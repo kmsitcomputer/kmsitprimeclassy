@@ -1,0 +1,333 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\AgentPaymentGatewayConfig;
+use App\Models\AgentProfile;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\PaymentMethod;
+use App\Models\PaymentTransaction;
+use App\Models\Product;
+use App\Models\ProductStock;
+use App\Models\ShippingConfiguration;
+use App\Models\User;
+use Database\Seeders\PaymentMethodSeeder;
+use Database\Seeders\RoleSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
+use Tests\Concerns\HasTestRegion;
+use Tests\TestCase;
+
+/**
+ * DOWN PAYMENT (DP): a partial, proof-based payment that must never be
+ * confused with PAID/LUNAS, plus its later pelunasan (settlement) flow.
+ */
+class DownPaymentTest extends TestCase
+{
+    use HasTestRegion;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(RoleSeeder::class);
+        $this->seed(PaymentMethodSeeder::class);
+        Storage::fake('public');
+    }
+
+    private function makeAgentBranch(): array
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+        AgentProfile::create([
+            'user_id' => $agen->id, 'store_name' => 'Toko DP', 'address' => 'Jl. DP',
+            'latitude' => -6.2, 'longitude' => 106.8166,
+        ]);
+        $admin = User::factory()->admin()->create(['agent_id' => $agen->id]);
+        $keuangan = User::factory()->keuangan()->create(['agent_id' => $agen->id]);
+        $konsumen = User::factory()->konsumen()->create(['agent_id' => $agen->id]);
+
+        // DP reuses the branch's bank_transfer destination account.
+        $bankTransfer = PaymentMethod::query()->where('code', 'bank_transfer')->firstOrFail();
+        AgentPaymentGatewayConfig::create([
+            'agent_id' => $agen->id, 'payment_method_id' => $bankTransfer->id, 'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
+        ]);
+
+        ShippingConfiguration::create([
+            'agent_id' => $agen->id, 'price_per_km' => 2000, 'minimum_distance_km' => 0,
+            'minimum_charge' => 5000, 'free_shipping_enabled' => false, 'is_active' => true,
+        ]);
+
+        return compact('agen', 'admin', 'keuangan', 'konsumen');
+    }
+
+    private function makeProduct(User $agen, int $price = 1000000, int $stockQty = 10): Product
+    {
+        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(), 
+            'name' => 'Kue DP', 'slug' => 'kue-dp-'.uniqid(),
+            'has_variations' => false, 'base_price' => $price, 'weight_grams' => 1000, 'status' => 'active',
+        ]);
+        ProductStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => $stockQty, 'quantity_reserved' => 0]);
+
+        return $product;
+    }
+
+    private function destination(): array
+    {
+        return [
+            'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
+            'village_id' => $this->seedTestVillage(),
+            'latitude' => -6.914744, 'longitude' => 107.609810,
+        ];
+    }
+
+    private function placeDpOrder(User $konsumen, Product $product, mixed $dpAmount, bool $includeDp = true): TestResponse
+    {
+        $payload = [
+            'payment_method_code' => 'down_payment',
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            ...$this->destination(),
+        ];
+
+        if ($includeDp) {
+            $payload['dp_amount'] = $dpAmount;
+        }
+
+        return $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', $payload);
+    }
+
+    private function submitProof(User $konsumen, int $orderId): TestResponse
+    {
+        return $this->actingAs($konsumen)->postJson("/api/v1/orders/{$orderId}/payment/proof", [
+            'proof' => UploadedFile::fake()->image('proof.jpg'),
+        ]);
+    }
+
+    public function test_dp_checkout_requires_a_nominal_strictly_between_zero_and_the_total(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 1000000);
+
+        // Missing
+        $this->placeDpOrder($konsumen, $product, null, includeDp: false)->assertStatus(422);
+        // Zero / negative
+        $this->placeDpOrder($konsumen, $product, 0)->assertStatus(422);
+        // Equal to the total (that's a full payment, not a DP)
+        $this->placeDpOrder($konsumen, $product, 1000000)->assertStatus(422);
+        // Greater than the total
+        $this->placeDpOrder($konsumen, $product, 1500000)->assertStatus(422);
+
+        // Valid
+        $this->placeDpOrder($konsumen, $product, 300000)->assertCreated();
+    }
+
+    public function test_dp_order_is_created_unpaid_with_the_full_balance_outstanding_and_a_dp_sized_transaction(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 1000000);
+
+        $response = $this->placeDpOrder($konsumen, $product, 300000);
+        $response->assertCreated();
+
+        $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+
+        $this->assertSame('unpaid', $order->payment_status, 'DP must never start as PAID');
+        $this->assertEquals(300000, (float) $order->dp_amount);
+        $this->assertEquals(0, (float) $order->paid_amount);
+        $this->assertEquals(1000000, (float) $order->remaining_amount);
+        $this->assertSame('diterima', $order->status, 'a DP order needs payment before processing');
+
+        $transaction = PaymentTransaction::where('order_id', $order->id)->latest()->first();
+        $this->assertEquals(300000, (float) $transaction->amount, 'the DP transaction only covers the nominal');
+        $this->assertStringStartsWith('DP-', $transaction->gateway_reference);
+    }
+
+    public function test_dp_proof_waits_for_verification_and_never_self_settles(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+
+        $this->submitProof($konsumen, $order->id)->assertOk();
+
+        $order->refresh();
+        $this->assertSame('pending_verification', $order->payment_status);
+        $this->assertEquals(0, (float) $order->paid_amount);
+        $this->assertEquals(1000000, (float) $order->remaining_amount, 'a submitted DP proof is not money yet');
+    }
+
+    public function test_keuangan_verifying_the_dp_yields_partially_paid_not_paid(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $order->refresh();
+        $this->assertSame('partially_paid', $order->payment_status);
+        $this->assertNotSame('paid', $order->payment_status, 'DP verification must never mark the order PAID');
+        $this->assertEquals(300000, (float) $order->paid_amount);
+        $this->assertEquals(700000, (float) $order->remaining_amount);
+    }
+
+    public function test_dp_order_may_only_advance_to_diproses_after_the_dp_is_verified(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+
+        // Unpaid DP -> cannot process yet.
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertStatus(422);
+
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        // partially_paid is enough to start fulfilling a DP order.
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
+        $this->assertSame('diproses', $order->fresh()->status);
+    }
+
+    public function test_admin_cannot_verify_a_dp_payment(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+
+        $this->actingAs($admin)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertStatus(403);
+    }
+
+    public function test_settlement_flow_lunasi(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 1000000);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+
+        // DP verified -> partially paid.
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->assertSame('partially_paid', $order->fresh()->payment_status);
+
+        // Keuangan requests settlement of the outstanding 700.000.
+        $settle = $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle");
+        $settle->assertOk();
+
+        $settlement = PaymentTransaction::where('order_id', $order->id)->orderByDesc('id')->first();
+        $this->assertEquals(700000, (float) $settlement->amount);
+        $this->assertStringStartsWith('ST-', $settlement->gateway_reference);
+
+        // Konsumen uploads the second proof -> still not paid.
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $order->refresh();
+        $this->assertSame('pending_verification', $order->payment_status);
+        // An unverified proof changes nothing: the balance is still owed.
+        $this->assertEquals(700000, (float) $order->remaining_amount);
+        $this->assertEquals(300000, (float) $order->paid_amount);
+
+        // ...and Keuangan verifies it -> now (and only now) LUNAS.
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $order->refresh();
+        $this->assertSame('paid', $order->payment_status);
+        $this->assertEquals(1000000, (float) $order->paid_amount);
+        $this->assertEquals(0, (float) $order->remaining_amount);
+        $this->assertTrue($order->isFullyPaid());
+    }
+
+    public function test_settlement_is_rejected_when_nothing_is_outstanding_or_the_order_is_not_a_dp(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        // Fully settled DP -> nothing left.
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 1000000 - 1)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        // dp_amount 999999 < total 1000000
+
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->assertSame('paid', $order->fresh()->payment_status);
+
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertStatus(422);
+
+        // A non-DP order cannot be "settled".
+        $bankOrder = Order::withoutGlobalScopes()->findOrFail(
+            $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+                'payment_method_code' => 'bank_transfer',
+                'items' => [['product_id' => $product->id, 'quantity' => 1]],
+                ...$this->destination(),
+            ])->json('data.id')
+        );
+
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$bankOrder->id}/payment/settle")->assertStatus(422);
+    }
+
+    public function test_reducing_quantity_on_a_partially_paid_dp_order_cancels_without_any_refund_record(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 1000000);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+
+        // Verify the DP so the order can be processed.
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
+
+        $item = OrderItem::where('order_id', $order->id)->firstOrFail();
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+            'fulfilled_quantity' => 0, 'reason' => 'Stok habis',
+        ])->assertOk();
+
+        $item->refresh();
+        $this->assertSame(0, $item->fulfilled_quantity);
+        $this->assertSame(1, $item->cancelled_quantity);
+        // Outstanding DP is a normal-flow obligation, NOT a post-paid adjustment.
+        $this->assertSame(0, $item->refund_quantity);
+        $this->assertDatabaseMissing('order_item_adjustments', ['order_item_id' => $item->id]);
+        $this->assertDatabaseMissing('order_additional_payments', ['order_id' => $order->id]);
+    }
+
+    public function test_keuangan_from_another_branch_cannot_settle_or_verify_this_payment(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+
+        $otherAgen = User::factory()->agen()->create();
+        $otherAgen->update(['agent_id' => $otherAgen->id]);
+        $otherKeuangan = User::factory()->keuangan()->create(['agent_id' => $otherAgen->id]);
+
+        // Order is hidden by the agent scope for a foreign branch -> 404.
+        $this->actingAs($otherKeuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertStatus(404);
+        $this->actingAs($otherKeuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertStatus(404);
+    }
+
+    public function test_konsumen_cannot_settle_or_verify(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+
+        $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertStatus(403);
+        $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertStatus(403);
+    }
+}

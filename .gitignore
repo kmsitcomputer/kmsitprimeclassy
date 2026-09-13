@@ -1,0 +1,21 @@
+# Root-level safety net — backend/ and frontend/ each carry their own more
+# specific .gitignore; these patterns catch anything at the repo root itself.
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Private integration credential files
+**/google-service-account*.json
+**/service-account*.json
+backend/storage/app/private/google-sheets/
+
+# Local AI-assistant tool state — not app code, and the permission
+# allowlists below have carried real local DB credentials in past commands.
+.claude/settings.local.json
+.commandcode/

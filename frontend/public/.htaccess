@@ -1,0 +1,16 @@
+# SPA fallback for Apache (shared hosting) — this is a static Vue Router
+# (history mode) build: every deep link (e.g. /orders/42) must still resolve
+# to index.html so the client-side router can take over, since there is no
+# actual /orders/42 file on disk.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Real files and directories (js/css/images/config.js/etc.) are served as-is.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Everything else falls back to the SPA shell.
+  RewriteRule ^ index.html [L]
+</IfModule>

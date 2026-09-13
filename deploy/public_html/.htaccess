@@ -1,0 +1,39 @@
+# Single-domain deployment: frontend (SPA) and backend (Laravel API) share
+# one document root. This decides, per request, which of the three wins:
+#   1. /api/*, /sanctum/*, /up  -> Laravel (laravel.php), REQUEST_URI kept intact
+#   2. a real file/directory (built JS/CSS, config.js, favicon.ico, storage/) -> served as-is
+#   3. anything else (a client-side Vue Router path) -> index.html (the SPA shell)
+
+# Never let LiteSpeed's page cache (LSCache — often enabled by default on
+# shared hosting) cache anything dynamic: a cached /sanctum/csrf-cookie
+# response hands out a stale session/token pair to every later visitor,
+# which surfaces as a "CSRF token mismatch" that no amount of retrying can
+# fix (the request just gets served the same cached response again). The
+# app also sends Cache-Control/X-LiteSpeed-Cache-Control: no-cache on every
+# response itself (defense in depth) — this stops the cache before PHP even
+# runs, for the paths that matter most.
+<IfModule LiteSpeed>
+  CacheLookup off
+</IfModule>
+<IfModule mod_rewrite.c>
+  RewriteCond %{REQUEST_URI} ^/(api|sanctum|up)(/|$)
+  RewriteRule ^ - [E=Cache-Control:no-cache]
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Laravel's own routes (never SPA-fallback these, and never require a real
+  # file to exist on disk for them — they're all handled by PHP).
+  RewriteCond %{REQUEST_URI} ^/(api|sanctum|up)(/|$)
+  RewriteRule ^ laravel.php [L]
+
+  # Real files and directories served as-is.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Everything else falls back to the SPA shell.
+  RewriteRule ^ index.html [L]
+</IfModule>

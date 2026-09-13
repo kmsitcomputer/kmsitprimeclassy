@@ -1,0 +1,56 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode (toggled on <html>), rather than only OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Brand accent — a deep berry/rose tone, deliberately distinct from the
+     orange/green/blue used by other marketplace apps. Used sparingly for
+     primary actions, active states and price emphasis. */
+  --color-brand-50: #fdf2f5;
+  --color-brand-100: #fbe3ea;
+  --color-brand-200: #f5c3d3;
+  --color-brand-300: #ec9bb4;
+  --color-brand-400: #dd6088;
+  --color-brand-500: #b0264a;
+  --color-brand-600: #8f1d3c;
+  --color-brand-700: #71182f;
+  --color-brand-800: #5a1326;
+  --color-brand-900: #3f0d1a;
+
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-stone-50 text-stone-900 antialiased;
+    @apply dark:bg-stone-950 dark:text-stone-100;
+    font-family: var(--font-sans);
+  }
+  ::selection {
+    @apply bg-brand-200 text-brand-900;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
