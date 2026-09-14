@@ -67,6 +67,7 @@ class OrderService
         ?string $idempotencyKey = null,
         ?string $shippingMethod = null,
         ?float $dpAmount = null,
+        ?array $selectedCourierOption = null,
     ): Order {
         $actor ??= $konsumen;
 
@@ -92,7 +93,7 @@ class OrderService
         $paymentMethod = $this->resolvePaymentMethod($paymentMethodCode);
 
         try {
-            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount) {
+            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption) {
                 $agentId = $konsumen->agent_id;
 
                 $agentProfile = AgentProfile::query()->where('user_id', $agentId)->first();
@@ -154,10 +155,12 @@ class OrderService
                     destLat: (float) $destinationSnapshot['latitude'],
                     destLng: (float) $destinationSnapshot['longitude'],
                     destRegencyId: $destinationSnapshot['regency_id'],
-                    weightGrams: max(1, $totalWeightGrams),
+                    destVillageId: $destinationSnapshot['village_id'],
+                    weightGrams: $totalWeightGrams,
                     subtotal: $subtotal,
                     agentId: $agentId,
-                    preferredProvider: $shippingMethod,
+                    preferredProvider: $shippingMethod ?? ($selectedCourierOption ? 'rajaongkir' : null),
+                    selectedCourierOption: $selectedCourierOption,
                 ));
 
                 $shippingFee = $quote->cost;
@@ -277,7 +280,7 @@ class OrderService
      * @param  array{address_id:?int, recipient_name:?string, recipient_phone:?string, address_line:?string, village_id:?string, latitude:?float, longitude:?float}  $destination
      * @return array{subtotal_amount:float, shipping_fee_amount:float, admin_fee_amount:float, total_amount:float, distance_km:?float, shipping_provider:string, shipping_enabled:bool, warnings: array<int, array{product_id:int, product_variation_id:?int, message:string}>}
      */
-    public function quote(User $konsumen, array $lines, array $destination, ?string $shippingMethod = null): array
+    public function quote(User $konsumen, array $lines, array $destination, ?string $shippingMethod = null, ?array $selectedCourierOption = null): array
     {
         if (! $konsumen->agent_id) {
             throw new ApiException(__('messages.order.no_agent_branch'), 422);
@@ -318,10 +321,12 @@ class OrderService
             destLat: (float) $destinationSnapshot['latitude'],
             destLng: (float) $destinationSnapshot['longitude'],
             destRegencyId: $destinationSnapshot['regency_id'],
-            weightGrams: max(1, $totalWeightGrams),
+            destVillageId: $destinationSnapshot['village_id'],
+            weightGrams: $totalWeightGrams,
             subtotal: $subtotal,
             agentId: $agentId,
-            preferredProvider: $shippingMethod,
+            preferredProvider: $shippingMethod ?? ($selectedCourierOption ? 'rajaongkir' : null),
+            selectedCourierOption: $selectedCourierOption,
         ));
 
         return [
@@ -334,6 +339,54 @@ class OrderService
             'shipping_enabled' => $this->shippingQuoteService->isAnyProviderEnabled($agentId),
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Every courier/service "Ekspedisi" (RajaOngkir) currently offers for
+     * this destination+cart, cheapest first — feeds the checkout's "pick a
+     * courier" sub-step once the konsumen has chosen "Ekspedisi" over "Kurir
+     * Online". Read-only, same as quote() — never reserves stock.
+     *
+     * @param  array<int, array{product_id:int, product_variation_id:?int, quantity:int}>  $lines
+     * @param  array{address_id:?int, recipient_name:?string, recipient_phone:?string, address_line:?string, village_id:?string, latitude:?float, longitude:?float}  $destination
+     * @return array<int, array{courier: string, service: string, cost: float, etd: ?string}>
+     */
+    public function courierOptions(User $konsumen, array $lines, array $destination): array
+    {
+        if (! $konsumen->agent_id) {
+            throw new ApiException(__('messages.order.no_agent_branch'), 422);
+        }
+
+        if (empty($lines)) {
+            throw new ApiException(__('messages.order.empty_items'), 422);
+        }
+
+        $agentId = $konsumen->agent_id;
+        $agentProfile = AgentProfile::query()->where('user_id', $agentId)->first();
+
+        if (! $agentProfile) {
+            throw new ApiException(__('messages.order.agent_profile_incomplete'), 422);
+        }
+
+        $destinationSnapshot = $this->resolveDestination($konsumen, $destination);
+
+        $totalWeightGrams = 0;
+        foreach ($lines as $line) {
+            [, $lineWeight] = $this->quoteLine($agentId, $line);
+            $totalWeightGrams += $lineWeight;
+        }
+
+        return $this->shippingQuoteService->courierOptions(new ShippingQuoteContext(
+            originLat: (float) $agentProfile->latitude,
+            originLng: (float) $agentProfile->longitude,
+            destLat: (float) $destinationSnapshot['latitude'],
+            destLng: (float) $destinationSnapshot['longitude'],
+            destRegencyId: $destinationSnapshot['regency_id'],
+            destVillageId: $destinationSnapshot['village_id'],
+            weightGrams: $totalWeightGrams,
+            subtotal: 0.0,
+            agentId: $agentId,
+        ));
     }
 
     /** @return array{0: float, 1: int, 2: ?array{product_id:int, product_variation_id:?int, message:string}} */
@@ -361,6 +414,10 @@ class OrderService
             $unitWeight = (int) $product->weight_grams;
             $stock = ProductStock::withoutGlobalScopes()
                 ->where('agent_id', $agentId)->where('product_id', $product->id)->first();
+        }
+
+        if ($unitWeight < 1) {
+            throw new ApiException('Berat produk belum dikonfigurasi.', 422, ['items' => 'Berat produk wajib minimal 1 gram.']);
         }
 
         $available = $stock?->availableQuantity() ?? 0;
@@ -402,6 +459,10 @@ class OrderService
             $unitWeight = (int) $product->weight_grams;
         }
 
+        if ($unitWeight < 1) {
+            throw new ApiException('Berat produk belum dikonfigurasi.', 422, ['items' => 'Berat produk wajib minimal 1 gram.']);
+        }
+
         if ($variation) {
             $this->stockService->reserveForVariation($agentId, $variation, $qty, 'order', $order->id, $actor->id);
         } else {
@@ -411,11 +472,13 @@ class OrderService
         // Snapshotted onto the order_item below — a later change to product_fees/
         // product_variation_fees never touches this row again (Blueprint example:
         // sales fee was Rp8.000 at purchase time, later raised to Rp15.000 — this
-        // order keeps Rp8.000 forever).
+        // order keeps Rp8.000 forever). Fee is configured PER UNIT, same as
+        // unit_price — scaled by quantity here exactly like subtotal is, so
+        // buying 3 never earns the same commission as buying 1.
         $fees = $this->feeService->resolveForLine($product, $variation);
-        $agentFee = $fees['agent'];
-        $salesFee = $fees['sales'];
-        $courierFee = $fees['courier'];
+        $agentFee = $fees['agent'] * $qty;
+        $salesFee = $fees['sales'] * $qty;
+        $courierFee = $fees['courier'] * $qty;
         $lineSubtotal = $unitPrice * $qty;
 
         $orderItem = OrderItem::create([
@@ -439,12 +502,37 @@ class OrderService
             'status' => $order->status,
         ]);
 
-        $this->recordCommission($order, $orderItem, $agentId, $konsumen->sales_id, $agentFee, $salesFee);
+        // Sales commission recipient:
+        //
+        // Self-purchase (the "konsumen" buying is itself an agen/korsal/
+        // sales — see OrderController::resolveKonsumen/OrderPolicy::create)
+        // — the buyer IS the referral owner for their own purchase, full
+        // stop. Their own sales_id/korsal_id fields mean "who is MY upline",
+        // which is the wrong question here (Blueprint §Fee: "buyer" and
+        // "referrer" are different concepts, but for a self-purchase they
+        // are deliberately the same person) — using that fallback chain
+        // would misattribute a korsal/sales's own self-purchase commission
+        // up to their upline instead of to themselves.
+        //
+        // Otherwise (an actual konsumen, whether buying for themselves or
+        // being ordered for by their agen/korsal/sales): whoever directly
+        // referred them — their sales rep if one exists, else the korsal
+        // who referred them directly (no sales in between), else the agen
+        // itself when the konsumen came straight from the agen's own
+        // referral code. In those last two cases the korsal/agen is acting
+        // as the "sales" for this konsumen, and earns BOTH their own
+        // agent_fee (above, unaffected) AND this sales_fee, as two separate
+        // commissions (never merged into one, never double-counted).
+        $salesBeneficiaryId = $konsumen->isRole('agen', 'korsal', 'sales')
+            ? $konsumen->id
+            : ($konsumen->sales_id ?? $konsumen->korsal_id ?? $agentId);
+
+        $this->recordCommission($order, $orderItem, $agentId, $salesBeneficiaryId, $agentFee, $salesFee);
 
         return [$lineSubtotal, $unitWeight * $qty];
     }
 
-    private function recordCommission(Order $order, OrderItem $item, int $agentId, ?int $salesId, float $agentFee, float $salesFee): void
+    private function recordCommission(Order $order, OrderItem $item, int $agentId, int $salesBeneficiaryId, float $agentFee, float $salesFee): void
     {
         if ($agentFee > 0) {
             Commission::create([
@@ -454,10 +542,10 @@ class OrderService
             ]);
         }
 
-        if ($salesId && $salesFee > 0) {
+        if ($salesFee > 0) {
             Commission::create([
                 'order_id' => $order->id, 'order_item_id' => $item->id,
-                'beneficiary_user_id' => $salesId, 'beneficiary_role' => 'sales',
+                'beneficiary_user_id' => $salesBeneficiaryId, 'beneficiary_role' => 'sales',
                 'amount' => $salesFee, 'status' => 'pending', 'earned_at' => now(),
             ]);
         }
@@ -484,6 +572,7 @@ class OrderService
                 'latitude' => (float) $address->latitude,
                 'longitude' => (float) $address->longitude,
                 'regency_id' => $address->regency_id,
+                'village_id' => $address->village_id,
                 'village_name' => $address->village?->name,
                 'district_name' => $address->district?->name,
                 'regency_name' => $address->regency?->name,
@@ -507,6 +596,7 @@ class OrderService
             'latitude' => (float) $destination['latitude'],
             'longitude' => (float) $destination['longitude'],
             'regency_id' => $village?->district?->regency_id,
+            'village_id' => $village?->id,
             'village_name' => $village?->name,
             'district_name' => $village?->district?->name,
             'regency_name' => $village?->district?->regency?->name,

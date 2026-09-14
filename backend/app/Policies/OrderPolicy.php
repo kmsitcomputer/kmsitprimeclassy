@@ -21,6 +21,15 @@ class OrderPolicy
             return true;
         }
 
+        // Self-purchase: the buyer can always see their own order, regardless
+        // of role — an agen/korsal/sales buying for themselves has no
+        // korsal_id/sales_id snapshot on the order (those columns record who
+        // REFERRED the buyer, and a self-purchaser has no separate referrer),
+        // so the role-specific branches below would otherwise reject them.
+        if ($order->konsumen_id === $user->id) {
+            return true;
+        }
+
         if ($user->isRole('agen', 'admin', 'keuangan')) {
             return $order->agent_id === $user->agent_id;
         }
@@ -85,12 +94,15 @@ class OrderPolicy
      * Konsumen always creates their own order. agen/korsal/sales may place an
      * order on behalf of a konsumen, but only one within their own network
      * (Blueprint: "AGEN/KORSAL/SALES dapat membuat order") — never an
-     * arbitrary konsumen_id from another branch.
+     * arbitrary konsumen_id from another branch. agen/korsal/sales may also
+     * self-purchase (buy for themselves, checking out as the buyer) — their
+     * account role never changes; "transaction actor" is a separate concept
+     * from "account role" (Blueprint §Fee: role tetap, buyer != role change).
      */
     public function create(User $user, User $targetKonsumen): bool
     {
         if ($user->id === $targetKonsumen->id) {
-            return $user->isRole('konsumen');
+            return $user->isRole('konsumen', 'agen', 'korsal', 'sales');
         }
 
         if (! $targetKonsumen->isRole('konsumen')) {

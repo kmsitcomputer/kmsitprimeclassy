@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\OrderAdjustmentController;
 use App\Http\Controllers\Api\V1\Admin\PaymentGatewayController;
 use App\Http\Controllers\Api\V1\Admin\RegionImportExportController;
+use App\Http\Controllers\Api\V1\Admin\ShippingCourierController;
 use App\Http\Controllers\Api\V1\Admin\ShippingProviderController;
 use App\Http\Controllers\Api\V1\Agent\AgentContactController;
 use App\Http\Controllers\Api\V1\Agent\AgentPaymentMethodController;
@@ -163,6 +164,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // of a konsumen in their own network (OrderPolicy::create enforces which).
     Route::middleware(['role:konsumen,agen,korsal,sales', 'throttle:30,1'])->group(function () {
         Route::post('/checkout/quote', [CheckoutController::class, 'quote']);
+        Route::post('/checkout/courier-options', [CheckoutController::class, 'courierOptions']);
         Route::post('/orders', [OrderController::class, 'store']);
     });
 
@@ -313,6 +315,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/agent/shipping-providers', [AgentShippingProviderController::class, 'index']);
         Route::patch('/agent/shipping-providers/{provider}/toggle', [AgentShippingProviderController::class, 'toggle']);
         Route::put('/agent/shipping-providers/{provider}/config', [AgentShippingProviderController::class, 'updateConfig']);
+        Route::get('/agent/shipping-providers/{provider}/couriers', [AgentShippingProviderController::class, 'couriers']);
+        Route::put('/agent/shipping-providers/{provider}/couriers', [AgentShippingProviderController::class, 'updateCouriers']);
+        Route::post('/agent/shipping-providers/{provider}/destinations', [AgentShippingProviderController::class, 'destinations']);
+        Route::post('/agent/shipping-providers/{provider}/test', [AgentShippingProviderController::class, 'testConnection']);
 
         // Self-service "Kontak Agen" — always $request->user()'s own store
         // profile, never another agent's (see AgentStoreProfileController).
@@ -452,6 +458,12 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         // Credentials/rate rules are configured per-agen (see Agent\AgentShippingProviderController).
         Route::get('/admin/shipping-providers', [ShippingProviderController::class, 'index']);
         Route::patch('/admin/shipping-providers/{provider}/toggle', [ShippingProviderController::class, 'toggle']);
+
+        // Provider-supported courier master list (see shipping_couriers migration) —
+        // what an agen's own courier checkboxes are validated against.
+        Route::get('/admin/shipping-couriers', [ShippingCourierController::class, 'index']);
+        Route::post('/admin/shipping-couriers', [ShippingCourierController::class, 'store']);
+        Route::patch('/admin/shipping-couriers/{shippingCourier}/toggle', [ShippingCourierController::class, 'toggle']);
 
         // Region reference data (province/regency/district/village) CSV export/import.
         Route::get('/admin/regions/export', [RegionImportExportController::class, 'export']);

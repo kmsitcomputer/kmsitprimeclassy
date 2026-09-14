@@ -1,6 +1,6 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
-import type { Order, PaginationMeta } from './types'
+import type { CourierSelection, Order, PaginationMeta } from './types'
 
 export interface OrderLine {
   product_id: number
@@ -28,6 +28,8 @@ export interface CreateOrderPayload {
   dpAmount?: number | null
   /** "Ekspedisi" (rajaongkir) / "Kurir Online" (openroute) — only meaningful when both are active. */
   shippingMethod?: string | null
+  /** The specific courier+service picked under "Ekspedisi" (e.g. JNE REG) — only meaningful with shippingMethod: 'rajaongkir'. */
+  courier?: CourierSelection | null
   konsumenId?: number | null
   /** Client-generated key (e.g. crypto.randomUUID()) — a retried submission with the
    *  same key returns the original order instead of creating a duplicate. */
@@ -43,6 +45,7 @@ export async function createOrder(payload: CreateOrderPayload) {
       payment_method_code: payload.paymentMethodCode,
       delivery_date: payload.deliveryDate ?? null,
       shipping_method: payload.shippingMethod ?? null,
+      ...(payload.courier ? { courier: payload.courier.courier, service: payload.courier.service } : {}),
       ...(payload.dpAmount ? { dp_amount: payload.dpAmount } : {}),
       ...(payload.konsumenId ? { konsumen_id: payload.konsumenId } : {}),
     },

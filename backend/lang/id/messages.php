@@ -136,6 +136,9 @@ return [
         'provider_config_saved' => 'Konfigurasi provider shipping berhasil disimpan.',
         'unsupported_provider' => 'Provider shipping ":code" tidak didukung.',
         'method_not_available' => 'Metode pengiriman yang dipilih sedang tidak tersedia.',
+        'couriers_saved' => 'Pengaturan kurir berhasil disimpan.',
+        'couriers_save_failed' => 'Pengaturan kurir gagal disimpan.',
+        'unsupported_couriers' => 'Tidak didukung oleh provider pengiriman: :couriers.',
     ],
 
     'region' => [

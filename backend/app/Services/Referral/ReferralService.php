@@ -75,6 +75,13 @@ class ReferralService
 
     private function findActiveReferrerByCode(string $referralCode): User
     {
+        // Codes are always generated/stored uppercase (see
+        // UserManagementService::generateCandidateReferralCode and the
+        // `regex:/^[A-Z0-9\-]+$/` rule on the self-service update endpoint),
+        // so normalize input the same way rather than requiring an exact
+        // case match on a link a visitor may have retyped by hand.
+        $referralCode = strtoupper(trim($referralCode));
+
         $referrer = User::query()
             ->whereHas('role', fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales']))
             ->where('status', 'active')

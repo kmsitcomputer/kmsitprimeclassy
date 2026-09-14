@@ -11,7 +11,11 @@ class Courier extends Model
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean'];
+        // See User::casts() — user_id is compared with strict !== against
+        // $actor->id in CourierService::updateShipmentStatus (delivery-proof
+        // ownership check); agent_id is compared with strict !== in
+        // CourierService::assignCourier.
+        return ['is_active' => 'boolean', 'user_id' => 'integer', 'agent_id' => 'integer'];
     }
 
     public function user(): BelongsTo

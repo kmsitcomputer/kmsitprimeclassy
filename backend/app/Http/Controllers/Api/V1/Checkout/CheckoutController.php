@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api\V1\Checkout;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Checkout\CourierOptionsRequest;
 use App\Http\Requests\Checkout\QuoteCheckoutRequest;
 use App\Models\Order;
-use App\Models\User;
 use App\Services\Checkout\CheckoutStepResolver;
 use App\Services\Order\OrderService;
 use Illuminate\Http\Request;
@@ -27,16 +27,28 @@ class CheckoutController extends Controller
     public function quote(QuoteCheckoutRequest $request)
     {
         $actor = $request->user();
-        $konsumen = $actor->isRole('konsumen')
-            ? $actor
-            : User::query()->where('agent_id', $actor->agent_id)->findOrFail($request->integer('konsumen_id'));
+        $konsumen = $this->resolveKonsumen($actor, $request->integer('konsumen_id') ?: null);
 
         $this->authorize('create', [Order::class, $konsumen]);
 
         $quote = $this->orderService->quote(
-            $konsumen, $request->array('items'), $request->destinationInput(), $request->input('shipping_method')
+            $konsumen, $request->array('items'), $request->destinationInput(),
+            $request->input('shipping_method'), $request->selectedCourierOption(),
         );
 
         return $this->ok($quote);
+    }
+
+    /** Courier/service options under "Ekspedisi" (RajaOngkir) for the checkout's courier-picker sub-step. */
+    public function courierOptions(CourierOptionsRequest $request)
+    {
+        $actor = $request->user();
+        $konsumen = $this->resolveKonsumen($actor, $request->integer('konsumen_id') ?: null);
+
+        $this->authorize('create', [Order::class, $konsumen]);
+
+        $options = $this->orderService->courierOptions($konsumen, $request->array('items'), $request->destinationInput());
+
+        return $this->ok($options);
     }
 }

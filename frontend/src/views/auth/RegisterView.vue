@@ -9,19 +9,23 @@ import PasswordInput from '@/components/ui/PasswordInput.vue'
 import { useAuthStore } from '@/stores/auth'
 import { previewReferral } from '@/api/auth'
 import { ApiError } from '@/api/client'
+import { getPersistedReferralCode, clearPersistedReferral } from '@/utils/referral'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+// Priority: an explicit ?ref= on THIS navigation, then whatever the router
+// guard persisted from an earlier page in this browsing session (see
+// utils/referral.ts) — either way it's only a pre-fill, never trusted as-is.
 const form = reactive({
   name: '',
   email: '',
   phone: '',
   password: '',
   password_confirmation: '',
-  referral_code: (route.query.ref as string) ?? '',
+  referral_code: (route.query.ref as string) || getPersistedReferralCode() || '',
 })
 
 const submitting = ref(false)
@@ -57,6 +61,7 @@ async function submit() {
   generalError.value = null
   try {
     await auth.register(form)
+    clearPersistedReferral()
     router.push((route.query.redirect as string) || { name: 'home' })
   } catch (e) {
     if (e instanceof ApiError) {
@@ -80,14 +85,21 @@ async function submit() {
       <p v-if="generalError" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">{{ generalError }}</p>
 
       <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.referralCode') }}</label>
-        <input v-model="form.referral_code" type="text" required :placeholder="t('auth.register.referralPlaceholder')" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm uppercase dark:border-stone-700 dark:bg-stone-950" />
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">
+          {{ t('auth.register.referralCode') }}
+          <span class="font-normal text-stone-400">({{ t('auth.register.optional') }})</span>
+        </label>
+        <input v-model="form.referral_code" type="text" :placeholder="t('auth.register.referralPlaceholder')" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm uppercase dark:border-stone-700 dark:bg-stone-950" />
         <p v-if="errors.referral_code" class="mt-1 text-xs text-red-600">{{ errors.referral_code[0] }}</p>
         <p v-else-if="referralChecking" class="mt-1 text-xs text-stone-400">{{ t('auth.register.checkingCode') }}</p>
         <p v-else-if="referralPreview" class="mt-1 flex items-center gap-1 text-xs text-emerald-600">
           <AppIcon name="check" :size="13" />
           {{ t('auth.register.referredBy', { name: referralPreview.referrer_name }) }}
           <template v-if="referralPreview.agent_store_name">· {{ referralPreview.agent_store_name }}</template>
+        </p>
+        <p v-else-if="!form.referral_code" class="mt-1 text-xs text-stone-400">
+          {{ t('auth.register.noReferralCode') }}
+          <RouterLink :to="{ name: 'store-locator' }" class="font-medium text-brand-600 dark:text-brand-400">{{ t('auth.register.viewAgentDirectory') }}</RouterLink>
         </p>
       </div>
 

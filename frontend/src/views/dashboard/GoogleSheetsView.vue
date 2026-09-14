@@ -11,6 +11,10 @@ interface Destination {
   id: number
   spreadsheet_id: string
   agent_id: number | null
+  spreadsheet_title: string | null
+  connection_status: string
+  last_tested_at: string | null
+  last_error_code: string | null
 }
 interface Mapping {
   field: string
@@ -41,6 +45,10 @@ const configs = ref<Config[]>([])
 const datasets = ref<Record<string, string[]>>({})
 const logs = ref<Log[]>([])
 const connection = ref('not_checked')
+const spreadsheetTitle = ref('')
+const serviceAccountEmail = ref('')
+const lastTestedAt = ref('')
+const connectionErrorCode = ref('')
 const error = ref('')
 const busy = ref(false)
 const editing = ref<number | null>(null)
@@ -74,7 +82,42 @@ async function load() {
   configs.value = data.data.configs
   datasets.value = data.data.datasets
   logs.value = data.data.logs
+  serviceAccountEmail.value = data.data.service_account_email ?? ''
   if (!data.data.enabled) connection.value = 'disabled'
+  const selected = destinations.value.find((item) => item.id === form.value.destination_id)
+  if (selected) applyDestinationStatus(selected)
+}
+function applyDestinationStatus(destination?: Destination) {
+  connection.value = destination?.connection_status ?? 'not_checked'
+  spreadsheetTitle.value = destination?.spreadsheet_title ?? ''
+  lastTestedAt.value = destination?.last_tested_at ?? ''
+  connectionErrorCode.value = destination?.last_error_code ?? ''
+}
+async function testConnection() {
+  busy.value = true
+  error.value = ''
+  connectionErrorCode.value = ''
+  try {
+    const { data } = await http.post('/google-sheets/connection', {
+      destination_id: form.value.destination_id,
+    })
+    connection.value = data.data.status
+    spreadsheetTitle.value = data.data.spreadsheet_title
+    serviceAccountEmail.value = data.data.service_account_email ?? serviceAccountEmail.value
+    lastTestedAt.value = data.data.last_tested_at
+    await load()
+  } catch (e) {
+    connection.value = 'failed'
+    if (e instanceof ApiError) {
+      connectionErrorCode.value = e.errors?.code?.[0] ?? ''
+      error.value = e.message
+    } else {
+      error.value = 'Operasi gagal. Silakan coba lagi.'
+    }
+    await load()
+  } finally {
+    busy.value = false
+  }
 }
 function reset() {
   editing.value = null
@@ -86,10 +129,20 @@ function reset() {
     columns: [],
     status: '',
   }
+  applyDestinationStatus(destinations.value[0])
 }
 function select(field: string, checked: boolean) {
   form.value.columns = form.value.columns.filter((c) => c.field !== field)
   if (checked) form.value.columns.push({ field, label: field })
+}
+function moveColumn(index: number, direction: -1 | 1) {
+  const target = index + direction
+  if (target < 0 || target >= form.value.columns.length) return
+  const columns = [...form.value.columns]
+  const current = columns[index]!
+  columns[index] = columns[target]!
+  columns[target] = current
+  form.value.columns = columns
 }
 function resetDatasetFields() {
   form.value.columns = []
@@ -149,20 +202,19 @@ onMounted(() =>
         <h2 class="font-semibold">Koneksi</h2>
         <p class="my-2">Status: {{ connection }}</p>
         <button
-          :disabled="busy"
+          :disabled="busy || !form.destination_id"
           class="rounded-lg bg-stone-800 px-4 py-2 text-white disabled:opacity-50"
-          @click="
-            run(async () => {
-              const { data } = await http.post('/google-sheets/connection')
-              connection = data.data.status
-            })
-          "
+          @click="testConnection"
         >
           Periksa koneksi
         </button>
+        <p v-if="spreadsheetTitle" class="mt-2 text-sm text-emerald-600">Spreadsheet: {{ spreadsheetTitle }}</p>
+        <p v-if="serviceAccountEmail" class="mt-2 text-sm">Service Account: {{ serviceAccountEmail }}</p>
+        <p v-if="lastTestedAt" class="mt-2 text-sm">Terakhir diuji: {{ formatDateTime(lastTestedAt) }}</p>
+        <p v-if="connectionErrorCode" class="mt-2 text-sm text-red-700">Kode error: {{ connectionErrorCode }}</p>
       </section>
       <form
-        v-if="auth.user?.role === 'super_admin'"
+        v-if="['super_admin', 'agen', 'admin'].includes(auth.user?.role || '')"
         class="space-y-3 rounded-xl border p-4"
         @submit.prevent="
           run(async () => {
@@ -183,7 +235,7 @@ onMounted(() =>
         <label class="block"
           >Spreadsheet ID<input v-model="spreadsheet" required :class="inputClass"
         /></label>
-        <AgentPicker v-model="agent" :allow-all="true" label="Scope Agen (kosong = global)" />
+        <AgentPicker v-if="auth.user?.role === 'super_admin'" v-model="agent" :allow-all="true" label="Scope Agen (kosong = global)" />
         <button :disabled="busy" class="rounded-lg bg-stone-800 px-4 py-2 text-white">
           Daftarkan
         </button>
@@ -198,7 +250,7 @@ onMounted(() =>
           >Nama<input v-model="form.name" required maxlength="150" :class="inputClass"
         /></label>
         <label class="block"
-          >Spreadsheet<select v-model.number="form.destination_id" required :class="inputClass">
+          >Spreadsheet<select v-model.number="form.destination_id" required :class="inputClass" @change="applyDestinationStatus(destinations.find((item) => item.id === form.destination_id))">
             <option :value="0" disabled>Pilih spreadsheet</option>
             <option v-for="d in destinations" :key="d.id" :value="d.id">
               {{ d.spreadsheet_id }} — {{ d.agent_id ? `Agen ${d.agent_id}` : 'Global' }}
@@ -236,10 +288,13 @@ onMounted(() =>
             />{{ field }}</label
           >
         </fieldset>
-        <label v-for="column in form.columns" :key="column.field" class="block"
-          >Judul kolom {{ column.field
-          }}<input v-model="column.label" required maxlength="100" :class="inputClass"
-        /></label>
+        <div v-for="(column, index) in form.columns" :key="column.field" class="flex items-end gap-2">
+          <label class="block flex-1">Judul kolom {{ column.field
+            }}<input v-model="column.label" required maxlength="100" :class="inputClass"
+          /></label>
+          <button type="button" :disabled="index === 0" class="rounded border px-3 py-2 disabled:opacity-30" @click="moveColumn(index, -1)">↑</button>
+          <button type="button" :disabled="index === form.columns.length - 1" class="rounded border px-3 py-2 disabled:opacity-30" @click="moveColumn(index, 1)">↓</button>
+        </div>
         <label v-if="fields.includes('status')" class="block"
           >Filter status (opsional)<input v-model="form.status" maxlength="40" :class="inputClass"
         /></label>

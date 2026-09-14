@@ -18,6 +18,16 @@ class Shipment extends Model
     protected function casts(): array
     {
         return [
+            // See User::casts() — these FKs are read by strict ===/!== against
+            // already-int ids (CourierOrderResource::itemVisibleToViewer,
+            // CourierService::selfAssignIfUnassigned). On some PDO/MySQL driver
+            // builds an uncast column returns as a string, so the match silently
+            // fails and a kurir's own 'dikirim' item (and its "Terkirim" button)
+            // disappears from their dashboard.
+            'order_id' => 'integer',
+            'courier_id' => 'integer',
+            'shipping_provider_id' => 'integer',
+            'proof_media_id' => 'integer',
             'origin_latitude' => 'decimal:7',
             'origin_longitude' => 'decimal:7',
             'destination_latitude' => 'decimal:7',

@@ -9,11 +9,14 @@ use App\Http\Requests\BaseFormRequest;
  * client — only identifiers and quantities. OrderService recomputes every
  * amount from the database. See Blueprint §Security and §Order.
  *
- * konsumen_id is only meaningful when the actor is agen/korsal/sales placing
- * an order on behalf of one of their own network's konsumen (Blueprint rule:
- * "AGEN/KORSAL/SALES dapat membuat order"). Whether that konsumen actually
- * belongs to the actor's network is authorized in the controller
- * (OrderPolicy::create), not here — this only validates shape.
+ * konsumen_id is only meaningful when the actor is agen/korsal/sales.
+ * Omitted, they're buying for themselves (self-purchase — Blueprint: account
+ * role never changes just because they check out). Supplied, they're
+ * placing an order on behalf of that konsumen in their own network
+ * (Blueprint: "AGEN/KORSAL/SALES dapat membuat order"). Whether that
+ * konsumen actually belongs to the actor's network — and whether a
+ * self-purchase is even allowed for this actor's role — is authorized in
+ * the controller (OrderPolicy::create), not here — this only validates shape.
  */
 class StoreOrderRequest extends BaseFormRequest
 {
@@ -25,7 +28,7 @@ class StoreOrderRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'konsumen_id' => ['required_unless:__actor_role,konsumen', 'nullable', 'integer', 'exists:users,id'],
+            'konsumen_id' => ['nullable', 'integer', 'exists:users,id'],
 
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
@@ -53,13 +56,18 @@ class StoreOrderRequest extends BaseFormRequest
             // meaningful when more than one shipping provider is active;
             // OrderService validates it's actually active, not just a known code.
             'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute'],
+            // Which courier/service under "Ekspedisi" (RajaOngkir) the
+            // konsumen picked — see QuoteCheckoutRequest for the same field.
+            'courier' => ['nullable', 'required_with:service', 'string', 'max:50'],
+            'service' => ['nullable', 'required_with:courier', 'string', 'max:50'],
         ];
     }
 
-    /** Injects a pseudo-field so the required_unless rule above can read the actor's role. */
-    protected function prepareForValidation(): void
+    public function selectedCourierOption(): ?array
     {
-        $this->merge(['__actor_role' => $this->user()?->role?->slug]);
+        return $this->filled('courier') && $this->filled('service')
+            ? ['courier' => $this->string('courier')->toString(), 'service' => $this->string('service')->toString()]
+            : null;
     }
 
     public function destinationInput(): array

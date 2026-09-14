@@ -18,7 +18,7 @@ class QuoteCheckoutRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'konsumen_id' => ['required_unless:__actor_role,konsumen', 'nullable', 'integer', 'exists:users,id'],
+            'konsumen_id' => ['nullable', 'integer', 'exists:users,id'],
 
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
@@ -34,12 +34,20 @@ class QuoteCheckoutRequest extends BaseFormRequest
             'latitude' => ['required_without:address_id', 'numeric', 'between:-90,90'],
             'longitude' => ['required_without:address_id', 'numeric', 'between:-180,180'],
             'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute'],
+            // Which courier/service under "Ekspedisi" (RajaOngkir) the
+            // konsumen picked — only meaningful with shipping_method=rajaongkir.
+            // Cost is never taken from the client; OrderService re-resolves it
+            // from a fresh RajaOngkir quote for this exact courier+service.
+            'courier' => ['nullable', 'required_with:service', 'string', 'max:50'],
+            'service' => ['nullable', 'required_with:courier', 'string', 'max:50'],
         ];
     }
 
-    protected function prepareForValidation(): void
+    public function selectedCourierOption(): ?array
     {
-        $this->merge(['__actor_role' => $this->user()?->role?->slug]);
+        return $this->filled('courier') && $this->filled('service')
+            ? ['courier' => $this->string('courier')->toString(), 'service' => $this->string('service')->toString()]
+            : null;
     }
 
     public function destinationInput(): array

@@ -1,10 +1,10 @@
 /**
  * Lazily loads the Google Maps JS API (Places + Marker) exactly once per
- * page load. Only ever invoked when the checkout steps response says
- * OpenRoute is active (map_picker_enabled) — see CheckoutView's Address
- * step. The API key is a build-time Vite env var (VITE_GOOGLE_MAPS_API_KEY);
- * it is not a secret (Google Maps JS keys are restricted by HTTP referrer,
- * not by staying hidden) — see .env.example.
+ * page load. Invoked whenever a Google Maps API key is configured — see
+ * CheckoutView's Address step (AddressMapPicker), available regardless of
+ * which shipping method is active. The API key is a build-time Vite env var
+ * (VITE_GOOGLE_MAPS_API_KEY); it is not a secret (Google Maps JS keys are
+ * restricted by HTTP referrer, not by staying hidden) — see .env.example.
  *
  * Typed loosely (no @types/google.maps dependency) since this project only
  * touches a handful of Maps/Places APIs directly.

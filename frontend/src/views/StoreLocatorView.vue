@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { listPublicAgents, type PublicAgentContact } from '@/api/agents'
+
+const router = useRouter()
 
 /** Public storefront "Cari Agen/Toko" directory — GET /agents, no auth required. */
 const agents = ref<PublicAgentContact[]>([])
@@ -24,6 +27,11 @@ async function copyReferralCode(code: string, i: number) {
   setTimeout(() => {
     if (copiedIndex.value === i) copiedIndex.value = null
   }, 2000)
+}
+
+/** Router guard captures ?ref= from this navigation, RegisterView pre-fills from it. */
+function useThisReferral(code: string) {
+  router.push({ name: 'register', query: { ref: code } })
 }
 </script>
 
@@ -50,16 +58,24 @@ async function copyReferralCode(code: string, i: number) {
           <AppIcon name="map-pin" :size="16" class="mt-0.5 shrink-0 text-stone-400" /> {{ agent.address }}
         </p>
         <p v-if="agent.phone" class="mt-1 text-sm text-stone-500 dark:text-stone-400">{{ agent.phone }}</p>
-        <button
-          v-if="agent.referral_code"
-          type="button"
-          class="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-100 dark:bg-brand-950 dark:text-brand-300 dark:hover:bg-brand-900"
-          @click.stop.prevent="copyReferralCode(agent.referral_code, i)"
-        >
-          <span>Kode Referral: <span class="font-semibold tracking-wide">{{ agent.referral_code }}</span></span>
-          <AppIcon v-if="copiedIndex === i" name="check" :size="14" />
-          <span>{{ copiedIndex === i ? 'Tersalin!' : 'Salin' }}</span>
-        </button>
+        <div v-if="agent.referral_code" class="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-100 dark:bg-brand-950 dark:text-brand-300 dark:hover:bg-brand-900"
+            @click.stop.prevent="copyReferralCode(agent.referral_code, i)"
+          >
+            <span>Kode Referral: <span class="font-semibold tracking-wide">{{ agent.referral_code }}</span></span>
+            <AppIcon v-if="copiedIndex === i" name="check" :size="14" />
+            <span>{{ copiedIndex === i ? 'Tersalin!' : 'Salin' }}</span>
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full bg-stone-800 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-stone-700 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-200"
+            @click.stop.prevent="useThisReferral(agent.referral_code)"
+          >
+            Gunakan Kode Ini
+          </button>
+        </div>
       </a>
       <p v-if="agents.length === 0" class="text-sm text-stone-400">Belum ada agen aktif yang terdaftar.</p>
     </div>

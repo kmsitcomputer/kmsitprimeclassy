@@ -119,7 +119,9 @@ class CourierDashboardController extends Controller
             })
             ->value('agent_id');
 
-        if ($orderAgentId !== $request->user()->agent_id) {
+        // value() is a raw query-builder read (no model cast) — normalise both
+        // sides so the branch check can't fail on a driver that yields strings.
+        if ((int) $orderAgentId !== (int) $request->user()->agent_id) {
             throw new ApiException(__('messages.system.unauthorized_action'), 403);
         }
     }

@@ -15,6 +15,13 @@ class ProductStock extends Model
 
     protected $fillable = ['agent_id', 'product_id', 'quantity_on_hand', 'quantity_reserved'];
 
+    // See User::casts() — agent_id is compared with strict === against
+    // other already-int agent_id values in Policies.
+    protected function casts(): array
+    {
+        return ['agent_id' => 'integer'];
+    }
+
     public function agent(): BelongsTo
     {
         return $this->belongsTo(User::class, 'agent_id');

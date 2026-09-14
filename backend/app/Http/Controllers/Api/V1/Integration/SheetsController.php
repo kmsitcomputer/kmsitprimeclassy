@@ -8,10 +8,12 @@ use App\Models\SheetsConfig;
 use App\Models\SheetsDestination;
 use App\Models\SheetsSyncLog;
 use App\Services\GoogleSheets\DatasetRegistry;
+use App\Services\GoogleSheets\GoogleSheetsException;
 use App\Services\GoogleSheets\SheetsClient;
 use App\Services\GoogleSheets\SyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class SheetsController extends Controller
@@ -25,36 +27,98 @@ class SheetsController extends Controller
         }
         $destinations = $destinations->get();
         $configs = SheetsConfig::with('destination')->whereIn('destination_id', $destinations->pluck('id'))->get();
+        $datasets = $registry->definitions();
+        if ($request->user()->isRole('admin')) {
+            $configs = $configs->reject(fn (SheetsConfig $config) => $config->dataset === 'financial_summary')->values();
+            unset($datasets['financial_summary']);
+        }
         $logs = SheetsSyncLog::query();
         if (! $request->user()->isRole('super_admin')) {
             $logs->where('agent_scope', $request->user()->agent_id);
         }
 
-        return $this->ok(['destinations' => $destinations, 'configs' => $configs, 'datasets' => $registry->definitions(),
-            'logs' => $logs->orderByDesc('id')->limit(100)->get(), 'enabled' => (bool) config('google_sheets.enabled'),
+        $credential = app(SheetsClient::class)->credentialInfo();
+
+        return $this->ok(['destinations' => $destinations, 'configs' => $configs, 'datasets' => $datasets,
+            'logs' => $logs->orderByDesc('id')->limit(100)->get([
+                'id', 'config_id', 'dataset', 'tab', 'actor_id', 'actor_role', 'agent_scope',
+                'started_at', 'completed_at', 'status', 'rows_processed', 'rows_success', 'rows_failed', 'error_summary',
+            ]), 'enabled' => (bool) config('google_sheets.enabled'),
+            'service_account_email' => $credential['client_email'],
             'connection_status' => config('google_sheets.enabled') ? 'not_checked' : 'disabled']);
     }
 
     public function connection(Request $request, SheetsClient $client)
     {
         $this->authorize('viewAny', SheetsConfig::class);
-        try {
-            $client->token();
+        $validated = $request->validate(['destination_id' => ['required', 'integer', 'exists:sheets_destinations,id']]);
+        $destination = SheetsDestination::findOrFail($validated['destination_id']);
+        abort_unless($request->user()->isRole('super_admin') || $destination->agent_id === $request->user()->agent_id, 403);
+        $credential = $client->credentialInfo();
+        $context = [
+            'actor_user_id' => $request->user()->id,
+            'actor_role' => $request->user()->role->slug,
+            'agent_scope' => $destination->agent_id,
+            'spreadsheet_id' => $this->maskSpreadsheetId($destination->spreadsheet_id),
+            'service_account_email' => $credential['client_email'],
+        ];
+        Log::info('google_sheets.connection_test.started', $context);
 
-            return $this->ok(['status' => 'connected']);
-        } catch (\Throwable) {
-            return $this->ok(['status' => 'unavailable']);
+        try {
+            $metadata = $client->metadata($destination->spreadsheet_id);
+            $testedAt = now();
+            $destination->update([
+                'spreadsheet_title' => $metadata['title'], 'connection_status' => 'connected',
+                'last_tested_at' => $testedAt, 'last_error_code' => null,
+            ]);
+            Log::info('google_sheets.connection_test.succeeded', $context);
+
+            return $this->ok([
+                'status' => 'connected', 'spreadsheet_title' => $metadata['title'],
+                'spreadsheet_id' => $destination->spreadsheet_id,
+                'service_account_email' => $credential['client_email'],
+                'last_tested_at' => $testedAt,
+            ]);
+        } catch (GoogleSheetsException $e) {
+            $destination->update([
+                'connection_status' => 'failed', 'last_tested_at' => now(),
+                'last_error_code' => $e->errorCode,
+            ]);
+            Log::warning('google_sheets.connection_test.failed', $context + [
+                'http_status' => $e->httpStatus,
+                'reason' => $e->googleReason,
+                'error_code' => $e->errorCode,
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->fail($e->getMessage(), [
+                'code' => [$e->errorCode],
+                'credential' => [[
+                    'resolved_path' => $credential['resolved_path'],
+                    'file_found' => $credential['file_found'],
+                    'readable' => $credential['readable'],
+                    'json_valid' => $credential['json_valid'],
+                    'type' => $credential['type'],
+                    'project_id' => $credential['project_id'],
+                    'client_email' => $credential['client_email'],
+                    'private_key_present' => $credential['private_key_present'],
+                ]],
+            ], 422);
         }
     }
 
-    /** Central credential access does not grant agents the right to claim arbitrary spreadsheets. */
+    /** A non-super-admin can register only a spreadsheet for their authenticated Agent scope. */
     public function destination(Request $request)
     {
-        abort_unless($request->user()->isRole('super_admin'), 403);
+        $normalized = $this->normalizeSpreadsheetId((string) $request->input('spreadsheet_id'));
+        $request->merge(['spreadsheet_id' => $normalized]);
         $data = $request->validate([
             'spreadsheet_id' => ['required', 'string', 'max:150', 'regex:/^[a-zA-Z0-9_-]+$/', 'unique:sheets_destinations,spreadsheet_id'],
             'agent_id' => ['nullable', 'integer', Rule::exists('users', 'id')->where(fn ($q) => $q->where('role_id', Role::where('slug', 'agen')->value('id'))->whereNull('deleted_at'))],
         ]);
+        if (! $request->user()->isRole('super_admin')) {
+            $data['agent_id'] = $request->user()->agent_id;
+        }
 
         return $this->created(SheetsDestination::create($data));
     }
@@ -127,5 +191,20 @@ class SheetsController extends Controller
         abort_unless($request->user()->isRole('super_admin') || $destination->agent_id === $request->user()->agent_id, 403);
 
         return $data;
+    }
+
+    private function normalizeSpreadsheetId(string $value): string
+    {
+        $value = trim($value);
+        if (preg_match('~docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)~', $value, $matches)) {
+            return $matches[1];
+        }
+
+        return $value;
+    }
+
+    private function maskSpreadsheetId(string $id): string
+    {
+        return strlen($id) <= 8 ? '***' : substr($id, 0, 4).'…'.substr($id, -4);
     }
 }

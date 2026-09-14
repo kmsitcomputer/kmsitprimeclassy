@@ -125,6 +125,9 @@ return [
         'provider_config_saved' => 'تم حفظ إعدادات مزود الشحن بنجاح.',
         'unsupported_provider' => 'مزود الشحن ":code" غير مدعوم.',
         'method_not_available' => 'طريقة الشحن المختارة غير متوفرة حاليًا.',
+        'couriers_saved' => 'تم حفظ إعدادات شركات الشحن بنجاح.',
+        'couriers_save_failed' => 'فشل حفظ إعدادات شركات الشحن.',
+        'unsupported_couriers' => 'غير مدعومة من قبل مزود الشحن: :couriers.',
     ],
 
     'region' => [

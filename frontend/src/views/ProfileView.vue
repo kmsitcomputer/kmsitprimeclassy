@@ -39,6 +39,16 @@ async function copyReferralCode() {
   setTimeout(() => (referralCopied.value = false), 2000)
 }
 
+/** window.location.origin, not a hardcoded domain — matches whatever APP_URL the SPA is actually served from. */
+const referralLink = computed(() => (auth.user?.referral_code ? `${window.location.origin}/?ref=${auth.user.referral_code}` : ''))
+const referralLinkCopied = ref(false)
+async function copyReferralLink() {
+  if (!referralLink.value) return
+  await navigator.clipboard.writeText(referralLink.value)
+  referralLinkCopied.value = true
+  setTimeout(() => (referralLinkCopied.value = false), 2000)
+}
+
 /* Self-service referral code CRUD — agen/korsal/sales only (see ProfileController). */
 const canManageReferralCode = computed(() => ['agen', 'korsal', 'sales'].includes(auth.user?.role ?? ''))
 const editingReferralCode = ref(false)
@@ -249,6 +259,16 @@ async function handleLogout() {
           <button type="button" class="text-xs font-medium text-red-600 dark:text-red-400" :disabled="referralCodeSaving" @click="doDeleteReferralCode">
             {{ t('profile.referralCodeDelete') }}
           </button>
+        </div>
+
+        <div class="mt-3 border-t border-stone-100 pt-3 dark:border-stone-800">
+          <p class="mb-1 text-xs text-stone-400">{{ t('profile.referralLink') }}</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <code class="max-w-full truncate rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-700 dark:bg-stone-800 dark:text-stone-200">{{ referralLink }}</code>
+            <button type="button" class="shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400" @click="copyReferralLink">
+              {{ referralLinkCopied ? t('profile.linkCopied') : t('profile.copyLink') }}
+            </button>
+          </div>
         </div>
       </template>
 

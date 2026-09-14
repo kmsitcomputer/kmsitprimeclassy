@@ -18,6 +18,22 @@ class UpdateAgentShippingProviderConfigRequest extends BaseFormRequest
         return $this->user()?->isRole('agen') ?? false;
     }
 
+    /** Lowercases courier codes before validation — matches the dedicated couriers-checkbox endpoint's normalization, so the same code always compares the same way against the supported master list. */
+    protected function prepareForValidation(): void
+    {
+        $config = $this->input('config');
+
+        if (is_array($config) && isset($config['couriers']) && is_array($config['couriers'])) {
+            $config['couriers'] = array_map(fn ($c) => is_string($c) ? strtolower(trim($c)) : $c, $config['couriers']);
+            $this->merge(['config' => $config]);
+        }
+
+        if (is_array($config) && $this->route('provider')?->code === 'openroute' && empty($config['profile'])) {
+            $config['profile'] = config('services.openroute.profile');
+            $this->merge(['config' => $config]);
+        }
+    }
+
     public function rules(): array
     {
         /** @var ShippingProvider $provider */

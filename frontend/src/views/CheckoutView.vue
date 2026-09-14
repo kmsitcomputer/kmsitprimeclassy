@@ -8,7 +8,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import { useCartStore } from '@/stores/cart'
 import { useAuthStore } from '@/stores/auth'
 import { createOrder, submitBankTransferProof, getOrder } from '@/api/orders'
-import { getCheckoutSteps, quoteCheckout } from '@/api/checkout'
+import { getCheckoutSteps, quoteCheckout, getCourierOptions } from '@/api/checkout'
 import { listUsers } from '@/api/users'
 import { listAddresses, createAddress } from '@/api/addresses'
 import { listProvinces, listRegencies, listDistricts, listVillages } from '@/api/regions'
@@ -16,7 +16,17 @@ import { ApiError } from '@/api/client'
 import { formatRupiah } from '@/utils/format'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
 import AddressMapPicker from '@/components/checkout/AddressMapPicker.vue'
-import type { CheckoutStepsResponse, CheckoutQuote, Order, PaymentMethod, RegionOption, AuthUser, KonsumenAddress } from '@/api/types'
+import type {
+  CheckoutStepsResponse,
+  CheckoutQuote,
+  CourierOption,
+  CourierSelection,
+  Order,
+  PaymentMethod,
+  RegionOption,
+  AuthUser,
+  KonsumenAddress,
+} from '@/api/types'
 
 /**
  * Dynamic "installer style" checkout wizard. The step list itself (which
@@ -142,14 +152,24 @@ function useMyLocation() {
   locationError.value = null
   navigator.geolocation.getCurrentPosition(
     (pos) => {
+      // Reactive assignment — AddressMapPicker's :latitude/:longitude props
+      // pick this up and pan/place its marker automatically, no separate
+      // wiring needed between the two ways of setting the same coordinate.
       destination.latitude = pos.coords.latitude
       destination.longitude = pos.coords.longitude
       locating.value = false
     },
-    () => {
-      locationError.value = t('checkout.address.geolocationFailed')
+    (err) => {
+      // permission denied / position unavailable / timeout all land here —
+      // whichever it is, the map picker below is always the fallback now,
+      // so every message points there rather than just "try again".
+      locationError.value =
+        err.code === err.PERMISSION_DENIED
+          ? t('checkout.address.geolocationDenied')
+          : t('checkout.address.geolocationFailed')
       locating.value = false
     },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
   )
 }
 
@@ -158,7 +178,13 @@ function onMapPicked(picked: { lat: number; lng: number }) {
   destination.longitude = picked.lng
 }
 
-const mapPickerEnabled = computed(() => (stepsConfig.value?.map_picker_enabled ?? false) && isGoogleMapsConfigured())
+// Available whenever Google Maps is configured — not tied to which shipping
+// method is active. Coordinates are always collected regardless of method
+// (RajaOngkir's own destination mapping is separate, but the order snapshot
+// still records lat/lng); "Gunakan Lokasi Sekarang" alone was too easy to
+// mis-tap or have browser geolocation deny/fail, so a manual map picker is
+// offered as a second way to set the same two fields either way.
+const mapPickerEnabled = computed(() => isGoogleMapsConfigured())
 
 /* Cascading Provinsi -> Kota/Kabupaten -> Kecamatan -> Kelurahan selects. */
 const provinces = ref<RegionOption[]>([])
@@ -242,12 +268,21 @@ watch(konsumenSearch, (search) => {
 
 function pickKonsumen(k: AuthUser) {
   selectedKonsumen.value = k
+  buyingForSelf.value = false
   konsumenSearch.value = ''
   konsumenResults.value = []
 }
 
 const needsKonsumenSelection = computed(() => !!stepsConfig.value?.on_behalf_of_konsumen)
-const konsumenSelected = computed(() => !needsKonsumenSelection.value || !!selectedKonsumen.value)
+// agen/korsal/sales may also buy for themselves — their account role never
+// changes (Blueprint: "Account Role != Transaction Actor"). Picking this
+// clears any previously-selected konsumen so no konsumen_id is sent, which
+// the backend resolves as a self-purchase (see resolveKonsumen on the API side).
+const buyingForSelf = ref(false)
+watch(buyingForSelf, (self) => {
+  if (self) selectedKonsumen.value = null
+})
+const konsumenSelected = computed(() => !needsKonsumenSelection.value || buyingForSelf.value || !!selectedKonsumen.value)
 
 /* ---------- Delivery date step ---------- */
 const deliveryDate = ref<string>('')
@@ -274,13 +309,70 @@ async function loadQuote() {
   quoting.value = true
   quoteError.value = null
   try {
-    quote.value = await quoteCheckout(orderLines.value, destination, selectedShippingMethod.value, selectedKonsumen.value?.id)
+    quote.value = await quoteCheckout(
+      orderLines.value, destination, selectedShippingMethod.value, selectedKonsumen.value?.id, selectedCourierOption.value,
+    )
   } catch (e) {
     quoteError.value = e instanceof ApiError ? e.message : t('checkout.review.quoteError')
   } finally {
     quoting.value = false
   }
 }
+
+/* ---------- Courier picker under "Ekspedisi" (RajaOngkir aggregates several couriers, each with several service tiers) ---------- */
+const courierOptions = ref<CourierOption[]>([])
+const loadingCourierOptions = ref(false)
+const courierOptionsError = ref<string | null>(null)
+const selectedCourierOption = ref<CourierSelection | null>(null)
+
+function courierOptionKey(o: CourierOption) {
+  return `${o.courier}:${o.service}`
+}
+
+function isCourierOptionSelected(o: CourierOption) {
+  return selectedCourierOption.value?.courier === o.courier && selectedCourierOption.value?.service === o.service
+}
+
+async function loadCourierOptions() {
+  if (!addressComplete.value) return
+  loadingCourierOptions.value = true
+  courierOptionsError.value = null
+  selectedCourierOption.value = null
+  try {
+    courierOptions.value = await getCourierOptions(orderLines.value, destination, selectedKonsumen.value?.id)
+    // Pre-select the cheapest — same default RajaOngkirProvider applies
+    // server-side when nothing is explicitly picked, just made visible here.
+    if (courierOptions.value.length) {
+      const cheapest = courierOptions.value[0]!
+      selectedCourierOption.value = { courier: cheapest.courier, service: cheapest.service }
+    }
+  } catch {
+    // Non-fatal: leaving no explicit pick still lets the order go through —
+    // RajaOngkirProvider falls back to its own cheapest-across-couriers
+    // default when selectedCourierOption is absent.
+    courierOptions.value = []
+    courierOptionsError.value = t('checkout.shipping.courierOptionsError')
+  } finally {
+    loadingCourierOptions.value = false
+  }
+}
+
+watch(selectedShippingMethod, (method) => {
+  if (method === 'rajaongkir') loadCourierOptions()
+  else {
+    courierOptions.value = []
+    selectedCourierOption.value = null
+  }
+})
+
+// Covers the "only one provider active" auto-select (fires before the
+// address step is necessarily complete, so loadCourierOptions no-ops then) —
+// retry once the konsumen actually reaches the shipping step.
+watch(currentStep, (step) => {
+  if (step === 'shipping' && selectedShippingMethod.value === 'rajaongkir' && !courierOptions.value.length) {
+    loadCourierOptions()
+  }
+})
 
 // Refresh the quote right before Review renders it, so it always reflects
 // the latest address/cart state rather than a stale snapshot.
@@ -313,6 +405,7 @@ async function placeOrder() {
       paymentMethodCode: selectedPaymentCode.value,
       deliveryDate: deliveryDate.value || null,
       shippingMethod: selectedShippingMethod.value,
+      courier: selectedCourierOption.value,
       konsumenId: selectedKonsumen.value?.id,
       dpAmount: isDpSelected.value ? Number(dpAmount.value) : null,
       idempotencyKey,
@@ -493,8 +586,16 @@ async function refreshOrderStatus() {
               <textarea v-model="destination.address_line" rows="3" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
             </div>
 
-            <!-- Google Maps picker/autocomplete — only when OpenRoute is the active shipping provider. -->
-            <AddressMapPicker v-if="mapPickerEnabled" @picked="onMapPicked" />
+            <!-- Google Maps picker/autocomplete — a second way to set the same lat/lng
+                 "Gunakan Lokasi Sekarang" below sets, available regardless of shipping
+                 method. Pre-fills its marker from whatever coordinate the form already
+                 has (a prior geolocation click, or re-entering this step). -->
+            <AddressMapPicker
+              v-if="mapPickerEnabled"
+              :latitude="destination.latitude"
+              :longitude="destination.longitude"
+              @picked="onMapPicked"
+            />
 
             <div>
               <button
@@ -533,35 +634,56 @@ async function refreshOrderStatus() {
           <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">{{ t('checkout.referral.title') }}</h2>
 
           <template v-if="needsKonsumenSelection">
-            <p class="text-sm text-stone-600 dark:text-stone-300">{{ t('checkout.referral.pickKonsumenPrompt') }}</p>
-
-            <div v-if="selectedKonsumen" class="flex items-center justify-between rounded-xl border border-brand-300 bg-brand-50 p-3 text-sm dark:bg-brand-950/40">
-              <span class="font-medium text-stone-800 dark:text-stone-100">{{ selectedKonsumen.name }} &middot; {{ selectedKonsumen.phone }}</span>
-              <button type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="selectedKonsumen = null">
-                {{ t('checkout.referral.change') }}
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="flex-1 rounded-xl border p-3 text-sm font-medium"
+                :class="buyingForSelf ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/40' : 'border-stone-200 text-stone-600 dark:border-stone-700 dark:text-stone-300'"
+                @click="buyingForSelf = true"
+              >
+                {{ t('checkout.referral.forMyself') }}
+              </button>
+              <button
+                type="button"
+                class="flex-1 rounded-xl border p-3 text-sm font-medium"
+                :class="!buyingForSelf ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/40' : 'border-stone-200 text-stone-600 dark:border-stone-700 dark:text-stone-300'"
+                @click="buyingForSelf = false"
+              >
+                {{ t('checkout.referral.forCustomer') }}
               </button>
             </div>
-            <template v-else>
-              <input
-                v-model="konsumenSearch"
-                type="text"
-                :placeholder="t('checkout.referral.searchPlaceholder')"
-                class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
-              />
-              <p v-if="searchingKonsumen" class="text-xs text-stone-400">{{ t('checkout.referral.searching') }}</p>
-              <ul v-else-if="konsumenResults.length" class="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 dark:divide-stone-800 dark:border-stone-700">
-                <li v-for="k in konsumenResults" :key="k.id">
-                  <button
-                    type="button"
-                    class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-stone-50 dark:hover:bg-stone-800"
-                    @click="pickKonsumen(k)"
-                  >
-                    <span class="text-stone-800 dark:text-stone-100">{{ k.name }}</span>
-                    <span class="text-xs text-stone-400">{{ k.phone }}</span>
-                  </button>
-                </li>
-              </ul>
-              <p v-else-if="konsumenSearch.trim()" class="text-xs text-stone-400">{{ t('checkout.referral.noResults') }}</p>
+
+            <template v-if="!buyingForSelf">
+              <p class="text-sm text-stone-600 dark:text-stone-300">{{ t('checkout.referral.pickKonsumenPrompt') }}</p>
+
+              <div v-if="selectedKonsumen" class="flex items-center justify-between rounded-xl border border-brand-300 bg-brand-50 p-3 text-sm dark:bg-brand-950/40">
+                <span class="font-medium text-stone-800 dark:text-stone-100">{{ selectedKonsumen.name }} &middot; {{ selectedKonsumen.phone }}</span>
+                <button type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="selectedKonsumen = null">
+                  {{ t('checkout.referral.change') }}
+                </button>
+              </div>
+              <template v-else>
+                <input
+                  v-model="konsumenSearch"
+                  type="text"
+                  :placeholder="t('checkout.referral.searchPlaceholder')"
+                  class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
+                />
+                <p v-if="searchingKonsumen" class="text-xs text-stone-400">{{ t('checkout.referral.searching') }}</p>
+                <ul v-else-if="konsumenResults.length" class="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 dark:divide-stone-800 dark:border-stone-700">
+                  <li v-for="k in konsumenResults" :key="k.id">
+                    <button
+                      type="button"
+                      class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-stone-50 dark:hover:bg-stone-800"
+                      @click="pickKonsumen(k)"
+                    >
+                      <span class="text-stone-800 dark:text-stone-100">{{ k.name }}</span>
+                      <span class="text-xs text-stone-400">{{ k.phone }}</span>
+                    </button>
+                  </li>
+                </ul>
+                <p v-else-if="konsumenSearch.trim()" class="text-xs text-stone-400">{{ t('checkout.referral.noResults') }}</p>
+              </template>
             </template>
           </template>
           <p v-else class="text-sm text-stone-600 dark:text-stone-300">
@@ -605,6 +727,41 @@ async function refreshOrderStatus() {
           <p v-else-if="shippingMethods.length === 1" class="text-sm text-stone-600 dark:text-stone-300">
             {{ t('checkout.shipping.methodLabel') }} <strong>{{ shippingMethods[0]?.label }}</strong>
           </p>
+
+          <!-- "Ekspedisi" aggregates several couriers (JNE, TIKI, ...), each with several service tiers/prices — pick which one. -->
+          <div v-if="selectedShippingMethod === 'rajaongkir'" class="space-y-2 border-t border-stone-100 pt-3 dark:border-stone-800">
+            <p class="text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('checkout.shipping.chooseCourierPrompt') }}</p>
+
+            <div v-if="loadingCourierOptions" class="space-y-2">
+              <div v-for="i in 3" :key="i" class="h-14 animate-pulse rounded-xl bg-stone-100 dark:bg-stone-800" />
+            </div>
+            <p v-else-if="courierOptionsError" class="text-xs text-amber-600 dark:text-amber-400">{{ courierOptionsError }}</p>
+            <p v-else-if="!courierOptions.length" class="text-xs text-stone-400">{{ t('checkout.shipping.noCourierOptions') }}</p>
+            <template v-else>
+              <label
+                v-for="option in courierOptions"
+                :key="courierOptionKey(option)"
+                class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 text-sm"
+                :class="isCourierOptionSelected(option) ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40' : 'border-stone-200 dark:border-stone-700'"
+              >
+                <span class="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    class="accent-brand-600"
+                    :checked="isCourierOptionSelected(option)"
+                    @change="selectedCourierOption = { courier: option.courier, service: option.service }"
+                  />
+                  <span class="font-medium uppercase text-stone-800 dark:text-stone-100">
+                    {{ option.courier }} {{ option.service }}
+                    <span v-if="option.etd" class="ml-1 text-xs font-normal normal-case text-stone-400">
+                      ({{ t('checkout.shipping.etdDays', { days: option.etd }) }})
+                    </span>
+                  </span>
+                </span>
+                <span class="shrink-0 font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(option.cost) }}</span>
+              </label>
+            </template>
+          </div>
 
           <p class="text-xs text-stone-400">
             {{ t('checkout.shipping.note') }}
@@ -680,6 +837,9 @@ async function refreshOrderStatus() {
             <p>{{ t('checkout.review.shippingTo', { name: destination.recipient_name, address: destination.address_line }) }}</p>
             <p v-if="deliveryDate">{{ t('checkout.review.preferredDate', { date: deliveryDate }) }}</p>
             <p v-if="shippingMethods.length">{{ t('checkout.review.shippingMethod', { method: shippingMethods.find((m) => m.code === selectedShippingMethod)?.label }) }}</p>
+            <p v-if="selectedCourierOption">
+              {{ t('checkout.review.courier', { courier: `${selectedCourierOption.courier} ${selectedCourierOption.service}`.toUpperCase() }) }}
+            </p>
             <p>{{ t('checkout.review.paymentMethod', { method: selectedPaymentMethod?.name }) }}</p>
           </div>
 
@@ -755,6 +915,11 @@ async function refreshOrderStatus() {
               (currentStep === 'address' && !addressComplete) ||
               (currentStep === 'referral' && !konsumenSelected) ||
               (currentStep === 'shipping' && shippingMethods.length > 1 && !selectedShippingMethod) ||
+              (currentStep === 'shipping' &&
+                selectedShippingMethod === 'rajaongkir' &&
+                !loadingCourierOptions &&
+                courierOptions.length > 0 &&
+                !selectedCourierOption) ||
               (currentStep === 'payment' && !selectedPaymentCode)
             "
             @click="goNext"

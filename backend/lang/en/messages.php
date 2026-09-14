@@ -125,6 +125,9 @@ return [
         'provider_config_saved' => 'Shipping provider configuration saved successfully.',
         'unsupported_provider' => 'Shipping provider ":code" is not supported.',
         'method_not_available' => 'The selected shipping method is currently unavailable.',
+        'couriers_saved' => 'Courier settings saved successfully.',
+        'couriers_save_failed' => 'Failed to save courier settings.',
+        'unsupported_couriers' => 'Not supported by the shipping provider: :couriers.',
     ],
 
     'region' => [

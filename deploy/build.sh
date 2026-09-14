@@ -34,6 +34,8 @@ cp "$ROOT_DIR/deploy/public_html/config.js" "$OUT_DIR/public_html/config.js"
 echo "==> Copying backend/ (excluding dev-only files)"
 rsync -a \
   --exclude '.env' \
+  --exclude '.env.bak' \
+  --exclude '.env.testing' \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude 'tests' \
@@ -60,6 +62,13 @@ ln -sfn "../backend/storage/app/public" "$OUT_DIR/public_html/storage"
 
 echo "==> Clearing caches baked into the copy (installer wizard rebuilds these post-install)"
 (cd "$OUT_DIR/backend" && php artisan config:clear && php artisan route:clear && php artisan view:clear) || true
+
+# The commands above can themselves fail (e.g. view:clear on this
+# single-domain layout, which has no Blade view path) and write a fresh
+# laravel.log into the staged copy AFTER the rsync --exclude 'storage/logs'
+# above already ran — that log would otherwise ship inside the zip, leaking
+# this build machine's local file paths. Never ship logs from the build.
+rm -f "$OUT_DIR/backend/storage/logs/"*.log
 
 echo "==> Zipping"
 # -y preserves the public_html/storage symlink instead of dereferencing it

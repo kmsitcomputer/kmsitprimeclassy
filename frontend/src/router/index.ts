@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstallStore } from '@/stores/install'
+import { captureReferralFromQuery } from '@/utils/referral'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -376,6 +377,11 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // Capture ?ref= on ANY page a visitor lands on (home, a product page, an
+  // agent's storefront link, etc.) — not just /register?ref= — so it
+  // survives browsing before the visitor actually registers.
+  captureReferralFromQuery(to.query)
+
   const install = useInstallStore()
   if (!install.checked) {
     await install.check()

@@ -229,10 +229,11 @@ class OrderFulfillmentService
      * split in proportion so the two rows still sum to the pre-split totals
      * (unit_price_snapshot itself never changes — it's already per unit).
      * agent_fee_amount/sales_fee_amount/courier_fee_amount stay on the
-     * original row untouched and are zeroed on the new one: these are a flat
-     * per-line commission already recorded once in `commissions` against the
-     * original item id at order creation — duplicating them onto the new row
-     * would make it look like the split doubled the agent/sales/courier fee.
+     * original row untouched and are zeroed on the new one: these were
+     * already computed for the item's full original_quantity and recorded
+     * once in `commissions` against the original item id at order creation —
+     * duplicating them onto the new row would make it look like the split
+     * doubled the agent/sales/courier fee.
      */
     private function splitItemForReschedule(OrderItem $item, int $quantityMoved, string $newDate, User $actor, string $reason): OrderItem
     {

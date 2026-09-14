@@ -24,10 +24,12 @@ class CommissionController extends Controller
     {
         return match (true) {
             $user->isRole('super_admin', 'agen') => ['agent', 'sales', 'courier'],
-            // Admin/Keuangan: sales + courier fee freely, and agent fee ONLY
-            // where the agen was the consumer's direct referral source (see
-            // scopeToActor's extra constraint below) — never agent fee generally.
-            $user->isRole('admin', 'keuangan') => ['sales', 'courier', 'agent'],
+            // Admin/Keuangan: sales + courier fee — never agent fee, full
+            // stop. An agen who directly referred a konsumen earns a
+            // separate 'sales'-role commission for that (see
+            // OrderService::recordCommission), so this never needs an
+            // agent-fee exception to let them verify referral payouts.
+            $user->isRole('admin', 'keuangan') => ['sales', 'courier'],
             $user->isRole('sales') => ['sales'],
             $user->isRole('kurir') => ['courier'],
             $user->isRole('korsal') => ['sales'],
@@ -44,23 +46,18 @@ class CommissionController extends Controller
         } elseif ($user->isRole('agen', 'admin', 'keuangan')) {
             $query->whereHas('beneficiary', fn ($q) => $q->where('agent_id', $user->agent_id));
         } elseif ($user->isRole('korsal')) {
-            // Sales fee earned by sales reps under this korsal's own network only.
-            $query->whereHas('beneficiary', fn ($q) => $q->where('korsal_id', $user->id));
+            // Sales fee earned by sales reps under this korsal's own network,
+            // PLUS the korsal's own commission when they were themselves a
+            // konsumen's direct referrer (beneficiary_user_id = the korsal).
+            $query->where(function ($q) use ($user) {
+                $q->where('beneficiary_user_id', $user->id)
+                    ->orWhereHas('beneficiary', fn ($qq) => $qq->where('korsal_id', $user->id));
+            });
         } else {
             $query->where('beneficiary_user_id', $user->id);
         }
 
         $query->whereIn('beneficiary_role', $this->allowedBeneficiaryRoles($user));
-
-        // Admin/Keuangan see agent-role commissions only when the agen acted
-        // as the direct referral/sales source (the order has no sales_id).
-        // This is the ONLY agent-fee visibility they get — never in general.
-        if ($user->isRole('admin', 'keuangan')) {
-            $query->where(function ($q) {
-                $q->where('beneficiary_role', '!=', 'agent')
-                    ->orWhereHas('order', fn ($order) => $order->whereNull('sales_id'));
-            });
-        }
     }
 
     public function index(Request $request)

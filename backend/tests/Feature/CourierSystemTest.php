@@ -924,4 +924,31 @@ class CourierSystemTest extends TestCase
         $otherReport->assertOk();
         $this->assertFalse(collect($otherReport->json('data'))->contains('id', $order->id));
     }
+
+    /**
+     * The kurir dashboard renders its action buttons from strict === / !==
+     * checks against these foreign keys (CourierOrderResource::itemVisibleToViewer,
+     * CourierReturnResource::picked_up_by_me, CourierService ownership checks).
+     * On some shared-hosting PDO/MySQL builds integer columns come back as
+     * strings while ids do not, which silently fails those checks and makes the
+     * "Terkirim"/"Refund" buttons vanish — this pins the casts that prevent it.
+     */
+    public function test_courier_foreign_keys_are_cast_to_int_so_strict_comparisons_survive_a_stringifying_driver(): void
+    {
+        $shipment = (new Shipment())->setRawAttributes(['order_id' => '11', 'courier_id' => '22']);
+        $this->assertSame(11, $shipment->order_id);
+        $this->assertSame(22, $shipment->courier_id);
+
+        $returnItem = (new ReturnItem())->setRawAttributes(['courier_id' => '22', 'order_item_id' => '7']);
+        $this->assertSame(22, $returnItem->courier_id);
+        $this->assertSame(7, $returnItem->order_item_id);
+
+        $courier = (new Courier())->setRawAttributes(['user_id' => '33', 'agent_id' => '44']);
+        $this->assertSame(33, $courier->user_id);
+        $this->assertSame(44, $courier->agent_id);
+
+        $orderItem = (new OrderItem())->setRawAttributes(['order_id' => '11', 'shipment_id' => '55']);
+        $this->assertSame(11, $orderItem->order_id);
+        $this->assertSame(55, $orderItem->shipment_id);
+    }
 }

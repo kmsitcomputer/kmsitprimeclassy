@@ -26,6 +26,8 @@ class DatasetRegistry
             'payment_status' => ['id', 'order_no', 'payment_status', 'paid_amount', 'remaining_amount'],
             'refunds' => ['id', 'order_no', 'refund_amount', 'refund_status'],
             'additional_payments' => ['id', 'order_no', 'amount', 'method', 'status'],
+            'transaction_report' => ['total_orders', 'paid_orders', 'pending_orders', 'cancelled_orders', 'gross_revenue'],
+            'financial_summary' => ['transaction_count', 'gross_revenue', 'paid_amount', 'outstanding_amount', 'refund_amount', 'additional_payment_amount', 'agent_fee', 'sales_fee', 'courier_fee'],
         ];
     }
 
@@ -64,6 +66,42 @@ class DatasetRegistry
             $q = DB::table('commissions as c')->join('users as s', 's.id', '=', 'c.beneficiary_user_id')->join('users as k', 'k.id', '=', 's.korsal_id')->where('c.beneficiary_role', 'sales')->select(['k.id as korsal_id', 'k.name as korsal_name'])->selectRaw('SUM(c.amount) as amount')->groupBy('k.id', 'k.name');
             if ($agentId !== null) {
                 $q->where('k.agent_id', $agentId)->where('s.agent_id', $agentId);
+            }
+        } elseif ($dataset === 'transaction_report') {
+            $q = DB::table('orders as o')
+                ->selectRaw('COUNT(*) as total_orders')
+                ->selectRaw("SUM(CASE WHEN o.payment_status = 'paid' THEN 1 ELSE 0 END) as paid_orders")
+                ->selectRaw("SUM(CASE WHEN o.payment_status IN ('unpaid', 'partially_paid') THEN 1 ELSE 0 END) as pending_orders")
+                ->selectRaw("SUM(CASE WHEN o.status = 'dibatalkan' THEN 1 ELSE 0 END) as cancelled_orders")
+                ->selectRaw('COALESCE(SUM(o.total_amount), 0) as gross_revenue');
+            if ($agentId !== null) {
+                $q->where('o.agent_id', $agentId);
+            }
+        } elseif ($dataset === 'financial_summary') {
+            $refunds = DB::table('return_items as r')->join('order_items as i', 'i.id', '=', 'r.order_item_id')->join('orders as ro', 'ro.id', '=', 'i.order_id')->selectRaw('COALESCE(SUM(r.refund_amount), 0)');
+            $additional = DB::table('order_additional_payments as a')->join('orders as ao', 'ao.id', '=', 'a.order_id')->selectRaw('COALESCE(SUM(a.amount), 0)');
+            $agentFees = DB::table('commissions as ac')->join('orders as afo', 'afo.id', '=', 'ac.order_id')->where('ac.beneficiary_role', 'agent')->selectRaw('COALESCE(SUM(ac.amount), 0)');
+            $salesFees = DB::table('commissions as sc')->join('orders as sfo', 'sfo.id', '=', 'sc.order_id')->where('sc.beneficiary_role', 'sales')->selectRaw('COALESCE(SUM(sc.amount), 0)');
+            $courierFees = DB::table('commissions as cc')->join('orders as cfo', 'cfo.id', '=', 'cc.order_id')->where('cc.beneficiary_role', 'courier')->selectRaw('COALESCE(SUM(cc.amount), 0)');
+            if ($agentId !== null) {
+                $refunds->where('ro.agent_id', $agentId);
+                $additional->where('ao.agent_id', $agentId);
+                $agentFees->where('afo.agent_id', $agentId);
+                $salesFees->where('sfo.agent_id', $agentId);
+                $courierFees->where('cfo.agent_id', $agentId);
+            }
+            $q = DB::table('orders as o')
+                ->selectRaw('COUNT(*) as transaction_count')
+                ->selectRaw('COALESCE(SUM(o.total_amount), 0) as gross_revenue')
+                ->selectRaw('COALESCE(SUM(o.paid_amount), 0) as paid_amount')
+                ->selectRaw('COALESCE(SUM(o.remaining_amount), 0) as outstanding_amount')
+                ->selectSub($refunds, 'refund_amount')
+                ->selectSub($additional, 'additional_payment_amount')
+                ->selectSub($agentFees, 'agent_fee')
+                ->selectSub($salesFees, 'sales_fee')
+                ->selectSub($courierFees, 'courier_fee');
+            if ($agentId !== null) {
+                $q->where('o.agent_id', $agentId);
             }
         } else {
             $q = DB::table('orders as o');

@@ -25,7 +25,7 @@ class SyncService
             $config->load('destination');
             $log = SheetsSyncLog::create([
                 'config_id' => $config->id, 'dataset' => $config->dataset,
-                'spreadsheet_id' => $config->destination->spreadsheet_id, 'tab' => $config->tab,
+                'spreadsheet_id' => $this->maskSpreadsheetId($config->destination->spreadsheet_id), 'tab' => $config->tab,
                 'actor_id' => $actor->id, 'actor_role' => $actor->role->slug,
                 'agent_scope' => $config->destination->agent_id, 'started_at' => now(), 'status' => 'running',
             ]);
@@ -44,19 +44,26 @@ class SyncService
             foreach ($records as $record) {
                 $rows[] = array_map(fn ($field) => $record->$field, $fields);
             }
-            $this->client->replace($log->spreadsheet_id, $config->tab, $rows);
+            $this->client->replace($config->destination->spreadsheet_id, $config->tab, $rows);
             $log->update(['status' => 'success', 'rows_success' => $records->count(), 'completed_at' => now()]);
         } catch (\Throwable $e) {
             if (! $log) {
                 throw $e;
             }
-            $safe = ['Integration disabled', 'Invalid credentials', 'Sheet not found', 'Timeout or network error', 'Permission denied', 'Spreadsheet not found', 'API quota', 'Invalid spreadsheet or mapping', 'Google API unavailable', 'Invalid mapping', 'Dataset exceeds manual sync limit'];
+            $safe = ['Invalid mapping', 'Dataset exceeds manual sync limit'];
+            $summary = $e instanceof GoogleSheetsException || in_array($e->getMessage(), $safe, true)
+                ? $e->getMessage() : 'Sync failed';
             $log->update(['status' => 'failed', 'completed_at' => now(), 'rows_failed' => $log->rows_processed,
-                'error_summary' => in_array($e->getMessage(), $safe, true) ? $e->getMessage() : 'Sync failed']);
+                'error_summary' => $summary]);
         } finally {
             $lock->release();
         }
 
         return $log->fresh();
+    }
+
+    private function maskSpreadsheetId(string $id): string
+    {
+        return strlen($id) <= 8 ? '***' : substr($id, 0, 4).'…'.substr($id, -4);
     }
 }

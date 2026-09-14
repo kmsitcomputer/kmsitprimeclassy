@@ -21,7 +21,7 @@ Implemented and working today:
 - Shop, cart, wishlist, checkout with delivery-date selection and a choice of courier ("kurir online", distance-priced) or expedition ("ekspedisi"/RajaOngkir) shipping.
 - Full order lifecycle: creation, per-item fulfillment adjustment, cancellation, per-item return/refund, additional-payment collection, per-shipment courier delivery tracking with photo proof.
 - Payment: Cash-on-delivery (with photo-proof + admin confirmation), manual bank transfer (with photo-proof + admin verification), and 3 payment gateways (Xendit, Tripay, Stripe) with signature-verified webhooks.
-- Shipping: OpenRoute (real road-distance courier pricing) and RajaOngkir (expedition rate lookup), both admin-configurable, both with a safe fallback (Haversine straight-line distance) if the provider is unavailable.
+- Shipping: OpenRouteService Directions V2 for internal road-route delivery and RajaOngkir/Komerce V2 for expedition rates. Credentials and pricing are scoped per agent; the backend recalculates every selected method when creating an order.
 - CMS: homepage content blocks, articles/news, static pages — all edited via a CKEditor 5 rich-text editor and sanitized server-side before storage.
 - Media upload pipeline with real MIME/type verification (not just extension checking).
 - Public website settings and a public "Contact Agent" directory.
@@ -174,8 +174,8 @@ All configuration lives in `backend/.env` (copied from `backend/.env.example`) a
 | App key / crypto | `backend/.env` | `APP_KEY` (generate with `php artisan key:generate`, never share it) |
 | Database | `backend/.env` | `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` |
 | Payment gateway credentials (Xendit / Tripay / Stripe) | **Database**, not `.env` | Set via the Super Admin → Payment Gateways admin screen (`PUT /admin/payment-gateways/{method}/config`); stored encrypted in the `payment_gateway_configs` table, never read back through any API response. There is deliberately no `XENDIT_*`/`TRIPAY_*`/`STRIPE_*` key in `.env` — this keeps credential rotation an in-app admin action instead of a redeploy. |
-| Shipping credentials (RajaOngkir) | **Database**, not `.env` | Same pattern, via Super Admin → Shipping Providers (`PUT /admin/shipping-providers/{provider}/config`). |
-| OpenRoute credentials | `backend/.env` (this one IS env-driven, since it's a platform-wide fallback distance calculator rather than a per-branch account) | `OPENROUTE_API_KEY`, `OPENROUTE_BASE_URL` — optional; leave `OPENROUTE_API_KEY` empty to fall back to the built-in Haversine straight-line distance calculator. |
+| Shipping credentials (RajaOngkir) | **Encrypted database config**, not `.env` | Each agent configures its own API key, official origin destination, and courier codes in Dashboard → Ekspedisi Saya. The key is never returned by the API. |
+| OpenRoute credentials | **Encrypted database config**, not `.env` | Each agent configures its own key, supported routing profile, and rate in Dashboard → Ekspedisi Saya. `OPENROUTE_BASE_URL` remains server-controlled to prevent arbitrary outbound requests. |
 | Google Sheets service account | Secure server filesystem + `backend/.env` | Set `GOOGLE_SHEETS_ENABLED=true` and `GOOGLE_SHEETS_CREDENTIALS_PATH` to an absolute path outside the public web root. Never place the JSON key in Git. |
 | Mail | `backend/.env` | `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` |
 | Storage | `backend/.env` | `FILESYSTEM_DISK` (`local` for the private disk, `public` disk backs `storage/app/public` — must be symlinked, see §16) |
@@ -232,11 +232,11 @@ No gateway credential belongs in `.env` — see §10.
 
 ## 14. RajaOngkir configuration
 
-Same admin-driven pattern as §13, under Shipping Providers (`/admin/shipping-settings`): enable RajaOngkir, choose its account tier (starter/basic/pro — each has a different base API URL, handled automatically), and enter the API key. RajaOngkir is used for "ekspedisi" (courier-company) shipping quotes.
+RajaOngkir uses the Komerce Shipping Cost API V2 at `rajaongkir.komerce.id`. A super admin controls the global provider switch. Each agent stores an encrypted API key and chooses an official origin through the destination-search endpoint. Checkout resolves the buyer's village to an official RajaOngkir destination, sends total server-derived weight in grams, lists all returned courier services, and recalculates the selected service during order creation. The shipment stores the provider, courier, service, cost, ETD, origin/destination IDs, and weight as an immutable snapshot.
 
 ## 15. OpenRoute configuration
 
-OpenRoute powers "kurir online" (in-house/branch courier) real road-distance pricing. Unlike the gateway/shipping-provider credentials above, this one **is** environment-driven (`backend/.env`): set `OPENROUTE_API_KEY` (get a free key at openrouteservice.org) and optionally override `OPENROUTE_BASE_URL`. Leave `OPENROUTE_API_KEY` empty to keep the built-in Haversine straight-line fallback distance calculator — the app works either way, just with a less precise distance figure.
+OpenRouteService powers "kurir online" (in-house/branch courier) road-route pricing. Each Agent saves an encrypted API key, supported routing profile, and pricing rule from its own dashboard. The server controls `OPENROUTE_BASE_URL` and the default `OPENROUTE_PROFILE`; these values cannot be supplied by an Agent. If ORS cannot verify a route, checkout returns a safe error and does not charge a Haversine-derived fee.
 
 ### Google Sheets synchronization
 
@@ -250,17 +250,19 @@ GOOGLE_SHEETS_CREDENTIALS_PATH=/absolute/private/path/service-account.json
 ```
 
 Super Admin registers a spreadsheet and assigns it to global scope or one
-Agent. Super Admin, Agent, and Admin can then configure allowed datasets,
+Agent. Agent and Admin can also register destinations for their authenticated
+Agent scope. Super Admin, Agent, and Admin can then configure allowed datasets,
 columns, an optional status filter, and run manual sync from
 `/dashboard/google-sheets`. Agent and Admin can only access their assigned
-Agent scope. The target tab must already exist and is dedicated to the export:
-each sync replaces its cell values. The integration exports at most 10,000
+Agent scope. Admin cannot export the Agent commission financial summary. A
+valid target tab is created when missing; each sync replaces its cell values.
+The integration exports at most 10,000
 rows per manual run and records a sanitized audit log. It never imports data
 from Google Sheets.
 
 Available datasets are defined in the application registry; the UI cannot
-select arbitrary tables or columns. Credentials, passwords, tokens, sessions,
-and payment secrets are not exportable.
+select arbitrary tables or columns. Column order and custom headers are saved
+per tab. Credentials, passwords, tokens, sessions, and payment secrets are not exportable.
 
 ## 16. Storage configuration
 
@@ -400,7 +402,26 @@ php artisan migrate:fresh    # DESTRUCTIVE — drops every table first; local/de
 php artisan migrate:fresh --seed   # fresh schema + roles/languages/settings/payment-methods/shipping-providers, no demo users
 ```
 
-`backend/database/migrations/` (70 files) is the authoritative schema source; `database.sql` (§25) is a generated export of it, not a hand-maintained alternative — don't edit `database.sql` directly and expect it to affect the app.
+`backend/database/migrations/` (85 files) is the authoritative schema source; `database.sql` (§25) is a generated export of it, not a hand-maintained alternative — don't edit `database.sql` directly and expect it to affect the app.
+
+### Transaction-only reset
+
+Use the dedicated command when the application must return to a state with no
+orders or transaction-derived reports while preserving all master data. Always
+review the dry run and create a recovery backup first:
+
+```bash
+cd backend
+php artisan transactions:reset --dry-run
+php artisan transactions:reset --force
+```
+
+The command deletes transaction dependencies child-to-parent, restores stock
+from recognized transaction movements, clears reserved stock and targeted
+cache entries, removes transaction-only evidence files, and verifies both zero
+transaction counts and unchanged master row counts. Production execution
+requires `--force`; it never drops tables or disables foreign keys. See
+`docs/TRANSACTION-RESET-REPORT.md` for the latest executed reset audit.
 
 ## 25. database.sql import
 
@@ -428,7 +449,7 @@ Outputs to `frontend/dist/` (per `vite.config.ts`'s default). Deploy that direct
 - **Refreshing a frontend route like `/products/foo` 404s**: the web server isn't falling back to `index.html` for unknown paths — see §21.
 - **500 error with no detail in production**: expected — `APP_DEBUG=false` hides exception detail from API responses by design (§22). Check `backend/storage/logs/laravel.log` instead.
 - **Webhook returns 401 `invalid_signature`**: the gateway's webhook secret/callback token configured in the admin screen (§13) doesn't match what the gateway is actually signing with — re-check both sides.
-- **RajaOngkir/OpenRoute quote always falls back to Haversine/free shipping**: the provider is either disabled or its API call failed (check `backend/storage/logs/laravel.log`) — both providers fail safe to a fallback rather than blocking checkout.
+- **RajaOngkir courier options return 422**: verify the agent's API key, official origin, courier codes, product weight, and the buyer's complete village hierarchy. Check the structured `shipping.rajaongkir_quote` log; it never contains the API key. A courier/service explicitly selected by the buyer is rejected if it is no longer available.
 
 ## 28. Backup
 

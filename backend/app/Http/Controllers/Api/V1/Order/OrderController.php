@@ -9,7 +9,6 @@ use App\Http\Requests\Order\StoreOrderRequest;
 use App\Http\Requests\Order\UpdateOrderStatusRequest;
 use App\Http\Resources\OrderResource;
 use App\Models\Order;
-use App\Models\User;
 use App\Services\Order\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -58,12 +57,7 @@ class OrderController extends Controller
         }
 
         $actor = $request->user();
-        $konsumen = $actor->isRole('konsumen')
-            ? $actor
-            // Explicit agent_id filter (User carries no auto-scope — see
-            // BelongsToAgentScope's docblock): a cross-branch konsumen_id
-            // 404s here rather than reaching OrderPolicy at all.
-            : User::query()->where('agent_id', $actor->agent_id)->findOrFail($request->integer('konsumen_id'));
+        $konsumen = $this->resolveKonsumen($actor, $request->integer('konsumen_id') ?: null);
 
         $this->authorize('create', [Order::class, $konsumen]);
 
@@ -80,6 +74,7 @@ class OrderController extends Controller
             $idempotencyKey,
             $request->input('shipping_method'),
             $request->filled('dp_amount') ? (float) $request->input('dp_amount') : null,
+            $request->selectedCourierOption(),
         );
 
         Log::info('order.created', [

@@ -38,6 +38,7 @@ return [
     'openroute' => [
         'key' => env('OPENROUTE_API_KEY'),
         'base_url' => env('OPENROUTE_BASE_URL', 'https://api.openrouteservice.org'),
+        'profile' => env('OPENROUTE_PROFILE', 'driving-car'),
     ],
 
 ];

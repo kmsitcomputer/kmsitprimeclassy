@@ -56,7 +56,7 @@ class CheckoutTest extends TestCase
 
     private function makeProduct(User $agen, int $price, int $stockQty): Product
     {
-        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(), 
+        $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
             'name' => 'Red Velvet Cake', 'slug' => 'red-velvet-cake-'.uniqid(),
             'has_variations' => false, 'base_price' => $price, 'weight_grams' => 1000, 'status' => 'active',
         ]);
@@ -106,7 +106,7 @@ class CheckoutTest extends TestCase
     public function test_quote_computes_totals_without_reserving_stock_or_creating_an_order(): void
     {
         Http::fake(['api.openrouteservice.org/*' => Http::response([
-            'routes' => [['summary' => ['distance' => 20000]]],
+            'routes' => [['summary' => ['distance' => 20000, 'duration' => 2400]]],
         ], 200)]);
 
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();

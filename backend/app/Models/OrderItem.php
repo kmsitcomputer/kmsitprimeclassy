@@ -36,6 +36,12 @@ class OrderItem extends Model
     protected function casts(): array
     {
         return [
+            // See User::casts() — order_id/shipment_id are compared with strict
+            // ===/!== against already-int ids (OrderFulfillmentController,
+            // CourierService); uncast they return as strings on some
+            // PDO/MySQL driver builds and silently fail the match.
+            'order_id' => 'integer',
+            'shipment_id' => 'integer',
             'unit_price_snapshot' => 'decimal:2',
             'agent_fee_amount' => 'decimal:2',
             'sales_fee_amount' => 'decimal:2',

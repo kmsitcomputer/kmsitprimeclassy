@@ -125,6 +125,9 @@ return [
         'provider_config_saved' => '物流服务商配置保存成功。',
         'unsupported_provider' => '不支持物流服务商":code"。',
         'method_not_available' => '所选配送方式当前不可用。',
+        'couriers_saved' => '快递设置保存成功。',
+        'couriers_save_failed' => '快递设置保存失败。',
+        'unsupported_couriers' => '物流服务商不支持:couriers。',
     ],
 
     'region' => [

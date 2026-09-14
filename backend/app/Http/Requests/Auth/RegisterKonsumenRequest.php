@@ -19,7 +19,10 @@ class RegisterKonsumenRequest extends BaseFormRequest
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'phone' => ['required', 'string', 'max:20'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'referral_code' => ['required', 'string', 'max:20'],
+            // Optional — a konsumen may register with no referral at all and
+            // pick an agent later (see AuthController::register and the
+            // "Lihat Toko Agen" fallback on the registration page).
+            'referral_code' => ['nullable', 'string', 'max:20'],
         ];
     }
 }

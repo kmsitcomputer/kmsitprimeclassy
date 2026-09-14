@@ -14,6 +14,10 @@ class SheetsConfigPolicy
 
     public function manage(User $user, SheetsConfig $config): bool
     {
+        if ($user->isRole('admin') && $config->dataset === 'financial_summary') {
+            return false;
+        }
+
         return $this->viewAny($user) && ($user->isRole('super_admin') || $config->destination->agent_id === $user->agent_id);
     }
 }

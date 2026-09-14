@@ -24,12 +24,12 @@
 ## Google Sheets
 
 - Central service-account authentication is server-side and environment based.
-- Spreadsheet destinations have global or Agent ownership, assigned by Super
-  Admin. Configs and logs inherit that ownership.
+- Spreadsheet destinations have global or Agent ownership. Super Admin assigns
+  either scope; Agent/Admin registrations are forced to their authenticated Agent.
 - Access is limited to Super Admin, Agent, and Admin; backend policies enforce
   ID-based access.
-- Thirteen application-defined datasets expose explicit allowed fields.
-- Manual synchronization replaces values in a dedicated existing tab, is
+- Fifteen application-defined datasets expose explicit allowed fields.
+- Manual synchronization creates a missing valid tab and replaces its values, is
   concurrency locked, limited to 10,000 rows, and records sanitized success or
   failure logs. There is no Sheets-to-MySQL path.
 

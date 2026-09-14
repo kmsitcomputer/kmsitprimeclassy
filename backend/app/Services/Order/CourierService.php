@@ -40,7 +40,10 @@ class CourierService
      */
     public function assignCourier(Shipment $shipment, Courier $courier, User $actor): Shipment
     {
-        $agentId = $shipment->order()->value('agent_id');
+        // Raw query-builder value bypasses Order's own integer cast, so force
+        // it here — otherwise $courier->agent_id (cast) !== string fails and a
+        // valid office assignment is wrongly rejected on some driver builds.
+        $agentId = (int) $shipment->order()->value('agent_id');
 
         if ($courier->agent_id !== $agentId || ! $courier->is_active) {
             throw new ApiException(__('messages.courier.invalid_assignment'), 422);

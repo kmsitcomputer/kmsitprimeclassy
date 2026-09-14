@@ -41,6 +41,13 @@ class Order extends Model
     protected function casts(): array
     {
         return [
+            // See User::casts() — same strict-comparison-vs-uncast-column
+            // footgun applies here (OrderPolicy compares these against
+            // ->id/->agent_id with === / !==).
+            'agent_id' => 'integer',
+            'konsumen_id' => 'integer',
+            'korsal_id' => 'integer',
+            'sales_id' => 'integer',
             'subtotal_amount' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'shipping_fee_amount' => 'decimal:2',

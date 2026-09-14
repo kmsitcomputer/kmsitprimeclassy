@@ -105,11 +105,12 @@ class OrderTest extends TestCase
             (float) $data['total_amount']
         );
 
+        // Fee is per unit, same as price — quantity 2 doubles it, same as subtotal.
         $this->assertDatabaseHas('commissions', [
-            'beneficiary_user_id' => $agen->id, 'beneficiary_role' => 'agent', 'amount' => 10000,
+            'beneficiary_user_id' => $agen->id, 'beneficiary_role' => 'agent', 'amount' => 20000,
         ]);
         $this->assertDatabaseHas('commissions', [
-            'beneficiary_user_id' => $sales->id, 'beneficiary_role' => 'sales', 'amount' => 5000,
+            'beneficiary_user_id' => $sales->id, 'beneficiary_role' => 'sales', 'amount' => 10000,
         ]);
     }
 

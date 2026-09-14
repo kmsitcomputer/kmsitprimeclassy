@@ -50,9 +50,11 @@ class ShippingQuoteService
             return $this->quoteWithPreferredProvider($context);
         }
 
+        $attemptedProvider = false;
         $rajaOngkirRow = ShippingProvider::query()->where('code', 'rajaongkir')->first();
 
         if ($rajaOngkirRow?->is_active && ! $this->agentDisabled($rajaOngkirRow->id, $context->agentId)) {
+            $attemptedProvider = true;
             try {
                 return $this->rajaOngkir->quote($context, $rajaOngkirRow);
             } catch (ShippingQuoteException $e) {
@@ -63,6 +65,7 @@ class ShippingQuoteService
         $openRouteRow = ShippingProvider::query()->where('code', 'openroute')->first();
 
         if ($openRouteRow?->is_active && ! $this->agentDisabled($openRouteRow->id, $context->agentId)) {
+            $attemptedProvider = true;
             try {
                 return $this->openRoute->quote($context, $openRouteRow);
             } catch (ShippingQuoteException $e) {
@@ -70,7 +73,50 @@ class ShippingQuoteService
             }
         }
 
+        if ($attemptedProvider) {
+            throw new ApiException(__('messages.shipping.method_not_available'), 422, [
+                'shipping_method' => __('messages.system.field_invalid'),
+            ]);
+        }
+
         return ShippingQuoteResult::free('no_provider_enabled_or_all_failed');
+    }
+
+    /**
+     * Every courier/service RajaOngkir currently offers for this route+weight
+     * (JNE REG, JNE YES, TIKI REG, ...), cheapest first — what the checkout
+     * "pick a courier" sub-step under "Ekspedisi" lists. Only meaningful for
+     * RajaOngkir; OpenRoute is a single distance-based calculation with no
+     * courier concept at all.
+     *
+     * @return array<int, array{courier: string, service: string, cost: float, etd: ?string}>
+     */
+    public function courierOptions(ShippingQuoteContext $context): array
+    {
+        $providerRow = ShippingProvider::query()->where('code', 'rajaongkir')->first();
+
+        if (! $providerRow?->is_active || $this->agentDisabled($providerRow->id, $context->agentId)) {
+            throw new ApiException(__('messages.shipping.method_not_available'), 422, [
+                'shipping_method' => __('messages.system.field_invalid'),
+            ]);
+        }
+
+        try {
+            $options = $this->rajaOngkir->listOptions($context, $providerRow);
+        } catch (ShippingQuoteException $e) {
+            // ShippingQuoteException's own contract: never surfaced raw to
+            // the client — same as every other caller of a provider here.
+            Log::warning('shipping.courier_options_failed', ['error' => $e->getMessage()]);
+
+            throw new ApiException(__('messages.shipping.method_not_available'), 422, [
+                'shipping_method' => __('messages.system.field_invalid'),
+            ]);
+        }
+
+        return array_map(
+            fn (array $o) => ['courier' => $o['courier'], 'service' => $o['service'], 'cost' => $o['value'], 'etd' => $o['etd']],
+            $options
+        );
     }
 
     private function quoteWithPreferredProvider(ShippingQuoteContext $context): ShippingQuoteResult
@@ -96,10 +142,9 @@ class ShippingQuoteService
                 'provider' => $context->preferredProvider, 'error' => $e->getMessage(),
             ]);
 
-            // The konsumen picked this method specifically — falling back to
-            // the OTHER provider would charge a service/price they never
-            // agreed to. Free shipping is the only safe fallback here.
-            return ShippingQuoteResult::free('preferred_provider_failed');
+            throw new ApiException(__('messages.shipping.method_not_available'), 422, [
+                'shipping_method' => __('messages.system.field_invalid'),
+            ]);
         }
     }
 

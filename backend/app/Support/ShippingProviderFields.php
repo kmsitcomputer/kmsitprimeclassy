@@ -2,6 +2,9 @@
 
 namespace App\Support;
 
+use App\Models\ShippingCourier;
+use Illuminate\Validation\Rule;
+
 /**
  * Which config fields each shipping provider needs — mirrors
  * PaymentGatewayFields. Every field here is written to a per-agen
@@ -14,14 +17,21 @@ class ShippingProviderFields
         return [
             'rajaongkir' => [
                 'api_key' => ['required', 'string', 'max:255'],
-                'account_type' => ['required', 'in:starter,basic,pro'],
-                'origin_city_id' => ['required', 'string', 'max:20'],
+                'api_version' => ['required', 'in:komerce_v2'],
+                'origin_destination_id' => ['required', 'integer', 'min:1'],
+                'origin_label' => ['required', 'string', 'max:255'],
+                'origin_search' => ['required', 'string', 'max:100'],
                 'couriers' => ['required', 'array', 'min:1'],
-                'couriers.*' => ['string', 'in:jne,pos,tiki'],
+                // Never trust an arbitrary string here — same provider-
+                // supported master list (shipping_couriers) the dedicated
+                // couriers checkbox endpoint validates against (see
+                // AgentShippingProviderController::updateCouriers), so this
+                // full-config form can't bypass that check.
+                'couriers.*' => ['string', 'max:30', 'regex:/^[a-z0-9_-]+$/', Rule::in(self::supportedCourierCodes())],
             ],
             'openroute' => [
                 'api_key' => ['required', 'string', 'max:255'],
-                'base_url' => ['nullable', 'string', 'max:255', 'url'],
+                'profile' => ['required', 'in:driving-car,driving-hgv,cycling-regular,cycling-road,cycling-mountain,cycling-electric,foot-walking,foot-hiking,wheelchair'],
             ],
         ];
     }
@@ -45,5 +55,12 @@ class ShippingProviderFields
     public static function isSupported(string $code): bool
     {
         return isset(self::definitions()[$code]);
+    }
+
+    /** @return array<int, string> Lowercase codes from the provider-supported courier master list (shipping_couriers, is_active only). */
+    private static function supportedCourierCodes(): array
+    {
+        return ShippingCourier::query()->where('is_active', true)->pluck('code')
+            ->map(fn ($c) => strtolower($c))->all();
     }
 }

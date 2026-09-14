@@ -42,6 +42,17 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            // Hierarchy FK columns are compared with strict === / !== against
+            // other models' ->id (e.g. UserManagementService, UserPolicy,
+            // OrderPolicy) — on some PDO/MySQL driver builds an uncast
+            // integer column comes back as a string while ->id does not,
+            // making an otherwise-correct match fail. Casting removes that
+            // driver-dependent footgun entirely.
+            'role_id' => 'integer',
+            'parent_id' => 'integer',
+            'agent_id' => 'integer',
+            'korsal_id' => 'integer',
+            'sales_id' => 'integer',
         ];
     }
 

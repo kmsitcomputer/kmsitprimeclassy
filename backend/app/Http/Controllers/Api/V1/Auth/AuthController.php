@@ -35,7 +35,16 @@ class AuthController extends Controller
 
     public function register(RegisterKonsumenRequest $request)
     {
-        $chain = $this->referralService->resolveChainByCode($request->string('referral_code')->toString());
+        // referral_code is optional (see RegisterKonsumenRequest) — a konsumen
+        // may sign up with no referral at all and get linked to an agent
+        // later. When a code IS supplied it is always re-resolved here
+        // server-side; the client's own agent_id/korsal_id/sales_id (if any
+        // were smuggled in the payload) are never read — RegisterKonsumenRequest
+        // doesn't even declare those fields.
+        $referralCode = $request->string('referral_code')->trim()->toString();
+        $chain = $referralCode !== ''
+            ? $this->referralService->resolveChainByCode($referralCode)
+            : ['parent_id' => null, 'sales_id' => null, 'korsal_id' => null, 'agent_id' => null];
 
         $konsumenRoleId = Role::query()->where('slug', 'konsumen')->value('id');
 

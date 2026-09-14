@@ -62,14 +62,17 @@ class KeuanganReportingTest extends TestCase
         return compact('agen', 'admin', 'keuangan', 'korsal', 'sales', 'directKonsumen', 'salesKonsumen');
     }
 
-    private function makeProduct(User $agen, int $agentFee = 10000, int $price = 100000): Product
+    private function makeProduct(User $agen, int $agentFee = 10000, int $salesFee = 0, int $price = 100000): Product
     {
-        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(), 
+        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(),
             'name' => 'Kue Report', 'slug' => 'kue-report-'.uniqid(),
             'has_variations' => false, 'base_price' => $price, 'weight_grams' => 1000, 'status' => 'active',
         ]);
         ProductStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 20, 'quantity_reserved' => 0]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'agent', 'amount' => $agentFee, 'is_active' => true]);
+        if ($salesFee > 0) {
+            ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'sales', 'amount' => $salesFee, 'is_active' => true]);
+        }
 
         return $product;
     }
@@ -125,10 +128,18 @@ class KeuanganReportingTest extends TestCase
         );
     }
 
-    public function test_agent_fee_is_visible_to_admin_and_keuangan_only_for_direct_agent_referrals(): void
+    /**
+     * agent_fee is the branch owner's own margin — never exposed to admin/
+     * keuangan, in any scenario. When a konsumen was referred DIRECTLY by
+     * the agen (no sales in between), the agen additionally earns a
+     * SEPARATE sales-role commission for that referral (two distinct
+     * commissions, never one merged into the other) — that sales commission
+     * is what admin/keuangan see, via the fee type they're already allowed.
+     */
+    public function test_agent_fee_is_never_visible_to_admin_or_keuangan_direct_referral_earns_a_separate_sales_commission(): void
     {
         $branch = $this->branch();
-        $product = $this->makeProduct($branch['agen'], agentFee: 10000);
+        $product = $this->makeProduct($branch['agen'], agentFee: 10000, salesFee: 4000);
 
         $directOrder = $this->placeCodOrder($branch['directKonsumen'], $product);
         $salesOrder = $this->placeCodOrder($branch['salesKonsumen'], $product);
@@ -140,16 +151,59 @@ class KeuanganReportingTest extends TestCase
         foreach (['admin', 'keuangan'] as $role) {
             $direct = $this->actingAs($branch[$role])->getJson("/api/v1/orders/{$directOrder->id}");
             $direct->assertOk();
-            $this->assertSame(10000, (int) $direct->json('data.items.0.agent_fee_amount'), "{$role} may see the agen's referral commission");
+            $this->assertArrayNotHasKey('agent_fee_amount', $direct->json('data.items.0'), "{$role} must NEVER see agent_fee, even for a direct referral");
+            $this->assertSame(4000, (int) $direct->json('data.items.0.sales_fee_amount'), "{$role} sees the agen's referral commission AS sales_fee");
 
             $viaSales = $this->actingAs($branch[$role])->getJson("/api/v1/orders/{$salesOrder->id}");
             $viaSales->assertOk();
-            $this->assertArrayNotHasKey('agent_fee_amount', $viaSales->json('data.items.0'), "{$role} must NOT see general agent fee");
+            $this->assertArrayNotHasKey('agent_fee_amount', $viaSales->json('data.items.0'), "{$role} must NOT see agent fee");
+            $this->assertSame(4000, (int) $viaSales->json('data.items.0.sales_fee_amount'));
         }
 
-        // The commission summary exposes the referral-only agent fee, never all agent fees.
+        // Two distinct commissions exist for the direct order: the agen's own
+        // 'agent' commission (hidden from keuangan) AND a SEPARATE 'sales'
+        // commission also paid to the agen (visible to keuangan) — never merged.
+        $this->assertDatabaseHas('commissions', [
+            'order_id' => $directOrder->id, 'beneficiary_user_id' => $branch['agen']->id,
+            'beneficiary_role' => 'agent', 'amount' => 10000,
+        ]);
+        $this->assertDatabaseHas('commissions', [
+            'order_id' => $directOrder->id, 'beneficiary_user_id' => $branch['agen']->id,
+            'beneficiary_role' => 'sales', 'amount' => 4000,
+        ]);
+
+        // The commission summary never exposes agent fee to keuangan at all,
+        // and sales_fee sums both the direct-referral (agen) and normal
+        // (sales rep) commissions within the branch.
         $summary = $this->actingAs($branch['keuangan'])->getJson('/api/v1/commissions/summary');
         $summary->assertOk();
-        $this->assertSame(10000.0, (float) $summary->json('data.total_agent_fee'));
+        $this->assertArrayNotHasKey('total_agent_fee', $summary->json('data'));
+        $this->assertSame(8000.0, (float) $summary->json('data.total_sales_fee'));
+    }
+
+    /** A korsal who is themselves a konsumen's direct referrer (no sales beneath them) earns their own sales commission, and can see it via /commissions. */
+    public function test_korsal_direct_referral_earns_and_can_view_their_own_sales_commission(): void
+    {
+        $branch = $this->branch();
+        $product = $this->makeProduct($branch['agen'], agentFee: 10000, salesFee: 5000);
+
+        $korsalDirectKonsumen = User::factory()->konsumen()->create([
+            'agent_id' => $branch['agen']->id, 'korsal_id' => $branch['korsal']->id, 'parent_id' => $branch['korsal']->id,
+        ]);
+
+        $order = $this->placeCodOrder($korsalDirectKonsumen, $product);
+        $this->assertNull($order->sales_id);
+
+        $this->assertDatabaseHas('commissions', [
+            'order_id' => $order->id, 'beneficiary_user_id' => $branch['korsal']->id,
+            'beneficiary_role' => 'sales', 'amount' => 5000,
+        ]);
+
+        $list = $this->actingAs($branch['korsal'])->getJson('/api/v1/commissions');
+        $list->assertOk();
+        $this->assertTrue(
+            collect($list->json('data'))->contains(fn ($c) => (float) $c['amount'] === 5000.0),
+            'korsal must see their own direct-referral commission'
+        );
     }
 }

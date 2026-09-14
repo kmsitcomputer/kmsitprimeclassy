@@ -50,14 +50,13 @@ class OrderItemResource extends JsonResource
             ),
             // Fee amounts are commission data, not customer-facing — each type
             // is gated to exactly the roles allowed to see it (Blueprint fee
-            // visibility rules): agent_fee is agen/super_admin only, EXCEPT
-            // that admin/keuangan may see it when the AGEN itself was the
-            // consumer's direct referral/sales source (the order has no
-            // sales_id) — in that case the agent fee IS the referral
-            // commission they are permitted to see. Never agent fee in general.
+            // visibility rules). agent_fee is the branch owner's own margin —
+            // always agen/super_admin only, full stop, never admin/keuangan:
+            // a konsumen referred directly by the agen (no sales in between)
+            // earns the agen a SEPARATE sales_fee commission for that (see
+            // OrderService::recordCommission) rather than exposing this one.
             'agent_fee_amount' => $this->when(
-                ($request->user()?->isRole('super_admin', 'agen') ?? false)
-                    || (($request->user()?->isRole('admin', 'keuangan') ?? false) && $this->order?->sales_id === null),
+                $request->user()?->isRole('super_admin', 'agen') ?? false,
                 $this->agent_fee_amount
             ),
             'sales_fee_amount' => $this->when(

@@ -21,6 +21,14 @@ const loading = ref(false)
 const orders = ref<CourierOrder[]>([])
 const returns = ref<CourierReturn[]>([])
 const delivered = ref<CourierOrder[]>([])
+const ordersPage = ref(1)
+const ordersLastPage = ref(1)
+const returnsPage = ref(1)
+const returnsLastPage = ref(1)
+const deliveredPage = ref(1)
+const deliveredLastPage = ref(1)
+const deliveredFrom = ref('')
+const deliveredTo = ref('')
 const busyShipmentId = ref<number | null>(null)
 const busyReturnItemId = ref<number | null>(null)
 const pickupNoteDraft = ref<Record<number, string>>({})
@@ -28,12 +36,14 @@ const pickingUpItemId = ref<number | null>(null)
 const proofInputs = ref<Record<number, HTMLInputElement | null>>({})
 const errorMessage = ref('')
 
-async function loadOrders() {
+async function loadOrders(page = ordersPage.value) {
   loading.value = true
   errorMessage.value = ''
   try {
-    const { orders: rows } = await listCourierOrders()
+    const { orders: rows, meta } = await listCourierOrders(page)
     orders.value = rows
+    ordersPage.value = meta.current_page
+    ordersLastPage.value = meta.last_page
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat daftar order.'
   } finally {
@@ -41,12 +51,14 @@ async function loadOrders() {
   }
 }
 
-async function loadReturns() {
+async function loadReturns(page = returnsPage.value) {
   loading.value = true
   errorMessage.value = ''
   try {
-    const { returns: rows } = await listCourierReturns()
+    const { returns: rows, meta } = await listCourierReturns(page)
     returns.value = rows
+    returnsPage.value = meta.current_page
+    returnsLastPage.value = meta.last_page
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat daftar retur.'
   } finally {
@@ -54,12 +66,18 @@ async function loadReturns() {
   }
 }
 
-async function loadDelivered() {
+async function loadDelivered(page = deliveredPage.value) {
   loading.value = true
   errorMessage.value = ''
   try {
-    const { orders: rows } = await courierDeliveredReport()
+    const { orders: rows, meta } = await courierDeliveredReport(
+      page,
+      deliveredFrom.value || undefined,
+      deliveredTo.value || undefined,
+    )
     delivered.value = rows
+    deliveredPage.value = meta.current_page
+    deliveredLastPage.value = meta.last_page
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat daftar order selesai.'
   } finally {
@@ -69,12 +87,13 @@ async function loadDelivered() {
 
 function switchTab(next: 'orders' | 'returns' | 'selesai') {
   tab.value = next
-  if (next === 'orders') loadOrders()
-  else if (next === 'returns') loadReturns()
-  else loadDelivered()
+  if (next === 'orders') loadOrders(1)
+  else if (next === 'returns') loadReturns(1)
+  else loadDelivered(1)
 }
 
-async function pickup(shipmentId: number) {
+async function pickup(shipmentId: number | null) {
+  if (shipmentId === null) return
   busyShipmentId.value = shipmentId
   try {
     await updateShipmentStatus(shipmentId, 'dikirim')
@@ -86,11 +105,13 @@ async function pickup(shipmentId: number) {
   }
 }
 
-function triggerProofPicker(shipmentId: number) {
+function triggerProofPicker(shipmentId: number | null) {
+  if (shipmentId === null) return
   proofInputs.value[shipmentId]?.click()
 }
 
-async function markDelivered(shipmentId: number, event: Event) {
+async function markDelivered(shipmentId: number | null, event: Event) {
+  if (shipmentId === null) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -136,7 +157,7 @@ async function confirmReturn(itemId: number, received: boolean) {
   }
 }
 
-onMounted(loadOrders)
+onMounted(() => loadOrders(1))
 </script>
 
 <template>
@@ -213,7 +234,7 @@ onMounted(loadOrders)
               <span class="flex shrink-0 items-center gap-2">
                 <span class="text-xs text-stone-400 dark:text-stone-500">{{ item.status }}</span>
                 <button
-                  v-if="item.status === 'diproses'"
+                  v-if="item.shipment_id && item.status === 'diproses'"
                   type="button"
                   class="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                   :disabled="busyShipmentId === item.shipment_id"
@@ -221,9 +242,9 @@ onMounted(loadOrders)
                 >
                   Ambil
                 </button>
-                <template v-else-if="item.status === 'dikirim'">
+                <template v-else-if="item.shipment_id && item.status === 'dikirim'">
                   <input
-                    :ref="(el) => (proofInputs[item.shipment_id] = el as HTMLInputElement)"
+                    :ref="(el) => (proofInputs[item.shipment_id as number] = el as HTMLInputElement)"
                     type="file"
                     accept="image/*"
                     capture="environment"
@@ -243,6 +264,26 @@ onMounted(loadOrders)
             </li>
           </ul>
         </div>
+      </div>
+
+      <div v-if="ordersLastPage > 1" class="mt-6 flex items-center justify-center gap-2 text-sm">
+        <button
+          type="button"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
+          :disabled="ordersPage <= 1"
+          @click="loadOrders(ordersPage - 1)"
+        >
+          Sebelumnya
+        </button>
+        <span class="text-stone-500">{{ ordersPage }} / {{ ordersLastPage }}</span>
+        <button
+          type="button"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
+          :disabled="ordersPage >= ordersLastPage"
+          @click="loadOrders(ordersPage + 1)"
+        >
+          Berikutnya
+        </button>
       </div>
     </template>
 
@@ -321,9 +362,47 @@ onMounted(loadOrders)
           </ul>
         </div>
       </div>
+
+      <div v-if="returnsLastPage > 1" class="mt-6 flex items-center justify-center gap-2 text-sm">
+        <button
+          type="button"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
+          :disabled="returnsPage <= 1"
+          @click="loadReturns(returnsPage - 1)"
+        >
+          Sebelumnya
+        </button>
+        <span class="text-stone-500">{{ returnsPage }} / {{ returnsLastPage }}</span>
+        <button
+          type="button"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
+          :disabled="returnsPage >= returnsLastPage"
+          @click="loadReturns(returnsPage + 1)"
+        >
+          Berikutnya
+        </button>
+      </div>
     </template>
 
     <template v-else>
+      <div class="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
+        <label class="text-sm text-stone-600 dark:text-stone-300">
+          Dari
+          <input v-model="deliveredFrom" type="date" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+        </label>
+        <label class="text-sm text-stone-600 dark:text-stone-300">
+          Sampai
+          <input v-model="deliveredTo" type="date" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+        </label>
+        <button
+          type="button"
+          class="rounded-lg bg-stone-800 px-3 py-2 text-xs font-medium text-white hover:bg-stone-900 dark:bg-stone-100 dark:text-stone-900"
+          @click="loadDelivered(1)"
+        >
+          Terapkan
+        </button>
+      </div>
+
       <p v-if="delivered.length === 0" class="text-sm text-stone-500 dark:text-stone-400">Belum ada order selesai.</p>
       <div v-else class="space-y-3">
         <div
@@ -343,6 +422,26 @@ onMounted(loadOrders)
             </span>
           </div>
         </div>
+      </div>
+
+      <div v-if="deliveredLastPage > 1" class="mt-6 flex items-center justify-center gap-2 text-sm">
+        <button
+          type="button"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
+          :disabled="deliveredPage <= 1"
+          @click="loadDelivered(deliveredPage - 1)"
+        >
+          Sebelumnya
+        </button>
+        <span class="text-stone-500">{{ deliveredPage }} / {{ deliveredLastPage }}</span>
+        <button
+          type="button"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
+          :disabled="deliveredPage >= deliveredLastPage"
+          @click="loadDelivered(deliveredPage + 1)"
+        >
+          Berikutnya
+        </button>
       </div>
     </template>
   </DashboardLayout>

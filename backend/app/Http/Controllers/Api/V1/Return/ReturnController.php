@@ -94,7 +94,9 @@ class ReturnController extends Controller
         // compare agent ids and correctly reject with 403.
         $orderAgentId = Order::withoutGlobalScopes()->where('id', $return->order_id)->value('agent_id');
 
-        if ($orderAgentId !== $actor->agent_id) {
+        // value() is a raw query-builder read (no model cast) — normalise both
+        // sides so the branch check can't fail on a driver that yields strings.
+        if ((int) $orderAgentId !== (int) $actor->agent_id) {
             throw new ApiException(__('messages.system.unauthorized_action'), 403);
         }
     }

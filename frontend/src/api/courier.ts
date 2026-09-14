@@ -4,7 +4,8 @@ import type { PaginationMeta } from './types'
 
 export interface CourierOrderItem {
   id: number
-  shipment_id: number
+  /** Null only for historical rows created before per-item shipments — the action buttons below must be hidden then. */
+  shipment_id: number | null
   product_name: string
   variation_label: string | null
   /** Product/variant SKU snapshot at order time; null for historical rows without one. */

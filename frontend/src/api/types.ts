@@ -177,6 +177,20 @@ export interface CheckoutQuote {
   warnings: Array<{ product_id: number; product_variation_id: number | null; message: string }>
 }
 
+/** One courier/service RajaOngkir offers under "Ekspedisi" (e.g. JNE REG) — never a trusted price, only what the server currently quotes. */
+export interface CourierOption {
+  courier: string
+  service: string
+  cost: number
+  etd: string | null
+}
+
+/** The konsumen's specific courier+service pick under "Ekspedisi" (e.g. { courier: 'jne', service: 'REG' }). */
+export interface CourierSelection {
+  courier: string
+  service: string
+}
+
 export interface RegionOption {
   id: string
   name: string
