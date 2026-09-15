@@ -42,7 +42,10 @@ class SyncService
             }
             $rows = [array_column($config->columns, 'label')];
             foreach ($records as $record) {
-                $rows[] = array_map(fn ($field) => $record->$field, $fields);
+                $rows[] = array_map(
+                    fn ($field) => $this->sheetValue($config->dataset, $field, $record->$field),
+                    $fields,
+                );
             }
             $this->client->replace($config->destination->spreadsheet_id, $config->tab, $rows);
             $log->update(['status' => 'success', 'rows_success' => $records->count(), 'completed_at' => now()]);
@@ -65,5 +68,15 @@ class SyncService
     private function maskSpreadsheetId(string $id): string
     {
         return strlen($id) <= 8 ? '***' : substr($id, 0, 4).'…'.substr($id, -4);
+    }
+
+    private function sheetValue(string $dataset, string $field, mixed $value): mixed
+    {
+        if (in_array($dataset, ['transactions', 'transaction_items'], true)
+            && in_array($field, ['unit_price', 'quantity', 'subtotal'], true)) {
+            return $field === 'quantity' ? (int) $value : (float) $value;
+        }
+
+        return $value;
     }
 }

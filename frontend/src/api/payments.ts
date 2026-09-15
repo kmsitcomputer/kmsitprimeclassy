@@ -56,3 +56,17 @@ export async function confirmCodPayment(proofId: number, confirmed: boolean, rej
   })
   return data.data
 }
+
+/**
+ * Keuangan/Super Admin requests settlement (pelunasan) of a DP order's
+ * outstanding balance — this only creates a new manual-transfer transaction
+ * for the remaining amount; the konsumen then uploads proof through the
+ * normal transfer-proof flow and Keuangan verifies it exactly like a DP
+ * proof. Pelunasan is never an Additional Payment.
+ */
+export async function requestDpSettlement(orderId: number) {
+  const { data } = await http.post<ApiEnvelope<{ transaction: Order['payment_transaction']; order: Order }>>(
+    `/orders/${orderId}/payment/settle`,
+  )
+  return data.data
+}

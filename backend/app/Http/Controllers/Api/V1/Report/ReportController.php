@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\V1\Report;
 
 use App\Http\Controllers\Controller;
 use App\Services\Export\ExcelExportService;
+use App\Services\Report\OrderTransactionReportService;
 use App\Services\Report\ReportService;
 use App\Support\HumanDate;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
 
 /**
@@ -26,7 +28,7 @@ class ReportController extends Controller
     {
         return $request->only([
             'from', 'to', 'delivery_date_from', 'delivery_date_to',
-            'sales_id', 'korsal_id', 'courier_id', 'status', 'search',
+            'sales_id', 'korsal_id', 'courier_id', 'status', 'item_status', 'order_status', 'search',
             // Report dimensions for the consolidated network summary.
             'payment_method', 'product_id',
             // super_admin-only narrowing — see ReportService::scopeToActor's
@@ -37,7 +39,7 @@ class ReportController extends Controller
     }
 
     /** Shared by every roster-style report (customers/korsal/sales/couriers): JSON paginates, xlsx exports the full filtered set. */
-    private function respondPaginatedOrExport(Request $request, Builder $query, string $filename, array $headers, \Closure $rowMapper)
+    private function respondPaginatedOrExport(Request $request, Builder|QueryBuilder $query, string $filename, array $headers, \Closure $rowMapper)
     {
         if ($request->string('export')->toString() === 'xlsx') {
             return $this->excelExportService->streamXlsx($filename, $headers, $query->get()->map($rowMapper));
@@ -56,12 +58,8 @@ class ReportController extends Controller
             $request,
             $this->reportService->transactions($request->user(), $this->filters($request)),
             'laporan-transaksi.xlsx',
-            ['Order No', 'Tanggal Order', 'Status Order', 'Konsumen', 'Sales', 'Korsal', 'Produk', 'SKU', 'Qty', 'Status Item', 'Tanggal Kirim', 'Kurir', 'Subtotal'],
-            fn ($r) => [
-                $r->order_no, HumanDate::date($r->order_created_at), $r->order_status, $r->konsumen_name,
-                $r->sales_name, $r->korsal_name, $r->product_name_snapshot, $r->sku ?? '-', $r->fulfilled_quantity,
-                $r->item_status, HumanDate::date($r->requested_delivery_date), $r->courier_name ?? '-', $r->subtotal_snapshot,
-            ],
+            array_values(OrderTransactionReportService::COLUMNS),
+            fn ($r) => array_map(fn ($field) => $r->$field, array_keys(OrderTransactionReportService::COLUMNS)),
         );
     }
 

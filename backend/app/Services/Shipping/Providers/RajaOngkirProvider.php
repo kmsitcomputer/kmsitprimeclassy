@@ -58,8 +58,15 @@ class RajaOngkirProvider implements ShippingCostProviderInterface
 
     public function validateOriginSelection(string $apiKey, string $search, string $originId): array
     {
-        $origin = collect($this->searchDestinations($apiKey, $search))->firstWhere('id', $originId);
+        $results = $this->searchDestinations($apiKey, $search);
+        $origin = collect($results)->firstWhere('id', $originId);
         if (! $origin) {
+            Log::warning('shipping.rajaongkir_origin_revalidation_failed', [
+                'search' => $search,
+                'origin_id_requested' => $originId,
+                'results_count' => count($results),
+                'result_ids' => collect($results)->pluck('id')->take(20)->all(),
+            ]);
             throw new ShippingQuoteException('Origin RajaOngkir tidak cocok dengan hasil pencarian resmi.');
         }
 
@@ -167,10 +174,14 @@ class RajaOngkirProvider implements ShippingCostProviderInterface
         }
         try {
             $response = Http::withHeaders(['key' => $apiKey])->timeout(12)->get(self::BASE_URL.'/destination/domestic-destination', ['search' => trim($search), 'limit' => 100, 'offset' => 0]);
-        } catch (ConnectionException) {
+        } catch (ConnectionException $e) {
+            Log::warning('shipping.rajaongkir_destination_search_connection_error', ['search' => $search, 'error' => $e->getMessage()]);
             throw new ShippingQuoteException('RajaOngkir tidak dapat dihubungi. Coba lagi beberapa saat.');
         }
         if (! $response->successful()) {
+            Log::warning('shipping.rajaongkir_destination_search_failed', [
+                'search' => $search, 'http_status' => $response->status(), 'body' => $response->body(),
+            ]);
             throw new ShippingQuoteException('Koneksi atau pencarian destination RajaOngkir gagal.');
         }
 

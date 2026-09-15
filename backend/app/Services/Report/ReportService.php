@@ -14,6 +14,7 @@ use App\Models\ProductVariationStock;
 use App\Models\ReturnItem;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 
 /**
@@ -26,6 +27,8 @@ use Illuminate\Support\Collection;
  */
 class ReportService
 {
+    public function __construct(private readonly OrderTransactionReportService $orderTransactionReport) {}
+
     /**
      * $korsalColumn narrows further still for a korsal actor — without it, a
      * korsal reading a report scoped only by $agentColumn would see every
@@ -74,47 +77,12 @@ class ReportService
      * order), since each item's own shipment/courier and delivery date may
      * differ from its siblings on the very same order.
      */
-    public function transactions(User $actor, array $filters): Builder
+    public function transactions(User $actor, array $filters): QueryBuilder
     {
-        $query = OrderItem::query()
-            ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->leftJoin('shipments', 'shipments.id', '=', 'order_items.shipment_id')
-            ->leftJoin('couriers', 'couriers.id', '=', 'shipments.courier_id')
-            ->leftJoin('users as sales_users', 'sales_users.id', '=', 'orders.sales_id')
-            ->leftJoin('users as korsal_users', 'korsal_users.id', '=', 'orders.korsal_id')
-            ->leftJoin('users as konsumen_users', 'konsumen_users.id', '=', 'orders.konsumen_id')
-            ->select([
-                'orders.id as order_id', 'orders.order_no', 'orders.agent_id',
-                'orders.status as order_status', 'orders.payment_status', 'orders.created_at as order_created_at',
-                'sales_users.id as sales_id', 'sales_users.name as sales_name',
-                'korsal_users.id as korsal_id', 'korsal_users.name as korsal_name',
-                'konsumen_users.name as konsumen_name',
-                'order_items.id as order_item_id', 'order_items.product_name_snapshot',
-                // Historical SKU captured at order time — already on the joined
-                // row, so this adds a column, never a query.
-                'order_items.sku_snapshot as sku', 'order_items.fulfilled_quantity',
-                'order_items.status as item_status', 'order_items.requested_delivery_date', 'order_items.subtotal_snapshot',
-                'couriers.id as courier_id', 'couriers.name as courier_name',
-            ]);
+        $agentId = $actor->isRole('super_admin') ? ($filters['agent_id'] ?? null) : $actor->agent_id;
+        $korsalId = $actor->isRole('korsal') ? $actor->id : null;
 
-        $this->scopeToActor($query, $actor, 'orders.agent_id', 'orders.korsal_id', $filters);
-        $this->applyDateFilters($query, $filters, 'orders.created_at');
-        $this->applyDateFilters($query, $filters, 'order_items.requested_delivery_date', 'delivery_date_from', 'delivery_date_to');
-
-        if (! empty($filters['sales_id'])) {
-            $query->where('orders.sales_id', $filters['sales_id']);
-        }
-        if (! empty($filters['korsal_id'])) {
-            $query->where('orders.korsal_id', $filters['korsal_id']);
-        }
-        if (! empty($filters['courier_id'])) {
-            $query->where('couriers.id', $filters['courier_id']);
-        }
-        if (! empty($filters['status'])) {
-            $query->where('order_items.status', $filters['status']);
-        }
-
-        return $query->orderByDesc('orders.created_at');
+        return $this->orderTransactionReport->query($agentId ? (int) $agentId : null, $korsalId, $filters);
     }
 
     /**
@@ -370,7 +338,16 @@ class ReportService
 
         return [
             'total_orders' => $totalOrders,
+            // "Nilai" of fully-completed transactions only (deliberately
+            // excludes still-partial DP orders) — distinct from
+            // total_received below, which is actual cash collected so far
+            // including verified-but-not-yet-settled DP payments.
             'total_transactions' => (float) $totalTransactions,
+            // Actual money collected so far, across every payment status —
+            // the canonical "sudah diterima" figure (same source as
+            // PaymentSummaryService/networkSummary.paid_amount: Order.
+            // paid_amount, written exclusively by PaymentService).
+            'total_received' => round((float) (clone $orders)->sum('paid_amount'), 2),
             'total_refunds' => (float) $totalAdjustmentRefunds + (float) $totalReturnRefunds,
             // Money still owed (unpaid / pending verification / DP partially
             // paid) and how much of that is DP-specific — the balance Keuangan
@@ -658,7 +635,15 @@ class ReportService
             'order_count' => (clone $orders)->count(),
             'item_count' => (int) OrderItem::query()->whereIn('order_id', $orderIds)->sum('fulfilled_quantity'),
             'total_amount' => round((float) (clone $orders)->sum('orders.total_amount'), 2),
-            'paid_amount' => round((float) (clone $orders)->where('orders.payment_status', 'paid')->sum('orders.total_amount'), 2),
+            // Actual money collected so far — sums Order.paid_amount across
+            // every order regardless of payment_status, so a DP order's
+            // already-verified partial payment counts (PaymentService is the
+            // only writer of paid_amount; see PaymentSummaryService for the
+            // same canonical formula used by the transaction report/detail
+            // page). Summing total_amount only where payment_status='paid'
+            // would silently report Rp0 collected for every still-partial DP
+            // order, understating cash actually received.
+            'paid_amount' => round((float) (clone $orders)->sum('orders.paid_amount'), 2),
             'outstanding_amount' => round((float) (clone $orders)
                 ->whereIn('orders.payment_status', ['unpaid', 'pending_verification', 'partially_paid'])
                 ->sum('orders.remaining_amount'), 2),

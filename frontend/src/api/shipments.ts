@@ -26,3 +26,53 @@ export async function assignCourier(shipmentId: number, courierId: number) {
   const { data } = await http.patch<ApiEnvelope<Order>>(`/shipments/${shipmentId}/courier`, { courier_id: courierId })
   return data.data
 }
+
+export interface ShipmentReceiptItem {
+  sku: string | null
+  product_name: string
+  variation_label: string | null
+  quantity: number
+}
+
+export interface ShipmentReceiptPayment {
+  is_cod: boolean
+  cod_amount_due: string | number | null
+  is_down_payment: boolean
+  dp_paid_amount: string | number | null
+  dp_outstanding_amount: string | number | null
+  is_fully_paid: boolean
+}
+
+/**
+ * Thermal shipping-receipt data — pure read. `mode` (pre_pickup/post_pickup)
+ * is derived server-side from the shipment's actual state, never something
+ * the caller picks; reprinting is just calling this again.
+ */
+export interface ShipmentReceipt {
+  shipment_id: number
+  mode: 'pre_pickup' | 'post_pickup'
+  order_no: string
+  order_date: string
+  recipient_name: string
+  recipient_phone: string
+  address_line: string
+  village: string | null
+  district: string | null
+  regency: string | null
+  province: string | null
+  delivery_date: string | null
+  shipping_method_code: string | null
+  shipping_method_label: string | null
+  is_official_carrier_label: boolean
+  courier_name: string | null
+  picked_up_at: string | null
+  items: ShipmentReceiptItem[]
+  total_item_count: number
+  notes: string | null
+  payment: ShipmentReceiptPayment
+}
+
+export async function getShipmentReceipt(shipmentId: number) {
+  const { data } = await http.get<ApiEnvelope<ShipmentReceipt>>(`/shipments/${shipmentId}/receipt`)
+  return data.data
+}

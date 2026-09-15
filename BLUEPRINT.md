@@ -131,6 +131,14 @@ MySQL / aplikasi → dataset whitelist → filter scope cabang → Google Sheets
 - Sinkronisasi dijalankan manual melalui `/dashboard/google-sheets`, menulis maksimal 10.000 baris, membuat tab valid yang belum ada, dan mengganti seluruh nilai tab agar retry tidak menggandakan baris. Mapping mendukung pemilihan, header custom, dan urutan kolom. Setiap percobaan menghasilkan log sukses/gagal dengan ringkasan error dan Spreadsheet ID tersanitasi.
 - Tombol **Periksa koneksi** melakukan pembacaan metadata nyata melalui `spreadsheets.get`, tanpa menulis sel. Status, judul spreadsheet, waktu test terakhir, dan kode error aman disimpan per destination. Dashboard menampilkan email service account aktual dan membedakan credential hilang/tidak valid, authentication, permission, API disabled, spreadsheet not found/invalid, rate limit, network, dan error Google lain.
 
+### 3.7.1. Dataset Laporan Order/Transaksi Kanonis
+
+- Dashboard laporan, ekspor XLSX, serta dataset Google Sheets `transactions` dan `transaction_items` memakai satu query item-level yang sama. Satu baris selalu mewakili satu `order_item`; satu order dengan beberapa produk menghasilkan beberapa baris tanpa menggandakan nilai item.
+- Urutan kolom baku adalah: **Order No, Tanggal, SKU, Produk, Harga, Qty, Status Item, Subtotal, Konsumen, Tgl Kirim, Kurir, Status Order, Sales, Korsal**. Mapping default Google Sheets mengikuti urutan ini dan dapat dipulihkan melalui tombol **Reset ke Default**.
+- SKU, nama/varian produk, harga satuan, subtotal, nama penerima, dan tanggal kirim berasal dari snapshot transaksi. Kurir dibaca dari shipment milik item tersebut. Sales menunjukkan penerima referral transaksi, termasuk Agen/Korsal/Sales yang membeli langsung untuk dirinya sendiri; Korsal menunjukkan jalur Korsal bila ada.
+- Tanggal tampil dalam format `DD/MM/YYYY`. Harga, Qty, dan Subtotal tetap berupa angka pada XLSX/Google Sheets agar dapat dijumlahkan. Nilai teks yang kosong ditampilkan sebagai `-`.
+- Super Admin dapat melihat seluruh jaringan dan memfilter Agen. Agen/Admin dibatasi ke cabangnya; Korsal yang diberi akses laporan hanya melihat downline miliknya. Scope selalu diterapkan di query backend.
+
 ### 3.8. Konfigurasi Pembayaran, Pengiriman, dan Wilayah
 
 - Super Admin mengaktifkan/nonaktifkan jenis payment gateway dan shipping provider secara global. Super Admin juga mengelola master kode ekspedisi yang boleh dipilih Agen.

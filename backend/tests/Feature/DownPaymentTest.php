@@ -330,4 +330,75 @@ class DownPaymentTest extends TestCase
         $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertStatus(403);
         $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertStatus(403);
     }
+
+    /**
+     * "Pelunasan DP merupakan DP SETTLEMENT, bukan Additional Payment" and
+     * "Outstanding DP bukan Refund" — the settlement transaction PaymentService::
+     * requestSettlement creates must stay type='payment', never 'additional_payment'
+     * or 'refund', and must never produce an OrderAdditionalPayment/refund ledger row.
+     */
+    public function test_dp_settlement_is_a_payment_transaction_never_an_additional_payment_or_refund(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 1000000);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
+
+        $settlement = PaymentTransaction::where('order_id', $order->id)->orderByDesc('id')->first();
+        $this->assertSame('payment', $settlement->type);
+        $this->assertSame('dp_settlement', $settlement->raw_payload['note']);
+        $this->assertDatabaseMissing('order_additional_payments', ['order_id' => $order->id]);
+        $this->assertDatabaseMissing('order_item_adjustments', ['order_item_id' => OrderItem::where('order_id', $order->id)->value('id')]);
+    }
+
+    /**
+     * OrderResource.payment_summary (PaymentSummaryService) is the canonical
+     * shape the Order Detail page and every report read instead of each
+     * re-deriving totals — this locks its formula end-to-end through the
+     * DP lifecycle: pending -> verified -> settled.
+     */
+    public function test_order_resource_payment_summary_reflects_the_dp_lifecycle(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 500000);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 200000)->json('data.id'));
+
+        // Pending: DP requested but not yet verified -> nothing counted as paid.
+        $pending = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->json('data.payment_summary');
+        $this->assertSame(500000.0, (float) $pending['grand_total']);
+        $this->assertSame(200000.0, (float) $pending['requested_dp']);
+        $this->assertSame(0.0, (float) $pending['verified_dp']);
+        $this->assertSame(0.0, (float) $pending['total_paid']);
+        $this->assertSame(500000.0, (float) $pending['remaining_balance']);
+        $this->assertFalse($pending['is_fully_paid']);
+
+        // Verified: DP cleared -> verified_dp/total_paid show 200.000, remaining 300.000.
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $verified = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->json('data.payment_summary');
+        $this->assertSame(200000.0, (float) $verified['verified_dp']);
+        $this->assertSame(200000.0, (float) $verified['total_paid']);
+        $this->assertSame(300000.0, (float) $verified['remaining_balance']);
+        $this->assertSame('partially_paid', $verified['payment_status']);
+        $this->assertFalse($verified['is_fully_paid']);
+
+        // Settled: pelunasan verified -> total_paid=grand_total, remaining=0, verified_dp
+        // stays capped at the ORIGINAL requested DP (200.000), never inflated by the settlement.
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $settled = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->json('data.payment_summary');
+        $this->assertSame(200000.0, (float) $settled['verified_dp'], 'the DP tranche itself never changes once verified');
+        $this->assertSame(500000.0, (float) $settled['total_paid']);
+        $this->assertSame(0.0, (float) $settled['remaining_balance']);
+        $this->assertSame('paid', $settled['payment_status']);
+        $this->assertTrue($settled['is_fully_paid']);
+    }
 }

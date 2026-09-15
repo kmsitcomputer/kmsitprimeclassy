@@ -115,10 +115,7 @@ class AgentShippingProviderController extends Controller
             $config['origin_label'] = $origin['label'];
         }
 
-        AgentShippingProviderConfig::query()->updateOrCreate(
-            ['agent_id' => $agentId, 'shipping_provider_id' => $provider->id],
-            ['config' => $config],
-        );
+        AgentShippingProviderConfig::replaceConfig($agentId, $provider->id, $config);
 
         if ($provider->code === 'openroute') {
             ShippingConfiguration::query()->updateOrCreate(
@@ -199,14 +196,19 @@ class AgentShippingProviderController extends Controller
             );
         }
 
-        $config = $this->currentConfig($agentId, $provider);
+        try {
+            $config = $this->readConfig($agentId, $provider);
+        } catch (DecryptException) {
+            return $this->fail(
+                'Credential lama tidak dapat dibaca. Simpan ulang konfigurasi dan API key RajaOngkir terlebih dahulu.',
+                ['config' => ['Konfigurasi terenkripsi tidak cocok dengan APP_KEY server.']],
+                422,
+            );
+        }
         $before = $config['couriers'] ?? [];
         $config['couriers'] = $requested->all();
 
-        AgentShippingProviderConfig::query()->updateOrCreate(
-            ['agent_id' => $agentId, 'shipping_provider_id' => $provider->id],
-            ['config' => $config],
-        );
+        AgentShippingProviderConfig::replaceConfig($agentId, $provider->id, $config);
 
         ActivityLogger::log($agentId, $provider, 'agent_shipping_provider.couriers_updated', null, [
             'shipping_provider' => $provider->code, 'old' => $before, 'new' => $config['couriers'],
@@ -219,12 +221,18 @@ class AgentShippingProviderController extends Controller
     private function currentConfig(int $agentId, ShippingProvider $provider): array
     {
         try {
-            return AgentShippingProviderConfig::query()
-                ->where('agent_id', $agentId)->where('shipping_provider_id', $provider->id)
-                ->value('config') ?? [];
+            return $this->readConfig($agentId, $provider);
         } catch (DecryptException) {
             return [];
         }
+    }
+
+    /** @return array<string, mixed> */
+    private function readConfig(int $agentId, ShippingProvider $provider): array
+    {
+        return AgentShippingProviderConfig::query()
+            ->where('agent_id', $agentId)->where('shipping_provider_id', $provider->id)
+            ->value('config') ?? [];
     }
 
     public function destinations(Request $request, ShippingProvider $provider, RajaOngkirProvider $rajaOngkir)

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
-import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment } from '@/api/payments'
+import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { getCourierReport } from '@/api/reports'
 import { adjustItemFulfillment, rescheduleOrderItem } from '@/api/orderAdjustments'
@@ -15,10 +15,12 @@ import { useAuthStore } from '@/stores/auth'
 import type { Order, OrderItem } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
 import { ApiError } from '@/api/client'
+import { isGoogleMapsConfigured } from '@/utils/googleMaps'
 
 const props = defineProps<{ id: number }>()
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 
 const order = ref<Order | null>(null)
@@ -48,6 +50,37 @@ onMounted(loadActiveCouriers)
    Admin/agen may submit proof and view status but must never settle it (backend routes are super_admin,keuangan only). */
 const canVerifyBankTransfer = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.payment.verify'))
 const canSettleCod = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.cod.settle'))
+const canRequestDpSettlement = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.dp.settle'))
+
+/**
+ * "Minta Pelunasan" is only offered once the DP itself is actually
+ * verified (never while its proof is still pending) and there's a real
+ * balance left — mirrors PaymentService::requestSettlement's own guard
+ * (remaining_amount > 0) plus the extra "not mid-review" check the backend
+ * doesn't need but the UI does, so Keuangan can't fire two settlement
+ * requests back-to-back before the first is resolved.
+ */
+const canOfferDpSettlement = computed(() => {
+  if (!order.value || !canRequestDpSettlement.value) return false
+  if (order.value.payment_method?.code !== 'down_payment') return false
+  if (order.value.payment_status !== 'partially_paid') return false
+  const verification = order.value.payment_transaction?.bank_transfer_verification
+  return !verification || verification.status === 'verified'
+})
+const requestingSettlement = ref(false)
+
+async function requestSettlement() {
+  if (!order.value) return
+  requestingSettlement.value = true
+  paymentActionError.value = null
+  try {
+    order.value = (await requestDpSettlement(order.value.id)).order
+  } catch (e) {
+    paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.requestSettlement')
+  } finally {
+    requestingSettlement.value = false
+  }
+}
 
 /* ---------- Office: advance the order out of 'diterima' into 'diproses' ---------- */
 const canManageStatus = computed(() => auth.can('orders.manage.status'))
@@ -72,13 +105,22 @@ const canSeeDeliveryMap = computed(() => auth.can('orders.manage.shipment'))
 const showDeliveryMap = computed(
   () => canSeeDeliveryMap.value && order.value?.shipping_provider === 'openroute' && !!order.value?.latitude && !!order.value?.longitude,
 )
-const mapEmbedUrl = computed(() => {
+/** Google Maps Embed API — a plain iframe (no WebGL/JS SDK involved), reusing the same key as the checkout picker. Requires "Maps Embed API" enabled on that key in Google Cloud Console. */
+const googleMapsEmbedUrl = computed(() => {
+  if (!order.value?.latitude || !order.value?.longitude) return ''
+  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
+  if (!key) return ''
+  return `https://www.google.com/maps/embed/v1/view?key=${encodeURIComponent(key)}&center=${order.value.latitude},${order.value.longitude}&zoom=16`
+})
+const openStreetMapEmbedUrl = computed(() => {
   if (!order.value?.latitude || !order.value?.longitude) return ''
   const lat = Number(order.value.latitude)
   const lng = Number(order.value.longitude)
   const d = 0.003
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&marker=${lat}%2C${lng}`
 })
+/** Google Maps Embed when a key is configured (no WebGL dependency, unlike openstreetmap.org's own vector-tile renderer); falls back to the OpenStreetMap embed when no key is set. */
+const mapEmbedUrl = computed(() => (isGoogleMapsConfigured() ? googleMapsEmbedUrl.value : openStreetMapEmbedUrl.value))
 const googleMapsUrl = computed(() => {
   if (!order.value?.latitude || !order.value?.longitude) return ''
   return `https://www.google.com/maps?q=${order.value.latitude},${order.value.longitude}`
@@ -115,6 +157,33 @@ const shipmentGroups = computed(() => {
 function shipmentActionableByViewer(group: { courierUserId: number | null }): boolean {
   if (auth.user?.role !== 'kurir') return true
   return group.courierUserId === null || group.courierUserId === auth.user?.id
+}
+
+/**
+ * Every shipment eligible for a thermal receipt — unlike shipmentGroups
+ * above (which drops out once 'terkirim', since there's no more pickup/
+ * deliver action left to take), a receipt must stay printable/reprintable
+ * even after delivery. A kurir only sees this for shipments actually
+ * assigned to them (mirrors ShipmentPolicy::printReceipt server-side).
+ */
+const printableShipmentGroups = computed(() => {
+  if (!order.value) return []
+  const groups = new Map<number, { shipmentId: number; productNames: string[]; courierUserId: number | null }>()
+  for (const item of order.value.items ?? []) {
+    if (!item.shipment_id || ['diterima', 'dibatalkan'].includes(item.status)) continue
+    const existing = groups.get(item.shipment_id)
+    if (existing) {
+      existing.productNames.push(item.product_name)
+    } else {
+      groups.set(item.shipment_id, { shipmentId: item.shipment_id, productNames: [item.product_name], courierUserId: item.courier?.user_id ?? null })
+    }
+  }
+  return Array.from(groups.values()).filter((g) => auth.user?.role !== 'kurir' || shipmentActionableByViewer(g))
+})
+
+function openReceipt(shipmentId: number) {
+  const target = router.resolve({ name: 'shipment-receipt-print', params: { id: shipmentId } })
+  window.open(target.href, '_blank')
 }
 
 function onDeliveryProofSelected(shipmentId: number, e: Event) {
@@ -647,6 +716,15 @@ async function submitReturn(item: OrderItem) {
         </div>
       </div>
 
+      <!-- Thermal receipt print — read-only, before/after pickup mode is derived server-side. Stays available after delivery for reprint. -->
+      <div v-if="canManageShipment && printableShipmentGroups.length" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+        <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.printReceipt') }}</h2>
+        <div v-for="group in printableShipmentGroups" :key="group.shipmentId" class="mb-2 flex items-center justify-between gap-2 rounded-lg bg-stone-50 p-3 last:mb-0 dark:bg-stone-800/60">
+          <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
+          <AppButton size="sm" variant="secondary" @click="openReceipt(group.shipmentId)">{{ t('orders.printReceipt') }}</AppButton>
+        </div>
+      </div>
+
       <div v-if="order.cancellation_reason" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">
         {{ t('orders.cancelledReason', { reason: order.cancellation_reason }) }}
       </div>
@@ -660,6 +738,29 @@ async function submitReturn(item: OrderItem) {
           </span>
         </div>
         <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">{{ t('orders.method', { name: order.payment_method?.name ?? '-' }) }}</p>
+
+        <!-- Ringkasan Pembayaran — canonical figures from PaymentSummaryService (payment_summary), never re-derived here. -->
+        <div class="mt-3 rounded-lg bg-stone-50 p-3 text-sm dark:bg-stone-800/60">
+          <p class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">{{ t('orders.paymentSummary') }}</p>
+          <dl class="space-y-1">
+            <div class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.grandTotal') }}</dt>
+              <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.grand_total) }}</dd>
+            </div>
+            <div v-if="order.payment_summary.requested_dp > 0" class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.dpPaid') }}</dt>
+              <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.verified_dp) }}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.totalPaid') }}</dt>
+              <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.total_paid) }}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.remainingBalance') }}</dt>
+              <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.remaining_balance) }}</dd>
+            </div>
+          </dl>
+        </div>
 
         <p v-if="paymentActionError" class="mt-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-400">{{ paymentActionError }}</p>
 
@@ -712,6 +813,14 @@ async function submitReturn(item: OrderItem) {
                 <AppButton size="sm" variant="danger" :disabled="verifying" @click="actOnVerification(false)">{{ t('orders.reject') }}</AppButton>
               </div>
             </div>
+          </div>
+
+          <!-- Keuangan/super_admin: request settlement (pelunasan) of the outstanding DP balance — never an Additional Payment. -->
+          <div v-if="canOfferDpSettlement" class="mt-3 rounded-lg bg-stone-50 p-3 dark:bg-stone-800/60">
+            <p class="mb-2 text-xs text-stone-500 dark:text-stone-400">{{ t('orders.dpSettlementHint', { amount: formatRupiah(order.payment_summary.remaining_balance) }) }}</p>
+            <AppButton size="sm" :disabled="requestingSettlement" @click="requestSettlement">
+              {{ requestingSettlement ? t('orders.uploading') : t('orders.requestSettlement') }}
+            </AppButton>
           </div>
         </template>
 

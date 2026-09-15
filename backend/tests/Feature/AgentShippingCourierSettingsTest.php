@@ -17,6 +17,7 @@ use Database\Seeders\RoleSeeder;
 use Database\Seeders\ShippingCourierSeeder;
 use Database\Seeders\ShippingProviderSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
@@ -122,6 +123,21 @@ class AgentShippingCourierSettingsTest extends TestCase
         $this->assertTrue($rows->firstWhere('code', 'tiki')['enabled']);
         $this->assertFalse($rows->firstWhere('code', 'sicepat')['enabled']);
         $this->assertTrue($rows->every(fn ($r) => $r['supported'] === true));
+    }
+
+    public function test_updating_couriers_returns_recovery_instruction_for_undecryptable_config(): void
+    {
+        ['agen' => $agen] = $this->makeAgentBranch();
+        $provider = $this->configureRajaOngkir($agen);
+        DB::table('agent_shipping_provider_configs')
+            ->where('agent_id', $agen->id)
+            ->where('shipping_provider_id', $provider->id)
+            ->update(['config' => 'not-a-valid-encrypted-payload']);
+
+        $this->actingAs($agen)
+            ->putJson("/api/v1/agent/shipping-providers/{$provider->id}/couriers", ['couriers' => ['jne']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['config']);
     }
 
     public function test_agent_can_enable_a_courier(): void

@@ -15,7 +15,7 @@
 2. Laravel calls ORS with the agent API key in the `Authorization` header.
 3. The adapter reads `routes[0].summary.distance` in meters and `duration` in seconds, then derives kilometers.
 4. Route results are cached for five minutes by origin, destination, and profile. Pricing is calculated after the cache lookup from the current Agent configuration.
-5. Existing pricing remains: below `minimum_distance_km` is free; otherwise distance × price/km with `minimum_charge`; the configured subtotal threshold may also make delivery free.
+5. Pricing: `chargeable_distance_km = max(0, distance_km - minimum_distance_km)`, then `cost = chargeable_distance_km × price_per_km` (floored to `minimum_charge` when set). `minimum_distance_km` is a free-distance allowance subtracted from the route distance, not a free/paid threshold — distance at or below the minimum always yields a chargeable distance (and cost) of zero. The configured subtotal threshold may also make delivery free.
 6. Shipment metadata stores API version, meters, kilometers, duration, profile, coordinates, pricing inputs, applied rule, and final fee.
 
 ## Security and failures

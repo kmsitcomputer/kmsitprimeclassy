@@ -40,6 +40,7 @@ class SheetsController extends Controller
         $credential = app(SheetsClient::class)->credentialInfo();
 
         return $this->ok(['destinations' => $destinations, 'configs' => $configs, 'datasets' => $datasets,
+            'dataset_defaults' => $registry->defaults(),
             'logs' => $logs->orderByDesc('id')->limit(100)->get([
                 'id', 'config_id', 'dataset', 'tab', 'actor_id', 'actor_role', 'agent_scope',
                 'started_at', 'completed_at', 'status', 'rows_processed', 'rows_success', 'rows_failed', 'error_summary',

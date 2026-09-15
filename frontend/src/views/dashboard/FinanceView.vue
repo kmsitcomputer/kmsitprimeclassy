@@ -56,6 +56,21 @@ onMounted(load)
         <p class="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">{{ formatRupiah(summary.total_transactions) }}</p>
       </div>
       <div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+        <div class="mb-2 flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+          <AppIcon name="cash" :size="16" />
+          <span class="text-xs font-medium uppercase tracking-wide">Total Diterima (termasuk DP)</span>
+        </div>
+        <p class="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">{{ formatRupiah(summary.total_received) }}</p>
+      </div>
+      <div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+        <div class="mb-2 flex items-center gap-2 text-amber-600 dark:text-amber-400">
+          <AppIcon name="cash" :size="16" />
+          <span class="text-xs font-medium uppercase tracking-wide">Sisa Pembayaran (Outstanding)</span>
+        </div>
+        <p class="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">{{ formatRupiah(summary.total_outstanding) }}</p>
+        <p class="mt-1 text-xs text-stone-400">Termasuk sisa DP: {{ formatRupiah(summary.total_dp_outstanding) }}</p>
+      </div>
+      <div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900">
         <div class="mb-2 flex items-center gap-2 text-red-600 dark:text-red-400">
           <AppIcon name="cash" :size="16" />
           <span class="text-xs font-medium uppercase tracking-wide">Total Refund</span>

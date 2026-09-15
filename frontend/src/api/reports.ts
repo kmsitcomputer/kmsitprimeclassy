@@ -3,26 +3,22 @@ import type { ApiEnvelope } from './client'
 
 export interface TransactionReportRow {
   order_id: number
+  order_item_id: number
   order_no: string
   agent_id: number
-  order_status: string
-  payment_status: string
-  order_created_at: string
-  sales_id: number | null
-  sales_name: string | null
-  korsal_id: number | null
-  korsal_name: string | null
-  konsumen_name: string | null
-  order_item_id: number
-  product_name_snapshot: string
-  /** SKU snapshot of the product/variant on this order item; null for historical rows without one. */
+  order_date: string
   sku: string | null
-  fulfilled_quantity: number
+  product: string
+  unit_price: number
+  quantity: number
   item_status: string
-  requested_delivery_date: string | null
-  subtotal_snapshot: string
-  courier_id: number | null
-  courier_name: string | null
+  subtotal: number
+  customer: string
+  delivery_date: string
+  courier: string
+  order_status: string
+  sales: string
+  korsal: string
 }
 
 export interface ReportFilters {
@@ -34,6 +30,8 @@ export interface ReportFilters {
   korsal_id?: number
   courier_id?: number
   status?: string
+  item_status?: string
+  order_status?: string
   delivery_date_from?: string
   delivery_date_to?: string
   search?: string
@@ -130,8 +128,15 @@ export async function getPaymentStatusReport(filters: ReportFilters = {}) {
 
 export interface FinanceSummary {
   total_orders: number
+  /** Value of fully-completed ("Lunas") orders only — excludes still-partial DP orders. */
   total_transactions: number
+  /** Actual cash collected so far across every payment status, DP included (canonical: Order.paid_amount). */
+  total_received: number
   total_refunds: number
+  /** Still owed (unpaid / pending verification / DP partial). */
+  total_outstanding: number
+  /** The subset of total_outstanding that's specifically an unsettled DP balance. */
+  total_dp_outstanding: number
 }
 
 export async function getFinanceSummary(filters: ReportFilters = {}) {

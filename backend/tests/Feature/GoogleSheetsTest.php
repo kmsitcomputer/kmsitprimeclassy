@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\GoogleSheets\DatasetRegistry;
 use App\Services\GoogleSheets\GoogleSheetsException;
 use App\Services\GoogleSheets\SheetsClient;
+use App\Services\Report\OrderTransactionReportService;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -207,6 +208,19 @@ class GoogleSheetsTest extends TestCase
             $registry->query($key, null)->select($fields)->get();
             $this->assertNotContains('password', $fields);
         }
+    }
+
+    public function test_transaction_datasets_expose_the_canonical_default_mapping(): void
+    {
+        $registry = app(DatasetRegistry::class);
+        $fields = array_keys(OrderTransactionReportService::COLUMNS);
+        $defaults = collect(OrderTransactionReportService::COLUMNS)
+            ->map(fn (string $label, string $field) => compact('field', 'label'))->values()->all();
+
+        $this->assertSame($fields, $registry->definitions()['transactions']);
+        $this->assertSame($fields, $registry->definitions()['transaction_items']);
+        $this->assertSame($defaults, $registry->defaults()['transactions']);
+        $this->assertSame($defaults, $registry->defaults()['transaction_items']);
     }
 
     public function test_client_clears_and_replaces_the_dedicated_tab_in_one_batch(): void

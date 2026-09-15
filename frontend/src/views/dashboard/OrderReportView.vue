@@ -4,7 +4,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AgentPicker from '@/components/ui/AgentPicker.vue'
 import { getOrdersReport, downloadReportXlsx, type TransactionReportRow } from '@/api/reports'
-import { formatRupiah, formatDate, skuLabel } from '@/utils/format'
+import { formatRupiah } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -19,7 +19,8 @@ const filters = ref({
   to: '',
   delivery_date_from: '',
   delivery_date_to: '',
-  status: '',
+  item_status: '',
+  order_status: '',
   agent_id: undefined as number | undefined,
 })
 
@@ -29,7 +30,8 @@ function buildFilters() {
     to: filters.value.to || undefined,
     delivery_date_from: filters.value.delivery_date_from || undefined,
     delivery_date_to: filters.value.delivery_date_to || undefined,
-    status: filters.value.status || undefined,
+    item_status: filters.value.item_status || undefined,
+    order_status: filters.value.order_status || undefined,
     agent_id: filters.value.agent_id,
   }
 }
@@ -76,14 +78,22 @@ function download() {
       </label>
       <label class="text-sm text-stone-600 dark:text-stone-300">
         Status Item
-        <select v-model="filters.status" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950">
+        <select v-model="filters.item_status" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950">
           <option value="">Semua</option>
-          <option value="menunggu">Menunggu</option>
+          <option value="diterima">Diterima</option>
           <option value="diproses">Diproses</option>
           <option value="dikirim">Dikirim</option>
-          <option value="diterima">Diterima</option>
           <option value="terkirim">Terkirim</option>
+          <option value="pengembalian">Pengembalian</option>
+          <option value="kembali">Kembali</option>
           <option value="dibatalkan">Dibatalkan</option>
+        </select>
+      </label>
+      <label class="text-sm text-stone-600 dark:text-stone-300">
+        Status Order
+        <select v-model="filters.order_status" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950">
+          <option value="">Semua</option>
+          <option v-for="status in ['diterima', 'diproses', 'dikirim', 'terkirim', 'pengembalian', 'kembali', 'dibatalkan']" :key="status" :value="status">{{ status }}</option>
         </select>
       </label>
       <AgentPicker v-if="isSuperAdmin" v-model="filters.agent_id" />
@@ -103,37 +113,38 @@ function download() {
           <tr>
             <th class="px-4 py-2">Order No</th>
             <th class="px-4 py-2">Tanggal</th>
-            <th class="px-4 py-2">Status Order</th>
-            <th class="px-4 py-2">Konsumen</th>
-            <th class="px-4 py-2">Sales</th>
-            <th class="px-4 py-2">Korsal</th>
+            <th class="px-4 py-2">SKU</th>
             <th class="px-4 py-2">Produk</th>
+            <th class="px-4 py-2 text-right">Harga</th>
             <th class="px-4 py-2">Qty</th>
             <th class="px-4 py-2">Status Item</th>
+            <th class="px-4 py-2 text-right">Subtotal</th>
+            <th class="px-4 py-2">Konsumen</th>
             <th class="px-4 py-2">Tgl Kirim</th>
             <th class="px-4 py-2">Kurir</th>
-            <th class="px-4 py-2 text-right">Subtotal</th>
+            <th class="px-4 py-2">Status Order</th>
+            <th class="px-4 py-2">Sales</th>
+            <th class="px-4 py-2">Korsal</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
           <tr v-for="row in items" :key="row.order_item_id">
             <td class="px-4 py-2">{{ row.order_no }}</td>
-            <td class="px-4 py-2 whitespace-nowrap">{{ formatDate(row.order_created_at) }}</td>
-            <td class="px-4 py-2 capitalize">{{ row.order_status }}</td>
-            <td class="px-4 py-2">{{ row.konsumen_name }}</td>
-            <td class="px-4 py-2">{{ row.sales_name ?? '-' }}</td>
-            <td class="px-4 py-2">{{ row.korsal_name ?? '-' }}</td>
-            <td class="px-4 py-2">
-              <div>{{ row.product_name_snapshot }}</div>
-              <div class="text-xs text-stone-400 dark:text-stone-500">{{ skuLabel(row.sku) }}</div>
-            </td>
-            <td class="px-4 py-2">{{ row.fulfilled_quantity }}</td>
+            <td class="px-4 py-2 whitespace-nowrap">{{ row.order_date }}</td>
+            <td class="px-4 py-2">{{ row.sku || '-' }}</td>
+            <td class="px-4 py-2">{{ row.product }}</td>
+            <td class="px-4 py-2 text-right">{{ formatRupiah(row.unit_price) }}</td>
+            <td class="px-4 py-2">{{ row.quantity }}</td>
             <td class="px-4 py-2 capitalize">{{ row.item_status }}</td>
-            <td class="px-4 py-2 whitespace-nowrap">{{ formatDate(row.requested_delivery_date) }}</td>
-            <td class="px-4 py-2">{{ row.courier_name ?? '-' }}</td>
-            <td class="px-4 py-2 text-right">{{ formatRupiah(row.subtotal_snapshot) }}</td>
+            <td class="px-4 py-2 text-right">{{ formatRupiah(row.subtotal) }}</td>
+            <td class="px-4 py-2">{{ row.customer || '-' }}</td>
+            <td class="px-4 py-2 whitespace-nowrap">{{ row.delivery_date }}</td>
+            <td class="px-4 py-2">{{ row.courier }}</td>
+            <td class="px-4 py-2 capitalize">{{ row.order_status }}</td>
+            <td class="px-4 py-2">{{ row.sales }}</td>
+            <td class="px-4 py-2">{{ row.korsal }}</td>
           </tr>
-          <tr v-if="items.length === 0"><td colspan="12" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
+          <tr v-if="items.length === 0"><td colspan="14" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
         </tbody>
       </table>
     </div>

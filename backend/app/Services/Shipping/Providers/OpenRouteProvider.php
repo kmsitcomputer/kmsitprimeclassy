@@ -18,8 +18,11 @@ use Illuminate\Support\Facades\Log;
 /**
  * Distance-based shipping using OpenRouteService for the actual road
  * distance, then the agent's configured pricing rule:
- *   - distance < minimum_distance_km -> FREE (0 cost) — "dalam radius bebas ongkir"
- *   - distance >= minimum_distance_km -> cost = distance * price_per_km
+ *   chargeable_distance_km = max(0, distance_km - minimum_distance_km)
+ *   cost = chargeable_distance_km * price_per_km
+ * minimum_distance_km is a free allowance subtracted from the route
+ * distance, not a free/paid threshold — distance <= minimum_distance_km
+ * always yields cost 0 as a natural consequence of the max(0, ...) floor.
  * A subtotal-based free-shipping override (free_shipping_enabled +
  * free_shipping_min_amount) is checked first, same as before.
  */
@@ -91,14 +94,17 @@ class OpenRouteProvider implements ShippingCostProviderInterface
             );
         }
 
-        if ($distanceKm < $minimumDistance) {
+        $chargeableDistanceKm = max(0.0, $distanceKm - $minimumDistance);
+        $meta['chargeable_distance_km'] = $chargeableDistanceKm;
+
+        if ($chargeableDistanceKm <= 0.0) {
             return new ShippingQuoteResult(
                 cost: 0.0, distanceKm: $distanceKm, ratePerKm: $ratePerKm, providerCode: 'openroute',
                 meta: [...$meta, 'rule' => 'below_minimum_distance'],
             );
         }
 
-        $cost = round($distanceKm * $ratePerKm, 2);
+        $cost = round($chargeableDistanceKm * $ratePerKm, 2);
 
         if ((float) $rateConfig->minimum_charge > 0) {
             $cost = max($cost, (float) $rateConfig->minimum_charge);

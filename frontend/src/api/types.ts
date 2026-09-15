@@ -141,7 +141,22 @@ export interface Order {
   items: OrderItem[]
   payment_method: PaymentMethod | null
   payment_transaction: PaymentTransaction | null
+  /** Canonical payment figures (PaymentSummaryService) — the single source for Grand Total / DP / Total Dibayar / Sisa Pembayaran everywhere they're displayed. */
+  payment_summary: PaymentSummary
   created_at: string
+}
+
+export interface PaymentSummary {
+  grand_total: number
+  /** What the customer chose as DP at checkout — NOT yet money received. */
+  requested_dp: number
+  /** How much of the DP has actually cleared verification, capped at requested_dp. */
+  verified_dp: number
+  /** All verified money received so far, DP + settlement combined. */
+  total_paid: number
+  remaining_balance: number
+  payment_status: string
+  is_fully_paid: boolean
 }
 
 export interface CheckoutStep {

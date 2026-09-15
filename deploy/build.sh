@@ -43,10 +43,25 @@ rsync -a \
   --exclude 'storage/framework/sessions' \
   --exclude 'storage/framework/views' \
   --exclude 'storage/logs' \
+  --exclude 'storage/app/private' \
+  --exclude 'storage/app/public' \
   --exclude 'storage/app/installed.lock' \
   --exclude 'database/database.sqlite' \
   --exclude '.phpunit.result.cache' \
   "$ROOT_DIR/backend/" "$OUT_DIR/backend/"
+
+echo "==> Recreating empty runtime directories rsync's excludes above skip entirely"
+# --exclude 'storage/framework/sessions' etc. (no trailing /*) tells rsync to
+# skip the directory ENTRY itself, not just its contents — so without this,
+# the folder never exists in the package at all, and Laravel's file session/
+# cache/view drivers fail with "Failed to open stream: No such file or
+# directory" on the very first request (a real production incident this
+# fixes — see git history). storage:link expects the parent app/public dir
+# to exist too, which composer/artisan don't create on a fresh checkout.
+mkdir -p "$OUT_DIR/backend/storage/framework/sessions"
+mkdir -p "$OUT_DIR/backend/storage/framework/views"
+mkdir -p "$OUT_DIR/backend/storage/framework/cache/data"
+mkdir -p "$OUT_DIR/backend/storage/logs"
 
 echo "==> Installing production PHP dependencies in the staged backend/"
 (cd "$OUT_DIR/backend" && composer install --no-dev --optimize-autoloader --no-interaction)
@@ -73,6 +88,7 @@ rm -f "$OUT_DIR/backend/storage/logs/"*.log
 echo "==> Zipping"
 # -y preserves the public_html/storage symlink instead of dereferencing it
 # (which would embed the entire uploads directory in duplicate).
+(rm -f "$ROOT_DIR/deploy/output/$NAME.zip")
 (cd "$ROOT_DIR/deploy/output" && zip -r -q -y "$NAME.zip" "$NAME")
 
 echo "==> Done: deploy/output/$NAME.zip"

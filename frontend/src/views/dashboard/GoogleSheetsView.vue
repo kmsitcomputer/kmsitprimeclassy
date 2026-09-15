@@ -43,6 +43,7 @@ interface Log {
 const destinations = ref<Destination[]>([])
 const configs = ref<Config[]>([])
 const datasets = ref<Record<string, string[]>>({})
+const datasetDefaults = ref<Record<string, Mapping[]>>({})
 const logs = ref<Log[]>([])
 const connection = ref('not_checked')
 const spreadsheetTitle = ref('')
@@ -81,6 +82,7 @@ async function load() {
   destinations.value = data.data.destinations
   configs.value = data.data.configs
   datasets.value = data.data.datasets
+  datasetDefaults.value = data.data.dataset_defaults ?? {}
   logs.value = data.data.logs
   serviceAccountEmail.value = data.data.service_account_email ?? ''
   if (!data.data.enabled) connection.value = 'disabled'
@@ -145,8 +147,11 @@ function moveColumn(index: number, direction: -1 | 1) {
   form.value.columns = columns
 }
 function resetDatasetFields() {
-  form.value.columns = []
+  resetColumnsToDefault()
   form.value.status = ''
+}
+function resetColumnsToDefault() {
+  form.value.columns = (datasetDefaults.value[form.value.dataset] ?? []).map((column) => ({ ...column }))
 }
 async function save() {
   await run(async () => {
@@ -277,6 +282,7 @@ onMounted(() =>
         </p>
         <fieldset>
           <legend>Kolom yang dikirim</legend>
+          <button v-if="datasetDefaults[form.dataset]" type="button" class="ml-3 rounded border px-2 py-1 text-xs" @click="resetColumnsToDefault">Reset ke Default</button>
           <label
             v-for="field in fields"
             :key="field"

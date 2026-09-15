@@ -113,6 +113,15 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/print/shipments/:id',
+      name: 'shipment-receipt-print',
+      component: () => import('@/views/print/ShipmentReceiptView.vue'),
+      props: (route) => ({ id: Number(route.params.id) }),
+      // Same roles as GET /shipments/{shipment}/receipt (ShipmentPolicy::printReceipt)
+      // — keuangan/korsal/sales/konsumen never get this print permission.
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'kurir'] },
+    },
+    {
       path: '/dashboard',
       name: 'dashboard-home',
       component: () => import('@/views/dashboard/DashboardHomeView.vue'),

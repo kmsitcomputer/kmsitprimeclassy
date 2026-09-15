@@ -2,20 +2,24 @@
 
 namespace App\Services\GoogleSheets;
 
+use App\Services\Report\OrderTransactionReportService;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class DatasetRegistry
 {
+    public function __construct(private readonly OrderTransactionReportService $orderTransactionReport) {}
+
     /** Public keys never become arbitrary SQL identifiers. */
     public function definitions(): array
     {
         return [
             'products' => ['id', 'sku', 'product_name', 'price', 'status'],
             'stock' => ['id', 'sku', 'product_name', 'quantity', 'reserved_quantity'],
-            'transactions' => ['id', 'order_no', 'total_amount', 'status', 'payment_status', 'created_at'],
-            'transaction_items' => ['id', 'order_no', 'sku', 'product_name', 'quantity', 'subtotal'],
+            'transactions' => array_keys(OrderTransactionReportService::COLUMNS),
+            // Backward-compatible dataset key; both now use the same canonical item-level rows.
+            'transaction_items' => array_keys(OrderTransactionReportService::COLUMNS),
             'sales' => ['id', 'name', 'korsal_id', 'status'],
             'korsal' => ['id', 'name', 'status'],
             'courier_deliveries' => ['id', 'order_no', 'courier_id', 'tracking_number', 'status', 'delivered_at'],
@@ -31,10 +35,35 @@ class DatasetRegistry
         ];
     }
 
+    public function defaults(): array
+    {
+        $columns = collect(OrderTransactionReportService::COLUMNS)
+            ->map(fn (string $label, string $field) => compact('field', 'label'))->values()->all();
+
+        return ['transactions' => $columns, 'transaction_items' => $columns];
+    }
+
     public function query(string $dataset, ?int $agentId, array $filters = []): Builder
     {
         if (! isset($this->definitions()[$dataset])) {
             throw ValidationException::withMessages(['dataset' => 'Dataset tidak diizinkan.']);
+        }
+        if (in_array($dataset, ['transactions', 'transaction_items'], true)) {
+            $canonical = $this->orderTransactionReport->query($agentId, null, [
+                'from' => $filters['from'] ?? null,
+                'to' => $filters['to'] ?? null,
+                'delivery_date_from' => $filters['delivery_date_from'] ?? null,
+                'delivery_date_to' => $filters['delivery_date_to'] ?? null,
+                'sales_id' => $filters['sales_id'] ?? null,
+                'korsal_id' => $filters['korsal_id'] ?? null,
+                'courier_id' => $filters['courier_id'] ?? null,
+                'item_status' => $filters['item_status'] ?? $filters['status'] ?? null,
+                'order_status' => $filters['order_status'] ?? null,
+            ]);
+
+            // A derived table preserves canonical aliases while allowing SyncService
+            // to select an administrator's chosen subset and column order safely.
+            return DB::query()->fromSub($canonical, 'canonical_transactions');
         }
         if (in_array($dataset, ['products', 'stock'])) {
             $q = DB::table('products as p')->whereNull('p.deleted_at');
@@ -109,9 +138,7 @@ class DatasetRegistry
                 $q->where('o.agent_id', $agentId);
             }
             match ($dataset) {
-                'transactions' => $q->select(['o.id', 'o.order_no', 'o.total_amount', 'o.status', 'o.payment_status', 'o.created_at']),
                 'payment_status' => $q->select(['o.id', 'o.order_no', 'o.payment_status', 'o.paid_amount', 'o.remaining_amount']),
-                'transaction_items' => $q->join('order_items as i', 'i.order_id', '=', 'o.id')->select(['i.id', 'o.order_no', 'i.sku_snapshot as sku', 'i.product_name_snapshot as product_name', 'i.original_quantity as quantity', 'i.subtotal_snapshot as subtotal']),
                 'courier_deliveries' => $q->join('shipments as s', 's.order_id', '=', 'o.id')->select(['s.id', 'o.order_no', 's.courier_id', 's.tracking_number', 's.status', 's.delivered_at']),
                 'sales_fees', 'courier_fees' => $q->join('commissions as c', 'c.order_id', '=', 'o.id')->where('c.beneficiary_role', $dataset === 'sales_fees' ? 'sales' : 'courier')->select(['c.id', 'o.order_no', 'c.beneficiary_user_id as beneficiary_id', 'c.amount', 'c.status', 'c.earned_at']),
                 'refunds' => $q->join('order_items as i', 'i.order_id', '=', 'o.id')->join('return_items as r', 'r.order_item_id', '=', 'i.id')->select(['r.id', 'o.order_no', 'r.refund_amount', 'r.refund_status']),

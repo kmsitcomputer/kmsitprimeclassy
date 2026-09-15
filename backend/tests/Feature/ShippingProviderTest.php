@@ -304,14 +304,15 @@ class ShippingProviderTest extends TestCase
         $this->assertEquals(0, (float) $near->json('data.shipping_fee_amount'));
         $this->assertDatabaseHas('shipments', ['order_id' => $near->json('data.id'), 'distance_km' => 3.0, 'shipping_provider_code' => 'openroute']);
 
-        // At/above the threshold -> full distance * price_per_km. A different
-        // destination so this doesn't hit the first call's cached distance.
+        // At/above the threshold -> (distance - minimum) * price_per_km. A
+        // different destination so this doesn't hit the first call's cached
+        // distance.
         $far = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(), 'latitude' => -6.900000, 'longitude' => 107.650000,
         ]);
         $far->assertCreated();
-        $this->assertEquals(20000, (float) $far->json('data.shipping_fee_amount')); // 10km * 2000
+        $this->assertEquals(10000, (float) $far->json('data.shipping_fee_amount')); // (10km - 5km min) * 2000
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v2/directions/driving-car/json')
             && $request['coordinates'][0] === [106.8166, -6.2]
             && $request['coordinates'][1] === [107.65, -6.9]
@@ -321,6 +322,114 @@ class ShippingProviderTest extends TestCase
         $this->assertEquals(1200.0, $shipment->provider_meta['duration_seconds']);
         $this->assertSame('driving-car', $shipment->provider_meta['routing_profile']);
         $this->assertSame(107.65, $shipment->provider_meta['destination']['longitude']);
+    }
+
+    /**
+     * Locks the new (chargeable_distance × rate) formula: chargeable
+     * distance is never negative, distance == minimum still yields 0, and
+     * decimal distances aren't rounded away before the subtraction.
+     */
+    public function test_openroute_chargeable_distance_formula_matrix(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+        $this->configureOpenRoute($agen, pricePerKm: 2500, minimumDistanceKm: 3);
+
+        $cases = [
+            // [ors_distance_meters, expected_shipping_fee, expected_distance_km, label]
+            [2000, 0, 2.0, 'distance below minimum -> 0, never negative'],
+            [3000, 0, 3.0, 'distance == minimum -> 0'],
+            [10000, 17500, 10.0, '10km - 3km minimum = 7km * 2500 = 17500'],
+        ];
+
+        // Http::fake() with the same URL pattern registered repeatedly keeps
+        // matching the FIRST stub, not the most recent — a single sequence
+        // is the correct way to script different responses per case.
+        Http::fake(['api.openrouteservice.org/*' => Http::sequence()
+            ->push(['routes' => [['summary' => ['distance' => $cases[0][0], 'duration' => 600]]]], 200)
+            ->push(['routes' => [['summary' => ['distance' => $cases[1][0], 'duration' => 600]]]], 200)
+            ->push(['routes' => [['summary' => ['distance' => $cases[2][0], 'duration' => 600]]]], 200)]);
+
+        foreach ($cases as $i => [$meters, $expectedFee, $expectedKm, $label]) {
+            // Each case targets a distinct destination so the 5-minute route
+            // cache never serves a stale distance from a previous case.
+            $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+                'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
+                ...$this->destination(),
+                'latitude' => -6.2 - ($i + 1) * 0.01,
+                'longitude' => 106.8166,
+            ]);
+
+            $response->assertCreated($label);
+            $this->assertEquals($expectedFee, (float) $response->json('data.shipping_fee_amount'), $label);
+            $this->assertEquals($expectedKm, (float) Shipment::where('order_id', $response->json('data.id'))->value('distance_km'), $label);
+        }
+    }
+
+    public function test_openroute_decimal_distance_is_not_rounded_before_subtracting_minimum(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+        $this->configureOpenRoute($agen, pricePerKm: 3000, minimumDistanceKm: 2);
+        // 8.7km distance: (8.7 - 2) * 3000 = 6.7 * 3000 = 20100.
+        Http::fake(['api.openrouteservice.org/*' => Http::response(
+            ['routes' => [['summary' => ['distance' => 8700, 'duration' => 900]]]], 200
+        )]);
+
+        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
+        ]);
+
+        $response->assertCreated();
+        $this->assertEquals(20100, (float) $response->json('data.shipping_fee_amount'));
+    }
+
+    public function test_openroute_converts_ors_meters_to_km_before_applying_the_formula(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen);
+        $this->configureOpenRoute($agen, pricePerKm: 2500, minimumDistanceKm: 3);
+        // 10500 meters -> 10.5km; (10.5 - 3) * 2500 = 7.5 * 2500 = 18750.
+        Http::fake(['api.openrouteservice.org/*' => Http::response(
+            ['routes' => [['summary' => ['distance' => 10500, 'duration' => 1100]]]], 200
+        )]);
+
+        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
+        ]);
+
+        $response->assertCreated();
+        $this->assertEquals(10.5, (float) Shipment::where('order_id', $response->json('data.id'))->value('distance_km'));
+        $this->assertEquals(18750, (float) $response->json('data.shipping_fee_amount'));
+    }
+
+    /** Agent A's minimum_distance_km/rate_per_km must never leak into Agent B's orders. */
+    public function test_openroute_uses_the_ordering_agents_own_network_pricing_config(): void
+    {
+        ['agen' => $agenA, 'konsumen' => $konsumenA] = $this->makeAgentBranch();
+        ['agen' => $agenB, 'konsumen' => $konsumenB] = $this->makeAgentBranch();
+        $productA = $this->makeProduct($agenA);
+        $productB = $this->makeProduct($agenB);
+        $this->configureOpenRoute($agenA, pricePerKm: 2500, minimumDistanceKm: 3);
+        $this->configureOpenRoute($agenB, pricePerKm: 4000, minimumDistanceKm: 5);
+
+        Http::fake(['api.openrouteservice.org/*' => Http::response(
+            ['routes' => [['summary' => ['distance' => 10000, 'duration' => 1200]]]], 200
+        )]);
+
+        // Agent A: (10 - 3) * 2500 = 17500.
+        $orderA = $this->actingAs($konsumenA)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod', 'items' => [['product_id' => $productA->id, 'quantity' => 1]], ...$this->destination(),
+        ]);
+        $orderA->assertCreated();
+        $this->assertEquals(17500, (float) $orderA->json('data.shipping_fee_amount'));
+
+        // Agent B: (10 - 5) * 4000 = 20000 — not Agent A's rate/minimum.
+        $orderB = $this->actingAs($konsumenB)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod', 'items' => [['product_id' => $productB->id, 'quantity' => 1]], ...$this->destination(),
+        ]);
+        $orderB->assertCreated();
+        $this->assertEquals(20000, (float) $orderB->json('data.shipping_fee_amount'));
     }
 
     public function test_openroute_connection_test_is_server_side_and_sanitized(): void
@@ -538,6 +647,44 @@ class ShippingProviderTest extends TestCase
         ]);
 
         $response->assertStatus(422);
+    }
+
+    public function test_agent_can_replace_undecryptable_rajaongkir_config_after_app_key_change(): void
+    {
+        ['agen' => $agen] = $this->makeAgentBranch();
+        $this->configureRajaOngkir($agen);
+        $rajaOngkir = ShippingProvider::where('code', 'rajaongkir')->firstOrFail();
+
+        DB::table('agent_shipping_provider_configs')
+            ->where('agent_id', $agen->id)
+            ->where('shipping_provider_id', $rajaOngkir->id)
+            ->update(['config' => 'not-a-valid-encrypted-payload']);
+
+        Http::fake(['rajaongkir.komerce.id/*' => Http::response(['data' => [[
+            'id' => 4816,
+            'label' => '-, BANDUNG, BANDUNG, JAWA BARAT, 40614',
+            'province_name' => 'JAWA BARAT',
+            'city_name' => 'BANDUNG',
+            'district_name' => 'BANDUNG',
+            'subdistrict_name' => null,
+            'zip_code' => '40614',
+        ]]], 200)]);
+
+        $this->actingAs($agen)->putJson("/api/v1/agent/shipping-providers/{$rajaOngkir->id}/config", [
+            'config' => [
+                'api_key' => 'replacement-key',
+                'api_version' => 'komerce_v2',
+                'origin_destination_id' => '4816',
+                'origin_label' => 'ignored client label',
+                'origin_search' => 'Kota Bandung',
+                'couriers' => ['jne'],
+            ],
+        ])->assertOk();
+
+        $saved = AgentShippingProviderConfig::where('agent_id', $agen->id)
+            ->where('shipping_provider_id', $rajaOngkir->id)->firstOrFail()->config;
+        $this->assertSame('replacement-key', $saved['api_key']);
+        $this->assertSame(['jne'], $saved['couriers']);
     }
 
     public function test_rajaongkir_falls_back_to_openroute_when_destination_regency_has_no_mapping(): void

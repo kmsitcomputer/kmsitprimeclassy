@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\Payment\PaymentSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,6 +25,13 @@ class OrderResource extends JsonResource
             'dp_amount' => $this->dp_amount,
             'paid_amount' => $this->paid_amount,
             'remaining_amount' => $this->remaining_amount,
+            // Canonical payment summary (PaymentSummaryService) — the single
+            // formula every payment display (Order Detail, Transaction
+            // Report, Google Sheets) reads instead of each re-deriving its
+            // own. verified_dp is capped at requested_dp even once a
+            // settlement pushes total_paid past it (the DP tranche's own
+            // history never changes once verified).
+            'payment_summary' => PaymentSummaryService::summarize($this->resource),
             'recipient_name' => $this->recipient_name_snapshot,
             'recipient_phone' => $this->recipient_phone_snapshot,
             'address' => $this->address_snapshot,

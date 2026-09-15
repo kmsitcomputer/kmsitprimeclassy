@@ -138,8 +138,8 @@ Agent can register and manage spreadsheets only for its own Agent ID. The backen
 |---|---|---|
 | `products` | Global/Agent | id, sku, product_name, price, status |
 | `stock` | Global/Agent | id, sku, product_name, quantity, reserved_quantity |
-| `transactions` | Global/Agent | id, order_no, total_amount, status, payment_status, created_at |
-| `transaction_items` | Global/Agent | id, order_no, sku, product_name, quantity, subtotal |
+| `transactions` | Global/Agent | order_no, order_date, sku, product, unit_price, quantity, item_status, subtotal, customer, delivery_date, courier, order_status, sales, korsal |
+| `transaction_items` | Global/Agent | Sama dengan `transactions`; alias kompatibilitas untuk dataset item-level kanonis |
 | `transaction_report` | Global/Agent | total_orders, paid_orders, pending_orders, cancelled_orders, gross_revenue |
 | `financial_summary` | Global/Agent | transaction_count, gross_revenue, paid_amount, outstanding_amount, refund_amount, additional_payment_amount, agent_fee, sales_fee, courier_fee |
 | `payment_status` | Global/Agent | id, order_no, payment_status, paid_amount, remaining_amount |
@@ -151,6 +151,8 @@ Agent can register and manage spreadsheets only for its own Agent ID. The backen
 | `courier_deliveries` | Global/Agent | id, order_no, courier_id, tracking_number, status, delivered_at |
 | `sales` | Global/Agent | id, name, korsal_id, status |
 | `korsal` | Global/Agent | id, name, status |
+
+Untuk kedua dataset transaksi, mapping default menggunakan header **Order No, Tanggal, SKU, Produk, Harga, Qty, Status Item, Subtotal, Konsumen, Tgl Kirim, Kurir, Status Order, Sales, Korsal**. Memilih dataset tersebut pada form baru langsung mengisi mapping ini. Tombol **Reset ke Default** mengembalikan mapping dan urutan baku; konfigurasi tetap dapat menghapus kolom, mengubah label, atau menyusun ulang kolom setelahnya.
 
 ## 23. Financial Data Security
 

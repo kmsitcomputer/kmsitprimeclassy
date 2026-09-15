@@ -197,33 +197,40 @@ const paymentStatusGrouped = computed(() => {
       <table v-if="activeTab === 'transactions'" class="w-full text-left text-sm">
         <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
           <tr>
-            <th class="px-4 py-2">Order</th>
+            <th class="px-4 py-2">Order No</th>
             <th class="px-4 py-2">Tanggal</th>
+            <th class="px-4 py-2">SKU</th>
+            <th class="px-4 py-2">Produk</th>
+            <th class="px-4 py-2 text-right">Harga</th>
+            <th class="px-4 py-2">Qty</th>
+            <th class="px-4 py-2">Status Item</th>
+            <th class="px-4 py-2 text-right">Subtotal</th>
+            <th class="px-4 py-2">Konsumen</th>
+            <th class="px-4 py-2">Tgl Kirim</th>
+            <th class="px-4 py-2">Kurir</th>
+            <th class="px-4 py-2">Status Order</th>
             <th class="px-4 py-2">Sales</th>
             <th class="px-4 py-2">Korsal</th>
-            <th class="px-4 py-2">Produk</th>
-            <th class="px-4 py-2">Qty</th>
-            <th class="px-4 py-2">Status</th>
-            <th class="px-4 py-2">Kurir</th>
-            <th class="px-4 py-2 text-right">Subtotal</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
           <tr v-for="row in transactions" :key="row.order_item_id">
             <td class="px-4 py-2">{{ row.order_no }}</td>
-            <td class="px-4 py-2">{{ formatDate(row.order_created_at) }}</td>
-            <td class="px-4 py-2">{{ row.sales_name ?? '-' }}</td>
-            <td class="px-4 py-2">{{ row.korsal_name ?? '-' }}</td>
-            <td class="px-4 py-2">
-              <div>{{ row.product_name_snapshot }}</div>
-              <div class="text-xs text-stone-400 dark:text-stone-500">{{ skuLabel(row.sku) }}</div>
-            </td>
-            <td class="px-4 py-2">{{ row.fulfilled_quantity }}</td>
+            <td class="px-4 py-2">{{ row.order_date }}</td>
+            <td class="px-4 py-2">{{ row.sku ?? '-' }}</td>
+            <td class="px-4 py-2">{{ row.product }}</td>
+            <td class="px-4 py-2 text-right">{{ formatRupiah(row.unit_price) }}</td>
+            <td class="px-4 py-2">{{ row.quantity }}</td>
             <td class="px-4 py-2">{{ orderStatusLabel(row.item_status) }}</td>
-            <td class="px-4 py-2">{{ row.courier_name ?? '-' }}</td>
-            <td class="px-4 py-2 text-right">{{ formatRupiah(row.subtotal_snapshot) }}</td>
+            <td class="px-4 py-2 text-right">{{ formatRupiah(row.subtotal) }}</td>
+            <td class="px-4 py-2">{{ row.customer }}</td>
+            <td class="px-4 py-2">{{ row.delivery_date }}</td>
+            <td class="px-4 py-2">{{ row.courier }}</td>
+            <td class="px-4 py-2">{{ orderStatusLabel(row.order_status) }}</td>
+            <td class="px-4 py-2">{{ row.sales }}</td>
+            <td class="px-4 py-2">{{ row.korsal }}</td>
           </tr>
-          <tr v-if="transactions.length === 0"><td colspan="9" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
+          <tr v-if="transactions.length === 0"><td colspan="14" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
         </tbody>
       </table>
 

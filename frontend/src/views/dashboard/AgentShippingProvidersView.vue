@@ -340,13 +340,13 @@ const openRoute = () => providers.value.find((p) => p.code === 'openroute')
           </p>
           <div class="grid grid-cols-3 gap-2.5">
             <div>
-              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Harga/km (Rp)</label>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Tarif per KM setelah Jarak Minimum (Rp)</label>
               <input v-model="openRouteForm.price_per_km" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Jarak Minimum (km)</label>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Jarak Minimum (KM)</label>
               <input v-model="openRouteForm.minimum_distance_km" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
-              <p class="mt-0.5 text-[11px] text-stone-400">Di bawah jarak ini: gratis ongkir.</p>
+              <p class="mt-0.5 text-[11px] text-stone-400">Ongkir dihitung dari jarak tempuh setelah dikurangi Jarak Minimum: (Jarak Tempuh − Jarak Minimum) × Tarif per KM.</p>
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Biaya Minimum (opsional)</label>

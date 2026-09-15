@@ -10,6 +10,8 @@ use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\Report\OrderTransactionReportService;
+use App\Support\HumanDate;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -58,7 +60,7 @@ class ReportSystemTest extends TestCase
 
     private function makeProduct(User $agen, string $name, int $price, int $stockQty): Product
     {
-        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(), 
+        $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
             'name' => $name, 'slug' => Str::slug($name).'-'.uniqid(),
             'has_variations' => false, 'base_price' => $price, 'weight_grams' => 500, 'status' => 'active',
         ]);
@@ -145,11 +147,90 @@ class ReportSystemTest extends TestCase
 
         $row = collect($response->json('data'))->firstWhere('order_id', $order->id);
         $this->assertNotNull($row);
-        $this->assertSame($branch['sales']->name, $row['sales_name']);
-        $this->assertSame($branch['korsal']->name, $row['korsal_name']);
-        $this->assertSame('Budi Kurir', $row['courier_name']);
+        $this->assertSame([
+            'order_no', 'order_date', 'sku', 'product', 'unit_price', 'quantity',
+            'item_status', 'subtotal', 'customer', 'delivery_date', 'courier',
+            'order_status', 'sales', 'korsal',
+            'payment_method', 'grand_total', 'dp_paid', 'total_paid', 'remaining_balance', 'payment_status',
+        ], array_keys(OrderTransactionReportService::COLUMNS));
+        $this->assertSame($order->order_no, $row['order_no']);
+        $this->assertSame('Kue Laporan', $row['product']);
+        $this->assertSame(40000.0, (float) $row['unit_price']);
+        $this->assertSame(2, (int) $row['quantity']);
+        $this->assertSame(80000.0, (float) $row['subtotal']);
+        $this->assertSame('Budi', $row['customer']);
+        $this->assertSame($branch['sales']->name, $row['sales']);
+        $this->assertSame($branch['korsal']->name, $row['korsal']);
+        $this->assertSame('Budi Kurir', $row['courier']);
         $this->assertSame('terkirim', $row['item_status']);
-        $this->assertNotNull($row['requested_delivery_date']);
+        $this->assertSame('terkirim', $row['order_status']);
+        $this->assertMatchesRegularExpression('/^\d{2}\/\d{2}\/\d{4}$/', $row['order_date']);
+        $this->assertMatchesRegularExpression('/^\d{2}\/\d{2}\/\d{4}$/', $row['delivery_date']);
+    }
+
+    /**
+     * The item-level transaction report must show DP-paid/total-paid/
+     * remaining-balance sourced from Order (PaymentSummaryService formula),
+     * repeated identically on every row of the same order — never summed
+     * across rows here (that's the financial-summary endpoints' job).
+     */
+    public function test_transaction_report_shows_dp_paid_total_paid_and_remaining_balance_columns(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Kue DP Report', 1000000, 10);
+
+        \App\Models\AgentPaymentGatewayConfig::create([
+            'agent_id' => $branch['agen']->id,
+            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
+        ]);
+
+        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'down_payment', 'dp_amount' => 200000,
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
+            'village_id' => $this->seedTestVillage(),
+            'latitude' => -6.914744, 'longitude' => 107.609810,
+        ]);
+        $orderResponse->assertCreated();
+        $order = Order::withoutGlobalScopes()->findOrFail($orderResponse->json('data.id'));
+
+        $this->actingAs($branch['konsumen'])->postJson("/api/v1/orders/{$order->id}/payment/proof", [
+            'proof' => UploadedFile::fake()->image('proof.jpg'),
+        ])->assertOk();
+        $this->actingAs($branch['superAdmin'])->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $rows = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions')->json('data'));
+        $row = $rows->firstWhere('order_id', $order->id);
+        $this->assertNotNull($row);
+        $this->assertSame('DP / Down Payment', $row['payment_method']);
+        $this->assertSame(1000000.0, (float) $row['grand_total']);
+        $this->assertSame(200000.0, (float) $row['dp_paid']);
+        $this->assertSame(200000.0, (float) $row['total_paid']);
+        $this->assertSame(800000.0, (float) $row['remaining_balance']);
+        $this->assertSame('partially_paid', $row['payment_status']);
+    }
+
+    public function test_transactions_report_uses_direct_agent_and_korsal_self_purchase_as_sales_referrer(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Kue Referral Langsung', 40000, 10);
+
+        $agentOrder = $this->placeOrder($branch['agen'], $product, 1);
+        $korsalOrder = $this->placeOrder($branch['korsal'], $product, 1);
+
+        $response = $this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions');
+        $response->assertOk();
+        $rows = collect($response->json('data'));
+
+        $agentRow = $rows->firstWhere('order_id', $agentOrder->id);
+        $this->assertSame($branch['agen']->name, $agentRow['sales']);
+        $this->assertSame('-', $agentRow['korsal']);
+
+        $korsalRow = $rows->firstWhere('order_id', $korsalOrder->id);
+        $this->assertSame($branch['korsal']->name, $korsalRow['sales']);
+        $this->assertSame($branch['korsal']->name, $korsalRow['korsal']);
     }
 
     public function test_transactions_report_is_scoped_to_the_actors_own_agent_branch(): void
@@ -288,6 +369,150 @@ class ReportSystemTest extends TestCase
         $otherView = $this->actingAs($otherBranch['agen'])->getJson('/api/v1/reports/fees/courier');
         $otherView->assertOk();
         $this->assertFalse(collect($otherView->json('data'))->contains('courier_name', 'Budi Kurir'));
+
+        // Nor does the other branch's admin.
+        $otherAdminView = $this->actingAs($otherBranch['admin'])->getJson('/api/v1/reports/fees/courier');
+        $otherAdminView->assertOk();
+        $this->assertFalse(collect($otherAdminView->json('data'))->contains('courier_name', 'Budi Kurir'));
+
+        // This branch's own admin DOES see it.
+        $ownAdminView = $this->actingAs($branch['admin'])->getJson('/api/v1/reports/fees/courier');
+        $ownAdminView->assertOk();
+        $this->assertTrue(collect($ownAdminView->json('data'))->contains('courier_name', 'Budi Kurir'));
+    }
+
+    /**
+     * "Fee Kurir bukan per Order" — a two-product order delivered by two
+     * different couriers must produce one transaction-report row per item,
+     * each with ITS OWN courier, never the same courier stamped on every
+     * row. Locks OrderTransactionReportService's `leftJoin('shipments',
+     * 'sh.id','=','i.shipment_id')` (item-scoped, not order-scoped).
+     */
+    public function test_transaction_report_shows_the_item_specific_courier_not_the_orders_first_courier(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $secondKurir = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id, 'name' => 'Andi Kurir']);
+        Courier::create(['type' => 'internal', 'user_id' => $secondKurir->id, 'agent_id' => $branch['agen']->id, 'name' => $secondKurir->name, 'is_active' => true]);
+
+        $productA = $this->makeProduct($branch['agen'], 'Brownies', 40000, 10);
+        $productB = $this->makeProduct($branch['agen'], 'Cake', 60000, 10);
+
+        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod',
+            'items' => [
+                ['product_id' => $productA->id, 'quantity' => 1],
+                ['product_id' => $productB->id, 'quantity' => 1],
+            ],
+            'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
+            'village_id' => $this->seedTestVillage(),
+            'latitude' => -6.914744, 'longitude' => 107.609810,
+        ]);
+        $response->assertCreated();
+        $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+        $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
+        $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        // Item A picked up by Budi, item B by Andi — two independent shipments.
+        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+        $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$itemB->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+
+        $rows = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions')->json('data'))
+            ->filter(fn ($r) => $r['order_id'] === $order->id);
+        $this->assertCount(2, $rows);
+
+        $rowA = $rows->firstWhere('order_item_id', $itemA->id);
+        $rowB = $rows->firstWhere('order_item_id', $itemB->id);
+        $this->assertSame('Budi Kurir', $rowA['courier']);
+        $this->assertSame('Andi Kurir', $rowB['courier']);
+        $this->assertNotSame($rowA['courier'], $rowB['courier'], 'each item must carry its OWN courier, not the order\'s first one');
+    }
+
+    /**
+     * "Fee Kurir harus PER ITEM" — one Commission row per order_item, each
+     * crediting that item's OWN courier; never a single Rp15.000 lump sum
+     * on the order.
+     */
+    public function test_courier_fee_ledger_is_per_item_not_per_order(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $secondKurir = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id, 'name' => 'Andi Kurir']);
+        Courier::create(['type' => 'internal', 'user_id' => $secondKurir->id, 'agent_id' => $branch['agen']->id, 'name' => $secondKurir->name, 'is_active' => true]);
+
+        $productA = $this->makeProduct($branch['agen'], 'Brownies Fee', 40000, 10);
+        $productB = $this->makeProduct($branch['agen'], 'Cake Fee', 60000, 10);
+        $this->actingAs($branch['superAdmin'])->putJson("/api/v1/products/{$productA->id}/fees", [
+            'agent_fee' => 1000, 'sales_fee' => 1000, 'courier_fee' => 5000,
+        ])->assertOk();
+        $this->actingAs($branch['superAdmin'])->putJson("/api/v1/products/{$productB->id}/fees", [
+            'agent_fee' => 1000, 'sales_fee' => 1000, 'courier_fee' => 4000,
+        ])->assertOk();
+
+        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod',
+            'items' => [
+                ['product_id' => $productA->id, 'quantity' => 1],
+                ['product_id' => $productB->id, 'quantity' => 1],
+            ],
+            'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
+            'village_id' => $this->seedTestVillage(),
+            'latitude' => -6.914744, 'longitude' => 107.609810,
+        ]);
+        $response->assertCreated();
+        $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+        $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
+        $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        foreach ([['kurir' => $branch['kurir'], 'item' => $itemA], ['kurir' => $secondKurir, 'item' => $itemB]] as $leg) {
+            $this->actingAs($leg['kurir'])->patchJson("/api/v1/shipments/{$leg['item']->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+            $this->actingAs($leg['kurir'])->patch("/api/v1/shipments/{$leg['item']->shipment_id}/status", ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('p.jpg')])->assertOk();
+        }
+
+        // Two distinct item-level fee records, never one order-level Rp9.000 (or Rp15.000-style) lump sum.
+        $this->assertDatabaseHas('commissions', [
+            'order_id' => $order->id, 'order_item_id' => $itemA->id, 'beneficiary_role' => 'courier',
+            'beneficiary_user_id' => $branch['kurir']->id, 'amount' => 5000,
+        ]);
+        $this->assertDatabaseHas('commissions', [
+            'order_id' => $order->id, 'order_item_id' => $itemB->id, 'beneficiary_role' => 'courier',
+            'beneficiary_user_id' => $secondKurir->id, 'amount' => 4000,
+        ]);
+        $this->assertSame(2, \App\Models\Commission::where('order_id', $order->id)->where('beneficiary_role', 'courier')->count());
+
+        $feeReport = $this->actingAs($branch['agen'])->getJson('/api/v1/reports/fees/courier');
+        $budiRow = collect($feeReport->json('data'))->firstWhere('courier_name', 'Budi Kurir');
+        $andiRow = collect($feeReport->json('data'))->firstWhere('courier_name', 'Andi Kurir');
+        $this->assertSame(5000.0, (float) $budiRow['total_fee']);
+        $this->assertSame(4000.0, (float) $andiRow['total_fee']);
+    }
+
+    /**
+     * Retrying/refreshing the same terkirim transition (status re-saved,
+     * report refresh, resi reprint) must never double-post the same item's
+     * courier fee.
+     */
+    public function test_courier_fee_is_idempotent_and_never_duplicated_on_retry(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Kue Idempotent', 40000, 10);
+        $this->actingAs($branch['superAdmin'])->putJson("/api/v1/products/{$product->id}/fees", [
+            'agent_fee' => 1000, 'sales_fee' => 1000, 'courier_fee' => 5000,
+        ])->assertOk();
+
+        $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->deliverOrder($branch, $order);
+
+        $item = OrderItem::where('order_id', $order->id)->firstOrFail();
+        $this->assertSame(1, \App\Models\Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
+
+        // Directly invoke the same fee-posting path a second time (simulating a retried
+        // job/callback/report refresh) — CourierService::recordCommissionsForItems must
+        // no-op, never insert a second Rp5.000 row.
+        app(\App\Services\Order\CourierService::class)->recordCommissionsForItems(
+            collect([$item->fresh()]), \App\Models\Courier::where('user_id', $branch['kurir']->id)->first()
+        );
+
+        $this->assertSame(1, \App\Models\Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
+        $this->assertEquals(5000.0, \App\Models\Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->sum('amount'));
     }
 
     /* ---------------------------------------------------------------
@@ -406,6 +631,51 @@ class ReportSystemTest extends TestCase
         $agenAView = $this->actingAs($branchA['agen'])->getJson('/api/v1/reports/finance-summary');
         $agenAView->assertOk();
         $this->assertSame(1, $agenAView->json('data.total_orders'));
+    }
+
+    /**
+     * "Total pembayaran yang sudah diterima" must include verified-but-
+     * partial DP money, not only orders that reached full 'paid' status —
+     * financeSummary.total_received sums Order.paid_amount across every
+     * status, distinct from total_transactions ("Lunas" value only).
+     */
+    public function test_finance_summary_total_received_includes_partially_paid_dp_money(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Kue DP Summary', 1000000, 10);
+
+        \App\Models\AgentPaymentGatewayConfig::create([
+            'agent_id' => $branch['agen']->id,
+            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
+        ]);
+
+        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'down_payment', 'dp_amount' => 300000,
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
+            'village_id' => $this->seedTestVillage(),
+            'latitude' => -6.914744, 'longitude' => 107.609810,
+        ]);
+        $orderResponse->assertCreated();
+        $order = Order::withoutGlobalScopes()->findOrFail($orderResponse->json('data.id'));
+
+        $this->actingAs($branch['konsumen'])->postJson("/api/v1/orders/{$order->id}/payment/proof", [
+            'proof' => UploadedFile::fake()->image('proof.jpg'),
+        ])->assertOk();
+        $this->actingAs($branch['superAdmin'])->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $this->assertSame('partially_paid', $order->fresh()->payment_status);
+
+        $summary = $this->actingAs($branch['agen'])->getJson('/api/v1/reports/finance-summary');
+        $summary->assertOk();
+        // The DP order never reached 'paid', so total_transactions ("Lunas" only) stays 0...
+        $this->assertSame(0.0, (float) $summary->json('data.total_transactions'));
+        // ...but total_received must show the real Rp300.000 already collected.
+        $this->assertSame(300000.0, (float) $summary->json('data.total_received'));
+        $this->assertSame(700000.0, (float) $summary->json('data.total_outstanding'));
+        $this->assertSame(700000.0, (float) $summary->json('data.total_dp_outstanding'));
     }
 
     /* ---------------------------------------------------------------
@@ -707,7 +977,7 @@ class ReportSystemTest extends TestCase
 
         $response = $this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions');
         $response->assertOk();
-        $row = collect($response->json('data'))->firstWhere('product_name_snapshot', 'Kue SKU Laporan');
+        $row = collect($response->json('data'))->firstWhere('product', 'Kue SKU Laporan');
         $this->assertNotNull($row);
         $this->assertSame($product->sku, $row['sku']);
     }
@@ -731,8 +1001,8 @@ class ReportSystemTest extends TestCase
         $this->assertNotSame('KATALOG-BARU-999', $row['sku']);
     }
 
-    /** Historical rows with no SKU must not break the report — they surface as null, never a guessed value. */
-    public function test_transactions_report_returns_null_sku_for_legacy_rows_without_one(): void
+    /** Historical rows with no SKU must not break the report or leave an ambiguous blank cell. */
+    public function test_transactions_report_returns_dash_for_legacy_rows_without_sku(): void
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue SKU Lama', 40000, 10);
@@ -742,7 +1012,7 @@ class ReportSystemTest extends TestCase
         $response = $this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions');
         $row = collect($response->json('data'))->firstWhere('order_id', $order->id);
         $this->assertNotNull($row);
-        $this->assertNull($row['sku']);
+        $this->assertSame('-', $row['sku']);
     }
 
     public function test_courier_order_items_include_sku_snapshot(): void
@@ -780,8 +1050,8 @@ class ReportSystemTest extends TestCase
 
     public function test_human_date_formats_as_indonesian_day_month_year_without_time(): void
     {
-        $this->assertSame('13 September 2026', \App\Support\HumanDate::date('2026-09-13 14:30:00'));
-        $this->assertSame('1 Januari 2026', \App\Support\HumanDate::date('2026-01-01'));
-        $this->assertNull(\App\Support\HumanDate::date(null));
+        $this->assertSame('13 September 2026', HumanDate::date('2026-09-13 14:30:00'));
+        $this->assertSame('1 Januari 2026', HumanDate::date('2026-01-01'));
+        $this->assertNull(HumanDate::date(null));
     }
 }
