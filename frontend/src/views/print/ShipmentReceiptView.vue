@@ -117,7 +117,7 @@ function closeTab() {
       </div>
 
       <!-- The actual printable resi. -->
-      <div class="resi" :class="paperWidth">
+      <div class="resi" :class="`w${paperWidth}`">
         <div class="center bold big">PRIME CLASSY</div>
         <div class="center bold">RESI PENGIRIMAN</div>
         <div class="divider"></div>
@@ -275,10 +275,10 @@ function closeTab() {
   padding: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
-.resi.58mm {
+.resi.w58mm {
   width: 58mm;
 }
-.resi.80mm {
+.resi.w80mm {
   width: 80mm;
   font-size: 13px;
 }
