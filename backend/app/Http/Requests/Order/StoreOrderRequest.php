@@ -55,7 +55,7 @@ class StoreOrderRequest extends BaseFormRequest
             // "Ekspedisi" (rajaongkir) or "Kurir Online" (openroute) — only
             // meaningful when more than one shipping provider is active;
             // OrderService validates it's actually active, not just a known code.
-            'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute'],
+            'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute,pickup'],
             // Which courier/service under "Ekspedisi" (RajaOngkir) the
             // konsumen picked — see QuoteCheckoutRequest for the same field.
             'courier' => ['nullable', 'required_with:service', 'string', 'max:50'],

@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\Village;
 use App\Services\Fee\FeeService;
 use App\Services\Logging\ActivityLogger;
+use App\Services\Payment\AvailablePaymentMethodService;
 use App\Services\Payment\PaymentService;
 use App\Services\Shipping\ShippingQuoteService;
 use App\Services\Stock\StockService;
@@ -44,6 +45,7 @@ class OrderService
         private readonly FeeService $feeService,
         private readonly PaymentService $paymentService,
         private readonly CourierService $courierService,
+        private readonly AvailablePaymentMethodService $availablePaymentMethodService,
     ) {}
 
     /**
@@ -163,6 +165,19 @@ class OrderService
                     selectedCourierOption: $selectedCourierOption,
                 ));
 
+                // Authoritative — never trusts the client's own shipping_method
+                // hint for this check, only the ACTUALLY resolved provider
+                // (ShippingQuoteService may fall back/differ from what was
+                // requested). Also re-enforces the agent's own enabled/disabled
+                // payment methods, which nothing before this point checked.
+                if (! $this->availablePaymentMethodService->isAvailable($agentId, $quote->providerCode, $paymentMethod)) {
+                    throw new ApiException(
+                        __('messages.payment.method_not_available_for_shipping'),
+                        422,
+                        ['payment_method_code' => __('messages.system.field_invalid')],
+                    );
+                }
+
                 $shippingFee = $quote->cost;
                 $total = $subtotal + $shippingFee + $adminFee;
 
@@ -193,7 +208,7 @@ class OrderService
                     ]);
                 }
 
-                $providerRow = $quote->providerCode !== 'free'
+                $providerRow = ! in_array($quote->providerCode, ['free', 'pickup'], true)
                     ? ShippingProvider::query()->where('code', $quote->providerCode)->first()
                     : null;
 
@@ -336,7 +351,7 @@ class OrderService
             'total_amount' => round($subtotal + $quote->cost + $adminFee, 2),
             'distance_km' => $quote->distanceKm,
             'shipping_provider' => $quote->providerCode,
-            'shipping_enabled' => $this->shippingQuoteService->isAnyProviderEnabled($agentId),
+            'shipping_enabled' => $this->shippingQuoteService->isShippingSelectionAvailable($agentId),
             'warnings' => $warnings,
         ];
     }

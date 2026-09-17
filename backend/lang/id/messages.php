@@ -105,6 +105,7 @@ return [
     'payment' => [
         'method_required' => 'Metode pembayaran wajib dipilih.',
         'invalid_method' => 'Metode pembayaran tidak valid atau tidak aktif.',
+        'method_not_available_for_shipping' => 'Metode pembayaran ini tidak tersedia untuk metode pengiriman yang dipilih. Pengiriman Ekspedisi hanya menerima Transfer Bank Manual.',
         'method_not_configured' => 'Metode pembayaran ":name" belum dikonfigurasi. Hubungi Super Admin.',
         'unsupported_method_type' => 'Tipe metode pembayaran ":type" tidak didukung.',
         'order_not_awaiting_proof' => 'Order ini tidak menggunakan transfer bank atau sudah diproses.',

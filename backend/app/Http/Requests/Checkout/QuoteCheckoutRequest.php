@@ -33,7 +33,7 @@ class QuoteCheckoutRequest extends BaseFormRequest
             'village_id' => ['required_without:address_id', 'nullable', 'string', 'exists:villages,id'],
             'latitude' => ['required_without:address_id', 'numeric', 'between:-90,90'],
             'longitude' => ['required_without:address_id', 'numeric', 'between:-180,180'],
-            'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute'],
+            'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute,pickup'],
             // Which courier/service under "Ekspedisi" (RajaOngkir) the
             // konsumen picked — only meaningful with shipping_method=rajaongkir.
             // Cost is never taken from the client; OrderService re-resolves it

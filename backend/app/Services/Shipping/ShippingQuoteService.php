@@ -6,6 +6,7 @@ use App\DataTransferObjects\ShippingQuoteContext;
 use App\DataTransferObjects\ShippingQuoteResult;
 use App\Exceptions\ApiException;
 use App\Exceptions\ShippingQuoteException;
+use App\Models\AgentProfile;
 use App\Models\AgentShippingProviderSetting;
 use App\Models\ShippingProvider;
 use App\Services\Shipping\Providers\OpenRouteProvider;
@@ -46,6 +47,15 @@ class ShippingQuoteService
 
     public function quote(ShippingQuoteContext $context): ShippingQuoteResult
     {
+        // Pickup is not a delivery provider — never RajaOngkir/OpenRoute, no
+        // shipping_providers row, no distance/rate involved. The customer
+        // collects the order themselves from the agent's own store, so the
+        // customer always owes Rp0 for "shipping" regardless of RajaOngkir/
+        // OpenRoute config (Blueprint: "Pickup -> No Shipping Cost").
+        if ($context->preferredProvider === 'pickup') {
+            return new ShippingQuoteResult(cost: 0.0, distanceKm: null, ratePerKm: null, providerCode: 'pickup');
+        }
+
         if ($context->preferredProvider) {
             return $this->quoteWithPreferredProvider($context);
         }
@@ -188,15 +198,42 @@ class ShippingQuoteService
         return $this->activeProviders($agentId)->contains(fn (ShippingProvider $p) => $p->code === 'openroute');
     }
 
+    /**
+     * Pickup needs no shipping_providers row/toggle — it's available
+     * whenever the order's agent has a resolvable store location
+     * (AgentProfile), the same source used as OpenRoute's own origin
+     * coordinate. No agentId (guest/super_admin browsing) means there's no
+     * specific branch to collect from yet, so pickup isn't offered.
+     */
+    public function isPickupAvailable(?int $agentId): bool
+    {
+        if (! $agentId || ! SafeSchema::hasTable('agent_profiles')) {
+            return false;
+        }
+
+        return AgentProfile::query()->where('user_id', $agentId)->exists();
+    }
+
+    /** Whether the checkout wizard's shipping step has anything at all to offer — a delivery provider, or pickup. */
+    public function isShippingSelectionAvailable(?int $agentId = null): bool
+    {
+        return $this->isAnyProviderEnabled($agentId) || $this->isPickupAvailable($agentId);
+    }
+
     /** @return array<int, array{code:string, label:string}> */
     public function availableShippingMethods(?int $agentId = null): array
     {
         $labels = ['rajaongkir' => 'Ekspedisi', 'openroute' => 'Kurir Online'];
 
-        return $this->activeProviders($agentId)
+        $methods = $this->activeProviders($agentId)
             ->sortBy('code')
             ->map(fn (ShippingProvider $p) => ['code' => $p->code, 'label' => $labels[$p->code]])
-            ->values()
-            ->all();
+            ->values();
+
+        if ($this->isPickupAvailable($agentId)) {
+            $methods->push(['code' => 'pickup', 'label' => 'Pickup']);
+        }
+
+        return $methods->all();
     }
 }

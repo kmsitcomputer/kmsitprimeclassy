@@ -17,10 +17,22 @@ class CheckoutController extends Controller
         private readonly OrderService $orderService,
     ) {}
 
-    /** Dynamic step list the wizard renders from — never hard-coded on the frontend. */
+    /**
+     * Dynamic step list the wizard renders from — never hard-coded on the
+     * frontend. Accepts an optional `shipping_method` query param (set once
+     * the konsumen has chosen one) so `payment_methods` narrows accordingly
+     * (e.g. Ekspedisi -> Manual Transfer only) — an invalid/unrecognized
+     * value is just ignored (treated as "not yet chosen"), never a hard
+     * error, since this is a display hint, not something the frontend must
+     * get exactly right before this endpoint will respond.
+     */
     public function steps(Request $request)
     {
-        return $this->ok($this->stepResolver->resolve($request->user()));
+        $shippingMethod = in_array($request->query('shipping_method'), ['rajaongkir', 'openroute'], true)
+            ? $request->query('shipping_method')
+            : null;
+
+        return $this->ok($this->stepResolver->resolve($request->user(), $shippingMethod));
     }
 
     /** Server-computed total preview for the Review step — never trusted from the client afterwards. */

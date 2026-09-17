@@ -94,6 +94,7 @@ return [
     'payment' => [
         'method_required' => '必须选择付款方式。',
         'invalid_method' => '付款方式无效或未启用。',
+        'method_not_available_for_shipping' => '所选配送方式不支持此付款方式。快递配送仅支持银行转账。',
         'method_not_configured' => '付款方式":name"尚未配置。请联系超级管理员。',
         'unsupported_method_type' => '不支持的付款方式类型":type"。',
         'order_not_awaiting_proof' => '该订单未使用银行转账，或已处理完成。',

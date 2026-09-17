@@ -94,6 +94,7 @@ return [
     'payment' => [
         'method_required' => 'A payment method must be selected.',
         'invalid_method' => 'Invalid or inactive payment method.',
+        'method_not_available_for_shipping' => 'This payment method is not available for the selected shipping method. Expedition shipping only accepts Manual Bank Transfer.',
         'method_not_configured' => 'Payment method ":name" is not configured yet. Contact the Super Admin.',
         'unsupported_method_type' => 'Unsupported payment method type ":type".',
         'order_not_awaiting_proof' => 'This order does not use bank transfer, or has already been processed.',
