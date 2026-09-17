@@ -418,11 +418,43 @@ class PaymentService
         return $this->recalculatePaymentStatus($order, (float) $order->paid_amount + $amount);
     }
 
-    /** Recompute paid/remaining/payment_status from an explicit paid amount (or the order's current one). */
+    /**
+     * Money actually leaving the business — a processed refund. Symmetric to
+     * applyPaymentToOrder: never lets paid_amount go negative, then re-derives
+     * remaining/payment_status the same way.
+     */
+    public function reverseAppliedPayment(Order $order, float $amount): Order
+    {
+        return $this->recalculatePaymentStatus($order, max(0.0, (float) $order->paid_amount - $amount));
+    }
+
+    /**
+     * Re-derives remaining_amount/payment_status against the order's CURRENT
+     * total_amount without adding or removing any money — the reconciliation
+     * step OrderFulfillmentService calls after OrderTotalCalculator changes
+     * total_amount, so a quantity change that doesn't itself involve a new
+     * payment still gets its outstanding balance/status updated correctly.
+     */
+    public function reconcileTotals(Order $order): Order
+    {
+        return $this->recalculatePaymentStatus($order);
+    }
+
+    /**
+     * Recompute paid/remaining/payment_status from an explicit paid amount
+     * (or the order's current one). paid_amount is deliberately NEVER
+     * clamped to total_amount here — capping it would silently fabricate a
+     * "payment reduction" that never actually happened as real money
+     * movement the moment total_amount shrinks below what was already paid
+     * (an item reduction on an already-settled order — see
+     * OrderTotalCalculator/OrderFulfillmentService). That state IS a real,
+     * legitimate overpayment (Case 3 of the canonical payment formula) and
+     * must stay visible as such — only remaining_amount is floored at 0.
+     */
     private function recalculatePaymentStatus(Order $order, ?float $paidAmount = null): Order
     {
         $total = round((float) $order->total_amount, 2);
-        $paid = round(max(0.0, min($paidAmount ?? (float) $order->paid_amount, $total)), 2);
+        $paid = round(max(0.0, $paidAmount ?? (float) $order->paid_amount), 2);
         $remaining = round(max(0.0, $total - $paid), 2);
 
         $order->update([

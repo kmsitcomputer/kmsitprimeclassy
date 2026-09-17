@@ -118,6 +118,7 @@ return [
         'nothing_to_settle' => '没有需要结清的未付余额。',
         'settlement_requested' => '已创建结清请求。客户需要上传转账凭证。',
         'not_fully_paid' => '交易尚未结清。只有在交易付清后才能处理退款/追加付款。',
+        'already_processed' => '此退款/追加付款已处理过。',
     ],
 
     'shipping' => [

@@ -276,29 +276,79 @@ class DownPaymentTest extends TestCase
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$bankOrder->id}/payment/settle")->assertStatus(422);
     }
 
+    /**
+     * Cancelling only PART of a still-partially-paid DP order's items is a
+     * plain cancellation (no refund) as long as the recalculated total still
+     * covers what was already paid — the DP remains a normal, unrefunded
+     * outstanding-balance obligation. See the sibling test below for the
+     * case where the cancellation is large enough to actually overpay.
+     */
     public function test_reducing_quantity_on_a_partially_paid_dp_order_cancels_without_any_refund_record(): void
     {
         ['agen' => $agen, 'admin' => $admin, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
-        $product = $this->makeProduct($agen, price: 1000000);
+        $productA = $this->makeProduct($agen, price: 700000);
+        $productB = $this->makeProduct($agen, price: 300000);
 
-        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+        // Two items so cancelling the smaller one still leaves 700k of total —
+        // enough to cover the 300k DP already paid, so never overpaid.
+        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'down_payment', 'dp_amount' => 300000,
+            'items' => [['product_id' => $productA->id, 'quantity' => 1], ['product_id' => $productB->id, 'quantity' => 1]],
+            ...$this->destination(),
+        ]);
+        $response->assertCreated();
+        $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+        $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
         // Verify the DP so the order can be processed.
         $this->submitProof($konsumen, $order->id)->assertOk();
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+            'fulfilled_quantity' => 0, 'reason' => 'Stok habis',
+        ])->assertOk();
+
+        $itemB->refresh();
+        $this->assertSame(0, $itemB->fulfilled_quantity);
+        $this->assertSame(1, $itemB->cancelled_quantity);
+        // 700k of total remains — still covers the 300k DP already paid, so no overpayment/refund.
+        $this->assertSame(0, $itemB->refund_quantity);
+        $this->assertDatabaseMissing('order_item_adjustments', ['order_item_id' => $itemB->id]);
+        $this->assertDatabaseMissing('order_additional_payments', ['order_id' => $order->id]);
+    }
+
+    /**
+     * Cancelling enough of a partially-paid DP order that the recalculated
+     * total drops BELOW what was already paid genuinely overpays it — this
+     * must create a real refund record, not silently swallow the DP.
+     * (Previously this codebase only ever refunded a FULLY paid order; a
+     * partially-paid DP order that got cancelled down below its own paid
+     * amount produced no refund record at all, silently stranding the
+     * customer's money — this test locks in the fix.)
+     */
+    public function test_reducing_the_only_item_on_a_partially_paid_dp_order_below_the_paid_amount_creates_a_refund(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 1000000);
+
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 300000)->json('data.id'));
+
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
+
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
-            'fulfilled_quantity' => 0, 'reason' => 'Stok habis',
+            'fulfilled_quantity' => 0, 'reason' => 'Batal total',
         ])->assertOk();
 
         $item->refresh();
         $this->assertSame(0, $item->fulfilled_quantity);
-        $this->assertSame(1, $item->cancelled_quantity);
-        // Outstanding DP is a normal-flow obligation, NOT a post-paid adjustment.
-        $this->assertSame(0, $item->refund_quantity);
-        $this->assertDatabaseMissing('order_item_adjustments', ['order_item_id' => $item->id]);
+        $this->assertSame(1, $item->refund_quantity);
+        $this->assertDatabaseHas('order_item_adjustments', [
+            'order_item_id' => $item->id, 'refund_amount' => 300000, 'refund_status' => 'pending',
+        ]);
         $this->assertDatabaseMissing('order_additional_payments', ['order_id' => $order->id]);
     }
 

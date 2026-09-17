@@ -118,6 +118,7 @@ return [
         'nothing_to_settle' => 'There is no outstanding balance to settle.',
         'settlement_requested' => 'Settlement request created. The customer must upload the transfer proof.',
         'not_fully_paid' => 'The transaction is not settled yet. Refunds/additional payments can only be processed once the transaction is PAID.',
+        'already_processed' => 'This refund/additional payment has already been processed.',
     ],
 
     'shipping' => [

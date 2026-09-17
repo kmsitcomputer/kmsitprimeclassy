@@ -35,6 +35,15 @@ class OrderTransactionReportService
         'total_paid' => 'Total Dibayar',
         'remaining_balance' => 'Sisa Pembayaran',
         'payment_status' => 'Status Pembayaran',
+        // additional_payment_status is THIS item's own additional payment
+        // (OrderItem.additional_payment_id — increaseFulfillment always
+        // targets one item at a time, so the FK is precise, never ambiguous).
+        // refund_status is collapsed across this item's OrderItemAdjustment
+        // row(s) via the same "any pending? -> pending, else latest" rule as
+        // PaymentSummaryService, since one item can accumulate more than one
+        // adjustment over time and this report stays one-row-per-item.
+        'additional_payment_status' => 'Status Additional Payment',
+        'refund_status' => 'Status Refund',
     ];
 
     public function query(?int $agentId = null, ?int $korsalScopeId = null, array $filters = []): Builder
@@ -53,7 +62,9 @@ class OrderTransactionReportService
             ->leftJoin('users as korsal_users', 'korsal_users.id', '=', 'o.korsal_id')
             ->leftJoin('users as agent_users', 'agent_users.id', '=', 'o.agent_id')
             ->leftJoin('payment_methods as pm', 'pm.id', '=', 'o.payment_method_id')
+            ->leftJoin('order_additional_payments as ap', 'ap.id', '=', 'i.additional_payment_id')
             ->select([
+                'ap.status as additional_payment_status',
                 'o.id as order_id', 'i.id as order_item_id', 'o.agent_id',
                 'c.id as courier_id', 'o.sales_id', 'o.korsal_id',
                 'o.order_no',
@@ -75,7 +86,14 @@ class OrderTransactionReportService
             ->selectRaw('o.total_amount + 0 as grand_total')
             ->selectRaw(PaymentSummaryService::verifiedDpSql('o.dp_amount', 'o.paid_amount').' as dp_paid')
             ->selectRaw('o.paid_amount + 0 as total_paid')
-            ->selectRaw('o.remaining_amount + 0 as remaining_balance');
+            ->selectRaw('o.remaining_amount + 0 as remaining_balance')
+            ->selectRaw("(
+                SELECT COALESCE(
+                    MAX(CASE WHEN oia.refund_status = 'pending' THEN 'pending' END),
+                    (SELECT oia2.refund_status FROM order_item_adjustments oia2 WHERE oia2.order_item_id = i.id ORDER BY oia2.id DESC LIMIT 1)
+                )
+                FROM order_item_adjustments oia WHERE oia.order_item_id = i.id
+            ) as refund_status");
 
         if ($agentId !== null) {
             $query->where('o.agent_id', $agentId);

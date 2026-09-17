@@ -34,6 +34,7 @@ class OrderFulfillmentService
     public function __construct(
         private readonly StockService $stockService,
         private readonly PaymentService $paymentService,
+        private readonly OrderTotalCalculator $orderTotalCalculator,
     ) {}
 
     public function adjustItemQuantity(OrderItem $item, int $newFulfilledQuantity, User $actor, string $reason, string $additionalPaymentMethod = 'transfer'): OrderItem
@@ -71,13 +72,15 @@ class OrderFulfillmentService
     }
 
     /**
-     * Only a FULLY PAID transaction can be financially adjusted. COD has not
-     * collected anything at this stage, and a DP order is only partially paid
-     * until its outstanding balance is settled — reducing either is a plain
-     * cancellation of that quantity, never a "refund" (there is nothing to
-     * give back yet). This is the "normal payment flow vs post-paid financial
-     * adjustment" split: an OrderItemAdjustment refund row only ever exists
-     * against money that was actually received and is being returned.
+     * Canonical rule (never "product removed = refund"): a refund is only
+     * ever eligible when TOTAL VALID PAID already exceeds the order's
+     * recalculated total — i.e. the reduction pushed the order into
+     * overpayment. COD (paid_amount=0) and a still-partial DP (paid_amount <
+     * new total) both correctly produce zero refund; only a fully-paid or
+     * over-settled order can. The refund row is sized to the INCREMENTAL
+     * overpayment this specific reduction created (newOverpaid -
+     * previousOverpaid), so a second reduction on an already-overpaid order
+     * never re-refunds the same money twice.
      */
     private function reduceFulfillment(Order $order, OrderItem $item, int $quantityReduced, User $actor, string $reason): void
     {
@@ -87,17 +90,21 @@ class OrderFulfillmentService
             $this->stockService->releaseProduct($order->agent_id, $item->product_id, $quantityReduced, 'order_item_adjustment', $item->id, $actor->id);
         }
 
-        $isFullyPaid = $order->isFullyPaid();
+        $totalValidPaid = (float) $order->paid_amount;
+        $previousOverpaid = max(0.0, $totalValidPaid - (float) $order->total_amount);
 
         $item->update([
             'fulfilled_quantity' => $item->fulfilled_quantity - $quantityReduced,
             'cancelled_quantity' => $item->cancelled_quantity + $quantityReduced,
-            'refund_quantity' => $isFullyPaid ? $item->refund_quantity + $quantityReduced : $item->refund_quantity,
             'status' => ($item->fulfilled_quantity - $quantityReduced) <= 0 ? 'dibatalkan' : $item->status,
         ]);
 
-        if ($isFullyPaid) {
-            $refundAmount = $quantityReduced * (float) $item->unit_price_snapshot;
+        $order = $this->orderTotalCalculator->recalculate($order);
+        $newOverpaid = max(0.0, $totalValidPaid - (float) $order->total_amount);
+        $refundAmount = round($newOverpaid - $previousOverpaid, 2);
+
+        if ($refundAmount > 0.0) {
+            $item->update(['refund_quantity' => $item->refund_quantity + $quantityReduced]);
 
             OrderItemAdjustment::create([
                 'order_item_id' => $item->id,
@@ -108,13 +115,18 @@ class OrderFulfillmentService
                 'refund_status' => 'pending',
             ]);
         }
+
+        $this->paymentService->reconcileTotals($order);
     }
 
     /**
-     * A COD order (and an unsettled DP order) has no settled payment to top
-     * up — an increased quantity simply folds into the still-outstanding
-     * total the kurir collects. Only a fully-paid transaction gets a separate
-     * OrderAdditionalPayment record here.
+     * Canonical rule (never "quantity increased = additional payment"): an
+     * increase only ever spins off a separate OrderAdditionalPayment when the
+     * order was ALREADY fully paid/settled before this change (previous
+     * outstanding was 0) AND the recalculated total now owes more than what
+     * was already paid. A COD order (nothing collected yet) or a still-
+     * partial DP simply folds the added value into the order's own
+     * outstanding total/remaining_balance — never a separate ledger entry.
      */
     private function increaseFulfillment(Order $order, OrderItem $item, int $quantityAdded, User $actor, string $reason, string $additionalPaymentMethod): void
     {
@@ -124,11 +136,19 @@ class OrderFulfillmentService
             $this->stockService->reserveForProduct($order->agent_id, $item->product, $quantityAdded, 'order_item_adjustment', $item->id, $actor->id);
         }
 
-        $isFullyPaid = $order->isFullyPaid();
-        $additionalPaymentId = null;
+        $totalValidPaid = (float) $order->paid_amount;
+        $previousRemaining = max(0.0, (float) $order->total_amount - $totalValidPaid);
 
-        if ($isFullyPaid) {
-            $additionalAmount = $quantityAdded * (float) $item->unit_price_snapshot;
+        $item->update([
+            'fulfilled_quantity' => $item->fulfilled_quantity + $quantityAdded,
+            'additional_quantity' => $item->additional_quantity + $quantityAdded,
+        ]);
+
+        $order = $this->orderTotalCalculator->recalculate($order);
+        $newRemaining = max(0.0, (float) $order->total_amount - $totalValidPaid);
+
+        if ($previousRemaining <= 0.0 && $newRemaining > 0.0) {
+            $additionalAmount = round($newRemaining - $previousRemaining, 2);
             $transaction = $this->paymentService->initiateAdditionalPayment($order, $additionalPaymentMethod, $additionalAmount);
 
             $additionalPaymentId = OrderAdditionalPayment::create([
@@ -140,26 +160,37 @@ class OrderFulfillmentService
                 'reason' => $reason,
                 'status' => 'pending',
             ])->id;
+
+            $item->update(['additional_payment_id' => $additionalPaymentId]);
         }
 
-        $item->update([
-            'fulfilled_quantity' => $item->fulfilled_quantity + $quantityAdded,
-            'additional_quantity' => $item->additional_quantity + $quantityAdded,
-            'additional_payment_id' => $additionalPaymentId,
-        ]);
+        $this->paymentService->reconcileTotals($order);
     }
 
-    /** Keuangan marks an additional payment paid — COD collected physically, or a manual transfer verified off the record. Only valid on a fully-paid transaction. */
+    /**
+     * Keuangan marks an additional payment paid — COD collected physically,
+     * or a manual transfer verified off the record. Idempotent (only valid
+     * while still 'pending' — a second call on an already-settled row is
+     * rejected, never double-applied). Marking it PAID actually folds that
+     * money into Order.paid_amount via PaymentService — this additional-
+     * payment ledger is not a side channel invisible to the order's own
+     * payment_summary; once paid, remaining_balance/payment_status must
+     * reflect it immediately.
+     */
     public function markAdditionalPaymentPaid(OrderAdditionalPayment $additionalPayment, User $actor, bool $paid): OrderAdditionalPayment
     {
         return DB::transaction(function () use ($additionalPayment, $actor, $paid) {
-            $order = $additionalPayment->order;
+            $additionalPayment = OrderAdditionalPayment::query()->whereKey($additionalPayment->id)->lockForUpdate()->firstOrFail();
 
-            if ($order && ! $order->isFullyPaid()) {
-                throw new ApiException(__('messages.payment.not_fully_paid'), 422);
+            if ($additionalPayment->status !== 'pending') {
+                throw new ApiException(__('messages.payment.already_processed'), 422);
             }
 
             $additionalPayment->update(['status' => $paid ? 'paid' : 'failed']);
+
+            if ($paid && ($order = $additionalPayment->order)) {
+                $this->paymentService->applyPaymentToOrder($order, (float) $additionalPayment->amount);
+            }
 
             ActivityLogger::log($actor->id, $additionalPayment, 'order_additional_payment.status_changed', null, [
                 'status' => $additionalPayment->status, 'actor_role' => $actor->role?->slug,
@@ -339,19 +370,27 @@ class OrderFulfillmentService
 
     /**
      * Keuangan marks a fulfillment-shortfall refund as actually processed
-     * (money sent back). This is a POST-PAID financial adjustment — it is only
-     * valid once the transaction is fully settled.
+     * (money sent back). Idempotent (only valid while still 'pending').
+     * Once 'processed', the refunded amount actually leaves Order.paid_amount
+     * (via PaymentService::reverseAppliedPayment) — a processed refund is
+     * real money returned, not just a status label; overpaid_amount must
+     * shrink to reflect it.
      */
     public function markAdjustmentRefundStatus(OrderItemAdjustment $adjustment, User $actor, string $status): OrderItemAdjustment
     {
         return DB::transaction(function () use ($adjustment, $actor, $status) {
-            $order = $adjustment->orderItem?->order;
+            $adjustment = OrderItemAdjustment::query()->whereKey($adjustment->id)->lockForUpdate()->firstOrFail();
 
-            if ($order && ! $order->isFullyPaid()) {
-                throw new ApiException(__('messages.payment.not_fully_paid'), 422);
+            if ($adjustment->refund_status !== 'pending') {
+                throw new ApiException(__('messages.payment.already_processed'), 422);
             }
 
+            $order = $adjustment->orderItem?->order;
             $adjustment->update(['refund_status' => $status]);
+
+            if ($status === 'processed' && $order) {
+                $this->paymentService->reverseAppliedPayment($order, (float) $adjustment->refund_amount);
+            }
 
             ActivityLogger::log($actor->id, $adjustment, 'order_item_adjustment.refund_status_changed', null, [
                 'refund_status' => $status, 'actor_role' => $actor->role?->slug,

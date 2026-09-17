@@ -152,6 +152,7 @@ class ReportSystemTest extends TestCase
             'item_status', 'subtotal', 'customer', 'delivery_date', 'courier',
             'order_status', 'sales', 'korsal',
             'payment_method', 'grand_total', 'dp_paid', 'total_paid', 'remaining_balance', 'payment_status',
+            'additional_payment_status', 'refund_status',
         ], array_keys(OrderTransactionReportService::COLUMNS));
         $this->assertSame($order->order_no, $row['order_no']);
         $this->assertSame('Kue Laporan', $row['product']);
@@ -210,6 +211,64 @@ class ReportSystemTest extends TestCase
         $this->assertSame(200000.0, (float) $row['total_paid']);
         $this->assertSame(800000.0, (float) $row['remaining_balance']);
         $this->assertSame('partially_paid', $row['payment_status']);
+    }
+
+    /**
+     * additional_payment_status is THIS item's own OrderAdditionalPayment
+     * (via OrderItem.additional_payment_id), refund_status is collapsed
+     * across THIS item's own OrderItemAdjustment row(s) — never the order's
+     * other item's ledger entry leaking onto a sibling row.
+     */
+    public function test_transaction_report_shows_additional_payment_and_refund_status(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $productA = $this->makeProduct($branch['agen'], 'Produk A Laporan', 100000, 10);
+        $productB = $this->makeProduct($branch['agen'], 'Produk B Laporan', 100000, 10);
+
+        \App\Models\AgentPaymentGatewayConfig::create([
+            'agent_id' => $branch['agen']->id,
+            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
+        ]);
+
+        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'payment_method_code' => 'cod',
+            'items' => [
+                ['product_id' => $productA->id, 'quantity' => 5],
+                ['product_id' => $productB->id, 'quantity' => 5],
+            ],
+            'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
+            'village_id' => $this->seedTestVillage(),
+            'latitude' => -6.914744, 'longitude' => 107.609810,
+        ]);
+        $orderResponse->assertCreated();
+        $order = Order::withoutGlobalScopes()->findOrFail($orderResponse->json('data.id'));
+        $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
+        $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        // Simulate the COD already collected in full, so both a reduction and an increase trigger their respective ledgers.
+        $order->update(['payment_status' => 'paid', 'paid_amount' => $order->total_amount, 'remaining_amount' => 0]);
+
+        // Reduce A by 1 (-100k) then increase B by 2 (+200k) — deliberately NOT
+        // symmetric: if they exactly offset, the increase would just absorb the
+        // reduction's overpayment and genuinely owe no new additional payment
+        // (correct behavior, but useless for asserting the 'pending' status here).
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+            'fulfilled_quantity' => 4, 'reason' => 'Kurangi A',
+        ])->assertOk();
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+            'fulfilled_quantity' => 7, 'reason' => 'Tambah B', 'additional_payment_method' => 'transfer',
+        ])->assertOk();
+
+        $rows = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions')->json('data'));
+        $rowA = $rows->firstWhere('order_item_id', $itemA->id);
+        $rowB = $rows->firstWhere('order_item_id', $itemB->id);
+
+        $this->assertSame('pending', $rowA['refund_status']);
+        $this->assertNull($rowA['additional_payment_status']);
+        $this->assertSame('pending', $rowB['additional_payment_status']);
+        $this->assertNull($rowB['refund_status']);
     }
 
     public function test_transactions_report_uses_direct_agent_and_korsal_self_purchase_as_sales_referrer(): void

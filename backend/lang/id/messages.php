@@ -129,6 +129,7 @@ return [
         'nothing_to_settle' => 'Tidak ada sisa pembayaran yang perlu dilunasi.',
         'settlement_requested' => 'Permintaan pelunasan berhasil dibuat. Konsumen perlu mengunggah bukti transfer.',
         'not_fully_paid' => 'Transaksi belum lunas. Refund/pembayaran tambahan hanya dapat diproses setelah transaksi LUNAS.',
+        'already_processed' => 'Refund/pembayaran tambahan ini sudah diproses sebelumnya.',
     ],
 
     'shipping' => [
