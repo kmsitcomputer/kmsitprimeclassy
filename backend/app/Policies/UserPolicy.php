@@ -74,7 +74,7 @@ class UserPolicy
         }
 
         if ($user->isRole('super_admin')) {
-            return true;
+            return $target->role?->slug !== 'super_admin' && $target->role?->slug !== 'agen';
         }
 
         if ($user->isRole('agen') && in_array($target->role?->slug, ['admin', 'keuangan', 'kurir'], true)) {

@@ -23,10 +23,16 @@ const ALLOWED_CREATIONS: Record<string, CreateUserPayload['role'][]> = {
   korsal: ['sales'],
 }
 
-/** Mirrors UserPolicy::delete — super_admin deletes anyone (but itself), an agen may delete only an admin/keuangan/kurir within its own branch. */
+/** Mirrors UserPolicy::delete — super_admin deletes any non-self, non-super-admin, non-agent account; an agen may delete only admin/keuangan/kurir within its own branch. */
 function canDelete(user: AuthUser): boolean {
-  if (auth.user?.role === 'super_admin') return true
-  if (auth.user?.role === 'agen') return ['admin', 'keuangan', 'kurir'].includes(user.role)
+  if (auth.user?.role === 'super_admin') {
+    return user.id !== auth.user.id && user.role !== 'super_admin' && user.role !== 'agen'
+  }
+
+  if (auth.user?.role === 'agen') {
+    return ['admin', 'keuangan', 'kurir'].includes(user.role) && user.agent_id === auth.user.agent_id
+  }
+
   return false
 }
 
@@ -209,8 +215,14 @@ async function submitEdit() {
 }
 
 async function remove(user: AuthUser) {
+  if (auth.user && (user.id === auth.user.id || user.role === 'super_admin' || user.role === 'agen')) {
+    errorMessage.value = 'Akun ini tidak dapat dihapus dari dashboard ini.'
+    return
+  }
+
   if (!confirm(`Hapus pengguna "${user.name}"? Tindakan ini tidak dapat dibatalkan sendiri.`))
     return
+
   try {
     await deleteUser(user.id)
     await load()

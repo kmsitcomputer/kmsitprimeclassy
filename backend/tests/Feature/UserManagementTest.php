@@ -51,21 +51,23 @@ class UserManagementTest extends TestCase
         }
     }
 
-    public function test_super_admin_can_soft_delete_a_user_but_never_another_super_admin_or_self(): void
+    public function test_super_admin_can_soft_delete_non_agent_users_but_never_another_super_admin_self_or_agen(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $agen = User::factory()->agen()->create();
         $agen->update(['agent_id' => $agen->id]);
+        $admin = User::factory()->admin()->create(['agent_id' => $agen->id]);
         $otherSuperAdmin = User::factory()->superAdmin()->create();
 
-        $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$agen->id}")->assertOk();
-        $this->assertSoftDeleted('users', ['id' => $agen->id]);
+        $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$admin->id}")->assertOk();
+        $this->assertSoftDeleted('users', ['id' => $admin->id]);
 
+        $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$agen->id}")->assertStatus(403);
         $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$otherSuperAdmin->id}")->assertStatus(403);
         $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$superAdmin->id}")->assertStatus(403);
     }
 
-    public function test_deleting_an_agen_also_removes_their_kontak_agen_profile(): void
+    public function test_super_admin_cannot_delete_an_agen_account(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $agen = User::factory()->agen()->create();
@@ -75,11 +77,10 @@ class UserManagementTest extends TestCase
             'latitude' => -6.2, 'longitude' => 106.8,
         ]);
 
-        $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$agen->id}")->assertOk();
+        $this->actingAs($superAdmin)->deleteJson("/api/v1/users/{$agen->id}")->assertForbidden();
 
-        $this->assertSoftDeleted('users', ['id' => $agen->id]);
-        // The FK's cascadeOnDelete() never fires for a soft delete — this must be an explicit hard delete.
-        $this->assertDatabaseMissing('agent_profiles', ['user_id' => $agen->id]);
+        $this->assertDatabaseHas('users', ['id' => $agen->id, 'deleted_at' => null]);
+        $this->assertDatabaseHas('agent_profiles', ['user_id' => $agen->id]);
     }
 
     public function test_agen_cannot_delete_users_even_within_their_own_branch(): void
