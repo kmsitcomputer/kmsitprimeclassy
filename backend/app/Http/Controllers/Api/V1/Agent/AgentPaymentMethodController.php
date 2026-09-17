@@ -11,8 +11,15 @@ use App\Services\Logging\ActivityLogger;
 use Illuminate\Http\Request;
 
 /**
- * An Agen's own settings for every payment method (cod/manual/gateway),
- * scoped to their own branch only:
+ * Payment method settings (cod/manual/gateway) for one Agen's own branch —
+ * reachable by the Agen themselves AND by that branch's own Admin (never
+ * another branch's), same "own agent_id, never own id" scoping pattern as
+ * StockController::resolveViewedAgentId(): an agen's own agent_id equals
+ * their own id, while an admin's agent_id points at the branch they belong
+ * to — so using `$actor->agent_id` (never `$actor->id`) as the scoping key
+ * resolves correctly for both roles without an extra branch in this
+ * controller. Every mutation still logs the actual acting user (agen or
+ * admin) as the audit-log causer, never the resolved agent id.
  *   - on/off override (never widens what super_admin's global
  *     PaymentMethod::is_active already allows, only narrows it further)
  *   - for manual/gateway: their own credentials (bank account, or
@@ -24,7 +31,7 @@ class AgentPaymentMethodController extends Controller
 {
     public function index(Request $request)
     {
-        $agentId = $request->user()->id;
+        $agentId = $request->user()->agent_id;
 
         $methods = PaymentMethod::query()->orderBy('id')->get();
         $overrides = AgentPaymentMethodSetting::query()->where('agent_id', $agentId)->get()->keyBy('payment_method_id');
@@ -49,7 +56,8 @@ class AgentPaymentMethodController extends Controller
 
     public function toggle(Request $request, PaymentMethod $method)
     {
-        $agentId = $request->user()->id;
+        $actor = $request->user();
+        $agentId = $actor->agent_id;
         $current = AgentPaymentMethodSetting::query()
             ->where('agent_id', $agentId)->where('payment_method_id', $method->id)->first();
         $newState = ! ($current?->is_active ?? true);
@@ -59,8 +67,8 @@ class AgentPaymentMethodController extends Controller
             ['is_active' => $newState],
         );
 
-        ActivityLogger::log($agentId, $setting, 'agent_payment_method.toggled', null, [
-            'payment_method' => $method->code, 'is_active' => $newState,
+        ActivityLogger::log($actor->id, $setting, 'agent_payment_method.toggled', null, [
+            'payment_method' => $method->code, 'is_active' => $newState, 'actor_role' => $actor->role?->slug,
         ]);
 
         return $this->ok([
@@ -80,15 +88,16 @@ class AgentPaymentMethodController extends Controller
         }
 
         $validated = $request->validate(['environment' => ['required', 'in:sandbox,production']]);
-        $agentId = $request->user()->id;
+        $actor = $request->user();
+        $agentId = $actor->agent_id;
 
         $setting = AgentPaymentMethodSetting::query()->updateOrCreate(
             ['agent_id' => $agentId, 'payment_method_id' => $method->id],
             ['active_environment' => $validated['environment']],
         );
 
-        ActivityLogger::log($agentId, $setting, 'agent_payment_method.environment_changed', null, [
-            'payment_method' => $method->code, 'active_environment' => $validated['environment'],
+        ActivityLogger::log($actor->id, $setting, 'agent_payment_method.environment_changed', null, [
+            'payment_method' => $method->code, 'active_environment' => $validated['environment'], 'actor_role' => $actor->role?->slug,
         ]);
 
         return $this->ok(null, __('messages.payment.gateway_environment_updated'));
@@ -100,7 +109,8 @@ class AgentPaymentMethodController extends Controller
             abort(403, __('messages.system.unauthorized_action'));
         }
 
-        $agentId = $request->user()->id;
+        $actor = $request->user();
+        $agentId = $actor->agent_id;
         $environment = $request->input('environment')
             ?? AgentPaymentMethodSetting::query()->where('agent_id', $agentId)->where('payment_method_id', $method->id)->value('active_environment')
             ?? 'sandbox';
@@ -110,9 +120,10 @@ class AgentPaymentMethodController extends Controller
             ['config' => $request->input('config')],
         );
 
-        ActivityLogger::log($agentId, $method, 'agent_payment_method.config_updated', null, [
+        ActivityLogger::log($actor->id, $method, 'agent_payment_method.config_updated', null, [
             'payment_method' => $method->code,
             'environment' => $environment,
+            'actor_role' => $actor->role?->slug,
             // Only field NAMES are logged — never their values.
             'fields' => array_keys($request->input('config')),
         ]);

@@ -307,16 +307,21 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/stock/adjust', [StockController::class, 'adjust']);
     });
 
-    // Agen's own scoped payment/shipping settings — on/off for the agen's own
-    // branch only (separate from super_admin's global toggle in
-    // PaymentGatewayController/ShippingProviderController), plus the agen's
-    // own credentials/rate config — see AgentPaymentMethodController docblock.
-    Route::middleware('role:agen')->group(function () {
+    // Payment method on/off + credentials for one Agen's own branch —
+    // reachable by the Agen themselves AND that branch's own Admin (never
+    // another branch's) — see AgentPaymentMethodController docblock for the
+    // agent_id-not-id scoping this relies on. Separate from super_admin's
+    // global toggle in PaymentGatewayController.
+    Route::middleware('role:agen,admin')->group(function () {
         Route::get('/agent/payment-methods', [AgentPaymentMethodController::class, 'index']);
         Route::patch('/agent/payment-methods/{method}/toggle', [AgentPaymentMethodController::class, 'toggle']);
         Route::patch('/agent/payment-methods/{method}/environment', [AgentPaymentMethodController::class, 'setEnvironment']);
         Route::put('/agent/payment-methods/{method}/config', [AgentPaymentMethodController::class, 'updateConfig']);
+    });
 
+    // Agen's own scoped shipping settings + store profile — on/off for the
+    // agen's own branch only, plus the agen's own credentials/rate config.
+    Route::middleware('role:agen')->group(function () {
         Route::get('/agent/shipping-providers', [AgentShippingProviderController::class, 'index']);
         Route::patch('/agent/shipping-providers/{provider}/toggle', [AgentShippingProviderController::class, 'toggle']);
         Route::put('/agent/shipping-providers/{provider}/config', [AgentShippingProviderController::class, 'updateConfig']);
