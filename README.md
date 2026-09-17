@@ -8,31 +8,33 @@ This document reflects the codebase as it actually exists today. It does not des
 
 ## 1. Project overview
 
-Prime Classy Cake & Cookies is a multi-agent (multi-branch) cake and cookies ordering platform. Each **agen** (agent/branch) runs its own storefront presence, stock, staff hierarchy, and delivery operation, while a single **super_admin** oversees the whole platform. Customers (**konsumen**) browse a shared product catalog, are attributed to a branch via a referral chain (agen → korsal → sales → konsumen), and can check out with courier, COD, manual bank transfer, or a payment gateway (Xendit, Tripay, or Stripe).
+Prime Classy Cake & Cookies is a multi-agent (multi-branch) cake and cookies ordering platform. Each **agen** (agent/branch) runs its own storefront presence, stock, staff hierarchy, and delivery operation, while a single **super_admin** oversees the whole platform. Customers (**konsumen**) browse a shared product catalog, are attributed to a branch via a referral chain (agen → korsal → sales → konsumen), and can check out with courier, COD, Down Payment (DP), manual bank transfer, or a payment gateway (Xendit, Tripay, or Stripe).
 
 ## 2. Features
 
 Implemented and working today:
 
-- Session-based (Sanctum SPA cookie) authentication, 7 roles: `super_admin`, `agen`, `korsal`, `sales`, `konsumen`, `admin`, `kurir`.
+- Session-based (Sanctum SPA cookie) authentication, 8 roles: `super_admin`, `agen`, `korsal`, `sales`, `konsumen`, `admin`, `keuangan`, `kurir`.
 - Role hierarchy with referral-code-based account creation (agen → korsal/sales, korsal → sales, sales/agen/korsal → konsumen).
 - Per-agent branch data isolation, enforced at query, policy, and service layers.
 - Catalog: products with optional variations, per-agent stock, per-product/variation fee configuration (agent fee, sales fee, courier fee).
 - Shop, cart, wishlist, checkout with delivery-date selection and a choice of courier ("kurir online", distance-priced) or expedition ("ekspedisi"/RajaOngkir) shipping.
-- Full order lifecycle: creation, per-item fulfillment adjustment, cancellation, per-item return/refund, additional-payment collection, per-shipment courier delivery tracking with photo proof.
-- Payment: Cash-on-delivery (with photo-proof + admin confirmation), manual bank transfer (with photo-proof + admin verification), and 3 payment gateways (Xendit, Tripay, Stripe) with signature-verified webhooks.
-- Shipping: OpenRouteService Directions V2 for internal road-route delivery and RajaOngkir/Komerce V2 for expedition rates. Credentials and pricing are scoped per agent; the backend recalculates every selected method when creating an order.
+- Full order lifecycle: creation, per-item fulfillment adjustment (recalculates the order's authoritative total via `OrderTotalCalculator`), cancellation, per-item return/refund driven by actual overpayment (never just "quantity went down"), additional-payment collection driven by actual outstanding balance (never just "quantity went up"), per-shipment courier delivery tracking with photo proof.
+- Payment: Cash-on-delivery (with photo-proof + admin confirmation), Down Payment / DP (partial payment + separate settlement/pelunasan flow), manual bank transfer (with photo-proof + admin verification), and 3 payment gateways (Xendit, Tripay, Stripe) with signature-verified webhooks. A canonical `PaymentSummaryService` (grand total, DP paid, total paid, remaining balance, payment status, additional-payment/refund amount+status) is the single source every surface (Order Detail, transaction report, Google Sheets) reads — never re-derived independently.
+- Thermal shipping-receipt printing: per-shipment (not per-order) pre-pickup / post-pickup receipt, 58mm/80mm, read-only (printing/reprinting never changes order/item/shipment state), scoped so a courier only ever sees their own assigned shipment's items.
+- Shipping: OpenRouteService Directions V2 for internal road-route delivery (`chargeable_distance_km = max(0, route_distance_km − minimum_distance_km)`, then `× rate_per_km`) and RajaOngkir/Komerce V2 for expedition rates. Credentials and pricing are scoped per agent; the backend recalculates every selected method when creating an order.
 - CMS: homepage content blocks, articles/news, static pages — all edited via a CKEditor 5 rich-text editor and sanitized server-side before storage.
 - Media upload pipeline with real MIME/type verification (not just extension checking).
 - Public website settings and a public "Contact Agent" directory.
 - 4-language backend message catalog (Indonesian, English, Arabic, Chinese).
-- Excel (.xlsx) export for 5 management reports (transactions, sales/korsal fees, cancellations & refunds, courier fees, agent fees).
+- Excel (.xlsx) export for 11 management reports (transactions, sales/korsal fees, cancellations & refunds, courier fees, agent fees, payment status, customers, korsal/sales rosters, sales' own customers).
 - A full backend audit trail (`ActivityLogger` → `activity_log` table) recording who did what, when, from which IP/user agent.
-- 236 automated backend tests (Feature-level, hitting real routes/policies/services against a real test database).
+- 500+ automated backend tests (Feature-level, hitting real routes/policies/services against a real test database; 517 passing on the last full suite run).
+- A real per-role dashboard frontend: a landing dashboard plus dedicated pages for orders/reports/finance/stock/users/CMS/Google Sheets/shipping & payment settings/courier operations — see `frontend/src/views/dashboard/` and `frontend/src/views/admin/`.
 
 **Known gaps** (not implemented — see the checklist in `FINAL_AUDIT_REPORT.md` for the authoritative, up-to-date status of every feature area):
-- No installer wizard (`/install`) — the backend is set up via the standard Laravel `.env` + `artisan migrate` flow described below, not a web-based first-run wizard.
-- No dedicated per-role dashboard frontend (Super Admin / Agen / Korsal / Sales / Admin / Kurir each need a real landing dashboard with navigation; today only a handful of individual admin settings pages exist — payment gateways, shipping settings, CMS, refunds/returns/additional-payments). Every backend API these would call already exists and is tested; only the frontend UI is missing.
+- No installer wizard is required to run locally, but production deployments typically use the browser-based `/install` wizard described in `BLUEPRINT.md` §3.1; the standard Laravel `.env` + `artisan migrate` flow below is the manual/dev alternative.
+- No way to add a brand-new product line to an *already-placed* order — fulfillment adjustment can only change the quantity of a product that was already on the order at checkout time.
 - No frontend dark-mode toggle and no frontend automated test suite yet.
 - No frontend language-switcher UI (the backend serves all 4 locales; the storefront currently renders in one locale at a time via `Accept-Language`/session state, with no visible switcher control).
 
@@ -106,7 +108,7 @@ primeclassy/
 │   ├── lang/                          # id / en / ar / zh message catalogs
 │   ├── public/                        # Apache/Nginx document root — index.php front controller + .htaccess
 │   ├── routes/api_v1.php              # the entire API surface
-│   ├── tests/Feature/                 # 236 automated tests
+│   ├── tests/Feature/                 # 500+ automated tests
 │   ├── SECURITY_AUDIT.md              # prior security audit + fixes
 │   ├── FINAL_AUDIT_REPORT.md          # final master audit (this pass)
 │   ├── .env.example                   # documented, secret-free environment template
@@ -402,7 +404,7 @@ php artisan migrate:fresh    # DESTRUCTIVE — drops every table first; local/de
 php artisan migrate:fresh --seed   # fresh schema + roles/languages/settings/payment-methods/shipping-providers, no demo users
 ```
 
-`backend/database/migrations/` (85 files) is the authoritative schema source; `database.sql` (§25) is a generated export of it, not a hand-maintained alternative — don't edit `database.sql` directly and expect it to affect the app.
+`backend/database/migrations/` (87 files as of this writing — check `ls backend/database/migrations | wc -l` for the current count) is the authoritative schema source; `database.sql` (§25) is a generated export of it, not a hand-maintained alternative — don't edit `database.sql` directly and expect it to affect the app.
 
 ### Transaction-only reset
 
@@ -425,7 +427,7 @@ requires `--force`; it never drops tables or disables foreign keys. See
 
 ## 25. database.sql import
 
-`backend/database.sql` is a structure-and-seed-only MySQL dump generated from the real migrations (`mysqldump` after `migrate:fresh --seed`). It contains the 7 fixed roles, the 4 languages, and Laravel's own `migrations` bookkeeping table — no user accounts, no products, no orders, no payment configuration. Use it as a faster alternative to running all 70 migrations one-by-one:
+`backend/database.sql` is a structure-and-seed-only MySQL dump generated from the real migrations (`mysqldump` after `migrate:fresh --seed`). It contains the 8 fixed roles, the 4 languages, and Laravel's own `migrations` bookkeeping table — no user accounts, no products, no orders, no payment configuration. Use it as a faster alternative to running every migration one-by-one — but regenerate it (`migrate:fresh --seed` + `mysqldump`) before relying on it if migrations have been added since it was last exported:
 
 ```bash
 mysql -u primeclassy -p primeclassy < backend/database.sql
