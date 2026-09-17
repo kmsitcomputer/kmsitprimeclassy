@@ -27,3 +27,8 @@ deploy/output/
 
 # Local task/notes scratch files — not part of the app.
 /DP.md
+
+# Local pre-change database dumps (e.g. before a transaction reset/cleanup) —
+# operational recovery artifacts that can contain real production data, never
+# app source; see docs/TRANSACTION-RESET-REPORT.md.
+/backups/
