@@ -86,8 +86,7 @@ export default {
   stockBadge: {
     loginToView: 'Sign in to view stock',
     outOfStock: 'Out of stock',
-    lowStock: '{quantity} left',
-    inStock: 'In stock',
+    stockCount: 'Stock: {quantity}',
   },
   passwordInput: {
     show: 'Show password',
@@ -291,6 +290,19 @@ export default {
     remainingBalance: 'Remaining Balance',
     dpSettlementHint: 'Remaining balance: {amount}. Requesting settlement creates a new transfer invoice for the customer.',
     requestSettlement: 'Request Settlement',
+    additionalPayment: 'Additional Payment',
+    refund: 'Refund',
+    none: 'None',
+    additionalPaymentStatus: {
+      pending: 'Awaiting Payment',
+      paid: 'Paid',
+      failed: 'Failed',
+    },
+    refundStatus: {
+      pending: 'Pending',
+      processed: 'Processed',
+      failed: 'Failed',
+    },
   },
   checkout: {
     title: 'Checkout',
@@ -362,11 +374,15 @@ export default {
       methodLabel: 'Shipping method:',
       rajaongkirHint: 'Courier rates (JNE/POS/TIKI)',
       openrouteHint: 'Fee based on distance traveled',
+      pickupHint: 'Collect it yourself in-store, free',
       note: 'Shipping fee is calculated automatically by the server based on the shipping method. The final fee appears on the Review step.',
       chooseCourierPrompt: 'Choose a courier:',
       noCourierOptions: 'No courier is available for this address right now — a fallback fee will be used.',
       courierOptionsError: 'Could not load courier options — a fallback fee will be used.',
       etdDays: '{days} days',
+      pickupAt: 'Pick up at:',
+      pickupDefaultName: 'Prime Classy Store',
+      pickupOpenMaps: 'Get Directions',
     },
     deliveryDate: {
       title: 'Delivery Date',
@@ -384,6 +400,8 @@ export default {
       dpNow: 'DP paid now: {amount}',
       dpRemaining: 'Remaining balance: {amount}',
       empty: 'No active payment methods yet. Contact the store admin.',
+      emptyExpedition: 'No payment method is currently available for Expedition shipping. Contact the store admin.',
+      expeditionRestriction: 'Expedition shipping can only be paid with Manual Bank Transfer.',
     },
     review: {
       title: 'Review Order',

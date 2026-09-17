@@ -84,8 +84,7 @@ export default {
   stockBadge: {
     loginToView: 'Masuk untuk lihat stok',
     outOfStock: 'Stok habis',
-    lowStock: 'Sisa {quantity}',
-    inStock: 'Stok tersedia',
+    stockCount: 'Stok: {quantity}',
   },
   passwordInput: {
     show: 'Lihat password',
@@ -289,6 +288,19 @@ export default {
     remainingBalance: 'Sisa Pembayaran',
     dpSettlementHint: 'Sisa pembayaran: {amount}. Meminta pelunasan akan membuat tagihan transfer baru untuk konsumen.',
     requestSettlement: 'Minta Pelunasan',
+    additionalPayment: 'Additional Payment',
+    refund: 'Refund',
+    none: 'Tidak Ada',
+    additionalPaymentStatus: {
+      pending: 'Menunggu Pembayaran',
+      paid: 'Lunas',
+      failed: 'Gagal',
+    },
+    refundStatus: {
+      pending: 'Pending',
+      processed: 'Sudah Diproses',
+      failed: 'Gagal',
+    },
   },
   checkout: {
     title: 'Checkout',
@@ -360,11 +372,15 @@ export default {
       methodLabel: 'Metode pengiriman:',
       rajaongkirHint: 'Tarif kurir (JNE/POS/TIKI)',
       openrouteHint: 'Ongkir berdasarkan jarak tempuh',
+      pickupHint: 'Ambil sendiri di toko, gratis',
       note: 'Ongkir dihitung otomatis oleh server sesuai metode pengiriman. Biaya final akan tampil di langkah Review.',
       chooseCourierPrompt: 'Pilih kurir ekspedisi:',
       noCourierOptions: 'Belum ada kurir tersedia untuk alamat ini — akan dipakai biaya cadangan.',
       courierOptionsError: 'Gagal memuat pilihan kurir — akan dipakai biaya cadangan.',
       etdDays: '{days} hari',
+      pickupAt: 'Ambil di:',
+      pickupDefaultName: 'Toko Prime Classy',
+      pickupOpenMaps: 'Buka Petunjuk Arah',
     },
     deliveryDate: {
       title: 'Tanggal Pengiriman',
@@ -382,6 +398,8 @@ export default {
       dpNow: 'DP dibayar sekarang: {amount}',
       dpRemaining: 'Sisa yang harus dibayar: {amount}',
       empty: 'Belum ada metode pembayaran aktif. Hubungi admin toko.',
+      emptyExpedition: 'Metode pembayaran untuk pengiriman Ekspedisi saat ini tidak tersedia. Hubungi admin toko.',
+      expeditionRestriction: 'Pengiriman Ekspedisi hanya dapat dibayar dengan Transfer Bank Manual.',
     },
     review: {
       title: 'Review Pesanan',

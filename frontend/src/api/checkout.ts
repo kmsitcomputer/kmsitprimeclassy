@@ -3,9 +3,17 @@ import type { ApiEnvelope } from './client'
 import type { CheckoutQuote, CheckoutStepsResponse, CourierOption, CourierSelection } from './types'
 import type { CheckoutDestination, OrderLine } from './orders'
 
-/** Dynamic step list the wizard renders from — never hard-coded in the frontend. */
-export async function getCheckoutSteps() {
-  const { data } = await http.get<ApiEnvelope<CheckoutStepsResponse>>('/checkout/steps')
+/**
+ * Dynamic step list the wizard renders from — never hard-coded in the
+ * frontend. `shippingMethod` (once chosen) narrows `payment_methods` to
+ * whatever is actually compatible (e.g. Ekspedisi -> Manual Transfer only) —
+ * see AvailablePaymentMethodService. Omit it while shipping hasn't been
+ * picked yet.
+ */
+export async function getCheckoutSteps(shippingMethod?: string | null) {
+  const { data } = await http.get<ApiEnvelope<CheckoutStepsResponse>>('/checkout/steps', {
+    params: shippingMethod ? { shipping_method: shippingMethod } : undefined,
+  })
   return data.data
 }
 

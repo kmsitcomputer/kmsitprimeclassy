@@ -155,8 +155,16 @@ export interface PaymentSummary {
   /** All verified money received so far, DP + settlement combined. */
   total_paid: number
   remaining_balance: number
+  /** max(0, total_paid - grand_total) — the canonical refund-eligibility signal; > 0 only when real money received exceeds the current bill. */
+  overpaid_amount: number
   payment_status: string
   is_fully_paid: boolean
+  /** Outstanding (pending) additional-payment obligation only — once paid it folds into total_paid and this returns to 0. */
+  additional_payment_amount: number
+  additional_payment_status: string | null
+  /** Outstanding (pending) refund obligation only — once processed it folds out of total_paid and this returns to 0. */
+  refund_amount: number
+  refund_status: string | null
 }
 
 export interface CheckoutStep {
@@ -166,8 +174,16 @@ export interface CheckoutStep {
 }
 
 export interface ShippingMethod {
-  code: 'rajaongkir' | 'openroute'
+  code: 'rajaongkir' | 'openroute' | 'pickup'
   label: string
+}
+
+export interface PickupLocation {
+  store_name: string | null
+  address: string | null
+  latitude: number | null
+  longitude: number | null
+  phone: string | null
 }
 
 export interface CheckoutStepsResponse {
@@ -176,8 +192,10 @@ export interface CheckoutStepsResponse {
   shipping_enabled: boolean
   /** True only when OpenRoute is the active provider — gates the Google Maps picker/autocomplete. */
   map_picker_enabled: boolean
-  /** "Ekspedisi" (RajaOngkir) / "Kurir Online" (OpenRoute) — only more than one entry when both are active. */
+  /** "Ekspedisi" (RajaOngkir) / "Kurir Online" (OpenRoute) / "Pickup" — only more than one entry when more than one is available. */
   shipping_methods: ShippingMethod[]
+  /** The order's own agent's store — where to collect when shipping_method = 'pickup'. Null until an agent is resolvable. */
+  pickup_location: PickupLocation | null
   payment_methods: PaymentMethod[]
 }
 

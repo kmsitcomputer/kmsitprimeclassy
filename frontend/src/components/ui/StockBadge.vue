@@ -38,12 +38,12 @@ const state = computed<'hidden' | 'out' | 'low' | 'in'>(() => {
     v-else-if="state === 'low'"
     class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
   >
-    {{ t('stockBadge.lowStock', { quantity }) }}
+    {{ t('stockBadge.stockCount', { quantity }) }}
   </span>
   <span
     v-else
     class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
   >
-    {{ t('stockBadge.inStock') }}
+    {{ t('stockBadge.stockCount', { quantity }) }}
   </span>
 </template>

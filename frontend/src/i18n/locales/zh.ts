@@ -86,8 +86,7 @@ export default {
   stockBadge: {
     loginToView: '登录后查看库存',
     outOfStock: '已售罄',
-    lowStock: '仅剩 {quantity} 件',
-    inStock: '现货充足',
+    stockCount: '库存：{quantity}',
   },
   passwordInput: {
     show: '显示密码',
@@ -291,6 +290,19 @@ export default {
     remainingBalance: '剩余应付',
     dpSettlementHint: '剩余应付：{amount}。请求结算将为客户生成新的转账账单。',
     requestSettlement: '请求结算',
+    additionalPayment: '追加付款',
+    refund: '退款',
+    none: '无',
+    additionalPaymentStatus: {
+      pending: '待付款',
+      paid: '已付款',
+      failed: '失败',
+    },
+    refundStatus: {
+      pending: '待处理',
+      processed: '已处理',
+      failed: '失败',
+    },
   },
   checkout: {
     title: '结算',
@@ -362,11 +374,15 @@ export default {
       methodLabel: '配送方式:',
       rajaongkirHint: '快递运费(JNE/POS/TIKI)',
       openrouteHint: '按行驶距离计费',
+      pickupHint: '到店自取,免费',
       note: '运费由服务器根据配送方式自动计算,最终费用将显示在确认步骤中。',
       chooseCourierPrompt: '请选择快递公司:',
       noCourierOptions: '该地址暂无可用快递 —— 将使用备用运费。',
       courierOptionsError: '无法加载快递选项 —— 将使用备用运费。',
       etdDays: '{days} 天',
+      pickupAt: '自取地点:',
+      pickupDefaultName: 'Prime Classy 门店',
+      pickupOpenMaps: '打开导航',
     },
     deliveryDate: {
       title: '配送日期',
@@ -384,6 +400,8 @@ export default {
       dpNow: '现在支付的定金:{amount}',
       dpRemaining: '剩余应付金额:{amount}',
       empty: '暂无可用的支付方式,请联系店铺管理员。',
+      emptyExpedition: '快递配送目前没有可用的付款方式,请联系店铺管理员。',
+      expeditionRestriction: '快递配送仅支持银行转账付款。',
     },
     review: {
       title: '确认订单',

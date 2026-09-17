@@ -17,6 +17,24 @@ export function isGoogleMapsConfigured(): boolean {
   return Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY)
 }
 
+/**
+ * Google's auth-failure callback (`window.gm_authFailure`) fires for
+ * RefererNotAllowedMapError / InvalidKeyMapError / ApiNotActivatedMapError /
+ * billing-disabled — all AFTER the base script has already loaded
+ * successfully (loadGoogleMaps()'s own promise already resolved by then), so
+ * this is the only hook that ever tells us about them. It fires as a side
+ * effect of the page's first `new google.maps.Map(...)` call, asynchronously
+ * and outside any promise/try-catch a caller could wrap around that call —
+ * consumers (AddressMapPicker) subscribe here instead of expecting an
+ * exception that Google never throws for this failure class.
+ */
+const authFailureListeners = new Set<() => void>()
+
+export function onGoogleMapsAuthFailure(listener: () => void): () => void {
+  authFailureListeners.add(listener)
+  return () => authFailureListeners.delete(listener)
+}
+
 export function loadGoogleMaps(): Promise<GoogleNamespace> {
   if (loadPromise) return loadPromise
 
@@ -25,6 +43,10 @@ export function loadGoogleMaps(): Promise<GoogleNamespace> {
     if (!key) {
       reject(new Error('VITE_GOOGLE_MAPS_API_KEY is not configured'))
       return
+    }
+
+    ;(window as unknown as { gm_authFailure?: () => void }).gm_authFailure = () => {
+      authFailureListeners.forEach((listener) => listener())
     }
 
     const callbackName = '__onGoogleMapsLoaded'

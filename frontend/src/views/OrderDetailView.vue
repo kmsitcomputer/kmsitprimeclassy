@@ -16,6 +16,7 @@ import type { Order, OrderItem } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
 import { ApiError } from '@/api/client'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
+import GoogleMapView from '@/components/maps/GoogleMapView.vue'
 
 const props = defineProps<{ id: number }>()
 const { t } = useI18n()
@@ -69,6 +70,23 @@ const canOfferDpSettlement = computed(() => {
 })
 const requestingSettlement = ref(false)
 
+function additionalPaymentStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    pending: t('orders.additionalPaymentStatus.pending'),
+    paid: t('orders.additionalPaymentStatus.paid'),
+    failed: t('orders.additionalPaymentStatus.failed'),
+  }
+  return map[status] ?? status
+}
+function refundStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    pending: t('orders.refundStatus.pending'),
+    processed: t('orders.refundStatus.processed'),
+    failed: t('orders.refundStatus.failed'),
+  }
+  return map[status] ?? status
+}
+
 async function requestSettlement() {
   if (!order.value) return
   requestingSettlement.value = true
@@ -105,13 +123,17 @@ const canSeeDeliveryMap = computed(() => auth.can('orders.manage.shipment'))
 const showDeliveryMap = computed(
   () => canSeeDeliveryMap.value && order.value?.shipping_provider === 'openroute' && !!order.value?.latitude && !!order.value?.longitude,
 )
-/** Google Maps Embed API — a plain iframe (no WebGL/JS SDK involved), reusing the same key as the checkout picker. Requires "Maps Embed API" enabled on that key in Google Cloud Console. */
-const googleMapsEmbedUrl = computed(() => {
-  if (!order.value?.latitude || !order.value?.longitude) return ''
-  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
-  if (!key) return ''
-  return `https://www.google.com/maps/embed/v1/view?key=${encodeURIComponent(key)}&center=${order.value.latitude},${order.value.longitude}&zoom=16`
-})
+/**
+ * Same Google Maps JS SDK rendering path as the checkout address picker
+ * (AddressMapPicker.vue / GoogleMapView.vue) — used whenever a key is
+ * configured, instead of the separate Embed iframe API, so there's one
+ * consistent Google Maps code path across the whole app. Falls back to a
+ * plain OpenStreetMap embed only when no API key is configured at all
+ * (osm.org's own vector-tile renderer needs WebGL, unlike this JS-SDK path).
+ */
+const showGoogleMap = computed(() => isGoogleMapsConfigured())
+const deliveryLat = computed(() => Number(order.value?.latitude))
+const deliveryLng = computed(() => Number(order.value?.longitude))
 const openStreetMapEmbedUrl = computed(() => {
   if (!order.value?.latitude || !order.value?.longitude) return ''
   const lat = Number(order.value.latitude)
@@ -119,8 +141,6 @@ const openStreetMapEmbedUrl = computed(() => {
   const d = 0.003
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&marker=${lat}%2C${lng}`
 })
-/** Google Maps Embed when a key is configured (no WebGL dependency, unlike openstreetmap.org's own vector-tile renderer); falls back to the OpenStreetMap embed when no key is set. */
-const mapEmbedUrl = computed(() => (isGoogleMapsConfigured() ? googleMapsEmbedUrl.value : openStreetMapEmbedUrl.value))
 const googleMapsUrl = computed(() => {
   if (!order.value?.latitude || !order.value?.longitude) return ''
   return `https://www.google.com/maps?q=${order.value.latitude},${order.value.longitude}`
@@ -633,7 +653,10 @@ async function submitReturn(item: OrderItem) {
           class="mt-3 block overflow-hidden rounded-xl border border-stone-200 dark:border-stone-700"
           :title="t('orders.openInGoogleMaps')"
         >
-          <iframe :src="mapEmbedUrl" class="h-48 w-full pointer-events-none" loading="lazy" :title="t('orders.deliveryLocation')" />
+          <div class="pointer-events-none h-48 w-full">
+            <GoogleMapView v-if="showGoogleMap" :latitude="deliveryLat" :longitude="deliveryLng" />
+            <iframe v-else :src="openStreetMapEmbedUrl" class="h-full w-full" loading="lazy" :title="t('orders.deliveryLocation')" />
+          </div>
           <span class="block bg-stone-50 px-3 py-1.5 text-center text-xs font-medium text-brand-600 dark:bg-stone-800 dark:text-brand-400">
             {{ t('orders.openInGoogleMaps') }}
           </span>
@@ -758,6 +781,26 @@ async function submitReturn(item: OrderItem) {
             <div class="flex justify-between">
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.remainingBalance') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.remaining_balance) }}</dd>
+            </div>
+            <div class="flex justify-between border-t border-stone-200 pt-1 dark:border-stone-700">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.additionalPayment') }}</dt>
+              <dd class="text-right font-medium text-stone-800 dark:text-stone-100">
+                <template v-if="order.payment_summary.additional_payment_status">
+                  {{ formatRupiah(order.payment_summary.additional_payment_amount) }}
+                  <span class="block text-[11px] font-normal text-stone-500 dark:text-stone-400">{{ additionalPaymentStatusLabel(order.payment_summary.additional_payment_status) }}</span>
+                </template>
+                <template v-else>{{ t('orders.none') }}</template>
+              </dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.refund') }}</dt>
+              <dd class="text-right font-medium text-stone-800 dark:text-stone-100">
+                <template v-if="order.payment_summary.refund_status">
+                  {{ formatRupiah(order.payment_summary.refund_amount) }}
+                  <span class="block text-[11px] font-normal text-stone-500 dark:text-stone-400">{{ refundStatusLabel(order.payment_summary.refund_status) }}</span>
+                </template>
+                <template v-else>{{ t('orders.none') }}</template>
+              </dd>
             </div>
           </dl>
         </div>

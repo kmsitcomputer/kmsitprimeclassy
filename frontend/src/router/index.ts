@@ -237,7 +237,9 @@ const router = createRouter({
       path: '/dashboard/agent/payment-methods',
       name: 'agent-payment-methods',
       component: () => import('@/views/dashboard/AgentPaymentMethodsView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['agen'] },
+      // Admin manages their own agent's payment methods too — same backend
+      // route group (role:agen,admin) and agent_id-scoped controller.
+      meta: { requiresAuth: true, requiresAnyRole: ['agen', 'admin'] },
     },
     {
       path: '/dashboard/agent/shipping-providers',

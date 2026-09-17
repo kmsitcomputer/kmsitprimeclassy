@@ -16,6 +16,7 @@ import { ApiError } from '@/api/client'
 import { formatRupiah } from '@/utils/format'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
 import AddressMapPicker from '@/components/checkout/AddressMapPicker.vue'
+import GoogleMapView from '@/components/maps/GoogleMapView.vue'
 import type {
   CheckoutStepsResponse,
   CheckoutQuote,
@@ -62,9 +63,9 @@ const activeSteps = computed(() => stepsConfig.value?.steps.filter((s) => s.acti
 const currentStep = computed(() => activeSteps.value[currentIndex.value]?.key ?? null)
 const isLastBeforeConfirmation = computed(() => currentStep.value === 'review')
 
-async function loadSteps() {
+async function loadSteps(shippingMethod?: string | null) {
   loadingSteps.value = true
-  stepsConfig.value = await getCheckoutSteps()
+  stepsConfig.value = await getCheckoutSteps(shippingMethod)
   loadingSteps.value = false
 }
 
@@ -236,11 +237,14 @@ const addressComplete = computed(
 const shippingMethods = computed(() => stepsConfig.value?.shipping_methods ?? [])
 const selectedShippingMethod = ref<string | null>(null)
 
-// Only one provider active -> nothing to choose, pre-select it automatically.
+// Only one method available -> nothing to choose, pre-select it automatically.
 watch(shippingMethods, (methods) => {
   if (methods.length === 1) selectedShippingMethod.value = methods[0]!.code
   else if (methods.length === 0) selectedShippingMethod.value = null
 })
+
+/** Where "Pickup" actually is — the order's own agent's store (Google Maps only ever visualizes this; never used for a shipping-cost calculation). */
+const pickupLocation = computed(() => stepsConfig.value?.pickup_location ?? null)
 
 /* ---------- Referral step: "order on behalf of a konsumen" picker (agen/korsal/sales only) ---------- */
 const konsumenSearch = ref('')
@@ -295,6 +299,24 @@ const selectedPaymentMethod = computed(() => paymentMethods.value.find((m) => m.
 const isDpSelected = computed(() => selectedPaymentCode.value === 'down_payment')
 /** DP nominal paid now — the server re-validates it against the recomputed total (0 < dp < total). */
 const dpAmount = ref<string>('')
+
+/**
+ * Shipping method decides which payment methods are even compatible (e.g.
+ * Ekspedisi -> Manual Transfer only, see AvailablePaymentMethodService on
+ * the backend — this refetch is UX only, the backend re-validates
+ * authoritatively at order creation regardless). Re-pulls `payment_methods`
+ * for the newly chosen shipping method, and clears a payment selection
+ * (DP nominal included) that's no longer valid under it instead of
+ * silently submitting a stale one.
+ */
+watch(selectedShippingMethod, async (method, previous) => {
+  if (method === previous) return
+  await loadSteps(method)
+  if (selectedPaymentCode.value && !paymentMethods.value.some((m) => m.code === selectedPaymentCode.value)) {
+    selectedPaymentCode.value = null
+    dpAmount.value = ''
+  }
+})
 
 /* ---------- Quote (server-computed totals — never invented on the frontend) ---------- */
 const quote = ref<CheckoutQuote | null>(null)
@@ -720,7 +742,13 @@ async function refreshOrderStatus() {
               <input v-model="selectedShippingMethod" type="radio" :value="method.code" class="accent-brand-600" />
               <span class="font-medium text-stone-800 dark:text-stone-100">{{ method.label }}</span>
               <span class="text-xs text-stone-400">
-                {{ method.code === 'rajaongkir' ? t('checkout.shipping.rajaongkirHint') : t('checkout.shipping.openrouteHint') }}
+                {{
+                  method.code === 'rajaongkir'
+                    ? t('checkout.shipping.rajaongkirHint')
+                    : method.code === 'openroute'
+                      ? t('checkout.shipping.openrouteHint')
+                      : t('checkout.shipping.pickupHint')
+                }}
               </span>
             </label>
           </template>
@@ -763,6 +791,29 @@ async function refreshOrderStatus() {
             </template>
           </div>
 
+          <!-- Pickup: show where to collect — Google Maps for visual location only, never used for a shipping-cost calculation (Pickup is always Rp0). -->
+          <div v-if="selectedShippingMethod === 'pickup' && pickupLocation" class="space-y-2 border-t border-stone-100 pt-3 dark:border-stone-800">
+            <p class="text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('checkout.shipping.pickupAt') }}</p>
+            <p class="text-sm text-stone-800 dark:text-stone-100">{{ pickupLocation.store_name ?? t('checkout.shipping.pickupDefaultName') }}</p>
+            <p v-if="pickupLocation.address" class="text-sm text-stone-600 dark:text-stone-300">{{ pickupLocation.address }}</p>
+            <p v-if="pickupLocation.phone" class="text-xs text-stone-400">{{ pickupLocation.phone }}</p>
+            <div v-if="pickupLocation.latitude != null && pickupLocation.longitude != null" class="h-48 w-full overflow-hidden rounded-xl border border-stone-200 dark:border-stone-700">
+              <GoogleMapView v-if="isGoogleMapsConfigured()" :latitude="pickupLocation.latitude" :longitude="pickupLocation.longitude" />
+              <p v-else class="flex h-full items-center justify-center bg-stone-50 px-3 text-center text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                {{ pickupLocation.address }}
+              </p>
+            </div>
+            <a
+              v-if="pickupLocation.latitude != null && pickupLocation.longitude != null"
+              :href="`https://www.google.com/maps?q=${pickupLocation.latitude},${pickupLocation.longitude}`"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-block text-xs font-medium text-brand-600 dark:text-brand-400"
+            >
+              {{ t('checkout.shipping.pickupOpenMaps') }}
+            </a>
+          </div>
+
           <p class="text-xs text-stone-400">
             {{ t('checkout.shipping.note') }}
           </p>
@@ -778,6 +829,9 @@ async function refreshOrderStatus() {
         <!-- Step: Payment -->
         <div v-else-if="currentStep === 'payment'" class="space-y-3">
           <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">{{ t('checkout.payment.title') }}</h2>
+          <p v-if="selectedShippingMethod === 'rajaongkir' && paymentMethods.length" class="rounded-lg bg-stone-50 p-2.5 text-xs text-stone-500 dark:bg-stone-800/60 dark:text-stone-400">
+            {{ t('checkout.payment.expeditionRestriction') }}
+          </p>
           <label
             v-for="method in paymentMethods"
             :key="method.code"
@@ -803,7 +857,9 @@ async function refreshOrderStatus() {
             <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">{{ t('checkout.payment.dpInputHint') }}</p>
           </div>
 
-          <p v-if="!paymentMethods.length" class="text-sm text-stone-400">{{ t('checkout.payment.empty') }}</p>
+          <p v-if="!paymentMethods.length" class="text-sm text-stone-400">
+            {{ selectedShippingMethod === 'rajaongkir' ? t('checkout.payment.emptyExpedition') : t('checkout.payment.empty') }}
+          </p>
         </div>
 
         <!-- Step: Review -->

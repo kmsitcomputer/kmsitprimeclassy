@@ -248,7 +248,9 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Metode Pembayaran Saya',
         routeName: 'agent-payment-methods',
         icon: 'credit-card',
-        show: (auth) => isRole(auth, 'agen'),
+        // Admin manages their own agent's payment methods too — same
+        // backend scope (role:agen,admin, agent_id-resolved).
+        show: (auth) => isRole(auth, 'agen', 'admin'),
       },
       {
         key: 'agent-shipping-providers',

@@ -86,8 +86,7 @@ export default {
   stockBadge: {
     loginToView: 'سجّل الدخول لعرض المخزون',
     outOfStock: 'نفدت الكمية',
-    lowStock: 'متبقٍ {quantity}',
-    inStock: 'متوفر بالمخزون',
+    stockCount: 'المخزون: {quantity}',
   },
   passwordInput: {
     show: 'إظهار كلمة المرور',
@@ -291,6 +290,19 @@ export default {
     remainingBalance: 'الرصيد المتبقي',
     dpSettlementHint: 'الرصيد المتبقي: {amount}. سيؤدي طلب التسوية إلى إنشاء فاتورة تحويل جديدة للعميل.',
     requestSettlement: 'طلب التسوية',
+    additionalPayment: 'دفعة إضافية',
+    refund: 'استرداد',
+    none: 'لا يوجد',
+    additionalPaymentStatus: {
+      pending: 'بانتظار الدفع',
+      paid: 'مدفوع',
+      failed: 'فشل',
+    },
+    refundStatus: {
+      pending: 'قيد الانتظار',
+      processed: 'تمت المعالجة',
+      failed: 'فشل',
+    },
   },
   checkout: {
     title: 'الدفع',
@@ -362,11 +374,15 @@ export default {
       methodLabel: 'طريقة الشحن:',
       rajaongkirHint: 'أسعار شركات الشحن (JNE/POS/TIKI)',
       openrouteHint: 'الرسوم حسب المسافة المقطوعة',
+      pickupHint: 'استلام ذاتي من المتجر، مجانًا',
       note: 'يتم احتساب رسوم الشحن تلقائيًا بواسطة الخادم حسب طريقة الشحن. ستظهر الرسوم النهائية في خطوة المراجعة.',
       chooseCourierPrompt: 'اختر شركة الشحن:',
       noCourierOptions: 'لا توجد شركة شحن متاحة لهذا العنوان حاليًا — سيتم استخدام رسوم بديلة.',
       courierOptionsError: 'تعذر تحميل خيارات شركة الشحن — سيتم استخدام رسوم بديلة.',
       etdDays: '{days} أيام',
+      pickupAt: 'الاستلام من:',
+      pickupDefaultName: 'متجر برايم كلاسي',
+      pickupOpenMaps: 'فتح الاتجاهات',
     },
     deliveryDate: {
       title: 'تاريخ التسليم',
@@ -384,6 +400,8 @@ export default {
       dpNow: 'الدفعة المقدمة المدفوعة الآن: {amount}',
       dpRemaining: 'الرصيد المتبقي: {amount}',
       empty: 'لا توجد طرق دفع نشطة بعد. تواصل مع مسؤول المتجر.',
+      emptyExpedition: 'لا توجد طريقة دفع متاحة حاليًا للشحن عبر شركة الشحن. تواصل مع مسؤول المتجر.',
+      expeditionRestriction: 'يمكن دفع الشحن عبر شركة الشحن بالتحويل البنكي اليدوي فقط.',
     },
     review: {
       title: 'مراجعة الطلب',
