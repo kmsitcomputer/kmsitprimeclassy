@@ -13,15 +13,23 @@ class HierarchyRules
     /** @var array<string, list<string>> creator role slug => roles it may create */
     public const ALLOWED_CREATIONS = [
         'super_admin' => ['agen'],
-        'agen' => ['korsal', 'sales', 'admin', 'keuangan', 'kurir'],
-        'korsal' => ['sales'],
+        'agen' => ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir'],
+        'korsal' => ['sales', 'sales-kurir'],
     ];
 
-    /** Roles that own a referral_code (Blueprint: agen/korsal/sales do, konsumen/admin/keuangan/kurir don't). */
-    public const ROLES_WITH_REFERRAL_CODE = ['agen', 'korsal', 'sales'];
+    /** Roles that own a referral_code. */
+    public const ROLES_WITH_REFERRAL_CODE = ['agen', 'korsal', 'sales', 'sales-kurir'];
+
+    /** Explicit prefixes preserve semantic uniqueness when role names change. */
+    public const REFERRAL_PREFIXES = [
+        'agen' => 'AG-',
+        'korsal' => 'KO-',
+        'sales' => 'SA-',
+        'sales-kurir' => 'SK-',
+    ];
 
     /** Roles that must always have a non-null agent_id ("wajib terhubung ke agen"). */
-    public const ROLES_REQUIRING_AGENT_LINK = ['korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir'];
+    public const ROLES_REQUIRING_AGENT_LINK = ['korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir'];
 
     public static function canCreate(string $creatorRoleSlug, string $targetRoleSlug): bool
     {

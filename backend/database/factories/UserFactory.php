@@ -74,6 +74,16 @@ class UserFactory extends Factory
         return $this->withRole('kurir');
     }
 
+    public function gudang(): static
+    {
+        return $this->withRole('gudang');
+    }
+
+    public function salesKurir(): static
+    {
+        return $this->withRole('sales-kurir');
+    }
+
     public function unverified(): static
     {
         return $this->state(fn (array $attributes) => [

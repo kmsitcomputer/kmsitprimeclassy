@@ -48,7 +48,7 @@ class ReturnSystemTest extends TestCase
     /** @return array{order: Order, item: OrderItem} */
     private function makeDeliveredOrder(User $agen, User $admin, User $konsumen, int $price = 100000, int $qty = 3, int $stock = 10): array
     {
-        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(), 
+        $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
             'name' => 'Returnable Cake', 'slug' => 'returnable-cake-'.uniqid(),
             'has_variations' => false, 'base_price' => $price, 'weight_grams' => 500, 'status' => 'active',
         ]);
@@ -99,7 +99,7 @@ class ReturnSystemTest extends TestCase
     public function test_return_is_rejected_before_item_is_terkirim(): void
     {
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
-        $product = Product::create(['sku' => 'TEST-'.\Illuminate\Support\Str::uuid(), 'name' => 'Not Yet Delivered', 'slug' => 'nyd-'.uniqid(), 'has_variations' => false, 'base_price' => 50000, 'weight_grams' => 500, 'status' => 'active']);
+        $product = Product::create(['sku' => 'TEST-'.Str::uuid(), 'name' => 'Not Yet Delivered', 'slug' => 'nyd-'.uniqid(), 'has_variations' => false, 'base_price' => 50000, 'weight_grams' => 500, 'status' => 'active']);
         ProductStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 5, 'quantity_reserved' => 0]);
 
         $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
@@ -160,13 +160,19 @@ class ReturnSystemTest extends TestCase
         $review = $this->actingAs($admin)->patchJson("/api/v1/admin/returns/{$returnId}/review", ['approved' => true]);
         $review->assertOk()->assertJsonPath('data.status', 'approved');
 
-        // Restocked: 2 units added back on hand.
+        // Review approves the return but does not restock before condition inspection.
         $stockAfter = ProductStock::withoutGlobalScopes()->where('product_id', $item->product_id)->first()->quantity_on_hand;
-        $this->assertEquals($stockBefore + 2, $stockAfter);
+        $this->assertEquals($stockBefore, $stockAfter);
 
         $returnItem = ReturnItem::where('order_item_id', $item->id)->firstOrFail();
         $this->assertSame('approved', $returnItem->status);
         $this->assertSame('pending', $returnItem->refund_status);
+
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $this->actingAs($gudang)->postJson("/api/v1/warehouse/returns/{$returnItem->id}/inspect", [
+            'received_quantity' => 2, 'good_quantity' => 2, 'damaged_quantity' => 0,
+        ])->assertOk();
+        $this->assertDatabaseHas('warehouse_stocks', ['agent_id' => $agen->id, 'product_id' => $item->product_id, 'stock_type' => 'transit', 'quantity' => 2]);
 
         // The order was COD and already delivered — Keuangan has collected the
         // cash and marked it paid, so the refund is now a valid post-paid

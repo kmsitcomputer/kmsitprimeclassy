@@ -32,3 +32,6 @@ deploy/output/
 # operational recovery artifacts that can contain real production data, never
 # app source; see docs/TRANSACTION-RESET-REPORT.md.
 /backups/
+
+# Local point-in-time recovery material; may contain production database data.
+/recovery/*.sql

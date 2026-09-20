@@ -9,7 +9,64 @@
  * Typed loosely (no @types/google.maps dependency) since this project only
  * touches a handful of Maps/Places APIs directly.
  */
-type GoogleNamespace = Record<string, any>
+export interface GoogleMapsLatLng {
+  lat: number
+  lng: number
+}
+
+export interface GoogleMapsClickEvent {
+  latLng: {
+    lat(): number
+    lng(): number
+  }
+}
+
+export interface GoogleMapInstance {
+  panTo(position: GoogleMapsLatLng): void
+  setCenter(position: GoogleMapsLatLng): void
+  addListener(event: 'click', handler: (e: GoogleMapsClickEvent) => void): void
+}
+
+export interface GoogleMarkerInstance {
+  position: GoogleMapsLatLng
+  addListener(event: string, handler: () => void): void
+}
+
+export interface GooglePlaceLocation {
+  lat(): number
+  lng(): number
+}
+
+export interface GooglePlace {
+  fetchFields(options: { fields: string[] }): Promise<{
+    location?: GooglePlaceLocation | null
+    formattedAddress?: string
+    displayName?: string
+  } | null>
+  location?: GooglePlaceLocation | null
+  formattedAddress?: string
+  displayName?: string
+}
+
+export type PlaceAutocompleteElement = HTMLElement & {
+  addEventListener(type: 'gmp-select', listener: (event: Event) => void): void
+}
+
+export interface GoogleMapsNamespace {
+  maps: {
+    Map: new (element: HTMLElement, options?: Record<string, unknown>) => GoogleMapInstance
+    importLibrary(name: string): Promise<Record<string, unknown>>
+    marker: {
+      AdvancedMarkerElement: new (options: {
+        map: GoogleMapInstance
+        position: GoogleMapsLatLng
+        gmpDraggable?: boolean
+      }) => GoogleMarkerInstance
+    }
+  }
+}
+
+type GoogleNamespace = GoogleMapsNamespace
 
 let loadPromise: Promise<GoogleNamespace> | null = null
 

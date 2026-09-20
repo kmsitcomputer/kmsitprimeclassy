@@ -80,6 +80,23 @@ class ReturnController extends Controller
         return $this->ok($item->fresh(), __('messages.return.refund_marked'));
     }
 
+    public function inspect(Request $request, ReturnItem $item)
+    {
+        $return = $item->returnRequest;
+        $this->authorizeBranch($request, $return);
+        $data = $request->validate([
+            'received_quantity' => ['required', 'integer', 'min:0'],
+            'good_quantity' => ['required', 'integer', 'min:0'],
+            'damaged_quantity' => ['required', 'integer', 'min:0'],
+            'note' => ['nullable', 'string', 'max:255'],
+        ]);
+        if (! $request->user()->isRole('gudang')) {
+            abort(403);
+        }
+
+        return $this->ok($this->returnService->inspectReturn($item, $request->user(), $data['received_quantity'], $data['good_quantity'], $data['damaged_quantity'], $data['note'] ?? null));
+    }
+
     private function authorizeBranch(Request $request, ReturnRequestModel $return): void
     {
         $actor = $request->user();

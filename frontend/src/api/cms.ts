@@ -2,10 +2,56 @@ import { http } from './client'
 import type { ApiEnvelope } from './client'
 import type { Article, Page } from './cmsContent'
 
+export interface HomepageContentArticle {
+  id: number
+  slug: string
+  title: string
+  cover_image_url?: string
+  published_at?: string
+}
+
+export interface HomepageContentCategory {
+  id: number
+  slug: string
+  name: string
+}
+
+export interface HomepageContentProduct {
+  id: number
+  slug: string
+  name: string
+  image_url?: string
+  has_variations?: boolean
+  base_price?: number
+}
+
+export interface HomepageBlockContent {
+  heading?: string
+  subheading?: string
+  body?: string
+  html?: string
+  cta_label?: string
+  cta_url?: string
+  button_label?: string
+  button_url?: string
+  url?: string
+  description?: string
+  alt?: string
+  image_url?: string
+  category_id?: number
+  category_ids?: number[]
+  product_ids?: number[]
+  article_ids?: number[]
+  limit?: number
+  articles?: HomepageContentArticle[]
+  categories?: HomepageContentCategory[]
+  products?: HomepageContentProduct[]
+}
+
 export interface HomepageBlock {
   id: number
   type: string
-  content: Record<string, any>
+  content: HomepageBlockContent
 }
 
 export async function getHomepage(): Promise<HomepageBlock[]> {

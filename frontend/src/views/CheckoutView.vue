@@ -61,7 +61,6 @@ const currentIndex = ref(0)
 
 const activeSteps = computed(() => stepsConfig.value?.steps.filter((s) => s.active) ?? [])
 const currentStep = computed(() => activeSteps.value[currentIndex.value]?.key ?? null)
-const isLastBeforeConfirmation = computed(() => currentStep.value === 'review')
 
 async function loadSteps(shippingMethod?: string | null) {
   loadingSteps.value = true

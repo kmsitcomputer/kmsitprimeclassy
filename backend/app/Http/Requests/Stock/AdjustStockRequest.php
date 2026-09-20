@@ -16,7 +16,8 @@ class AdjustStockRequest extends BaseFormRequest
     {
         // super_admin can browse/oversee stock (StockController::products/variations)
         // but never mutate it — "stok hanya untuk agen dan admin di bawah jaringan agen tersebut."
-        return $this->user()?->isRole('agen', 'admin') ?? false;
+        return ! config('warehouse.authoritative')
+            && ($this->user()?->isRole('agen', 'admin') ?? false);
     }
 
     public function rules(): array

@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\Fee\CommissionController;
 use App\Http\Controllers\Api\V1\Fee\FeeController;
 use App\Http\Controllers\Api\V1\Fulfillment\OrderFulfillmentController;
 use App\Http\Controllers\Api\V1\Install\InstallController;
+use App\Http\Controllers\Api\V1\Integration\SheetsController;
 use App\Http\Controllers\Api\V1\Language\LanguageController;
 use App\Http\Controllers\Api\V1\Media\MediaController;
 use App\Http\Controllers\Api\V1\Order\OrderController;
@@ -38,6 +39,12 @@ use App\Http\Controllers\Api\V1\Report\ReportController;
 use App\Http\Controllers\Api\V1\Return\ReturnController;
 use App\Http\Controllers\Api\V1\Settings\WebsiteSettingController;
 use App\Http\Controllers\Api\V1\Stock\StockController;
+use App\Http\Controllers\Api\V1\Stock\StockOpnameController;
+use App\Http\Controllers\Api\V1\Stock\StockRequestController;
+use App\Http\Controllers\Api\V1\Stock\StockTransferController;
+use App\Http\Controllers\Api\V1\Stock\WarehouseController;
+use App\Http\Controllers\Api\V1\Stock\WarehouseSettingsController;
+use App\Http\Controllers\Api\V1\Stock\WarehouseSubLocationController;
 use App\Http\Controllers\Api\V1\User\UserController;
 use App\Http\Controllers\Api\V1\Webhook\PaymentWebhookController;
 use Illuminate\Support\Facades\Route;
@@ -131,7 +138,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::patch('/profile/password', [ProfileController::class, 'updatePassword']);
 
     // Self-service referral code — agen/korsal/sales only (konsumen/admin/kurir never carry one).
-    Route::middleware('role:agen,korsal,sales')->group(function () {
+    Route::middleware('role:agen,korsal,sales,sales-kurir')->group(function () {
         Route::patch('/profile/referral-code', [ProfileController::class, 'updateReferralCode']);
         Route::post('/profile/referral-code/regenerate', [ProfileController::class, 'regenerateReferralCode']);
         Route::delete('/profile/referral-code', [ProfileController::class, 'deleteReferralCode']);
@@ -152,17 +159,19 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/users', [UserController::class, 'store']);
     });
 
-    Route::middleware('role:super_admin,agen,korsal,sales,admin,keuangan,kurir')->group(function () {
+    Route::middleware('role:super_admin,agen,korsal,sales,sales-kurir,admin,keuangan,kurir')->group(function () {
         Route::get('/users', [UserController::class, 'index']);
         Route::get('/users/{user}', [UserController::class, 'show']);
         Route::patch('/users/{user}', [UserController::class, 'update']);
         Route::delete('/users/{user}', [UserController::class, 'destroy']);
         Route::patch('/users/{user}/reassign-referral', [UserController::class, 'reassignReferral']);
+        Route::patch('/users/{user}/convert-to-sales-kurir', [UserController::class, 'convertToSalesKurir'])
+            ->middleware('role:agen');
     });
 
     // Order creation: konsumen for themselves, or agen/korsal/sales on behalf
     // of a konsumen in their own network (OrderPolicy::create enforces which).
-    Route::middleware(['role:konsumen,agen,korsal,sales', 'throttle:30,1'])->group(function () {
+    Route::middleware(['role:konsumen,agen,korsal,sales,sales-kurir', 'throttle:30,1'])->group(function () {
         Route::post('/checkout/quote', [CheckoutController::class, 'quote']);
         Route::post('/checkout/courier-options', [CheckoutController::class, 'courierOptions']);
         Route::post('/orders', [OrderController::class, 'store']);
@@ -197,7 +206,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // counterpart of the order-wide route above, scoped to one courier's own
     // batch of items (ShipmentPolicy/CourierService enforce WHOSE delivery
     // and WHICH transitions).
-    Route::middleware('role:super_admin,agen,admin,kurir')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir')->group(function () {
         Route::patch('/shipments/{shipment}/status', [ShipmentController::class, 'updateStatus']);
         // Thermal shipping receipt — read-only, before/after pickup mode is
         // derived server-side (ShipmentReceiptResource), never picked by the
@@ -223,6 +232,9 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/admin/returns/{return}', [ReturnController::class, 'show']);
         Route::patch('/admin/returns/{return}/review', [ReturnController::class, 'review']);
     });
+    Route::middleware('role:gudang')->group(function () {
+        Route::post('/warehouse/returns/{item}/inspect', [ReturnController::class, 'inspect']);
+    });
 
     // Refund / additional-payment ledgers stay READABLE by the operational
     // roles too (oversight), but only KEUANGAN (or super_admin) may change a
@@ -246,7 +258,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Kurir dashboard — "tidak boleh melakukan transaksi/mengubah harga/fee/
     // payment/melihat data agen lain": every action here is read-only or a
     // pure logistics status flip, scoped to the kurir's own agent branch.
-    Route::middleware('role:kurir')->group(function () {
+    Route::middleware('role:kurir,sales-kurir')->group(function () {
         Route::get('/kurir/orders', [CourierDashboardController::class, 'orders']);
         Route::get('/kurir/returns', [CourierDashboardController::class, 'returns']);
         Route::patch('/kurir/returns/{item}/pickup', [CourierDashboardController::class, 'pickupReturn']);
@@ -281,7 +293,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // and agen was deliberately given the same create/edit/publish rights as
     // super_admin here (confirmed decision, not an oversight): one agent can
     // create or edit any product, same as super_admin. See ProductPolicy.
-    Route::middleware('role:super_admin,agen')->group(function () {
+    Route::middleware('role:super_admin,agen,admin')->group(function () {
         Route::post('/products', [ProductController::class, 'store']);
         Route::patch('/products/{product}', [ProductController::class, 'update']);
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
@@ -299,9 +311,56 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // ?agent_id=) stays open to super_admin too, but MUTATING stock is
     // agen/admin-exclusive only — "stok hanya untuk agen dan admin di bawah
     // jaringan agen tersebut, super_admin tidak boleh mengubah stok."
-    Route::middleware('role:super_admin,agen,admin')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
         Route::get('/stock/products', [StockController::class, 'products']);
         Route::get('/stock/variations', [StockController::class, 'variations']);
+        Route::get('/warehouse-stock', [StockController::class, 'warehouse']);
+        Route::get('/warehouse/settings', [WarehouseSettingsController::class, 'show']);
+        Route::get('/warehouse/sellable', [WarehouseController::class, 'sellable']);
+    });
+    Route::patch('/warehouse/settings/factory-plan', [WarehouseSettingsController::class, 'update'])
+        ->middleware('role:admin');
+    Route::middleware('role:gudang')->group(function () {
+        Route::post('/warehouse/transit/receive', [WarehouseController::class, 'receive']);
+        Route::post('/warehouse/factory-plan', [WarehouseController::class, 'adjustPlan']);
+    });
+    Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
+        Route::get('/warehouse/transfers', [StockTransferController::class, 'index']);
+        Route::get('/warehouse/transfers/{transfer}', [StockTransferController::class, 'show']);
+        Route::get('/warehouse/handovers/{handover}', [StockTransferController::class, 'handover']);
+        Route::get('/warehouse/handovers/{handover}/print', [StockTransferController::class, 'printHandover']);
+        Route::get('/warehouse/sub-locations', [WarehouseSubLocationController::class, 'index']);
+        Route::get('/warehouse/sub-locations/{subLocation}', [WarehouseSubLocationController::class, 'show']);
+        Route::get('/warehouse/sub-locations/{subLocation}/stocks', [WarehouseSubLocationController::class, 'stocks']);
+    });
+    Route::middleware('role:agen,admin')->group(function () {
+        Route::post('/warehouse/sub-locations', [WarehouseSubLocationController::class, 'store']);
+        Route::patch('/warehouse/sub-locations/{subLocation}', [WarehouseSubLocationController::class, 'update']);
+        Route::post('/warehouse/sub-locations/{subLocation}/deactivate', [WarehouseSubLocationController::class, 'deactivate']);
+    });
+    Route::middleware('role:gudang')->group(function () {
+        Route::post('/warehouse/transfers', [StockTransferController::class, 'store']);
+        Route::post('/warehouse/transfers/{transfer}/complete', [StockTransferController::class, 'complete']);
+        Route::post('/warehouse/transfers/{transfer}/cancel', [StockTransferController::class, 'cancel']);
+        Route::post('/warehouse/opnames', [StockOpnameController::class, 'store']);
+        Route::patch('/warehouse/opnames/{opname}/count', [StockOpnameController::class, 'count']);
+        Route::post('/warehouse/opnames/{opname}/submit', [StockOpnameController::class, 'submit']);
+        Route::post('/warehouse/opnames/{opname}/cancel', [StockOpnameController::class, 'cancel']);
+    });
+    Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
+        Route::get('/warehouse/opnames', [StockOpnameController::class, 'index']);
+        Route::get('/warehouse/opnames/{opname}', [StockOpnameController::class, 'show']);
+    });
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/warehouse/opnames/{opname}/approve', [StockOpnameController::class, 'approve']);
+        Route::post('/warehouse/opnames/{opname}/reject', [StockOpnameController::class, 'reject']);
+    });
+    Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
+        Route::get('/warehouse/stock-requests', [StockRequestController::class, 'index']);
+        Route::get('/warehouse/stock-requests/{stockRequest}', [StockRequestController::class, 'show']);
+    });
+    Route::middleware('role:gudang')->group(function () {
+        Route::post('/warehouse/stock-requests/{stockRequest}/fulfill', [StockRequestController::class, 'fulfill']);
     });
     Route::middleware('role:agen,admin')->group(function () {
         Route::post('/stock/adjust', [StockController::class, 'adjust']);
@@ -338,14 +397,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
 
     // Sales' own konsumen roster + fee earned from each — never another
     // sales' customers, never agen-level fee (Blueprint §Sales dashboard).
-    Route::middleware('role:sales')->group(function () {
+    Route::middleware('role:sales,sales-kurir')->group(function () {
         Route::get('/reports/my-customers', [ReportController::class, 'salesCustomers']);
     });
 
     // Fee configuration — never kurir ("fee tidak boleh dilihat selain agen
     // dan super admin" for courier_fee specifically; FeeResource narrows it
     // further still for sales — see FeeResource docblock).
-    Route::middleware('role:super_admin,agen,sales')->group(function () {
+    Route::middleware('role:super_admin,agen,sales,sales-kurir')->group(function () {
         Route::get('/products/{product}/fees', [FeeController::class, 'showForProduct']);
         Route::get('/products/{product}/variations/{variation}/fees', [FeeController::class, 'showForVariation']);
     });
@@ -482,7 +541,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
 });
 
 Route::prefix('google-sheets')->middleware(['auth:sanctum', 'agent.linked', 'role:super_admin,agen,admin'])->group(function () {
-    $controller = \App\Http\Controllers\Api\V1\Integration\SheetsController::class;
+    $controller = SheetsController::class;
     Route::get('/', [$controller, 'index']);
     Route::post('/connection', [$controller, 'connection'])->middleware('throttle:10,1');
     Route::post('/destinations', [$controller, 'destination']);

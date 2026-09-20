@@ -35,9 +35,9 @@ class ReferralService
             // the user_closures adjacency list, regardless of which level
             // (sales/korsal/agen) they sit at.
             'parent_id' => $referrer->id,
-            'sales_id' => $roleSlug === 'sales' ? $referrer->id : null,
+            'sales_id' => in_array($roleSlug, ['sales', 'sales-kurir'], true) ? $referrer->id : null,
             'korsal_id' => match ($roleSlug) {
-                'sales' => $referrer->korsal_id,
+                'sales', 'sales-kurir' => $referrer->korsal_id,
                 'korsal' => $referrer->id,
                 default => null,
             },
@@ -83,7 +83,7 @@ class ReferralService
         $referralCode = strtoupper(trim($referralCode));
 
         $referrer = User::query()
-            ->whereHas('role', fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales']))
+            ->whereHas('role', fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir']))
             ->where('status', 'active')
             ->where('referral_code', $referralCode)
             ->with('role')

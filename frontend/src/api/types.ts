@@ -15,6 +15,7 @@ export interface ProductVariation {
   weight_grams: number
   is_active: boolean
   agent_available_quantity?: number
+  stock?: { available: number; in_stock: boolean; login_to_view: boolean }
 }
 
 export interface ProductImage {
@@ -41,6 +42,7 @@ export interface Product {
   variations: ProductVariation[]
   status: string
   agent_available_quantity?: number
+  stock?: { available: number; in_stock: boolean; login_to_view: boolean }
 }
 
 export interface PaginationMeta {

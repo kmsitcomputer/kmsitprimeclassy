@@ -10,6 +10,7 @@ class ReturnItem extends Model
     protected $fillable = [
         'return_id', 'order_item_id', 'courier_id', 'quantity_returned', 'refund_amount',
         'restock', 'condition_note', 'status', 'refund_status',
+        'quantity_received', 'good_quantity', 'damaged_quantity', 'condition_status', 'inspected_by', 'inspected_at', 'restock_processed_at', 'disposition_status',
     ];
 
     protected function casts(): array
@@ -25,6 +26,7 @@ class ReturnItem extends Model
             'courier_id' => 'integer',
             'refund_amount' => 'decimal:2',
             'restock' => 'boolean',
+            'quantity_received' => 'integer', 'good_quantity' => 'integer', 'damaged_quantity' => 'integer', 'inspected_by' => 'integer', 'inspected_at' => 'datetime', 'restock_processed_at' => 'datetime',
         ];
     }
 

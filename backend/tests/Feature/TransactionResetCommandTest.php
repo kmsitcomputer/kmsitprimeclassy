@@ -62,7 +62,7 @@ class TransactionResetCommandTest extends TestCase
             $this->assertDatabaseCount($table, 0);
         }
         $this->assertDatabaseCount('users', 2);
-        $this->assertDatabaseCount('roles', 8);
+        $this->assertDatabaseCount('roles', 10);
         $this->assertDatabaseHas('products', ['id' => $product->id, 'sku' => 'MASTER-001']);
         $this->assertDatabaseHas('product_fees', ['product_id' => $product->id, 'beneficiary_role' => 'agent', 'amount' => 1000]);
         $this->assertDatabaseHas('product_stocks', [

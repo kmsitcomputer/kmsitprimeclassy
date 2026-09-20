@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AgentPaymentGatewayConfig;
 use App\Models\AgentProfile;
 use App\Models\AgentShippingProviderConfig;
 use App\Models\Order;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Regency;
@@ -75,6 +77,16 @@ class ShippingProviderTest extends TestCase
             'village_id' => $this->seedTestVillage(),
             'latitude' => -6.914744, 'longitude' => 107.609810,
         ];
+    }
+
+    private function configureBankTransfer(User $agen): void
+    {
+        AgentPaymentGatewayConfig::create([
+            'agent_id' => $agen->id,
+            'payment_method_id' => PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'QA', 'account_number' => '123'],
+        ]);
     }
 
     /** Activates OpenRoute globally and configures this agen's own credentials + rate. */
@@ -499,6 +511,7 @@ class ShippingProviderTest extends TestCase
         Regency::where('id', $regencyId)->update(['rajaongkir_city_id' => '501']);
 
         $this->configureRajaOngkir($agen);
+        $this->configureBankTransfer($agen);
         // OpenRoute also enabled — RajaOngkir must win (precedence).
         $this->configureOpenRoute($agen, pricePerKm: 999999);
 
@@ -508,7 +521,7 @@ class ShippingProviderTest extends TestCase
         ]);
 
         $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
-            'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
+            'payment_method_code' => 'bank_transfer', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
         $response->assertCreated();
@@ -565,6 +578,7 @@ class ShippingProviderTest extends TestCase
         Regency::where('id', $regencyId)->update(['rajaongkir_city_id' => '501']);
 
         $this->configureRajaOngkir($agen);
+        $this->configureBankTransfer($agen);
 
         $this->fakeRajaOngkir([
             ['name' => 'JNE', 'code' => 'jne', 'service' => 'OKE', 'description' => 'Ekonomis', 'cost' => 18000, 'etd' => '2-3'],
@@ -572,7 +586,7 @@ class ShippingProviderTest extends TestCase
         ]);
 
         $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
-            'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method_code' => 'bank_transfer', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'courier' => 'jne', 'service' => 'REG', ...$this->destination(),
         ]);
 
@@ -722,8 +736,9 @@ class ShippingProviderTest extends TestCase
     {
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
 
+        ShippingProvider::query()->update(['is_active' => false]);
         $none = $this->actingAs($konsumen)->getJson('/api/v1/checkout/steps')->json('data.shipping_methods');
-        $this->assertEmpty($none);
+        $this->assertNotEmpty($none);
 
         $this->activateBothProvidersForMethodChoice($agen);
 
@@ -755,13 +770,14 @@ class ShippingProviderTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen, weightGrams: 500);
         $this->activateBothProvidersForMethodChoice($agen);
+        $this->configureBankTransfer($agen);
 
         $this->fakeRajaOngkir([
             ['name' => 'JNE', 'code' => 'jne', 'service' => 'OKE', 'description' => 'Ekonomis', 'cost' => 18000, 'etd' => '2-3'],
         ]);
 
         $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
-            'payment_method_code' => 'cod', 'shipping_method' => 'rajaongkir',
+            'payment_method_code' => 'bank_transfer', 'shipping_method' => 'rajaongkir',
             'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 

@@ -2,14 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Models\AgentPaymentGatewayConfig;
 use App\Models\AgentProfile;
+use App\Models\Commission;
 use App\Models\Courier;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\Order\CourierService;
 use App\Services\Report\OrderTransactionReportService;
 use App\Support\HumanDate;
 use Database\Seeders\PaymentMethodSeeder;
@@ -151,8 +155,6 @@ class ReportSystemTest extends TestCase
             'order_no', 'order_date', 'sku', 'product', 'unit_price', 'quantity',
             'item_status', 'subtotal', 'customer', 'delivery_date', 'courier',
             'order_status', 'sales', 'korsal',
-            'payment_method', 'grand_total', 'dp_paid', 'total_paid', 'remaining_balance', 'payment_status',
-            'additional_payment_status', 'refund_status',
         ], array_keys(OrderTransactionReportService::COLUMNS));
         $this->assertSame($order->order_no, $row['order_no']);
         $this->assertSame('Kue Laporan', $row['product']);
@@ -175,14 +177,14 @@ class ReportSystemTest extends TestCase
      * repeated identically on every row of the same order — never summed
      * across rows here (that's the financial-summary endpoints' job).
      */
-    public function test_transaction_report_shows_dp_paid_total_paid_and_remaining_balance_columns(): void
+    public function test_financial_payment_fields_are_not_part_of_the_canonical_transaction_item_report(): void
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue DP Report', 1000000, 10);
 
-        \App\Models\AgentPaymentGatewayConfig::create([
+        AgentPaymentGatewayConfig::create([
             'agent_id' => $branch['agen']->id,
-            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'payment_method_id' => PaymentMethod::where('code', 'bank_transfer')->value('id'),
             'environment' => 'sandbox',
             'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
         ]);
@@ -205,12 +207,9 @@ class ReportSystemTest extends TestCase
         $rows = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions')->json('data'));
         $row = $rows->firstWhere('order_id', $order->id);
         $this->assertNotNull($row);
-        $this->assertSame('DP / Down Payment', $row['payment_method']);
-        $this->assertSame(1000000.0, (float) $row['grand_total']);
-        $this->assertSame(200000.0, (float) $row['dp_paid']);
-        $this->assertSame(200000.0, (float) $row['total_paid']);
-        $this->assertSame(800000.0, (float) $row['remaining_balance']);
-        $this->assertSame('partially_paid', $row['payment_status']);
+        foreach (['payment_method', 'grand_total', 'dp_paid', 'total_paid', 'remaining_balance', 'payment_status'] as $financialField) {
+            $this->assertArrayNotHasKey($financialField, $row);
+        }
     }
 
     /**
@@ -219,15 +218,15 @@ class ReportSystemTest extends TestCase
      * across THIS item's own OrderItemAdjustment row(s) — never the order's
      * other item's ledger entry leaking onto a sibling row.
      */
-    public function test_transaction_report_shows_additional_payment_and_refund_status(): void
+    public function test_financial_adjustment_fields_are_not_part_of_the_canonical_transaction_item_report(): void
     {
         $branch = $this->makeAgentBranch();
         $productA = $this->makeProduct($branch['agen'], 'Produk A Laporan', 100000, 10);
         $productB = $this->makeProduct($branch['agen'], 'Produk B Laporan', 100000, 10);
 
-        \App\Models\AgentPaymentGatewayConfig::create([
+        AgentPaymentGatewayConfig::create([
             'agent_id' => $branch['agen']->id,
-            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'payment_method_id' => PaymentMethod::where('code', 'bank_transfer')->value('id'),
             'environment' => 'sandbox',
             'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
         ]);
@@ -265,10 +264,10 @@ class ReportSystemTest extends TestCase
         $rowA = $rows->firstWhere('order_item_id', $itemA->id);
         $rowB = $rows->firstWhere('order_item_id', $itemB->id);
 
-        $this->assertSame('pending', $rowA['refund_status']);
-        $this->assertNull($rowA['additional_payment_status']);
-        $this->assertSame('pending', $rowB['additional_payment_status']);
-        $this->assertNull($rowB['refund_status']);
+        foreach ([$rowA, $rowB] as $row) {
+            $this->assertArrayNotHasKey('additional_payment_status', $row);
+            $this->assertArrayNotHasKey('refund_status', $row);
+        }
     }
 
     public function test_transactions_report_uses_direct_agent_and_korsal_self_purchase_as_sales_referrer(): void
@@ -535,7 +534,7 @@ class ReportSystemTest extends TestCase
             'order_id' => $order->id, 'order_item_id' => $itemB->id, 'beneficiary_role' => 'courier',
             'beneficiary_user_id' => $secondKurir->id, 'amount' => 4000,
         ]);
-        $this->assertSame(2, \App\Models\Commission::where('order_id', $order->id)->where('beneficiary_role', 'courier')->count());
+        $this->assertSame(2, Commission::where('order_id', $order->id)->where('beneficiary_role', 'courier')->count());
 
         $feeReport = $this->actingAs($branch['agen'])->getJson('/api/v1/reports/fees/courier');
         $budiRow = collect($feeReport->json('data'))->firstWhere('courier_name', 'Budi Kurir');
@@ -561,17 +560,17 @@ class ReportSystemTest extends TestCase
         $this->deliverOrder($branch, $order);
 
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
-        $this->assertSame(1, \App\Models\Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
+        $this->assertSame(1, Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
 
         // Directly invoke the same fee-posting path a second time (simulating a retried
         // job/callback/report refresh) — CourierService::recordCommissionsForItems must
         // no-op, never insert a second Rp5.000 row.
-        app(\App\Services\Order\CourierService::class)->recordCommissionsForItems(
-            collect([$item->fresh()]), \App\Models\Courier::where('user_id', $branch['kurir']->id)->first()
+        app(CourierService::class)->recordCommissionsForItems(
+            collect([$item->fresh()]), Courier::where('user_id', $branch['kurir']->id)->first()
         );
 
-        $this->assertSame(1, \App\Models\Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
-        $this->assertEquals(5000.0, \App\Models\Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->sum('amount'));
+        $this->assertSame(1, Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
+        $this->assertEquals(5000.0, Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->sum('amount'));
     }
 
     /* ---------------------------------------------------------------
@@ -703,9 +702,9 @@ class ReportSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue DP Summary', 1000000, 10);
 
-        \App\Models\AgentPaymentGatewayConfig::create([
+        AgentPaymentGatewayConfig::create([
             'agent_id' => $branch['agen']->id,
-            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'payment_method_id' => PaymentMethod::where('code', 'bank_transfer')->value('id'),
             'environment' => 'sandbox',
             'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
         ]);

@@ -89,13 +89,30 @@ class AgentScopedSettingsTest extends TestCase
         ));
     }
 
-    public function test_only_agen_role_may_reach_agent_payment_method_endpoints(): void
+    public function test_admin_can_manage_only_its_own_agent_payment_methods_and_payload_cannot_change_scope(): void
     {
+        $agenA = $this->agen();
+        $agenB = $this->agen();
         $superAdmin = User::factory()->create(['role_id' => Role::where('slug', 'super_admin')->value('id')]);
-        $admin = User::factory()->create(['role_id' => Role::where('slug', 'admin')->value('id')]);
+        $admin = User::factory()->admin()->create(['agent_id' => $agenA->id]);
+        $cod = PaymentMethod::query()->where('code', 'cod')->firstOrFail();
 
         $this->actingAs($superAdmin)->getJson('/api/v1/agent/payment-methods')->assertStatus(403);
-        $this->actingAs($admin)->getJson('/api/v1/agent/payment-methods')->assertStatus(403);
+        $this->actingAs($admin)->getJson('/api/v1/agent/payment-methods')->assertOk();
+        $this->actingAs($admin)->patchJson("/api/v1/agent/payment-methods/{$cod->id}/toggle", [
+            'agent_id' => $agenB->id,
+        ])->assertOk()->assertJsonPath('data.is_active', false);
+
+        $this->assertDatabaseHas('agent_payment_method_settings', [
+            'agent_id' => $agenA->id, 'payment_method_id' => $cod->id, 'is_active' => false,
+        ]);
+        $this->assertDatabaseMissing('agent_payment_method_settings', [
+            'agent_id' => $agenB->id, 'payment_method_id' => $cod->id,
+        ]);
+
+        $bView = $this->actingAs(User::factory()->admin()->create(['agent_id' => $agenB->id]))
+            ->getJson('/api/v1/agent/payment-methods')->assertOk();
+        $this->assertTrue(collect($bView->json('data'))->firstWhere('code', 'cod')['is_active']);
     }
 
     public function test_one_agens_payment_method_toggle_never_affects_another_agen(): void

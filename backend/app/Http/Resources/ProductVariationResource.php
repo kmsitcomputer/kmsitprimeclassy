@@ -21,6 +21,11 @@ class ProductVariationResource extends JsonResource
                 isset($this->agent_available_quantity),
                 fn () => $this->agent_available_quantity
             ),
+            'stock' => $this->when(isset($this->sellable_stock), fn () => [
+                'available' => $this->sellable_stock['available'],
+                'in_stock' => $this->sellable_stock['available'] > 0,
+                'login_to_view' => false,
+            ]),
         ];
     }
 }

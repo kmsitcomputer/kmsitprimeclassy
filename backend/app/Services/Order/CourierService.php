@@ -98,11 +98,11 @@ class CourierService
             throw new ApiException(__('messages.order.status_endpoint_required', ['status' => $newStatus]), 422);
         }
 
-        if ($newStatus === 'dikirim' && $actor->isRole('kurir')) {
+        if ($newStatus === 'dikirim' && $actor->isRole('kurir', 'sales-kurir')) {
             $this->selfAssignIfUnassigned($shipment, $actor);
         }
 
-        if ($newStatus === 'terkirim' && $actor->isRole('kurir')) {
+        if ($newStatus === 'terkirim' && $actor->isRole('kurir', 'sales-kurir')) {
             $assignedCourierUserId = $shipment->fresh()->courier?->user_id;
 
             if ($assignedCourierUserId !== null && $assignedCourierUserId !== $actor->id) {

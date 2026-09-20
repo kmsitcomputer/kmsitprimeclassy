@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\AgentPaymentGatewayConfig;
 use App\Models\AgentProfile;
 use App\Models\AgentShippingProviderConfig;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Regency;
@@ -346,12 +348,18 @@ class AgentShippingCourierSettingsTest extends TestCase
         Regency::where('id', $regencyId)->update(['rajaongkir_city_id' => '501']);
 
         $this->configureRajaOngkir($agen, couriers: ['jne']);
+        AgentPaymentGatewayConfig::create([
+            'agent_id' => $agen->id,
+            'payment_method_id' => PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'QA', 'account_number' => '123'],
+        ]);
         $this->fakeRajaOngkir([
             ['name' => 'JNE', 'code' => 'jne', 'service' => 'REG', 'description' => 'Reguler', 'cost' => 22000, 'etd' => '1-2'],
         ]);
 
         $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
-            'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
+            'payment_method_code' => 'bank_transfer', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
         $response->assertCreated();

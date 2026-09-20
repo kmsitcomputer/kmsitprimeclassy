@@ -32,8 +32,7 @@ const form = reactive({
 
 const currentTranslation = computed(() => {
   if (activeLanguageId.value === null) return null
-  form.translations[activeLanguageId.value] ??= { title: '', excerpt: '', body: '' }
-  return form.translations[activeLanguageId.value]
+  return form.translations[activeLanguageId.value] ?? { title: '', excerpt: '', body: '' }
 })
 
 function languageName(id: number): string {

@@ -7,10 +7,9 @@ use App\Http\Requests\Catalog\StoreProductRequest;
 use App\Http\Requests\Catalog\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
-use App\Models\ProductStock;
-use App\Models\ProductVariationStock;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Sanitizer\HtmlSanitizerService;
+use App\Services\Stock\WarehouseStockService;
 use App\Support\SafeSchema;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -25,7 +24,7 @@ use Illuminate\Support\Str;
  */
 class ProductController extends Controller
 {
-    public function __construct(private readonly HtmlSanitizerService $sanitizer) {}
+    public function __construct(private readonly HtmlSanitizerService $sanitizer, private readonly WarehouseStockService $warehouseStockService) {}
 
     /**
      * Catalog browsing is reachable on a completely fresh, unmigrated
@@ -180,35 +179,16 @@ class ProductController extends Controller
         }
 
         $simpleProductIds = $products->where('has_variations', false)->pluck('id');
-
-        if ($simpleProductIds->isNotEmpty()) {
-            $stockByProduct = ProductStock::withoutGlobalScopes()
-                ->where('agent_id', $agentId)
-                ->whereIn('product_id', $simpleProductIds)
-                ->get()
-                ->keyBy('product_id');
-
-            foreach ($products as $product) {
-                if (! $product->has_variations) {
-                    $product->agent_available_quantity = $stockByProduct->get($product->id)?->availableQuantity() ?? 0;
-                }
-            }
-        }
-
         $variationIds = $products->flatMap(fn ($p) => $p->has_variations ? $p->variations->pluck('id') : collect());
-
-        if ($variationIds->isNotEmpty()) {
-            $stockByVariation = ProductVariationStock::withoutGlobalScopes()
-                ->where('agent_id', $agentId)
-                ->whereIn('product_variation_id', $variationIds)
-                ->get()
-                ->keyBy('product_variation_id');
-
-            foreach ($products as $product) {
-                if ($product->has_variations) {
-                    foreach ($product->variations as $variation) {
-                        $variation->agent_available_quantity = $stockByVariation->get($variation->id)?->availableQuantity() ?? 0;
-                    }
+        $stock = $this->warehouseStockService->sellableForTargets($agentId, $simpleProductIds, $variationIds);
+        foreach ($products as $product) {
+            if (! $product->has_variations) {
+                $product->sellable_stock = $stock['p:'.$product->id] ?? ['available' => 0];
+                $product->agent_available_quantity = $product->sellable_stock['available'];
+            } else {
+                foreach ($product->variations as $variation) {
+                    $variation->sellable_stock = $stock['v:'.$variation->id] ?? ['available' => 0];
+                    $variation->agent_available_quantity = $variation->sellable_stock['available'];
                 }
             }
         }

@@ -86,9 +86,9 @@ async function load() {
     form.html = c.html ?? ''
     form.category_ids = (c.category_ids ?? []).join(',')
     form.product_ids = (c.product_ids ?? []).join(',')
-    form.category_id = c.category_id ?? ''
+    form.category_id = c.category_id != null ? String(c.category_id) : ''
     form.article_ids = (c.article_ids ?? []).join(',')
-    form.limit = c.limit ?? ''
+    form.limit = c.limit != null ? String(c.limit) : ''
     existingImageUrl.value = block.image_url
   }
 

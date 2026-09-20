@@ -10,7 +10,8 @@ class StockMovement extends Model
     const UPDATED_AT = null;
 
     protected $fillable = [
-        'agent_id', 'product_id', 'product_variation_id', 'type', 'quantity',
+        'agent_id', 'product_id', 'product_variation_id', 'type', 'quantity', 'stock_type', 'sub_location_id',
+        'counterpart_stock_type', 'transfer_id', 'handover_id', 'opname_id',
         'reference_type', 'reference_id', 'note', 'created_by',
     ];
 
@@ -32,5 +33,10 @@ class StockMovement extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function opname(): BelongsTo
+    {
+        return $this->belongsTo(StockOpname::class, 'opname_id');
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AgentProfile;
+use App\Models\Courier;
 use App\Models\User;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
@@ -126,6 +127,54 @@ class UserManagementTest extends TestCase
         $kurirResponse->assertUnprocessable();
     }
 
+    public function test_agen_can_create_gudang_directly_under_its_own_network_without_referral_hierarchy(): void
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+
+        $response = $this->actingAs($agen)->postJson('/api/v1/users', $this->payload([
+            'role' => 'gudang',
+        ]))->assertCreated();
+
+        $gudang = User::query()->with('role')->findOrFail($response->json('data.id'));
+        $this->assertSame('gudang', $gudang->role->slug);
+        $this->assertSame($agen->id, $gudang->agent_id);
+        $this->assertSame($agen->id, $gudang->parent_id);
+        $this->assertNull($gudang->korsal_id);
+        $this->assertNull($gudang->sales_id);
+        $this->assertNull($gudang->referral_code);
+        $this->assertNotNull($gudang->password);
+        $this->assertDatabaseHas('user_closures', [
+            'ancestor_id' => $agen->id,
+            'descendant_id' => $gudang->id,
+            'depth' => 1,
+        ]);
+    }
+
+    public function test_gudang_creation_rejects_cross_agent_tampering_and_is_forbidden_to_unauthorized_roles(): void
+    {
+        $owner = User::factory()->agen()->create();
+        $owner->update(['agent_id' => $owner->id]);
+        $foreign = User::factory()->agen()->create();
+        $foreign->update(['agent_id' => $foreign->id]);
+
+        $tamperedEmail = 'tampered-'.uniqid().'@example.com';
+        $this->actingAs($owner)->postJson('/api/v1/users', $this->payload([
+            'role' => 'gudang',
+            'email' => $tamperedEmail,
+            'agent_id' => $foreign->id,
+        ]))->assertUnprocessable();
+        $this->assertDatabaseMissing('users', ['email' => $tamperedEmail]);
+
+        $admin = User::factory()->admin()->create([
+            'agent_id' => $owner->id,
+            'parent_id' => $owner->id,
+        ]);
+        $this->actingAs($admin)->postJson('/api/v1/users', $this->payload([
+            'role' => 'gudang',
+        ]))->assertForbidden();
+    }
+
     public function test_agen_can_delete_admin_and_kurir_in_its_own_branch_but_not_another_agents(): void
     {
         $agenA = User::factory()->agen()->create();
@@ -230,5 +279,72 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $response->json('data.id'), 'parent_id' => $own->id, 'korsal_id' => $own->id, 'agent_id' => $agen->id]);
         $this->assertDatabaseHas('user_closures', ['ancestor_id' => $own->id, 'descendant_id' => $response->json('data.id'), 'depth' => 1]);
         $this->actingAs($own)->postJson('/api/v1/users', $this->payload(['role' => 'sales', 'korsal_id' => $foreign->id]))->assertUnprocessable();
+    }
+
+    public function test_agen_can_convert_own_sales_to_sales_kurir_without_replacing_identity_or_referral(): void
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $sales = User::factory()->sales()->create([
+            'agent_id' => $agen->id, 'korsal_id' => $korsal->id, 'parent_id' => $korsal->id,
+            'referral_code' => 'SA-KEEP01',
+        ]);
+        $originalId = $sales->id;
+
+        $response = $this->actingAs($agen)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir");
+
+        $response->assertOk();
+        $sales->refresh();
+        $this->assertSame($originalId, $sales->id);
+        $this->assertSame('sales-kurir', $sales->role->slug);
+        $this->assertSame('SA-KEEP01', $sales->referral_code);
+        $this->assertSame($agen->id, $sales->agent_id);
+        $this->assertSame($korsal->id, $sales->korsal_id);
+        $this->assertSame($korsal->id, $sales->parent_id);
+        $this->assertDatabaseHas('couriers', ['user_id' => $sales->id, 'type' => 'internal', 'agent_id' => $agen->id, 'is_active' => true]);
+
+        $this->actingAs($agen)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir")->assertUnprocessable();
+        $this->assertSame(1, Courier::query()->where('user_id', $sales->id)->count());
+    }
+
+    public function test_only_owning_agen_can_convert_sales_to_sales_kurir(): void
+    {
+        $owner = User::factory()->agen()->create();
+        $owner->update(['agent_id' => $owner->id]);
+        $other = User::factory()->agen()->create();
+        $other->update(['agent_id' => $other->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $owner->id]);
+        $sales = User::factory()->sales()->create(['agent_id' => $owner->id, 'korsal_id' => $korsal->id]);
+
+        foreach ([User::factory()->superAdmin()->create(), User::factory()->admin()->create(['agent_id' => $owner->id]), $korsal, User::factory()->sales()->create(['agent_id' => $owner->id]), $other] as $actor) {
+            $this->actingAs($actor)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir")->assertForbidden();
+        }
+    }
+
+    public function test_sales_kurir_creation_and_conversion_preserve_identity_and_referral_profile(): void
+    {
+        $agent = User::factory()->agen()->create();
+        $agent->update(['agent_id' => $agent->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
+
+        $created = $this->actingAs($agent)->postJson('/api/v1/users', $this->payload(['role' => 'sales-kurir', 'korsal_id' => $korsal->id]))->assertCreated();
+        $createdUser = User::query()->where('email', $created->json('data.email'))->firstOrFail();
+        $this->assertStringStartsWith('SK-', $createdUser->referral_code);
+        $this->assertSame($agent->id, $createdUser->agent_id);
+        $this->assertSame($korsal->id, $createdUser->korsal_id);
+        $this->assertSame($korsal->id, $createdUser->parent_id);
+        $this->assertDatabaseHas('couriers', ['user_id' => $createdUser->id, 'agent_id' => $agent->id]);
+
+        $sales = User::factory()->sales()->create(['agent_id' => $agent->id, 'korsal_id' => $korsal->id, 'parent_id' => $korsal->id, 'referral_code' => 'SA-ABC123']);
+        $id = $sales->id;
+        $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir")->assertOk();
+        $sales->refresh();
+        $this->assertSame($id, $sales->id);
+        $this->assertSame('sales-kurir', $sales->role->slug);
+        $this->assertSame('SA-ABC123', $sales->referral_code);
+        $this->assertDatabaseCount('couriers', 2);
+        $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir")->assertUnprocessable();
+        $this->assertDatabaseCount('couriers', 2);
     }
 }

@@ -43,7 +43,7 @@ class StockService
             ->lockForUpdate()
             ->first();
 
-        $available = $stock?->availableQuantity() ?? 0;
+        $available = $this->availableProduct($agentId, $product->id, $stock);
 
         if (! $stock || $available < $qty) {
             throw new InsufficientStockException($product->name, $available, $qty);
@@ -76,7 +76,7 @@ class StockService
             ->lockForUpdate()
             ->first();
 
-        $available = $stock?->availableQuantity() ?? 0;
+        $available = $this->availableVariation($agentId, $variation->id, $stock);
 
         if (! $stock || $available < $qty) {
             throw new InsufficientStockException($variation->sku, $available, $qty);
@@ -180,6 +180,8 @@ class StockService
      */
     public function adjustProduct(int $agentId, int $productId, int $delta, string $reason, ?int $actorId): ProductStock
     {
+        $this->assertLegacyAdjustmentAllowed();
+
         return DB::transaction(function () use ($agentId, $productId, $delta, $reason, $actorId) {
             $stock = ProductStock::withoutGlobalScopes()
                 ->where('agent_id', $agentId)->where('product_id', $productId)
@@ -214,6 +216,8 @@ class StockService
 
     public function adjustVariation(int $agentId, int $variationId, int $delta, string $reason, ?int $actorId): ProductVariationStock
     {
+        $this->assertLegacyAdjustmentAllowed();
+
         return DB::transaction(function () use ($agentId, $variationId, $delta, $reason, $actorId) {
             $stock = ProductVariationStock::withoutGlobalScopes()
                 ->where('agent_id', $agentId)->where('product_variation_id', $variationId)
@@ -253,6 +257,34 @@ class StockService
                 __('messages.stock.insufficient_column', ['column' => $column]), 422,
                 ['available' => $available, 'needed' => $needed]
             );
+        }
+    }
+
+    /**
+     * L-006: the sellable formula lives in exactly one place. Checkout asks the
+     * canonical SellableStockService instead of keeping a second copy that can
+     * drift (e.g. it used to fall back to legacy on-hand when only excluded
+     * buckets such as `shipping` held stock, which allowed overselling).
+     *
+     * $stock is the row already held under lockForUpdate by reserve*(), so its
+     * reserved value is authoritative and no extra query is needed.
+     */
+    private function availableProduct(int $agentId, int $productId, ?ProductStock $stock): int
+    {
+        return app(SellableStockService::class)
+            ->forProduct($agentId, $productId, $stock?->quantity_reserved === null ? null : (int) $stock->quantity_reserved)['available'];
+    }
+
+    private function availableVariation(int $agentId, int $variationId, ?ProductVariationStock $stock): int
+    {
+        return app(SellableStockService::class)
+            ->forVariation($agentId, $variationId, $stock?->quantity_reserved === null ? null : (int) $stock->quantity_reserved)['available'];
+    }
+
+    private function assertLegacyAdjustmentAllowed(): void
+    {
+        if (config('warehouse.authoritative')) {
+            throw new ApiException('Legacy stock adjustment is disabled in warehouse-authoritative mode.', 403);
         }
     }
 }

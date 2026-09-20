@@ -4,7 +4,7 @@
  * is ever persisted — see backend HomepageBlockService::sanitizeContent.
  * v-html here renders that already-cleaned string, not raw admin input.
  */
-defineProps<{ content: Record<string, any> }>()
+defineProps<{ content: { html?: string } }>()
 </script>
 
 <template>

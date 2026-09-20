@@ -13,6 +13,13 @@ class UserPolicy
         return HierarchyRules::canCreate($user->role?->slug ?? '', $targetRoleSlug);
     }
 
+    public function convertToSalesKurir(User $user, User $target): bool
+    {
+        return $user->isRole('agen')
+            && $user->agent_id !== null
+            && $target->agent_id === $user->agent_id;
+    }
+
     /** Can $user view $target's profile/downline data? */
     public function view(User $user, User $target): bool
     {
@@ -32,7 +39,7 @@ class UserPolicy
             return $target->korsal_id === $user->id || $target->id === $user->id;
         }
 
-        if ($user->isRole('sales')) {
+        if ($user->isRole('sales', 'sales-kurir')) {
             return $target->sales_id === $user->id;
         }
 

@@ -6,6 +6,7 @@ use App\Models\Scopes\BelongsToAgentScope;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
 {
@@ -133,6 +134,11 @@ class Order extends Model
     public function commissions(): HasMany
     {
         return $this->hasMany(Commission::class);
+    }
+
+    public function stockRequest(): HasOne
+    {
+        return $this->hasOne(StockRequest::class);
     }
 
     public function canTransitionTo(string $next): bool

@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/utils/googleMaps'
+import type { GoogleMapInstance, GoogleMapsNamespace, GoogleMarkerInstance } from '@/utils/googleMaps'
 
 const { t } = useI18n()
 
@@ -22,9 +23,9 @@ const mapEl = ref<HTMLDivElement | null>(null)
 const error = ref<string | null>(null)
 const ready = ref(false)
 
-let google: any = null
-let map: any = null
-let marker: any = null
+let google: GoogleMapsNamespace | null = null
+let map: GoogleMapInstance | null = null
+let marker: GoogleMarkerInstance | null = null
 let isMounted = true
 
 const stopAuthFailureListener = onGoogleMapsAuthFailure(() => {

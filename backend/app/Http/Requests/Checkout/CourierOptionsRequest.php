@@ -13,7 +13,7 @@ class CourierOptionsRequest extends BaseFormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->isRole('konsumen', 'agen', 'korsal', 'sales') ?? false;
+        return $this->user()?->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir') ?? false;
     }
 
     public function rules(): array

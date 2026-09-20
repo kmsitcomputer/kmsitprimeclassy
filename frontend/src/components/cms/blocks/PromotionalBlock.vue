@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
-defineProps<{ content: Record<string, any> }>()
+defineProps<{ content: { image_url?: string; heading?: string; description?: string; url?: string } }>()
 </script>
 
 <template>

@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/utils/googleMaps'
+import type { GoogleMapInstance, GoogleMapsNamespace, GoogleMarkerInstance, GooglePlace, PlaceAutocompleteElement } from '@/utils/googleMaps'
 
 const { t } = useI18n()
 
@@ -26,10 +27,10 @@ const searchEl = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
 const ready = ref(false)
 
-let google: any = null
-let map: any = null
-let marker: any = null
-let placeAutocomplete: any = null
+let google: GoogleMapsNamespace | null = null
+let map: GoogleMapInstance | null = null
+let marker: GoogleMarkerInstance | null = null
+let placeAutocomplete: PlaceAutocompleteElement | null = null
 // Guards against the prop-sync watcher re-placing the marker in response to
 // the very update this component itself just emitted (no functional loop
 // risk either way since positions would match, but avoids a redundant pan).
@@ -47,11 +48,12 @@ function placeMarker(lat: number, lng: number, pan = true) {
   if (marker) {
     marker.position = position
   } else if (google && map) {
-    marker = new google.maps.marker.AdvancedMarkerElement({ map, position, gmpDraggable: true })
-    marker.addListener('dragend', () => {
-      const pos = marker.position
+    const created = new google.maps.marker.AdvancedMarkerElement({ map, position, gmpDraggable: true })
+    created.addListener('dragend', () => {
+      const pos = created.position
       updatePickedLocation(pos.lat, pos.lng, '')
     })
+    marker = created
   }
   if (pan && map) map.panTo(position)
 }
@@ -67,7 +69,7 @@ async function setupPlaceAutocomplete() {
 
   try {
     const placesLib = (await google.maps.importLibrary('places')) as {
-      PlaceAutocompleteElement?: new (options?: Record<string, unknown>) => any
+      PlaceAutocompleteElement?: new (options?: Record<string, unknown>) => PlaceAutocompleteElement
     }
 
     const PlaceAutocompleteElement = placesLib.PlaceAutocompleteElement
@@ -85,7 +87,7 @@ async function setupPlaceAutocomplete() {
 
     searchEl.value.appendChild(placeAutocomplete)
     placeAutocomplete.addEventListener('gmp-select', async (event: Event) => {
-      const selectedPlace = (event as CustomEvent<{ place: any }>).detail?.place
+      const selectedPlace = (event as CustomEvent<{ place: GooglePlace }>).detail?.place
       if (!selectedPlace) return
 
       try {
@@ -145,7 +147,7 @@ onMounted(async () => {
 
     if (hasInitial) placeMarker(props.latitude!, props.longitude!, false)
 
-    map.addListener('click', (e: any) => {
+    map.addListener('click', (e) => {
       const lat = e.latLng.lat()
       const lng = e.latLng.lng()
       updatePickedLocation(lat, lng, '')

@@ -3,13 +3,17 @@
 namespace App\Services\GoogleSheets;
 
 use App\Services\Report\OrderTransactionReportService;
+use App\Services\Stock\SellableStockService;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class DatasetRegistry
 {
-    public function __construct(private readonly OrderTransactionReportService $orderTransactionReport) {}
+    public function __construct(
+        private readonly OrderTransactionReportService $orderTransactionReport,
+        private readonly SellableStockService $sellableStock,
+    ) {}
 
     /** Public keys never become arbitrary SQL identifiers. */
     public function definitions(): array
@@ -76,18 +80,11 @@ class DatasetRegistry
                     });
                 }
             } else {
-                $q->join('product_stocks as s', 's.product_id', '=', 'p.id')->select(['s.id', 'p.sku', 'p.name as product_name', 's.quantity_on_hand as quantity', 's.quantity_reserved as reserved_quantity']);
-                if ($agentId !== null) {
-                    $q->where('s.agent_id', $agentId);
-                }
-                $variants = DB::table('product_variation_stocks as s')->join('product_variations as v', 'v.id', '=', 's.product_variation_id')->join('products as p', 'p.id', '=', 'v.product_id')->whereNull('v.deleted_at')->whereNull('p.deleted_at')->select(['s.id', 'v.sku', 'p.name as product_name', 's.quantity_on_hand as quantity', 's.quantity_reserved as reserved_quantity']);
-                if ($agentId !== null) {
-                    $variants->where('s.agent_id', $agentId);
-                }
-                $q->unionAll($variants);
+                $q = $this->sellableStock->projection($agentId === null ? null : [$agentId])
+                    ->select(['id', 'sku', 'product_name', 'quantity', 'reserved_quantity']);
             }
         } elseif (in_array($dataset, ['sales', 'korsal'])) {
-            $q = DB::table('users as u')->join('roles as r', 'r.id', '=', 'u.role_id')->where('r.slug', $dataset)->whereNull('u.deleted_at')->select($dataset === 'sales' ? ['u.id', 'u.name', 'u.korsal_id', 'u.status'] : ['u.id', 'u.name', 'u.status']);
+            $q = DB::table('users as u')->join('roles as r', 'r.id', '=', 'u.role_id')->whereIn('r.slug', $dataset === 'sales' ? ['sales', 'sales-kurir'] : ['korsal'])->whereNull('u.deleted_at')->select($dataset === 'sales' ? ['u.id', 'u.name', 'u.korsal_id', 'u.status'] : ['u.id', 'u.name', 'u.status']);
             if ($agentId !== null) {
                 $q->where('u.agent_id', $agentId);
             }

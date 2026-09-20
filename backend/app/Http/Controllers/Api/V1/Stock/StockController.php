@@ -12,6 +12,7 @@ use App\Models\ProductStock;
 use App\Models\ProductVariation;
 use App\Models\ProductVariationStock;
 use App\Models\User;
+use App\Models\WarehouseStock;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Stock\StockService;
 use Illuminate\Http\Request;
@@ -53,6 +54,21 @@ class StockController extends Controller
             ->paginate($request->integer('per_page', 15));
 
         return $this->ok(ProductVariationStockResource::collection($stocks)->resolve(), meta: [
+            'current_page' => $stocks->currentPage(), 'last_page' => $stocks->lastPage(), 'total' => $stocks->total(),
+        ]);
+    }
+
+    public function warehouse(Request $request)
+    {
+        $agentId = $this->resolveViewedAgentId($request);
+
+        $stocks = WarehouseStock::withoutGlobalScopes()
+            ->where('agent_id', $agentId)
+            ->with(['product', 'variation', 'subLocation'])
+            ->when($request->filled('stock_type'), fn ($q) => $q->where('stock_type', $request->string('stock_type')))
+            ->paginate($request->integer('per_page', 30));
+
+        return $this->ok($stocks->items(), meta: [
             'current_page' => $stocks->currentPage(), 'last_page' => $stocks->lastPage(), 'total' => $stocks->total(),
         ]);
     }

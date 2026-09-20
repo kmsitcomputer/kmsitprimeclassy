@@ -9,10 +9,9 @@ use App\Models\Order;
 use App\Models\OrderAdditionalPayment;
 use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
-use App\Models\ProductStock;
-use App\Models\ProductVariationStock;
 use App\Models\ReturnItem;
 use App\Models\User;
+use App\Services\Stock\SellableStockService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
@@ -27,7 +26,10 @@ use Illuminate\Support\Collection;
  */
 class ReportService
 {
-    public function __construct(private readonly OrderTransactionReportService $orderTransactionReport) {}
+    public function __construct(
+        private readonly OrderTransactionReportService $orderTransactionReport,
+        private readonly SellableStockService $sellableStock,
+    ) {}
 
     /**
      * $korsalColumn narrows further still for a korsal actor — without it, a
@@ -677,7 +679,10 @@ class ReportService
             'sales_with_sales_count' => (int) (clone $orders)->whereNotNull('orders.sales_id')->distinct()->count('orders.sales_id'),
         ];
 
-        $agentIds = (clone $orders)->select('orders.agent_id')->distinct()->pluck('orders.agent_id')->filter()->values()->all();
+        $agentIds = User::query()
+            ->whereHas('role', fn ($role) => $role->where('slug', 'agen'))
+            ->when($scopeAgentId, fn ($query) => $query->whereKey($scopeAgentId))
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
         $agentNames = User::query()->whereIn('id', $agentIds)->pluck('name', 'id');
         $countBy = fn (string $role) => User::query()
             ->whereIn('agent_id', $agentIds)
@@ -685,10 +690,8 @@ class ReportService
             ->selectRaw('agent_id, COUNT(*) as c')->groupBy('agent_id')->pluck('c', 'agent_id');
         $korsalCounts = $countBy('korsal');
         $salesCounts = $countBy('sales');
-        $stockByAgent = ProductStock::withoutGlobalScopes()->whereIn('agent_id', $agentIds)
-            ->selectRaw('agent_id, SUM(quantity_on_hand) as q')->groupBy('agent_id')->pluck('q', 'agent_id');
-        $variationStockByAgent = ProductVariationStock::withoutGlobalScopes()->whereIn('agent_id', $agentIds)
-            ->selectRaw('agent_id, SUM(quantity_on_hand) as q')->groupBy('agent_id')->pluck('q', 'agent_id');
+        $stockByAgent = $this->sellableStock->projection($agentIds)
+            ->selectRaw('agent_id, SUM(quantity) as q')->groupBy('agent_id')->pluck('q', 'agent_id');
         $feeByAgent = Commission::query()
             ->join('users as beneficiaries', 'beneficiaries.id', '=', 'commissions.beneficiary_user_id')
             ->whereIn('beneficiaries.agent_id', $agentIds)
@@ -718,10 +721,30 @@ class ReportService
                 'total_amount' => round((float) $row->total_amount, 2),
                 'paid_amount' => round((float) $row->paid_amount, 2),
                 'outstanding_amount' => round((float) $row->outstanding_amount, 2),
-                'stock_quantity' => (int) ($stockByAgent[$row->agent_id] ?? 0) + (int) ($variationStockByAgent[$row->agent_id] ?? 0),
+                'stock_quantity' => (int) ($stockByAgent[$row->agent_id] ?? 0),
                 'total_fee' => round((float) ($feeByAgent[$row->agent_id] ?? 0), 2),
             ])
-            ->values()->all();
+            ->keyBy('agent_id');
+
+        foreach ($agentIds as $agentId) {
+            $perAgen->put($agentId, $perAgen->get($agentId, [
+                'agent_id' => $agentId,
+                'agent_name' => $agentNames[$agentId] ?? null,
+                'korsal_count' => (int) ($korsalCounts[$agentId] ?? 0),
+                'sales_count' => (int) ($salesCounts[$agentId] ?? 0),
+                'active_sales_count' => 0,
+                'sales_transaction_count' => 0,
+                'korsal_transaction_count' => 0,
+                'order_count' => 0,
+                'total_amount' => 0.0,
+                'paid_amount' => 0.0,
+                'outstanding_amount' => 0.0,
+                'stock_quantity' => (int) ($stockByAgent[$agentId] ?? 0),
+                'total_fee' => round((float) ($feeByAgent[$agentId] ?? 0), 2),
+            ]));
+        }
+
+        $perAgen = $perAgen->values()->all();
 
         // Grouped by name AND historical SKU so a product with variants reports
         // each variant line separately, and so no live catalog lookup is needed.

@@ -13,6 +13,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
@@ -91,6 +92,37 @@ class ProductSystemTest extends TestCase
         $this->actingAs($sales)->postJson('/api/v1/products', ['sku' => 'TEST-'.(string) Str::uuid(),
             'name' => 'Kue Sales', 'has_variations' => false, 'base_price' => 1000, 'weight_grams' => 500,
         ])->assertStatus(403);
+    }
+
+    public function test_admin_can_manage_product_and_variation_but_gudang_and_sales_kurir_cannot(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $admin = $branch['admin'];
+        $gudang = User::factory()->gudang()->create(['agent_id' => $branch['agen']->id, 'parent_id' => $branch['agen']->id]);
+        $salesKurir = User::factory()->salesKurir()->create([
+            'agent_id' => $branch['agen']->id, 'korsal_id' => $branch['korsal']->id, 'parent_id' => $branch['korsal']->id,
+        ]);
+
+        $created = $this->actingAs($admin)->postJson('/api/v1/products', [
+            'name' => 'Admin Cake', 'has_variations' => true,
+        ])->assertCreated();
+        $productId = $created->json('data.id');
+
+        $this->actingAs($admin)->patchJson("/api/v1/products/{$productId}", ['name' => 'Admin Cake Updated'])->assertOk();
+        $variation = $this->actingAs($admin)->postJson("/api/v1/products/{$productId}/variations", [
+            'sku' => 'ADMIN-VAR-'.uniqid(), 'price' => 10000, 'weight_grams' => 100,
+            'attributes' => ['Ukuran' => 'Kecil'],
+        ])->assertCreated();
+        $this->actingAs($admin)->patchJson("/api/v1/products/{$productId}/variations/{$variation->json('data.id')}", [
+            'sku' => 'ADMIN-VAR-UPDATED-'.uniqid(), 'price' => 12000, 'weight_grams' => 100,
+            'is_active' => true,
+        ])->assertOk();
+
+        foreach ([$gudang, $salesKurir] as $actor) {
+            $this->actingAs($actor)->postJson('/api/v1/products', [
+                'name' => 'Denied Cake', 'has_variations' => false, 'base_price' => 1000, 'weight_grams' => 100,
+            ])->assertForbidden();
+        }
     }
 
     /**
@@ -292,81 +324,123 @@ class ProductSystemTest extends TestCase
      * Stock isolation & business rules
      * ------------------------------------------------------------- */
 
+    /**
+     * LEGACY NON-AUTHORITATIVE MODE: verifies legacy table routing (stock
+     * lands on product_stocks, never product_variation_stocks). Requires the
+     * legacy adjust path, which warehouse-authoritative mode locks down.
+     */
     public function test_product_without_variation_stores_stock_on_product_not_variation(): void
     {
-        $branch = $this->makeAgentBranch();
-        $product = Product::create([
-            'sku' => 'KUE-LAPIS-'.uniqid(),
-            'name' => 'Kue Lapis', 'slug' => 'kue-lapis-'.uniqid(), 'has_variations' => false,
-            'base_price' => 60000, 'weight_grams' => 700, 'status' => 'active',
-        ]);
+        Config::set('warehouse.authoritative', false);
+        try {
+            $branch = $this->makeAgentBranch();
+            $product = Product::create([
+                'sku' => 'KUE-LAPIS-'.uniqid(),
+                'name' => 'Kue Lapis', 'slug' => 'kue-lapis-'.uniqid(), 'has_variations' => false,
+                'base_price' => 60000, 'weight_grams' => 700, 'status' => 'active',
+            ]);
 
-        $response = $this->actingAs($branch['agen'])->postJson('/api/v1/stock/adjust', [
-            'product_id' => $product->id, 'delta' => 25, 'reason' => 'Stok awal',
-        ]);
+            $response = $this->actingAs($branch['agen'])->postJson('/api/v1/stock/adjust', [
+                'product_id' => $product->id, 'delta' => 25, 'reason' => 'Stok awal',
+            ]);
 
-        $response->assertOk();
-        $this->assertDatabaseHas('product_stocks', ['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 25]);
-        $this->assertDatabaseCount('product_variation_stocks', 0);
+            $response->assertOk();
+            $this->assertDatabaseHas('product_stocks', ['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 25]);
+            $this->assertDatabaseCount('product_variation_stocks', 0);
+        } finally {
+            Config::set('warehouse.authoritative', true);
+        }
     }
 
+    /**
+     * LEGACY NON-AUTHORITATIVE MODE: verifies the 422 variation-parent
+     * rejection inside the legacy adjust path.
+     */
     public function test_product_with_variation_rejects_stock_adjustment_on_the_parent_product(): void
     {
-        $branch = $this->makeAgentBranch();
-        $product = Product::create([
-            'name' => 'Cake Susun', 'slug' => 'cake-susun-'.uniqid(), 'has_variations' => true, 'status' => 'active',
-        ]);
+        Config::set('warehouse.authoritative', false);
+        try {
+            $branch = $this->makeAgentBranch();
+            $product = Product::create([
+                'name' => 'Cake Susun', 'slug' => 'cake-susun-'.uniqid(), 'has_variations' => true, 'status' => 'active',
+            ]);
 
-        $this->actingAs($branch['agen'])->postJson('/api/v1/stock/adjust', [
-            'product_id' => $product->id, 'delta' => 10, 'reason' => 'Coba-coba',
-        ])->assertStatus(422);
+            $this->actingAs($branch['agen'])->postJson('/api/v1/stock/adjust', [
+                'product_id' => $product->id, 'delta' => 10, 'reason' => 'Coba-coba',
+            ])->assertStatus(422);
+        } finally {
+            Config::set('warehouse.authoritative', true);
+        }
     }
 
+    /**
+     * LEGACY NON-AUTHORITATIVE MODE: verifies per-agent variation-stock
+     * isolation inside the legacy adjust path.
+     */
     public function test_stock_for_the_same_product_variation_is_isolated_per_agent_and_never_summed(): void
     {
-        $branchA = $this->makeAgentBranch();
-        $branchB = $this->makeAgentBranch();
+        Config::set('warehouse.authoritative', false);
+        try {
+            $branchA = $this->makeAgentBranch();
+            $branchB = $this->makeAgentBranch();
 
-        $product = Product::create([
-            'name' => 'Cake Chocolate', 'slug' => 'cake-chocolate-'.uniqid(), 'has_variations' => true, 'status' => 'active',
-        ]);
-        $superAdmin = User::factory()->superAdmin()->create();
-        $variationId = $this->actingAs($superAdmin)->postJson("/api/v1/products/{$product->id}/variations", [
-            'sku' => 'CC-500', 'price' => 90000, 'weight_grams' => 500, 'attributes' => ['Ukuran' => '500gr'],
-        ])->json('data.id');
+            $product = Product::create([
+                'name' => 'Cake Chocolate', 'slug' => 'cake-chocolate-'.uniqid(), 'has_variations' => true, 'status' => 'active',
+            ]);
+            $superAdmin = User::factory()->superAdmin()->create();
+            $variationId = $this->actingAs($superAdmin)->postJson("/api/v1/products/{$product->id}/variations", [
+                'sku' => 'CC-500', 'price' => 90000, 'weight_grams' => 500, 'attributes' => ['Ukuran' => '500gr'],
+            ])->json('data.id');
 
-        $this->actingAs($branchA['agen'])->postJson('/api/v1/stock/adjust', [
-            'product_variation_id' => $variationId, 'delta' => 10, 'reason' => 'Stok awal A',
-        ])->assertOk();
+            $this->actingAs($branchA['agen'])->postJson('/api/v1/stock/adjust', [
+                'product_variation_id' => $variationId, 'delta' => 10, 'reason' => 'Stok awal A',
+            ])->assertOk();
 
-        $this->actingAs($branchB['agen'])->postJson('/api/v1/stock/adjust', [
-            'product_variation_id' => $variationId, 'delta' => 20, 'reason' => 'Stok awal B',
-        ])->assertOk();
+            $this->actingAs($branchB['agen'])->postJson('/api/v1/stock/adjust', [
+                'product_variation_id' => $variationId, 'delta' => 20, 'reason' => 'Stok awal B',
+            ])->assertOk();
 
-        $this->assertDatabaseHas('product_variation_stocks', [
-            'agent_id' => $branchA['agen']->id, 'product_variation_id' => $variationId, 'quantity_on_hand' => 10,
-        ]);
-        $this->assertDatabaseHas('product_variation_stocks', [
-            'agent_id' => $branchB['agen']->id, 'product_variation_id' => $variationId, 'quantity_on_hand' => 20,
-        ]);
+            $this->assertDatabaseHas('product_variation_stocks', [
+                'agent_id' => $branchA['agen']->id, 'product_variation_id' => $variationId, 'quantity_on_hand' => 10,
+            ]);
+            $this->assertDatabaseHas('product_variation_stocks', [
+                'agent_id' => $branchB['agen']->id, 'product_variation_id' => $variationId, 'quantity_on_hand' => 20,
+            ]);
+        } finally {
+            Config::set('warehouse.authoritative', true);
+        }
     }
 
+    /**
+     * LEGACY NON-AUTHORITATIVE MODE: verifies the StockService below-zero
+     * guard (422) inside the legacy adjust path.
+     */
     public function test_stock_can_never_be_adjusted_below_zero(): void
     {
-        $branch = $this->makeAgentBranch();
-        $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
-            'name' => 'Pie Buah', 'slug' => 'pie-buah-'.uniqid(), 'has_variations' => false,
-            'base_price' => 45000, 'weight_grams' => 600, 'status' => 'active',
-        ]);
-        ProductStock::create(['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 5, 'quantity_reserved' => 0]);
+        Config::set('warehouse.authoritative', false);
+        try {
+            $branch = $this->makeAgentBranch();
+            $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
+                'name' => 'Pie Buah', 'slug' => 'pie-buah-'.uniqid(), 'has_variations' => false,
+                'base_price' => 45000, 'weight_grams' => 600, 'status' => 'active',
+            ]);
+            ProductStock::create(['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 5, 'quantity_reserved' => 0]);
 
-        $this->actingAs($branch['agen'])->postJson('/api/v1/stock/adjust', [
-            'product_id' => $product->id, 'delta' => -10, 'reason' => 'Koreksi berlebihan',
-        ])->assertStatus(422);
+            $this->actingAs($branch['agen'])->postJson('/api/v1/stock/adjust', [
+                'product_id' => $product->id, 'delta' => -10, 'reason' => 'Koreksi berlebihan',
+            ])->assertStatus(422);
 
-        $this->assertDatabaseHas('product_stocks', ['product_id' => $product->id, 'quantity_on_hand' => 5]);
+            $this->assertDatabaseHas('product_stocks', ['product_id' => $product->id, 'quantity_on_hand' => 5]);
+        } finally {
+            Config::set('warehouse.authoritative', true);
+        }
     }
 
+    /**
+     * AUTHORITATIVE MODE: warehouse-authoritative lockdown denies the legacy
+     * adjust path for every role, so cross-agent stock tampering is
+     * impossible — B's stock is untouched and no row is created for A.
+     */
     public function test_agen_cannot_adjust_another_agents_stock(): void
     {
         $branchA = $this->makeAgentBranch();
@@ -377,14 +451,11 @@ class ProductSystemTest extends TestCase
         ]);
         ProductStock::create(['agent_id' => $branchB['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
 
-        // Agent A has no way to even name Agent B — the request has no agent_id field for
-        // a non-super_admin actor, so this always resolves to Agent A's OWN branch: a
-        // fresh, zero-based row gets created for Agent A, completely independent of B's.
         $this->actingAs($branchA['agen'])->postJson('/api/v1/stock/adjust', [
             'product_id' => $product->id, 'delta' => 5, 'reason' => 'stok milik A sendiri',
-        ])->assertOk();
+        ])->assertForbidden();
 
-        $this->assertDatabaseHas('product_stocks', ['agent_id' => $branchA['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 5]);
+        $this->assertDatabaseMissing('product_stocks', ['agent_id' => $branchA['agen']->id, 'product_id' => $product->id]);
 
         $this->assertDatabaseHas('product_stocks', ['agent_id' => $branchB['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 10]);
     }
@@ -425,20 +496,28 @@ class ProductSystemTest extends TestCase
         $this->assertDatabaseHas('product_stocks', ['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 10]);
     }
 
-    /** Admin (per-agent staff) keeps stock-adjust rights, same as agen. */
+    /**
+     * LEGACY NON-AUTHORITATIVE MODE: admin (per-agent staff) keeps
+     * stock-adjust rights, same as agen. Requires the legacy adjust path.
+     */
     public function test_admin_can_still_adjust_stock_within_their_own_agent(): void
     {
-        $branch = $this->makeAgentBranch();
-        $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
-            'name' => 'Donat', 'slug' => 'donat-'.uniqid(), 'has_variations' => false,
-            'base_price' => 15000, 'weight_grams' => 100, 'status' => 'active',
-        ]);
+        Config::set('warehouse.authoritative', false);
+        try {
+            $branch = $this->makeAgentBranch();
+            $product = Product::create(['sku' => 'TEST-'.Str::uuid(),
+                'name' => 'Donat', 'slug' => 'donat-'.uniqid(), 'has_variations' => false,
+                'base_price' => 15000, 'weight_grams' => 100, 'status' => 'active',
+            ]);
 
-        $this->actingAs($branch['admin'])->postJson('/api/v1/stock/adjust', [
-            'product_id' => $product->id, 'delta' => 8, 'reason' => 'stok awal oleh admin',
-        ])->assertOk();
+            $this->actingAs($branch['admin'])->postJson('/api/v1/stock/adjust', [
+                'product_id' => $product->id, 'delta' => 8, 'reason' => 'stok awal oleh admin',
+            ])->assertOk();
 
-        $this->assertDatabaseHas('product_stocks', ['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 8]);
+            $this->assertDatabaseHas('product_stocks', ['agent_id' => $branch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 8]);
+        } finally {
+            Config::set('warehouse.authoritative', true);
+        }
     }
 
     /* ---------------------------------------------------------------

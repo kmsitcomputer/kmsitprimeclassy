@@ -26,6 +26,10 @@ class OrderController extends Controller
 
         if ($user->isRole('konsumen')) {
             $query->where('konsumen_id', $user->id);
+        } elseif ($user->isRole('sales-kurir')) {
+            $query->where(fn ($scope) => $scope
+                ->where('sales_id', $user->id)
+                ->orWhere('konsumen_id', $user->id));
         } elseif ($user->isRole('sales')) {
             $query->where('sales_id', $user->id);
         } elseif ($user->isRole('korsal')) {

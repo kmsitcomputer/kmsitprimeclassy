@@ -6,7 +6,7 @@ const { t } = useI18n()
 
 /**
  * Stock is only ever known to the frontend when the backend chose to
- * include `agent_available_quantity` (i.e. the viewer is authenticated and
+ * include `stock.available` (i.e. the viewer is authenticated and
  * has a resolved network agent) — see ProductController::attachAgentAvailability.
  * `quantity === undefined` means "not disclosed", not "zero"; this badge
  * must render that as a neutral prompt, never as "out of stock".

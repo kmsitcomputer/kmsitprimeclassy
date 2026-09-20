@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * The only place internal-role accounts (agen/korsal/sales/admin/keuangan/kurir)
+ * The only place internal-role accounts are created.
  * get created. Enforces, server-side and independent of anything the client
  * sends: who is allowed to create which role (HierarchyRules), that
  * admin/keuangan/kurir are always linked to a real agent, and that referral
@@ -51,13 +51,15 @@ class UserManagementService
 
                 $targetRoleSlug === 'korsal' && $creatorRoleSlug === 'agen' => [$creator->id, $creator->agent_id, null],
 
-                $targetRoleSlug === 'sales' && $creatorRoleSlug === 'korsal' => [$creator->id, $creator->agent_id, $creator->id],
+                in_array($targetRoleSlug, ['sales', 'sales-kurir'], true) && $creatorRoleSlug === 'korsal' => [$creator->id, $creator->agent_id, $creator->id],
 
-                $targetRoleSlug === 'sales' && $creatorRoleSlug === 'agen' => [
+                in_array($targetRoleSlug, ['sales', 'sales-kurir'], true) && $creatorRoleSlug === 'agen' => [
                     $korsalId = $this->resolveRequiredKorsalUnderAgent($data['korsal_id'] ?? null, $creator->id),
                     $creator->id,
                     $korsalId,
                 ],
+
+                $targetRoleSlug === 'gudang' && $creatorRoleSlug === 'agen' => [$creator->id, $creator->agent_id, null],
 
                 // An agen-created admin/keuangan/kurir always belongs to the
                 // creator's own branch — never trust a client-supplied agent_id
@@ -92,18 +94,61 @@ class UserManagementService
                 $user->update(['agent_id' => $user->id]);
             }
 
-            if ($targetRoleSlug === 'kurir') {
+            if (in_array($targetRoleSlug, ['kurir', 'sales-kurir'], true)) {
                 // "Kurir wajib berada di bawah Agen" — the Courier profile row
                 // (assignable to shipments, carries is_active) is created
                 // alongside the account itself, never as a separate step an
                 // admin could forget.
-                Courier::create([
+                Courier::firstOrCreate([
+                    'user_id' => $user->id,
+                ], [
                     'type' => 'internal', 'user_id' => $user->id, 'agent_id' => $agentId,
                     'name' => $user->name, 'is_active' => true,
                 ]);
             }
 
             return $user->fresh();
+        });
+    }
+
+    public function convertSalesToSalesKurir(User $actor, User $target): User
+    {
+        if (! $actor->isRole('agen')) {
+            throw new ApiException('Hanya Agen pemilik network yang dapat melakukan konversi.', 403);
+        }
+
+        if (! $target->isRole('sales')) {
+            throw new ApiException('User target harus memiliki role Sales.', 422);
+        }
+
+        if (! $actor->agent_id || $target->agent_id !== $actor->agent_id) {
+            throw new ApiException('Sales harus berada dalam network Agen yang sama.', 403);
+        }
+
+        $korsal = $target->korsal_id
+            ? User::query()->whereKey($target->korsal_id)->whereHas('role', fn ($q) => $q->where('slug', 'korsal'))
+                ->where('agent_id', $actor->agent_id)->first()
+            : null;
+
+        if (! $korsal) {
+            throw new ApiException('Sales harus memiliki Korsal valid dalam network yang sama.', 422, [
+                'korsal_id' => 'Korsal wajib valid dalam network Agen.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($actor, $target) {
+            $target->update([
+                'role_id' => Role::query()->where('slug', 'sales-kurir')->value('id'),
+            ]);
+
+            Courier::firstOrCreate([
+                'user_id' => $target->id,
+            ], [
+                'type' => 'internal', 'user_id' => $target->id, 'agent_id' => $actor->agent_id,
+                'name' => $target->name, 'is_active' => true,
+            ]);
+
+            return $target->fresh();
         });
     }
 
@@ -153,10 +198,11 @@ class UserManagementService
     /** Public — also reused by ProfileController::regenerateReferralCode for a role's own self-service regenerate action. */
     public function generateCandidateReferralCode(string $roleSlug): string
     {
-        $prefix = strtoupper(substr($roleSlug, 0, 2));
+        $prefix = HierarchyRules::REFERRAL_PREFIXES[$roleSlug]
+            ?? throw new ApiException('Role referral tidak valid.', 422);
 
         do {
-            $code = $prefix.'-'.strtoupper(Str::random(6));
+            $code = $prefix.strtoupper(Str::random(6));
         } while (User::query()->where('referral_code', $code)->exists());
 
         return $code;

@@ -25,7 +25,9 @@ use App\Services\Logging\ActivityLogger;
 use App\Services\Payment\AvailablePaymentMethodService;
 use App\Services\Payment\PaymentService;
 use App\Services\Shipping\ShippingQuoteService;
+use App\Services\Stock\StockRequestService;
 use App\Services\Stock\StockService;
+use App\Services\Stock\WarehouseStockService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -41,6 +43,9 @@ class OrderService
 {
     public function __construct(
         private readonly StockService $stockService,
+        private readonly StockRequestService $stockRequestService,
+        private readonly WarehouseStockService $warehouseStockService,
+        private readonly InventoryCancellationService $inventoryCancellationService,
         private readonly ShippingQuoteService $shippingQuoteService,
         private readonly FeeService $feeService,
         private readonly PaymentService $paymentService,
@@ -243,6 +248,10 @@ class OrderService
                     $item->update(['shipment_id' => $shipment->id]);
                 }
 
+                if ($initialStatus === 'diproses') {
+                    $this->stockRequestService->createForOrderWhenProcessing($order);
+                }
+
                 $this->paymentService->initiate($order, $paymentMethod);
 
                 ActivityLogger::log($actor->id, $order, 'order.created', null, [
@@ -435,7 +444,9 @@ class OrderService
             throw new ApiException('Berat produk belum dikonfigurasi.', 422, ['items' => 'Berat produk wajib minimal 1 gram.']);
         }
 
-        $available = $stock?->availableQuantity() ?? 0;
+        $available = $variation
+            ? $this->warehouseStockService->sellableForVariation($agentId, $variation->id)['available']
+            : $this->warehouseStockService->sellableForProduct($agentId, $product->id)['available'];
         $warning = $available < $qty ? [
             'product_id' => $product->id,
             'product_variation_id' => $variation?->id,
@@ -635,28 +646,30 @@ class OrderService
             throw new ApiException(__('messages.order.status_endpoint_required', ['status' => $newStatus]), 422);
         }
 
-        if (! $order->canTransitionTo($newStatus)) {
-            throw new InvalidStateTransitionException($order->status, $newStatus);
-        }
-
-        // "MANUAL TRANSFER: Order awal diterima ... jika verified: order dapat
-        // masuk diproses. Jika belum verified: tetap diterima." Same rule for
-        // gateway payments (a webhook, not this endpoint, marks those paid).
-        // COD is exempt — "Order COD dapat langsung diproses". A DP order may
-        // start processing once its DP has been verified (partially_paid); the
-        // outstanding balance is settled later in the transaction.
-        $isCod = $order->paymentMethod?->type === 'cod';
-        $paymentReady = $order->payment_status === 'paid'
-            || ($order->paymentMethod?->code === 'down_payment' && $order->payment_status === 'partially_paid');
-
-        if ($newStatus === 'diproses' && ! $isCod && ! $paymentReady) {
-            throw new ApiException(__('messages.order.payment_not_verified'), 422);
-        }
-
         return DB::transaction(function () use ($order, $newStatus, $actor) {
-            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $order = Order::query()->with('paymentMethod')->whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if (! $order->canTransitionTo($newStatus)) {
+                throw new InvalidStateTransitionException($order->status, $newStatus);
+            }
+
+            // Payment eligibility is state-dependent and therefore belongs
+            // after the row lock, beside transition validation. A concurrent
+            // payment/status mutation cannot leave this decision stale.
+            $isCod = $order->paymentMethod?->type === 'cod';
+            $paymentReady = $order->payment_status === 'paid'
+                || ($order->paymentMethod?->code === 'down_payment' && $order->payment_status === 'partially_paid');
+
+            if ($newStatus === 'diproses' && ! $isCod && ! $paymentReady) {
+                throw new ApiException(__('messages.order.payment_not_verified'), 422);
+            }
+
             $previousStatus = $order->status;
             $order->update(['status' => $newStatus]);
+
+            if ($newStatus === 'diproses' && $previousStatus !== 'diproses') {
+                $this->stockRequestService->createForOrderWhenProcessing($order);
+            }
 
             // Per-item status mirrors the order (Blueprint: "status harus
             // diperiksa PER ORDER ITEM") — an item already 'dibatalkan' at the
@@ -711,42 +724,25 @@ class OrderService
      */
     public function cancel(Order $order, User $actor, string $reason): Order
     {
-        if (! $order->canTransitionTo('dibatalkan')) {
-            throw new InvalidStateTransitionException($order->status, 'dibatalkan');
-        }
-
-        $isCod = $order->paymentMethod?->type === 'cod';
-        $allowedStatuses = $isCod ? ['diterima', 'diproses'] : ['diterima'];
-
-        if (! in_array($order->status, $allowedStatuses, true)) {
-            throw new InvalidStateTransitionException($order->status, 'dibatalkan');
-        }
-
         return DB::transaction(function () use ($order, $actor, $reason) {
-            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $order = Order::query()->with('paymentMethod')->whereKey($order->id)->lockForUpdate()->firstOrFail();
 
+            if (! $order->canTransitionTo('dibatalkan')) {
+                throw new InvalidStateTransitionException($order->status, 'dibatalkan');
+            }
+
+            $isCod = $order->paymentMethod?->type === 'cod';
+            $allowedStatuses = $isCod ? ['diterima', 'diproses'] : ['diterima'];
+
+            if (! in_array($order->status, $allowedStatuses, true)) {
+                throw new InvalidStateTransitionException($order->status, 'dibatalkan');
+            }
+
+            $this->inventoryCancellationService->reverseOrder($order, $actor->id);
             foreach ($order->items as $item) {
-                if (! $item->canTransitionTo('dibatalkan')) {
-                    continue;
+                if ($item->canTransitionTo('dibatalkan')) {
+                    $item->update(['status' => 'dibatalkan', 'cancelled_quantity' => $item->cancelled_quantity + max(0, $item->original_quantity - $item->cancelled_quantity - $item->returned_quantity)]);
                 }
-
-                $remaining = $item->fulfilled_quantity - $item->cancelled_quantity - $item->returned_quantity;
-
-                if ($remaining > 0) {
-                    if ($item->product_variation_id) {
-                        $this->stockService->releaseVariation(
-                            $order->agent_id, $item->product_variation_id, $remaining,
-                            'order', $order->id, $actor->id
-                        );
-                    } else {
-                        $this->stockService->releaseProduct(
-                            $order->agent_id, $item->product_id, $remaining,
-                            'order', $order->id, $actor->id
-                        );
-                    }
-                }
-
-                $item->update(['status' => 'dibatalkan']);
             }
 
             $order->update([

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ content: Record<string, any> }>()
+defineProps<{ content: { heading?: string; button_url?: string; button_label?: string } }>()
 </script>
 
 <template>

@@ -88,14 +88,15 @@ class CheckoutTest extends TestCase
         $this->assertFalse($authSteps['account']['active']);
     }
 
-    public function test_steps_endpoint_hides_shipping_step_unless_a_provider_is_active(): void
+    public function test_steps_endpoint_keeps_shipping_step_active_for_pickup_without_carrier_provider(): void
     {
         ['konsumen' => $konsumen] = $this->makeAgentBranch();
+        ShippingProvider::query()->update(['is_active' => false]);
 
         // No RajaOngkir/OpenRoute provider active by default -> free shipping, no shipping step.
         $disabled = collect($this->actingAs($konsumen)->getJson('/api/v1/checkout/steps')->json('data.steps'))->keyBy('key');
-        $this->assertFalse($disabled['shipping']['active']);
-        $this->assertFalse($this->getJson('/api/v1/checkout/steps')->json('data.shipping_enabled'));
+        $this->assertTrue($disabled['shipping']['active']);
+        $this->assertTrue($this->actingAs($konsumen)->getJson('/api/v1/checkout/steps')->json('data.shipping_enabled'));
 
         ShippingProvider::query()->updateOrCreate(['code' => 'openroute'], ['name' => 'OpenRouteService', 'is_active' => true]);
 

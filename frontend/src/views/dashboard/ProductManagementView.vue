@@ -31,9 +31,9 @@ function primaryImageUrl(product: Product): string | null {
 
 function totalStock(product: Product): number {
   if (product.has_variations) {
-    return product.variations.reduce((sum, v) => sum + (v.agent_available_quantity ?? 0), 0)
+    return product.variations.reduce((sum, v) => sum + (v.stock?.available ?? 0), 0)
   }
-  return product.agent_available_quantity ?? 0
+  return product.stock?.available ?? 0
 }
 
 async function load() {

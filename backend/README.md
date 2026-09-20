@@ -21,6 +21,17 @@ Laravel is a web application framework with expressive, elegant syntax. We belie
 
 Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
+## Backend Tests
+
+Run MySQL-backed PHPUnit tests through the serialized runner so destructive
+RefreshDatabase and migration lifecycles cannot overlap on `primeclassy_testing`:
+
+```text
+php scripts/run-tests-serialized.php tests/Feature/PermissionMapTest.php
+```
+
+The runner refuses non-testing databases and does not touch production.
+
 ## Learning Laravel
 
 Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.

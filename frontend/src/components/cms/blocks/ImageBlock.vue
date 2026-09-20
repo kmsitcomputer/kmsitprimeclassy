@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ content: Record<string, any> }>()
+defineProps<{ content: { url?: string; image_url?: string; alt?: string } }>()
 </script>
 
 <template>

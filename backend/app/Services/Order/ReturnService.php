@@ -7,7 +7,9 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\ReturnItem;
 use App\Models\ReturnRequest;
+use App\Models\StockMovement;
 use App\Models\User;
+use App\Models\WarehouseStock;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Stock\StockService;
 use Illuminate\Http\UploadedFile;
@@ -122,11 +124,8 @@ class ReturnService
                 if ($approved) {
                     $returnItem->update(['status' => 'approved', 'refund_status' => 'pending']);
 
-                    // Restocking adds units back on hand directly (these units
-                    // already left as delivered stock, not a reservation to release).
-                    if ($returnItem->restock && $orderItem) {
-                        $this->restockItem($orderItem, $returnItem->quantity_returned, $actor->id);
-                    }
+                    // Physical restock is deliberately deferred until Gudang
+                    // records the received condition inspection.
                 } else {
                     $returnItem->update(['status' => 'rejected', 'refund_status' => 'not_required']);
 
@@ -151,6 +150,33 @@ class ReturnService
             ]);
 
             return $return->fresh('items');
+        });
+    }
+
+    public function inspectReturn(ReturnItem $returnItem, User $actor, int $received, int $good, int $damaged, ?string $note = null): ReturnItem
+    {
+        return DB::transaction(function () use ($returnItem, $actor, $received, $good, $damaged, $note) {
+            $returnItem = ReturnItem::query()->whereKey($returnItem->id)->lockForUpdate()->firstOrFail();
+            $orderItem = OrderItem::query()->whereKey($returnItem->order_item_id)->lockForUpdate()->firstOrFail();
+            $order = Order::withoutGlobalScopes()->whereKey($orderItem->order_id)->lockForUpdate()->firstOrFail();
+            if (! $actor->isRole('gudang') || $actor->agent_id !== $order->agent_id) {
+                throw new ApiException(__('messages.system.unauthorized_action'), 403);
+            }
+            if ($returnItem->status !== 'approved' || $returnItem->restock_processed_at) {
+                throw new ApiException('Return belum siap diinspeksi atau sudah diproses.', 422);
+            }
+            if ($received < 0 || $good < 0 || $damaged < 0 || $good + $damaged !== $received || $received > $returnItem->quantity_returned) {
+                throw new ApiException('Jumlah inspeksi return tidak valid.', 422);
+            }
+            $returnItem->update(['quantity_received' => $received, 'good_quantity' => $good, 'damaged_quantity' => $damaged, 'condition_status' => $damaged > 0 && $good > 0 ? 'mixed' : ($damaged > 0 ? 'damaged' : 'good'), 'condition_note' => $note, 'inspected_by' => $actor->id, 'inspected_at' => now(), 'restock_processed_at' => now(), 'disposition_status' => $damaged > 0 ? 'pending_disposition' : 'restocked']);
+            if ($good > 0) {
+                $query = WarehouseStock::withoutGlobalScopes()->where('agent_id', $order->agent_id)->where('stock_type', 'transit')->whereNull('sub_location_id')->when($orderItem->product_id, fn ($q) => $q->where('product_id', $orderItem->product_id)->whereNull('product_variation_id'))->when($orderItem->product_variation_id, fn ($q) => $q->where('product_variation_id', $orderItem->product_variation_id)->whereNull('product_id'))->lockForUpdate();
+                $stock = $query->first() ?? WarehouseStock::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'stock_type' => 'transit', 'quantity' => 0]);
+                $stock->increment('quantity', $good);
+                StockMovement::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'type' => 'return_restock', 'stock_type' => 'transit', 'quantity' => $good, 'reference_type' => ReturnItem::class, 'reference_id' => $returnItem->id, 'created_by' => $actor->id, 'note' => 'good_return']);
+            }
+
+            return $returnItem->fresh();
         });
     }
 
@@ -292,12 +318,4 @@ class ReturnService
         }
     }
 
-    private function restockItem(OrderItem $orderItem, int $quantity, ?int $actorId): void
-    {
-        if ($orderItem->product_variation_id) {
-            $this->stockService->adjustVariation($orderItem->order->agent_id, $orderItem->product_variation_id, $quantity, 'return_restock', $actorId);
-        } else {
-            $this->stockService->adjustProduct($orderItem->order->agent_id, $orderItem->product_id, $quantity, 'return_restock', $actorId);
-        }
-    }
 }

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { formatDate } from '@/utils/format'
-defineProps<{ content: Record<string, any> }>()
+import type { HomepageContentArticle } from '@/api/cms'
+
+defineProps<{ content: { heading?: string; articles?: HomepageContentArticle[] } }>()
 </script>
 
 <template>

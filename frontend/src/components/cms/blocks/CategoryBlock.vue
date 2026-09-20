@@ -1,5 +1,7 @@
 <script setup lang="ts">
-defineProps<{ content: Record<string, any> }>()
+import type { HomepageContentCategory } from '@/api/cms'
+
+defineProps<{ content: { heading?: string; categories?: HomepageContentCategory[] } }>()
 </script>
 
 <template>

@@ -79,4 +79,21 @@ class PermissionMapTest extends TestCase
         $this->assertNotContains('users.create.agen', $permissions);
         $this->assertNull($admin->referral_code);
     }
+
+    public function test_sales_kurir_permissions_are_scoped_sales_and_courier_capabilities(): void
+    {
+        $agent = User::factory()->agen()->create();
+        $agent->update(['agent_id' => $agent->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agent->id]);
+        $salesKurir = User::factory()->salesKurir()->create(['agent_id' => $agent->id, 'korsal_id' => $korsal->id, 'parent_id' => $korsal->id]);
+
+        $permissions = $this->actingAs($salesKurir)->getJson('/api/v1/auth/me')->json('data.permissions');
+
+        $this->assertContains('orders.create', $permissions);
+        $this->assertContains('orders.view.assigned', $permissions);
+        $this->assertContains('orders.manage.shipment', $permissions);
+        $this->assertNotContains('stock.manage', $permissions);
+        $this->assertNotContains('finance.view', $permissions);
+        $this->assertNull($salesKurir->refresh()->referral_code, 'Factory-created fixtures do not generate codes; creation path is covered by UserManagementTest.');
+    }
 }

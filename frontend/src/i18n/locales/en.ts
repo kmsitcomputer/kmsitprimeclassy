@@ -11,6 +11,16 @@ export default {
     next: 'Next',
     copyright: '© {year} Prime Classy Cake & Cookies.',
   },
+  roles: {
+    gudang: 'Warehouse',
+    salesKurir: 'Sales-Courier',
+  },
+  warehouse: {
+      subLocation: { title: 'Sub Locations', physicalStock: 'Physical stock at Sub location', notSellable: 'Not available stock for sale' },
+      opname: { title: 'Stock Opname', physical: 'Physical Opname', plan: 'Plan Reconciliation', sellable: 'Sellable Reconciliation', approve: 'Approve', reject: 'Reject', submit: 'Submit' },
+      stockRequest: { title: 'Stock Requests', pending: 'Pending', partial: 'Partial', fulfilled: 'Fulfilled', physicalOnly: 'Physical Transit stock only' },
+    stockTransfer: 'Stock Transfer', transferNumber: 'Transfer Number', source: 'Source', destination: 'Destination', handover: 'Handover', pending: 'Pending', completed: 'Completed', cancelled: 'Cancelled', printHandover: 'Print Handover',
+  },
   nav: {
     searchPlaceholder: 'Search cakes, cookies, hampers...',
     toggleTheme: 'Toggle theme',

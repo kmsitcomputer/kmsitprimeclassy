@@ -76,7 +76,7 @@ const unitPrice = computed(() => {
 
 const stockQuantity = computed<number | undefined>(() => {
   if (!product.value) return undefined
-  return product.value.has_variations ? selectedVariation.value?.agent_available_quantity : product.value.agent_available_quantity
+  return product.value.has_variations ? selectedVariation.value?.stock?.available : product.value.stock?.available
 })
 
 const canAddToCart = computed(() => {

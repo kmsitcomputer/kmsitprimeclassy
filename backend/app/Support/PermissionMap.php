@@ -52,11 +52,27 @@ class PermissionMap
             'kurir' => [
                 'orders.view.assigned', 'orders.manage.shipment',
             ],
+            'gudang' => [
+                'stock.view.own', 'orders.view.assigned',
+            ],
+            'sales-kurir' => [
+                'users.view.network', 'orders.create', 'orders.view.assigned', 'orders.manage.shipment',
+            ],
             default => [],
         };
 
         if (in_array($roleSlug, ['super_admin', 'agen', 'admin'], true)) {
             $capabilities[] = 'sheets.manage';
+        }
+
+        // L-003: once the warehouse is the physical-stock authority, Agent/Admin
+        // may no longer write quantity_on_hand directly — POST /stock/adjust is
+        // denied by AdjustStockRequest::authorize() and StockService. This hint
+        // is derived from that same cutover switch (config('warehouse.authoritative'))
+        // rather than a second, independently settable flag, and only tells the
+        // SPA whether to offer the legacy form; the server still enforces it.
+        if (in_array($roleSlug, ['agen', 'admin'], true) && ! config('warehouse.authoritative')) {
+            $capabilities[] = 'stock.adjust.legacy';
         }
 
         foreach (HierarchyRules::ALLOWED_CREATIONS[$roleSlug] ?? [] as $creatable) {

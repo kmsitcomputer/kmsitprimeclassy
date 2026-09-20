@@ -3,7 +3,7 @@ import type { ApiEnvelope } from './client'
 import type { AuthUser, PaginationMeta } from './types'
 
 export interface CreateUserPayload {
-  role: 'agen' | 'korsal' | 'sales' | 'admin' | 'keuangan' | 'kurir'
+  role: 'agen' | 'korsal' | 'sales' | 'admin' | 'keuangan' | 'kurir' | 'gudang' | 'sales-kurir'
   name: string
   email: string
   phone: string
@@ -25,6 +25,11 @@ export async function getUser(id: number) {
 
 export async function createUser(payload: CreateUserPayload) {
   const { data } = await http.post<ApiEnvelope<AuthUser>>('/users', payload)
+  return data.data
+}
+
+export async function convertToSalesKurir(id: number) {
+  const { data } = await http.patch<ApiEnvelope<AuthUser>>(`/users/${id}/convert-to-sales-kurir`)
   return data.data
 }
 

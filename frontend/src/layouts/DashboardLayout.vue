@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useSiteStore } from '@/stores/site'
+import { useI18n } from 'vue-i18n'
 import { buildNavStructure, groupHasVisibleItems, type NavGroup } from '@/dashboard/navConfig'
 import AppIcon from '@/components/ui/AppIcon.vue'
 
@@ -12,6 +13,7 @@ const ui = useUiStore()
 const site = useSiteStore()
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 
 const mobileNavOpen = ref(false)
 
@@ -98,6 +100,8 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   keuangan: 'Keuangan',
   kurir: 'Kurir',
+  gudang: t('roles.gudang'),
+  'sales-kurir': t('roles.salesKurir'),
   konsumen: 'Konsumen',
 }
 

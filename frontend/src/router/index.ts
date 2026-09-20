@@ -127,14 +127,14 @@ const router = createRouter({
       component: () => import('@/views/dashboard/DashboardHomeView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'korsal', 'sales', 'admin', 'kurir', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'korsal', 'sales', 'admin', 'kurir', 'sales-kurir', 'gudang', 'keuangan'],
       },
     },
     {
       path: '/dashboard/kurir',
       name: 'kurir-dashboard',
       component: () => import('@/views/dashboard/KurirDashboardView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['kurir'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['kurir', 'sales-kurir'] },
     },
     {
       path: '/dashboard/stock',
@@ -143,26 +143,62 @@ const router = createRouter({
       meta: {
         requiresAuth: true,
         requiresAnyPermission: ['stock.view.own', 'stock.manage'],
-        requiresAnyRole: ['super_admin'],
+        requiresAnyRole: ['super_admin', 'agen', 'admin', 'gudang'],
       },
+    },
+    {
+      path: '/dashboard/warehouse',
+      name: 'warehouse-stock',
+      component: () => import('@/views/dashboard/WarehouseStockView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin'] },
+    },
+    {
+      path: '/dashboard/warehouse/transfers',
+      name: 'warehouse-transfers',
+      component: () => import('@/views/dashboard/WarehouseTransfersView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
+    },
+    {
+      path: '/dashboard/warehouse/sub-locations',
+      name: 'warehouse-sub-locations',
+      component: () => import('@/views/dashboard/WarehouseSubLocationsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['agen', 'admin', 'gudang'] },
+    },
+    {
+      path: '/dashboard/warehouse/opnames',
+      name: 'warehouse-opnames',
+      component: () => import('@/views/dashboard/WarehouseOpnamesView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
+    },
+    {
+      path: '/dashboard/warehouse/stock-requests',
+      name: 'warehouse-stock-requests',
+      component: () => import('@/views/dashboard/StockRequestsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
+    },
+    {
+      path: '/dashboard/warehouse/returns',
+      name: 'warehouse-returns',
+      component: () => import('@/views/dashboard/WarehouseReturnsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang'] },
     },
     {
       path: '/dashboard/products',
       name: 'product-management',
       component: () => import('@/views/dashboard/ProductManagementView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin'] },
     },
     {
       path: '/dashboard/products/create',
       name: 'product-create',
       component: () => import('@/views/dashboard/ProductFormView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin'] },
     },
     {
       path: '/dashboard/products/:id/edit',
       name: 'product-edit',
       component: () => import('@/views/dashboard/ProductFormView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin'] },
     },
     {
       path: '/dashboard/google-sheets',
@@ -182,7 +218,7 @@ const router = createRouter({
       component: () => import('@/views/dashboard/CommissionsView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'sales', 'korsal', 'kurir', 'admin', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'sales', 'sales-kurir', 'korsal', 'kurir', 'admin', 'keuangan'],
       },
     },
     {
@@ -251,7 +287,7 @@ const router = createRouter({
       path: '/dashboard/reports/my-customers',
       name: 'sales-customers-report',
       component: () => import('@/views/dashboard/SalesCustomersReportView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['sales'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['sales', 'sales-kurir'] },
     },
     {
       path: '/dashboard/agent/store-profile',

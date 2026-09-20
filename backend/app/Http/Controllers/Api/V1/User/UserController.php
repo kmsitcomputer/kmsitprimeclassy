@@ -65,6 +65,20 @@ class UserController extends Controller
         return $this->ok(new UserResource($updated));
     }
 
+    public function convertToSalesKurir(Request $request, User $user)
+    {
+        $this->authorize('convertToSalesKurir', $user);
+
+        $converted = $this->userManagementService->convertSalesToSalesKurir($request->user(), $user);
+
+        ActivityLogger::log($request->user()->id, $converted, 'user.role_converted', null, [
+            'actor_role' => $request->user()->role?->slug,
+            'previous_role' => 'sales', 'target_role' => 'sales-kurir',
+        ]);
+
+        return $this->ok(new UserResource($converted));
+    }
+
     /**
      * "Network" listing — scoped per role (Blueprint §Authorization "Cakupan
      * data per role"). The User model deliberately carries no global
@@ -78,7 +92,7 @@ class UserController extends Controller
 
         $query = User::query()->with('role')->whereHas(
             'role',
-            fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir'])
+            fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang'])
         );
 
         if (! $user->isRole('super_admin')) {
@@ -89,7 +103,7 @@ class UserController extends Controller
 
         if ($user->isRole('korsal')) {
             $query->where(fn ($q) => $q->where('korsal_id', $user->id)->orWhere('id', $user->id));
-        } elseif ($user->isRole('sales')) {
+        } elseif ($user->isRole('sales', 'sales-kurir')) {
             $query->where(fn ($q) => $q->where('sales_id', $user->id)->orWhere('id', $user->id));
         }
         // agen/admin/super_admin: the agent_id filter above (or none, for super_admin) is enough.

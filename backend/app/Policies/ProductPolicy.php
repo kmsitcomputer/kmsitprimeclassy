@@ -17,7 +17,7 @@ class ProductPolicy
      */
     public function manage(User $user): bool
     {
-        return $user->isRole('super_admin', 'agen');
+        return $user->isRole('super_admin', 'agen', 'admin');
     }
 
     public function create(User $user): bool
@@ -38,6 +38,6 @@ class ProductPolicy
     /** Fee columns are only ever exposed to these roles — see ProductFeeResource. */
     public function viewFees(User $user): bool
     {
-        return $user->isRole('super_admin', 'agen', 'sales');
+        return $user->isRole('super_admin', 'agen', 'sales', 'sales-kurir');
     }
 }

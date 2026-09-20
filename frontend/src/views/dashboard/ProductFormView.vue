@@ -45,7 +45,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 /** "Stok hanya untuk agen dan admin di bawah jaringan agen tersebut" — super_admin never sees a stock control here. */
-const canManageStock = computed(() => auth.user?.role === 'agen' || auth.user?.role === 'admin')
+const canManageStock = computed(() => false)
 /** Fee (agen/sales/kurir) configuration — write access is super_admin/agen only (see ProductPolicy::manage). */
 const canManageFees = computed(() => auth.user?.role === 'super_admin' || auth.user?.role === 'agen')
 
@@ -138,7 +138,7 @@ async function openEditVariation(variation: ProductVariation) {
   variationEditForm.price = Number(variation.price)
   variationEditForm.weight_grams = variation.weight_grams
   variationEditForm.is_active = variation.is_active
-  variationEditForm.stock = variation.agent_available_quantity ?? 0
+  variationEditForm.stock = variation.stock?.available ?? 0
   variationEditForm.agent_fee = 0
   variationEditForm.sales_fee = 0
   variationEditForm.courier_fee = 0
@@ -647,7 +647,7 @@ async function submit() {
                     <p class="text-sm font-medium text-stone-800 dark:text-stone-100">{{ variation.label }} <span class="text-xs text-stone-400">({{ variation.sku }})</span></p>
                     <p class="text-xs text-stone-500 dark:text-stone-400">
                       Rp{{ Number(variation.price).toLocaleString('id-ID') }} &middot; {{ variation.weight_grams }}g &middot; {{ variation.is_active ? 'Aktif' : 'Nonaktif' }}
-                      <span v-if="canManageStock"> &middot; Stok: {{ variation.agent_available_quantity ?? 0 }}</span>
+                                      <span v-if="canManageStock"> &middot; Stok: {{ variation.stock?.available ?? 0 }}</span>
                     </p>
                   </div>
                   <div class="flex gap-1.5">

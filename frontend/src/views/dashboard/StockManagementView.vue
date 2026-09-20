@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AgentPicker from '@/components/ui/AgentPicker.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -15,6 +15,14 @@ import { formatApiError } from '@/utils/apiError'
 
 const auth = useAuthStore()
 const isSuperAdmin = auth.user?.role === 'super_admin'
+/**
+ * L-003 — legacy manual adjustment. The server denies POST /stock/adjust as
+ * soon as the warehouse is the physical-stock authority, and only publishes
+ * this capability while that legacy path is still allowed, so the SPA never
+ * offers a form the backend would refuse. Stock movement then goes through the
+ * warehouse workflows (transfers, opname, stock requests, returns).
+ */
+const canAdjustStockLegacy = computed(() => auth.can('stock.adjust.legacy'))
 
 const tab = ref<'products' | 'variations'>('products')
 const loading = ref(false)
@@ -148,7 +156,7 @@ onMounted(loadProducts)
             <th class="px-4 py-3 text-right">Ada</th>
             <th class="px-4 py-3 text-right">Ditahan</th>
             <th class="px-4 py-3 text-right">Tersedia</th>
-            <th v-if="!isSuperAdmin" class="px-4 py-3"></th>
+            <th v-if="canAdjustStockLegacy" class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
@@ -168,7 +176,7 @@ onMounted(loadProducts)
             <td class="px-4 py-3 text-right tabular-nums">{{ row.quantity_on_hand }}</td>
             <td class="px-4 py-3 text-right tabular-nums">{{ row.quantity_reserved }}</td>
             <td class="px-4 py-3 text-right font-semibold tabular-nums">{{ row.quantity_available }}</td>
-            <td v-if="!isSuperAdmin" class="px-4 py-3 text-right">
+            <td v-if="canAdjustStockLegacy" class="px-4 py-3 text-right">
               <button
                 type="button"
                 class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200"
@@ -194,7 +202,7 @@ onMounted(loadProducts)
             <td class="px-4 py-3 text-right tabular-nums">{{ row.quantity_on_hand }}</td>
             <td class="px-4 py-3 text-right tabular-nums">{{ row.quantity_reserved }}</td>
             <td class="px-4 py-3 text-right font-semibold tabular-nums">{{ row.quantity_available }}</td>
-            <td v-if="!isSuperAdmin" class="px-4 py-3 text-right">
+            <td v-if="canAdjustStockLegacy" class="px-4 py-3 text-right">
               <button
                 type="button"
                 class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200"
@@ -209,7 +217,7 @@ onMounted(loadProducts)
     </div>
 
     <!-- Adjust modal -->
-    <div v-if="adjusting" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="closeAdjust">
+    <div v-if="adjusting && canAdjustStockLegacy" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="closeAdjust">
       <div class="w-full max-w-sm rounded-2xl bg-white p-5 dark:bg-stone-900">
         <h2 class="mb-4 font-display text-lg font-semibold text-stone-800 dark:text-stone-100">Sesuaikan Stok</h2>
         <label class="mb-3 block text-sm text-stone-600 dark:text-stone-300">

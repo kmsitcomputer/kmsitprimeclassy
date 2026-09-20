@@ -4,7 +4,9 @@ import { formatRupiah } from '@/utils/format'
 import AppIcon from '@/components/ui/AppIcon.vue'
 
 const { t } = useI18n()
-defineProps<{ content: Record<string, any> }>()
+import type { HomepageContentProduct } from '@/api/cms'
+
+defineProps<{ content: { heading?: string; products?: HomepageContentProduct[] } }>()
 </script>
 
 <template>

@@ -24,10 +24,10 @@ const displayPrice = computed(() => {
 
 const stockQuantity = computed(() => {
   if (props.product.has_variations) {
-    const totals = props.product.variations.map((v) => v.agent_available_quantity).filter((n) => n !== undefined) as number[]
+    const totals = props.product.variations.map((v) => v.stock?.available).filter((n) => n !== undefined) as number[]
     return totals.length ? totals.reduce((a, b) => a + b, 0) : undefined
   }
-  return props.product.agent_available_quantity
+  return props.product.stock?.available
 })
 </script>
 

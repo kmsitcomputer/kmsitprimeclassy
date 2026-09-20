@@ -9,7 +9,7 @@ class RoleSeeder extends Seeder
 {
     /**
      * Fixed system role taxonomy required for users.role_id to have anything to
-     * reference — not business/demo data, just the closed set of 8 roles the
+     * reference — not business/demo data, just the closed set of 10 roles the
      * hierarchy is built on.
      */
     public function run(): void
@@ -23,6 +23,8 @@ class RoleSeeder extends Seeder
             ['slug' => 'admin', 'name' => 'Admin'],
             ['slug' => 'keuangan', 'name' => 'Keuangan'],
             ['slug' => 'kurir', 'name' => 'Kurir'],
+            ['slug' => 'gudang', 'name' => 'Gudang'],
+            ['slug' => 'sales-kurir', 'name' => 'Sales-Kurir'],
         ];
 
         foreach ($roles as $role) {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import PasswordInput from '@/components/ui/PasswordInput.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -9,6 +10,7 @@ import {
   updateUser,
   deleteUser,
   reassignReferral,
+  convertToSalesKurir,
   type CreateUserPayload,
 } from '@/api/users'
 import type { AuthUser } from '@/api/types'
@@ -16,11 +18,12 @@ import { ApiError } from '@/api/client'
 import { formatApiError } from '@/utils/apiError'
 
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const ALLOWED_CREATIONS: Record<string, CreateUserPayload['role'][]> = {
   super_admin: ['agen'],
-  agen: ['korsal', 'sales', 'admin', 'keuangan', 'kurir'],
-  korsal: ['sales'],
+  agen: ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir'],
+  korsal: ['sales', 'sales-kurir'],
 }
 
 /** Mirrors UserPolicy::delete — super_admin deletes any non-self, non-super-admin, non-agent account; an agen may delete only admin/keuangan/kurir within its own branch. */
@@ -46,6 +49,10 @@ function canReassign(user: AuthUser): boolean {
   return canEdit(user) && (user.role === 'sales' || user.role === 'konsumen')
 }
 
+function canConvertToSalesKurir(user: AuthUser): boolean {
+  return auth.user?.role === 'agen' && user.role === 'sales' && user.agent_id === auth.user.agent_id
+}
+
 const ROLE_LABELS: Record<string, string> = {
   super_admin: 'Super Admin',
   agen: 'Agen',
@@ -54,6 +61,8 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   keuangan: 'Keuangan',
   kurir: 'Kurir',
+  gudang: t('roles.gudang'),
+  'sales-kurir': t('roles.salesKurir'),
   konsumen: 'Konsumen',
 }
 
@@ -75,7 +84,9 @@ const form = ref<CreateUserPayload>({
 const createError = ref('')
 const creating = ref(false)
 
-const needsKorsalId = computed(() => auth.user?.role === 'agen' && form.value.role === 'sales')
+const needsKorsalId = computed(
+  () => ['sales', 'sales-kurir'].includes(form.value.role) && auth.user?.role === 'agen',
+)
 const korsalCandidates = ref<AuthUser[]>([])
 const korsalLoading = ref(false)
 watch(needsKorsalId, async (required) => {
@@ -144,6 +155,16 @@ async function submitReassign() {
     reassignError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memindahkan referral.'
   } finally {
     reassigning.value = false
+  }
+}
+
+async function convertSales(user: AuthUser) {
+  if (!confirm(`Ubah ${user.name} menjadi Sales-Kurir?`)) return
+  try {
+    await convertToSalesKurir(user.id)
+    await load()
+  } catch (e) {
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengubah role pengguna.'
   }
 }
 
@@ -337,6 +358,14 @@ onMounted(load)
                 @click="openReassign(user)"
               >
                 {{ user.role === 'sales' ? 'Pindah Korsal' : 'Pindah Sales' }}
+              </button>
+              <button
+                v-if="canConvertToSalesKurir(user)"
+                type="button"
+                class="mr-2 rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200"
+                @click="convertSales(user)"
+              >
+                Jadikan Sales-Kurir
               </button>
               <button
                 v-if="canDelete(user)"

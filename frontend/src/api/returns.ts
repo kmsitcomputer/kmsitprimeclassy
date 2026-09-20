@@ -15,6 +15,10 @@ export interface ReturnItemLine {
   status: 'pending' | 'approved' | 'rejected'
   refund_status: 'not_required' | 'pending' | 'processed' | 'failed'
   condition_note: string | null
+  quantity_received?: number
+  good_quantity?: number
+  damaged_quantity?: number
+  condition_status?: string
 }
 
 export interface ReturnRequestRecord {
@@ -73,5 +77,10 @@ export async function reviewReturn(id: number, approved: boolean, note?: string)
 
 export async function markReturnItemRefunded(itemId: number) {
   const { data } = await http.patch<ApiEnvelope<ReturnItemLine>>(`/admin/return-items/${itemId}/refund`, {})
+  return data.data
+}
+
+export async function inspectReturn(itemId: number, payload: { received_quantity: number; good_quantity: number; damaged_quantity: number; note?: string }) {
+  const { data } = await http.post<ApiEnvelope<ReturnItemLine>>(`/warehouse/returns/${itemId}/inspect`, payload)
   return data.data
 }
