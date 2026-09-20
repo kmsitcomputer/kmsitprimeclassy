@@ -2,7 +2,18 @@ import { http } from './client'
 import type { ApiEnvelope } from './client'
 import type { PaginationMeta } from './types'
 
-export interface StockTransfer { id: number; transfer_number: string; source_stock_type: string; source_sub_location_id?: number | null; destination_stock_type: string; destination_sub_location_id?: number | null; status: string; reference: string | null; items: { quantity: number; product?: { name: string; sku?: string | null } | null; variation?: { label: string; sku: string } | null }[]; handover?: { id: number } | null }
+export interface StockTransferItem {
+  id?: number
+  quantity: number
+  product_id?: number | null
+  product_variation_id?: number | null
+  // Product-oriented identity (PBR-003) — nested objects from eager-loaded
+  // relations; variation.label mirrors backend ProductVariation::label().
+  product?: { id?: number; name: string; sku?: string | null } | null
+  variation?: { id?: number; label: string; sku: string } | null
+}
+
+export interface StockTransfer { id: number; transfer_number: string; source_stock_type: string; source_sub_location_id?: number | null; destination_stock_type: string; destination_sub_location_id?: number | null; status: string; reference: string | null; items: StockTransferItem[]; handover?: { id: number } | null }
 
 export async function listTransfers(page = 1) {
   const { data } = await http.get<ApiEnvelope<StockTransfer[]>>('/warehouse/transfers', { params: { page } })

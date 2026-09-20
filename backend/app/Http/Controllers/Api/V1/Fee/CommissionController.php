@@ -32,6 +32,10 @@ class CommissionController extends Controller
             $user->isRole('admin', 'keuangan') => ['sales', 'courier'],
             $user->isRole('sales') => ['sales'],
             $user->isRole('kurir') => ['courier'],
+            // Sales-Kurir earns BOTH a Sales Fee (referral attribution) and a
+            // Courier Fee (delivery) — both ledgers must stay visible and
+            // independently auditable, never merged.
+            $user->isRole('sales-kurir') => ['sales', 'courier'],
             $user->isRole('korsal') => ['sales'],
             default => [],
         };

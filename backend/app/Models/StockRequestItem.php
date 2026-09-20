@@ -23,4 +23,14 @@ class StockRequestItem extends Model
     {
         return $this->belongsTo(OrderItem::class);
     }
+
+    public function product(): BelongsTo
+    {
+        return $this->belongsTo(Product::class);
+    }
+
+    public function variation(): BelongsTo
+    {
+        return $this->belongsTo(ProductVariation::class, 'product_variation_id');
+    }
 }

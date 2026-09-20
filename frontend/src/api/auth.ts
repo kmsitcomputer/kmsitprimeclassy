@@ -54,7 +54,7 @@ export async function updatePassword(payload: UpdatePasswordPayload) {
   await http.patch('/profile/password', payload)
 }
 
-/** agen/korsal/sales only — see ProfileController::updateReferralCode/regenerateReferralCode/deleteReferralCode. */
+/** agen/korsal/sales/sales-kurir — see ProfileController referral-code routes. */
 export async function updateReferralCode(referralCode: string) {
   const { data } = await http.patch<ApiEnvelope<AuthUser>>('/profile/referral-code', { referral_code: referralCode })
   return data.data

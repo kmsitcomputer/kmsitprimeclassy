@@ -418,7 +418,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // CommissionController::allowedBeneficiaryRoles. keuangan sees the same
     // financial slice as admin (sales+courier freely, agent fee only for
     // direct agent referrals).
-    Route::middleware('role:super_admin,agen,sales,kurir,admin,korsal,keuangan')->group(function () {
+    Route::middleware('role:super_admin,agen,sales,sales-kurir,kurir,admin,korsal,keuangan')->group(function () {
         Route::get('/commissions', [CommissionController::class, 'index']);
         Route::get('/commissions/summary', [CommissionController::class, 'summary']);
     });

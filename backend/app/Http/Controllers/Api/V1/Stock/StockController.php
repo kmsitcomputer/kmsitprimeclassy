@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Stock\AdjustStockRequest;
 use App\Http\Resources\ProductStockResource;
 use App\Http\Resources\ProductVariationStockResource;
+use App\Http\Resources\WarehouseStockResource;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\ProductVariation;
@@ -64,11 +65,18 @@ class StockController extends Controller
 
         $stocks = WarehouseStock::withoutGlobalScopes()
             ->where('agent_id', $agentId)
-            ->with(['product', 'variation', 'subLocation'])
+            ->with(['product.images', 'variation.compositions.option', 'subLocation'])
             ->when($request->filled('stock_type'), fn ($q) => $q->where('stock_type', $request->string('stock_type')))
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $search = '%'.$request->string('search')->toString().'%';
+                $q->where(function ($qq) use ($search) {
+                    $qq->whereHas('product', fn ($p) => $p->where('name', 'like', $search)->orWhere('sku', 'like', $search))
+                        ->orWhereHas('variation', fn ($v) => $v->where('sku', 'like', $search));
+                });
+            })
             ->paginate($request->integer('per_page', 30));
 
-        return $this->ok($stocks->items(), meta: [
+        return $this->ok(WarehouseStockResource::collection($stocks)->resolve(), meta: [
             'current_page' => $stocks->currentPage(), 'last_page' => $stocks->lastPage(), 'total' => $stocks->total(),
         ]);
     }

@@ -14,7 +14,7 @@ class StockTransferController extends Controller
 
     public function index(Request $request)
     {
-        $query = StockTransfer::query()->with(['items.product', 'items.variation', 'handover', 'sourceSubLocation', 'destinationSubLocation'])->latest();
+        $query = StockTransfer::query()->with(['items.product', 'items.variation.compositions.option', 'handover', 'sourceSubLocation', 'destinationSubLocation'])->latest();
         if ($request->user()->isRole('super_admin')) {
             $query->withoutGlobalScopes();
         }
@@ -32,28 +32,28 @@ class StockTransferController extends Controller
             'items.*.product_variation_id' => ['nullable', 'integer', 'exists:product_variations,id'], 'items.*.quantity' => ['required', 'integer', 'min:1'],
         ]);
 
-        return $this->created($this->transfers->create($request->user(), $data['source_stock_type'], $data['source_sub_location_id'] ?? null, $data['destination_stock_type'], $data['destination_sub_location_id'] ?? null, $data['items'], $data['reference'] ?? null, $data['note'] ?? null));
+        return $this->created($this->transfers->create($request->user(), $data['source_stock_type'], $data['source_sub_location_id'] ?? null, $data['destination_stock_type'], $data['destination_sub_location_id'] ?? null, $data['items'], $data['reference'] ?? null, $data['note'] ?? null)->load(['items.product', 'items.variation.compositions.option']));
     }
 
     public function show(Request $request, StockTransfer $transfer)
     {
         $this->authorize('view', $transfer);
 
-        return $this->ok($transfer->load(['items.product', 'items.variation', 'handover', 'sourceSubLocation', 'destinationSubLocation']));
+        return $this->ok($transfer->load(['items.product', 'items.variation.compositions.option', 'handover', 'sourceSubLocation', 'destinationSubLocation']));
     }
 
     public function complete(Request $request, StockTransfer $transfer)
     {
         $this->authorize('complete', $transfer);
 
-        return $this->ok($this->transfers->complete($request->user(), $transfer));
+        return $this->ok($this->transfers->complete($request->user(), $transfer)->load(['items.product', 'items.variation.compositions.option', 'handover']));
     }
 
     public function cancel(Request $request, StockTransfer $transfer)
     {
         $this->authorize('cancel', $transfer);
 
-        return $this->ok($this->transfers->cancel($request->user(), $transfer));
+        return $this->ok($this->transfers->cancel($request->user(), $transfer)->load(['items.product', 'items.variation.compositions.option']));
     }
 
     public function handover(Request $request, StockHandover $handover)

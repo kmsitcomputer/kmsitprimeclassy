@@ -53,7 +53,7 @@ onMounted(load)
 <template>
   <DashboardLayout>
     <h1 class="mb-1 font-display text-2xl font-semibold text-stone-800 dark:text-stone-100">Komisi</h1>
-    <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">Ringkasan dan riwayat komisi/fee Anda.</p>
+    <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">Ringkasan dan riwayat komisi/fee Anda. Fee Sales (referral) dan Fee Kurir (pengiriman) dicatat dan ditampilkan terpisah.</p>
 
     <div class="mb-5 flex flex-wrap items-end gap-3">
       <label class="text-sm text-stone-600 dark:text-stone-300">

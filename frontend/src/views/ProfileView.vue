@@ -49,8 +49,8 @@ async function copyReferralLink() {
   setTimeout(() => (referralLinkCopied.value = false), 2000)
 }
 
-/* Self-service referral code CRUD — agen/korsal/sales only (see ProfileController). */
-const canManageReferralCode = computed(() => ['agen', 'korsal', 'sales'].includes(auth.user?.role ?? ''))
+/* Self-service referral code CRUD — agen/korsal/sales/sales-kurir (see ProfileController route gate). */
+const canManageReferralCode = computed(() => ['agen', 'korsal', 'sales', 'sales-kurir'].includes(auth.user?.role ?? ''))
 const editingReferralCode = ref(false)
 const referralCodeDraft = ref('')
 const referralCodeSaving = ref(false)

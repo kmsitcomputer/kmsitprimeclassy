@@ -53,9 +53,13 @@ class ProductController extends Controller
                 'category',
                 fn ($c) => $c->where('slug', $request->string('category'))
             ))
-            ->when($request->filled('search'), fn ($q) => $q->where(
-                'name', 'like', '%'.$request->string('search')->toString().'%'
-            ))
+            ->when($request->filled('search'), fn ($q) => $q->where(function ($qq) use ($request) {
+                // DS-PBR-001: warehouse product picker searches by name OR
+                // SKU (additive — name matches behave exactly as before).
+                $term = '%'.$request->string('search')->toString().'%';
+                $qq->where('name', 'like', $term)->orWhere('sku', 'like', $term)
+                    ->orWhereHas('variations', fn ($v) => $v->where('sku', 'like', $term));
+            }))
             ->when($request->filled('min_price'), fn ($q) => $q->havingRaw(
                 'COALESCE(base_price, variations_min_price) >= ?', [$request->float('min_price')]
             ))

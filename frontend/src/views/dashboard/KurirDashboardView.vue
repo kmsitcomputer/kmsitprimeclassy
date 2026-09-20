@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import { useAuthStore } from '@/stores/auth'
 import { updateShipmentStatus } from '@/api/shipments'
 import {
   listCourierOrders,
@@ -17,6 +18,26 @@ import { formatApiError } from '@/utils/apiError'
 import { formatDate, formatRupiah, skuLabel } from '@/utils/format'
 
 const tab = ref<'orders' | 'returns' | 'selesai'>('orders')
+const auth = useAuthStore()
+
+/* Sales-Kurir referral visibility (PBR-001) — same code/link/copy UX as ProfileView. */
+const isSalesKurir = computed(() => auth.user?.role === 'sales-kurir')
+const referralLink = computed(() => (auth.user?.referral_code ? `${window.location.origin}/?ref=${auth.user.referral_code}` : ''))
+const referralCopied = ref(false)
+const referralLinkCopied = ref(false)
+async function copyReferralCode() {
+  if (!auth.user?.referral_code) return
+  await navigator.clipboard.writeText(auth.user.referral_code)
+  referralCopied.value = true
+  setTimeout(() => (referralCopied.value = false), 2000)
+}
+async function copyReferralLink() {
+  if (!referralLink.value) return
+  await navigator.clipboard.writeText(referralLink.value)
+  referralLinkCopied.value = true
+  setTimeout(() => (referralLinkCopied.value = false), 2000)
+}
+
 const loading = ref(false)
 const orders = ref<CourierOrder[]>([])
 const returns = ref<CourierReturn[]>([])
@@ -166,6 +187,26 @@ onMounted(() => loadOrders(1))
     <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">
       Ambil order untuk dikirim, tandai terkirim dengan foto bukti, dan kelola pengambilan retur.
     </p>
+
+    <div
+      v-if="isSalesKurir && auth.user?.referral_code"
+      class="mb-5 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900"
+    >
+      <p class="text-xs uppercase text-stone-400 dark:text-stone-500">Kode Referral Saya</p>
+      <div class="mt-1 flex flex-wrap items-center gap-2">
+        <code class="rounded-lg bg-stone-100 px-3 py-2 text-sm font-semibold tracking-wide text-stone-800 dark:bg-stone-800 dark:text-stone-100">{{ auth.user.referral_code }}</code>
+        <button type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="copyReferralCode">
+          {{ referralCopied ? 'Tersalin!' : 'Salin' }}
+        </button>
+      </div>
+      <p class="mb-1 mt-3 text-xs text-stone-400">Link Referral</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <code class="max-w-full truncate rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-700 dark:bg-stone-800 dark:text-stone-200">{{ referralLink }}</code>
+        <button type="button" class="shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400" @click="copyReferralLink">
+          {{ referralLinkCopied ? 'Link referral berhasil disalin.' : 'Salin Link' }}
+        </button>
+      </div>
+    </div>
 
     <div class="mb-5 flex gap-2 border-b border-stone-200 dark:border-stone-800">
       <button

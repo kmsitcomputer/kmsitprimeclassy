@@ -1,12 +1,28 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
 
-export interface WarehouseRow { id: number; product_id: number | null; product_variation_id: number | null; stock_type: string; quantity: number }
+export interface WarehouseRow {
+  id: number
+  product_id: number | null
+  product_variation_id: number | null
+  stock_type: string
+  quantity: number
+  sub_location_id?: number | null
+  // Product-oriented identity (PBR-003) — flat human-readable fields added
+  // alongside the legacy nested objects; IDs stay present but secondary.
+  product_name?: string | null
+  variation_label?: string | null
+  sku?: string | null
+  product_image_url?: string | null
+  product?: { id: number; name: string; sku?: string | null } | null
+  variation?: { id: number; label: string; sku: string } | null
+  sub_location?: { id: number; code: string; name: string } | null
+}
 export interface SubLocation { id: number; code: string; name: string; address: string | null; description: string | null; is_active: boolean }
 export interface SellableStock { transit: number; factory_plan: number; factory_plan_enabled: boolean; sellable_base: number; reserved: number; available: number; physical_stock: number; has_commitment_deficit: boolean }
 
-export async function listWarehouseStock(stockType?: string) {
-  const { data } = await http.get<ApiEnvelope<WarehouseRow[]>>('/warehouse-stock', { params: stockType ? { stock_type: stockType } : {} })
+export async function listWarehouseStock(stockType?: string, search?: string) {
+  const { data } = await http.get<ApiEnvelope<WarehouseRow[]>>('/warehouse-stock', { params: { ...(stockType ? { stock_type: stockType } : {}), ...(search ? { search } : {}) } })
   return data.data
 }
 
