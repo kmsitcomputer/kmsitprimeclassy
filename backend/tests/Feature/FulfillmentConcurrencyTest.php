@@ -11,10 +11,13 @@ use App\Models\ProductStock;
 use App\Models\StockMovement;
 use App\Models\StockRequest;
 use App\Models\StockRequestItem;
+use App\Models\StockRequestProposal;
+use App\Models\StockRequestProposalItem;
 use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
 use App\Services\Stock\SellableStockService;
+use App\Services\Stock\StockRequestProposalService;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Facades\DB;
@@ -34,7 +37,7 @@ class FulfillmentConcurrencyTest extends TestCase
         $this->seed(PaymentMethodSeeder::class);
     }
 
-    public function test_overlapping_fulfillments_cannot_duplicate_physical_inventory(): void
+    public function test_overlapping_proposal_approvals_cannot_duplicate_physical_inventory(): void
     {
         $reports = [];
 
@@ -44,8 +47,9 @@ class FulfillmentConcurrencyTest extends TestCase
 
             try {
                 $report = $harness->runFulfillment([
-                    'actor_a_id' => $fixture['gudang_a']->id,
-                    'actor_b_id' => $fixture['gudang_b']->id,
+                    'actor_a_id' => $fixture['admin_a']->id,
+                    'actor_b_id' => $fixture['admin_b']->id,
+                    'proposal_id' => $fixture['proposal']->id,
                     'request_id' => $fixture['request']->id,
                     'item_id' => $fixture['request_item']->id,
                     'quantity' => 6,
@@ -63,11 +67,17 @@ class FulfillmentConcurrencyTest extends TestCase
                     ->where('reference_id', $fixture['request']->id)
                     ->where('stock_type', 'shipping')
                     ->sum('quantity');
+                $proposal = StockRequestProposal::withoutGlobalScopes()->findOrFail($fixture['proposal']->id);
+                $operations = DB::table('stock_request_fulfillments')->where('stock_request_id', $fixture['request']->id)->count();
                 $successful = collect([$report['actor_a'], $report['actor_b']])->where('outcome', 'success')->count();
 
                 $this->assertTrue($report['different_connections']);
                 $this->assertTrue($report['true_overlap']);
-                $this->assertLessThanOrEqual(1, $successful);
+                // Approval is idempotent, so the loser may also report success; what
+                // must never happen is the physical stock moving twice.
+                $this->assertGreaterThanOrEqual(1, $successful);
+                $this->assertSame('approved', $proposal->status);
+                $this->assertSame(1, $operations);
                 $this->assertSame(6, (int) $item->fulfilled_qty);
                 $this->assertSame(4, (int) $item->remaining_qty);
                 $this->assertSame('partial', $request->status);
@@ -111,8 +121,9 @@ class FulfillmentConcurrencyTest extends TestCase
     {
         $agent = User::factory()->agen()->create();
         $agent->update(['agent_id' => $agent->id]);
-        $gudangA = User::factory()->gudang()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
-        $gudangB = User::factory()->gudang()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
+        $adminA = User::factory()->admin()->create(['agent_id' => $agent->id]);
+        $adminB = User::factory()->admin()->create(['agent_id' => $agent->id]);
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $agent->id]);
         AgentProfile::create(['user_id' => $agent->id, 'store_name' => 'Fulfillment Race Branch', 'address' => 'Test', 'latitude' => -6.2, 'longitude' => 106.8]);
         $product = Product::create([
@@ -154,11 +165,14 @@ class FulfillmentConcurrencyTest extends TestCase
         WarehouseSetting::create(['agent_id' => $agent->id, 'factory_plan_enabled' => false]);
         $request = StockRequest::create(['agent_id' => $agent->id, 'order_id' => $order->id, 'request_number' => 'SR-'.Str::uuid(), 'status' => 'pending', 'created_by' => $agent->id]);
         $requestItem = StockRequestItem::create(['stock_request_id' => $request->id, 'order_item_id' => $orderItem->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 10, 'fulfilled_qty' => 0, 'remaining_qty' => 10]);
+        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $requestItem->id, 'quantity' => 6]]);
 
         return [
             'agent' => $agent,
-            'gudang_a' => $gudangA,
-            'gudang_b' => $gudangB,
+            'admin_a' => $adminA,
+            'admin_b' => $adminB,
+            'gudang' => $gudang,
+            'proposal' => $proposal,
             'konsumen' => $konsumen,
             'product' => $product,
             'order' => $order,
@@ -177,6 +191,8 @@ class FulfillmentConcurrencyTest extends TestCase
     {
         StockMovement::withoutGlobalScopes()->where('reference_type', StockRequest::class)->where('reference_id', $fixture['request']->id)->delete();
         DB::table('stock_request_fulfillments')->where('stock_request_id', $fixture['request']->id)->delete();
+        StockRequestProposalItem::query()->where('stock_request_proposal_id', $fixture['proposal']->id)->delete();
+        StockRequestProposal::withoutGlobalScopes()->whereKey($fixture['proposal']->id)->delete();
         $fixture['request_item']->delete();
         $fixture['request']->delete();
         $fixture['order_item']->delete();
@@ -186,6 +202,6 @@ class FulfillmentConcurrencyTest extends TestCase
         WarehouseSetting::withoutGlobalScopes()->where('agent_id', $fixture['agent']->id)->delete();
         AgentProfile::where('user_id', $fixture['agent']->id)->delete();
         Product::whereKey($fixture['product']->id)->delete();
-        User::whereIn('id', [$fixture['gudang_a']->id, $fixture['gudang_b']->id, $fixture['konsumen']->id, $fixture['agent']->id])->delete();
+        User::whereIn('id', [$fixture['admin_a']->id, $fixture['admin_b']->id, $fixture['gudang']->id, $fixture['konsumen']->id, $fixture['agent']->id])->delete();
     }
 }

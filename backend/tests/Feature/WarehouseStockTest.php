@@ -57,7 +57,7 @@ class WarehouseStockTest extends TestCase
             ->assertSuccessful();
     }
 
-    public function test_only_gudang_can_receive_transit_and_receipt_creates_movement(): void
+    public function test_direct_transit_receive_is_removed_in_favor_of_admin_approval(): void
     {
         $agent = User::factory()->agen()->create();
         $agent->update(['agent_id' => $agent->id]);
@@ -66,16 +66,22 @@ class WarehouseStockTest extends TestCase
         $product = Product::create(['sku' => 'RECV-'.uniqid(), 'name' => 'Receive Cake', 'slug' => 'receive-'.uniqid(), 'has_variations' => false, 'status' => 'active']);
         $payload = ['product_id' => $product->id, 'quantity' => 10, 'reference' => 'DO-123'];
 
-        $this->actingAs($agent)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertForbidden();
-        $this->actingAs($admin)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertForbidden();
-        $this->actingAs($gudang)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertCreated();
+        $this->actingAs($agent)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertNotFound();
+        $this->actingAs($admin)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertNotFound();
+        $this->actingAs($gudang)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertNotFound();
+
+        $request = $this->actingAs($gudang)->postJson('/api/v1/warehouse/stock-addition-requests', [
+            'product_id' => $product->id, 'quantity' => 10, 'target_stock_type' => 'transit', 'reference' => 'DO-123',
+        ])->assertCreated()->json('data');
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/stock-addition-requests/{$request['id']}/approve")->assertOk();
+
         $this->assertDatabaseHas('warehouse_stocks', ['agent_id' => $agent->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 10]);
         $this->assertDatabaseHas('stock_movements', ['agent_id' => $agent->id, 'product_id' => $product->id, 'type' => 'factory_in', 'stock_type' => 'transit', 'quantity' => 10, 'note' => 'DO-123']);
-        $this->actingAs($gudang)->postJson('/api/v1/warehouse/transit/receive', $payload)->assertCreated();
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/stock-addition-requests/{$request['id']}/approve")->assertOk();
         $this->assertDatabaseCount('stock_movements', 1);
     }
 
-    public function test_admin_toggle_and_gudang_plan_mutation_are_commitment_safe(): void
+    public function test_admin_toggle_and_plan_request_approval_are_commitment_safe(): void
     {
         $agent = User::factory()->agen()->create();
         $agent->update(['agent_id' => $agent->id]);
@@ -85,7 +91,11 @@ class WarehouseStockTest extends TestCase
         ProductStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'quantity_on_hand' => 0, 'quantity_reserved' => 20]);
 
         $this->actingAs($admin)->patchJson('/api/v1/warehouse/settings/factory-plan', ['factory_plan_enabled' => true])->assertOk();
-        $this->actingAs($gudang)->postJson('/api/v1/warehouse/factory-plan', ['product_id' => $product->id, 'delta' => 30, 'reference' => 'PLAN-1'])->assertOk();
+        $this->actingAs($gudang)->postJson('/api/v1/warehouse/factory-plan', ['product_id' => $product->id, 'delta' => 30, 'reference' => 'PLAN-1'])->assertNotFound();
+        $request = $this->actingAs($gudang)->postJson('/api/v1/warehouse/stock-addition-requests', [
+            'product_id' => $product->id, 'quantity' => 30, 'target_stock_type' => 'factory_plan', 'reference' => 'PLAN-1',
+        ])->assertCreated()->json('data');
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/stock-addition-requests/{$request['id']}/approve")->assertOk();
         $this->actingAs($gudang)->getJson('/api/v1/warehouse/sellable?product_id='.$product->id)->assertOk()->assertJsonPath('data.available', 10);
         $this->actingAs($admin)->patchJson('/api/v1/warehouse/settings/factory-plan', ['factory_plan_enabled' => false])->assertUnprocessable();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'factory_plan', 'quantity' => 30]);

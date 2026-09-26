@@ -165,6 +165,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['agen', 'admin', 'gudang'] },
     },
     {
+      path: '/dashboard/warehouse/sub-locations/:id',
+      name: 'warehouse-sub-location-detail',
+      component: () => import('@/views/dashboard/WarehouseSubLocationDetailView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['admin', 'gudang'] },
+    },
+    {
       path: '/dashboard/warehouse/opnames',
       name: 'warehouse-opnames',
       component: () => import('@/views/dashboard/WarehouseOpnamesView.vue'),

@@ -4,7 +4,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AgentPicker from '@/components/ui/AgentPicker.vue'
 import { useAuthStore } from '@/stores/auth'
-import { listReturns, reviewReturn, markReturnItemRefunded, type ReturnRequestRecord } from '@/api/returns'
+import { finalizeReturn, listReturns, reviewReturn, markReturnItemRefunded, type ReturnRequestRecord } from '@/api/returns'
 import { formatRupiah, formatDate, skuLabel } from '@/utils/format'
 
 /** Admin dashboard: return list — item/quantity/amount/customer/order/reason/status/refund status. */
@@ -45,6 +45,18 @@ async function markRefunded(itemId: number) {
   busyId.value = itemId
   try {
     await markReturnItemRefunded(itemId)
+    await load()
+  } finally {
+    busyId.value = null
+  }
+}
+
+const DISPOSITION_LABEL: Record<string, string> = { pending_disposition: 'Menunggu disposisi final', restocked: 'Masuk Transit', damaged_confirmed: 'Rusak terkonfirmasi' }
+
+async function finalize(itemId: number) {
+  busyId.value = itemId
+  try {
+    await finalizeReturn(itemId)
     await load()
   } finally {
     busyId.value = null
@@ -99,6 +111,14 @@ async function markRefunded(itemId: number) {
               </span>
             </div>
             <p v-if="item.condition_note" class="mt-0.5 text-stone-400">Catatan kurir: {{ item.condition_note }}</p>
+            <p v-if="item.condition_status && item.condition_status !== 'pending'" class="mt-0.5 text-stone-400">
+              Inspeksi: {{ item.condition_status }} · Baik {{ item.good_quantity ?? 0 }} · Rusak {{ item.damaged_quantity ?? 0 }} · {{ DISPOSITION_LABEL[item.disposition_status ?? ''] ?? item.disposition_status }}
+            </p>
+            <div v-if="item.disposition_status === 'pending_disposition'" class="mt-1">
+              <AppButton size="sm" :disabled="busyId === item.id" @click="finalize(item.id)">
+                Finalisasi Disposisi
+              </AppButton>
+            </div>
           </li>
         </ul>
 

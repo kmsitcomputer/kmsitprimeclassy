@@ -10,6 +10,7 @@ use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class WarehouseStockService
@@ -24,46 +25,59 @@ class WarehouseStockService
         return app(SellableStockService::class)->forVariation($agentId, $variationId);
     }
 
-    public function sellableForTargets(int $agentId, \Illuminate\Support\Collection $productIds, \Illuminate\Support\Collection $variationIds): array
+    public function sellableForTargets(int $agentId, Collection $productIds, Collection $variationIds): array
     {
         return app(SellableStockService::class)->forTargets($agentId, $productIds, $variationIds);
     }
 
-    public function receiveFactoryStock(User $actor, int $productId, ?int $variationId, int $quantity, string $reference, ?string $note = null): WarehouseStock
+    public function receiveFactoryStock(User $actor, int $productId, ?int $variationId, int $quantity, string $reference, ?string $note = null, ?int $approvedRequestId = null): WarehouseStock
     {
-        $this->assertGudang($actor);
+        $this->assertWarehouseActor($actor);
         if ($quantity <= 0) {
             throw new ApiException('Jumlah penerimaan harus lebih besar dari nol.', 422);
         }
 
-        return DB::transaction(function () use ($actor, $productId, $variationId, $quantity, $reference, $note) {
+        return DB::transaction(function () use ($actor, $productId, $variationId, $quantity, $reference, $note, $approvedRequestId) {
             $this->assertTarget($productId, $variationId);
-            $existing = StockMovement::query()->where('agent_id', $actor->agent_id)->where('type', 'factory_in')
-                ->where('reference_type', 'factory_receipt')->where('note', $reference)
-                ->where('product_id', $variationId ? null : $productId)->where('product_variation_id', $variationId)->first();
-            if ($existing) {
-                return WarehouseStock::withoutGlobalScopes()->whereKey($existing->reference_id)->firstOrFail();
+            if ($approvedRequestId) {
+                $existing = StockMovement::query()->where('agent_id', $actor->agent_id)->where('warehouse_stock_request_id', $approvedRequestId)->first();
+                if ($existing) {
+                    return WarehouseStock::withoutGlobalScopes()->whereKey($existing->reference_id)->firstOrFail();
+                }
+            } else {
+                $existing = StockMovement::query()->where('agent_id', $actor->agent_id)->where('type', 'factory_in')
+                    ->where('reference_type', 'factory_receipt')->where('note', $reference)
+                    ->where('product_id', $variationId ? null : $productId)->where('product_variation_id', $variationId)->first();
+                if ($existing) {
+                    return WarehouseStock::withoutGlobalScopes()->whereKey($existing->reference_id)->firstOrFail();
+                }
             }
             $stock = $this->lockedStock($actor->agent_id, $productId, $variationId, 'transit');
             $before = $stock->quantity;
             $stock->increment('quantity', $quantity);
-            StockMovement::create(['agent_id' => $actor->agent_id, 'product_id' => $variationId ? null : $productId, 'product_variation_id' => $variationId, 'type' => 'factory_in', 'quantity' => $quantity, 'stock_type' => 'transit', 'reference_type' => 'factory_receipt', 'reference_id' => $stock->id, 'note' => $reference, 'created_by' => $actor->id]);
+            StockMovement::create(['agent_id' => $actor->agent_id, 'product_id' => $variationId ? null : $productId, 'product_variation_id' => $variationId, 'type' => 'factory_in', 'quantity' => $quantity, 'stock_type' => 'transit', 'reference_type' => 'factory_receipt', 'reference_id' => $stock->id, 'note' => $reference, 'warehouse_stock_request_id' => $approvedRequestId, 'created_by' => $actor->id]);
 
             return $stock->fresh()->setAttribute('before_quantity', $before)->setAttribute('note', $note);
         });
     }
 
-    public function adjustFactoryPlan(User $actor, int $productId, ?int $variationId, int $delta, string $reference): WarehouseStock
+    public function adjustFactoryPlan(User $actor, int $productId, ?int $variationId, int $delta, string $reference, ?int $approvedRequestId = null, bool $fromApproval = false): WarehouseStock
     {
-        $this->assertGudang($actor);
+        $this->assertWarehouseActor($actor);
         if ($delta === 0) {
             throw new ApiException('Perubahan Plan Pabrik tidak boleh nol.', 422);
         }
 
-        return DB::transaction(function () use ($actor, $productId, $variationId, $delta, $reference) {
+        return DB::transaction(function () use ($actor, $productId, $variationId, $delta, $reference, $approvedRequestId, $fromApproval) {
             $this->assertTarget($productId, $variationId);
+            if ($approvedRequestId) {
+                $existing = StockMovement::query()->where('agent_id', $actor->agent_id)->where('warehouse_stock_request_id', $approvedRequestId)->first();
+                if ($existing) {
+                    return WarehouseStock::withoutGlobalScopes()->where('agent_id', $actor->agent_id)->where('stock_type', 'factory_plan')->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId)->whereNull('product_id'))->when(! $variationId, fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'))->firstOrFail();
+                }
+            }
             $setting = WarehouseSetting::query()->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrCreate(['agent_id' => $actor->agent_id]);
-            if (! $setting->factory_plan_enabled) {
+            if (! $fromApproval && ! $setting->factory_plan_enabled) {
                 throw new ApiException(__('messages.warehouse.factory_plan_disabled'), 422);
             }
             $stock = $this->lockedStock($actor->agent_id, $productId, $variationId, 'factory_plan');
@@ -76,7 +90,7 @@ class WarehouseStockService
                 throw new ApiException('Perubahan Plan Pabrik melampaui komitmen reservasi.', 422);
             }
             $stock->update(['quantity' => $newQuantity]);
-            StockMovement::create(['agent_id' => $actor->agent_id, 'product_id' => $variationId ? null : $productId, 'product_variation_id' => $variationId, 'type' => $delta > 0 ? 'factory_plan_in' : 'factory_plan_out', 'quantity' => $delta, 'stock_type' => 'factory_plan', 'reference_type' => 'factory_plan', 'note' => $reference, 'created_by' => $actor->id]);
+            StockMovement::create(['agent_id' => $actor->agent_id, 'product_id' => $variationId ? null : $productId, 'product_variation_id' => $variationId, 'type' => $delta > 0 ? 'factory_plan_in' : 'factory_plan_out', 'quantity' => $delta, 'stock_type' => 'factory_plan', 'reference_type' => 'factory_plan', 'note' => $reference, 'warehouse_stock_request_id' => $approvedRequestId, 'created_by' => $actor->id]);
 
             return $stock->fresh();
         });
@@ -111,9 +125,17 @@ class WarehouseStockService
         });
     }
 
+    private function assertWarehouseActor(User $actor): void
+    {
+        if ((! $actor->isRole('gudang') && ! $actor->isRole('admin')) || ! $actor->agent_id) {
+            throw new ApiException('Hanya Gudang/Admin dengan network valid.', 403);
+        }
+    }
+
     private function assertGudang(User $actor): void
     {
-        if (! $actor->isRole('gudang') || ! $actor->agent_id) {
+        $this->assertWarehouseActor($actor);
+        if (! $actor->isRole('gudang')) {
             throw new ApiException('Hanya Gudang dengan network valid.', 403);
         }
     }

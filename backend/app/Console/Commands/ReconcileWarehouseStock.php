@@ -145,7 +145,7 @@ class ReconcileWarehouseStock extends Command
             }
         }
         $uninspectedApprovedReturns = ReturnItem::query()->where('status', 'approved')->whereNull('inspected_at')->count();
-        $damagedInTransit = ReturnItem::query()->where('damaged_quantity', '>', 0)->where('condition_status', '!=', 'pending')->where('restock_processed_at', '!=', null)->whereHas('orderItem', fn ($q) => $q->whereHas('product'))->count();
+        $damagedInTransit = ReturnItem::query()->where('damaged_quantity', '>', 0)->where('condition_status', '!=', 'pending')->whereIn('disposition_status', ['restocked', 'damaged_confirmed'])->whereHas('orderItem', fn ($q) => $q->whereHas('product'))->count();
         $this->info("duplicate_cancellation_reversals={$duplicateCancellationReversals} orphan_cancellation_movements={$orphanCancellationMovements} unreleased_cancelled_reservations={$unreleasedCancelledReservations} approved_returns_uninspected={$uninspectedApprovedReturns} damaged_return_audit_rows={$damagedInTransit}");
 
         return $negative->isEmpty() ? self::SUCCESS : self::FAILURE;

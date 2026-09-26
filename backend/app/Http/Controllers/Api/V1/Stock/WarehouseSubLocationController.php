@@ -19,7 +19,7 @@ class WarehouseSubLocationController extends Controller
     public function store(Request $request)
     {
         $this->authorize('create', WarehouseSubLocation::class);
-        $data = $request->validate(['code' => ['required', 'string', 'max:40', Rule::unique('warehouse_sub_locations', 'code')->where('agent_id', $request->user()->agent_id)], 'name' => ['required', 'string', 'max:150'], 'address' => ['nullable', 'string', 'max:255'], 'description' => ['nullable', 'string']]);
+        $data = $request->validate(['code' => ['required', 'string', 'max:40', Rule::unique('warehouse_sub_locations', 'code')->where('agent_id', $request->user()->agent_id)], 'name' => ['required', 'string', 'max:150'], 'address' => ['nullable', 'string', 'max:255'], 'contact_number' => ['nullable', 'string', 'max:30'], 'description' => ['nullable', 'string']]);
         $data['agent_id'] = $request->user()->agent_id;
         $data['created_by'] = $request->user()->id;
 
@@ -36,7 +36,7 @@ class WarehouseSubLocationController extends Controller
     public function update(Request $request, WarehouseSubLocation $subLocation)
     {
         $this->authorize('update', $subLocation);
-        $subLocation->update($request->validate(['code' => ['sometimes', 'string', 'max:40', Rule::unique('warehouse_sub_locations', 'code')->where('agent_id', $subLocation->agent_id)->ignore($subLocation->id)], 'name' => ['sometimes', 'string', 'max:150'], 'address' => ['nullable', 'string', 'max:255'], 'description' => ['nullable', 'string']]));
+        $subLocation->update($request->validate(['code' => ['sometimes', 'string', 'max:40', Rule::unique('warehouse_sub_locations', 'code')->where('agent_id', $subLocation->agent_id)->ignore($subLocation->id)], 'name' => ['sometimes', 'string', 'max:150'], 'address' => ['nullable', 'string', 'max:255'], 'contact_number' => ['nullable', 'string', 'max:30'], 'description' => ['nullable', 'string']]));
 
         return $this->ok($subLocation->fresh());
     }

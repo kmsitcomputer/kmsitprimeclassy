@@ -24,6 +24,9 @@ class StockTransferService
     public function create(User $actor, string $source, ?int $sourceSubLocationId, string $destination, ?int $destinationSubLocationId, array $items, ?string $reference = null, ?string $note = null): StockTransfer
     {
         $this->assertGudang($actor);
+        if ($source === 'factory_plan' || $destination === 'factory_plan') {
+            throw new ApiException('Transfer Plan hanya melalui Stock Transfer Plan ke Transit dengan persetujuan Admin.', 422);
+        }
         $this->assertBucketPair($actor, $source, $sourceSubLocationId, $destination, $destinationSubLocationId);
         if ($items === []) {
             throw new ApiException('Transfer harus memiliki item.', 422);
@@ -63,6 +66,142 @@ class StockTransferService
         });
     }
 
+    public function createPlanTransfer(User $actor, array $items, ?string $reference = null, ?string $note = null): StockTransfer
+    {
+        $this->assertGudang($actor);
+        if (! $this->planEnabled($actor->agent_id)) {
+            throw new ApiException('Plan Pabrik sedang nonaktif. Aktifkan Plan Pabrik sebelum membuat Stock Transfer.', 422);
+        }
+
+        return DB::transaction(function () use ($actor, $items, $reference, $note) {
+            if ($items === []) {
+                throw new ApiException('Transfer harus memiliki item.', 422);
+            }
+            $seenTargets = [];
+            $normalized = [];
+            foreach ($items as $item) {
+                $productId = isset($item['product_id']) ? (int) $item['product_id'] : null;
+                $variationId = isset($item['product_variation_id']) ? (int) $item['product_variation_id'] : null;
+                if (($productId === null) === ($variationId === null) || (int) ($item['quantity'] ?? 0) <= 0) {
+                    throw new ApiException('Setiap item harus memiliki tepat satu target dan jumlah positif.', 422);
+                }
+                $targetKey = $variationId ? 'v:'.$variationId : 'p:'.$productId;
+                if (isset($seenTargets[$targetKey])) {
+                    throw new ApiException('Target transfer tidak boleh duplikat.', 422);
+                }
+                $seenTargets[$targetKey] = true;
+                $this->assertTarget($productId, $variationId);
+                $normalized[] = ['product_id' => $productId, 'product_variation_id' => $variationId, 'quantity' => (int) $item['quantity']];
+            }
+            $transfer = StockTransfer::create([
+                'agent_id' => $actor->agent_id,
+                'transfer_number' => $this->uniqueNumber('TRF'),
+                'source_stock_type' => 'factory_plan',
+                'source_sub_location_id' => null,
+                'destination_stock_type' => 'transit',
+                'destination_sub_location_id' => null,
+                'status' => 'pending',
+                'reference' => $reference,
+                'note' => $note,
+                'created_by' => $actor->id,
+            ]);
+            foreach ($normalized as $row) {
+                $transfer->items()->create($row);
+            }
+
+            return $transfer->load(['items.product', 'items.variation.compositions.option']);
+        });
+    }
+
+    public function approve(User $actor, StockTransfer $transfer): StockTransfer
+    {
+        if (! $actor->isRole('admin')) {
+            throw new ApiException('Hanya Admin yang dapat menyetujui transfer.', 403);
+        }
+
+        return DB::transaction(function () use ($actor, $transfer) {
+            $locked = StockTransfer::withoutGlobalScopes()->with('items')->whereKey($transfer->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status === 'completed') {
+                return $locked->load(['items.product', 'items.variation.compositions.option', 'handover']);
+            }
+            if ($locked->status !== 'pending') {
+                throw new ApiException('Transfer ini tidak dapat disetujui.', 422);
+            }
+            if ($locked->source_stock_type !== 'factory_plan' || $locked->destination_stock_type !== 'transit' || $locked->source_sub_location_id !== null || $locked->destination_sub_location_id !== null) {
+                throw new ApiException('Transfer ini bukan Plan Pabrik ke Transit.', 422);
+            }
+
+            $targets = [];
+            foreach ($locked->items as $item) {
+                $targetKey = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
+                $targets[$targetKey] = $item;
+            }
+            ksort($targets);
+            $pairs = [];
+            foreach ($targets as $item) {
+                $source = $this->stock($locked->agent_id, $item, 'factory_plan', null)->lockForUpdate()->first();
+                if (! $source || $source->quantity < $item->quantity) {
+                    throw new ApiException('Stok Plan Pabrik tidak mencukupi.', 422);
+                }
+                $destination = $this->stock($locked->agent_id, $item, 'transit', null)->lockForUpdate()->first();
+                $pairs[] = [$item, $source, $destination];
+            }
+
+            foreach ($pairs as [$item, $source, $destination]) {
+                $sourceBefore = $source->quantity;
+                $source->decrement('quantity', $item->quantity);
+                $destination ??= WarehouseStock::create([
+                    'agent_id' => $locked->agent_id,
+                    'product_id' => $item->product_id,
+                    'product_variation_id' => $item->product_variation_id,
+                    'stock_type' => 'transit',
+                    'sub_location_id' => null,
+                    'quantity' => 0,
+                ]);
+                $destinationBefore = $destination->quantity;
+                $destination->increment('quantity', $item->quantity);
+                $common = ['agent_id' => $locked->agent_id, 'product_id' => $item->product_id, 'product_variation_id' => $item->product_variation_id, 'transfer_id' => $locked->id, 'reference_type' => StockTransfer::class, 'reference_id' => $locked->id, 'created_by' => $actor->id];
+                StockMovement::create($common + ['type' => 'transfer_out', 'stock_type' => 'factory_plan', 'counterpart_stock_type' => 'transit', 'quantity' => -$item->quantity, 'note' => "before={$sourceBefore};after=".($sourceBefore - $item->quantity)]);
+                StockMovement::create($common + ['type' => 'transfer_in', 'stock_type' => 'transit', 'counterpart_stock_type' => 'factory_plan', 'quantity' => $item->quantity, 'note' => "before={$destinationBefore};after=".($destinationBefore + $item->quantity)]);
+            }
+
+            $locked->update(['status' => 'completed', 'completed_by' => $actor->id, 'completed_at' => now()]);
+            ActivityLog::create(['causer_id' => $actor->id, 'subject_type' => StockTransfer::class, 'subject_id' => $locked->id, 'event' => 'stock_transfer.approved', 'properties' => ['agent_id' => $locked->agent_id]]);
+
+            return $locked->fresh()->load(['items.product', 'items.variation.compositions.option', 'handover']);
+        });
+    }
+
+    public function reject(User $actor, StockTransfer $transfer, string $reason): StockTransfer
+    {
+        if (! $actor->isRole('admin')) {
+            throw new ApiException('Hanya Admin yang dapat menolak transfer.', 403);
+        }
+
+        return DB::transaction(function () use ($actor, $transfer, $reason) {
+            $locked = StockTransfer::withoutGlobalScopes()->whereKey($transfer->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status === 'rejected') {
+                return $locked->load(['items.product', 'items.variation.compositions.option']);
+            }
+            if ($locked->status !== 'pending') {
+                throw new ApiException('Transfer ini tidak dapat ditolak.', 422);
+            }
+            if ($locked->source_stock_type === 'factory_plan' || $locked->destination_stock_type === 'factory_plan') {
+                if ($locked->source_stock_type !== 'factory_plan' || $locked->destination_stock_type !== 'transit' || $locked->source_sub_location_id !== null || $locked->destination_sub_location_id !== null) {
+                    throw new ApiException('Transfer ini bukan Plan Pabrik ke Transit.', 422);
+                }
+            }
+            $locked->update(['status' => 'rejected', 'rejected_by' => $actor->id, 'rejected_at' => now(), 'rejection_reason' => $reason]);
+
+            return $locked->fresh()->load(['items.product', 'items.variation.compositions.option']);
+        });
+    }
+
+    private function planEnabled(int $agentId): bool
+    {
+        return (bool) (WarehouseSetting::query()->where('agent_id', $agentId)->value('factory_plan_enabled') ?? false);
+    }
+
     public function complete(User $actor, StockTransfer $transfer): StockTransfer
     {
         $this->assertGudang($actor);
@@ -74,6 +213,9 @@ class StockTransferService
             }
             if ($transfer->status !== 'pending') {
                 throw new ApiException('Transfer ini tidak dapat diselesaikan.', 422);
+            }
+            if ($transfer->source_stock_type === 'factory_plan' || $transfer->destination_stock_type === 'factory_plan') {
+                throw new ApiException('Transfer Plan hanya melalui persetujuan Admin.', 422);
             }
 
             $targets = [];
@@ -133,6 +275,9 @@ class StockTransferService
         $transfer = StockTransfer::withoutGlobalScopes()->whereKey($transfer->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
         if ($transfer->status !== 'pending') {
             throw new ApiException('Hanya transfer pending yang dapat dibatalkan.', 422);
+        }
+        if ($transfer->source_stock_type === 'factory_plan' || $transfer->destination_stock_type === 'factory_plan') {
+            throw new ApiException('Transfer Plan hanya melalui persetujuan Admin.', 422);
         }
         $transfer->update(['status' => 'cancelled']);
 

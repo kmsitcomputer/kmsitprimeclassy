@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Stock;
 
+use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Models\StockHandover;
 use App\Models\StockTransfer;
@@ -14,12 +15,23 @@ class StockTransferController extends Controller
 
     public function index(Request $request)
     {
-        $query = StockTransfer::query()->with(['items.product', 'items.variation.compositions.option', 'handover', 'sourceSubLocation', 'destinationSubLocation'])->latest();
+        $query = StockTransfer::query()->with(['items.product.images', 'items.variation.compositions.option', 'handover', 'sourceSubLocation', 'destinationSubLocation', 'creator'])->latest();
         if ($request->user()->isRole('super_admin')) {
             $query->withoutGlobalScopes();
         }
+        $status = $request->string('status')->toString();
+        if ($status !== '') {
+            if (! in_array($status, ['pending', 'completed', 'rejected', 'cancelled'], true)) {
+                throw new ApiException('Status transfer tidak valid.', 422);
+            }
+            $query->where('status', $status);
+        }
 
-        return $this->ok($query->paginate($request->integer('per_page', 15)));
+        $transfers = $query->paginate($request->integer('per_page', 15));
+
+        return $this->ok($transfers->items(), meta: [
+            'current_page' => $transfers->currentPage(), 'last_page' => $transfers->lastPage(), 'total' => $transfers->total(),
+        ]);
     }
 
     public function store(Request $request)
@@ -40,6 +52,33 @@ class StockTransferController extends Controller
         $this->authorize('view', $transfer);
 
         return $this->ok($transfer->load(['items.product', 'items.variation.compositions.option', 'handover', 'sourceSubLocation', 'destinationSubLocation']));
+    }
+
+    public function storePlanTransfer(Request $request)
+    {
+        $this->authorize('create', StockTransfer::class);
+        $data = $request->validate([
+            'reference' => ['nullable', 'string', 'max:255'], 'note' => ['nullable', 'string', 'max:255'],
+            'items' => ['required', 'array', 'min:1'], 'items.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
+            'items.*.product_variation_id' => ['nullable', 'integer', 'exists:product_variations,id'], 'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return $this->created($this->transfers->createPlanTransfer($request->user(), $data['items'], $data['reference'] ?? null, $data['note'] ?? null));
+    }
+
+    public function approve(Request $request, StockTransfer $transfer)
+    {
+        $this->authorize('approve', $transfer);
+
+        return $this->ok($this->transfers->approve($request->user(), $transfer));
+    }
+
+    public function reject(Request $request, StockTransfer $transfer)
+    {
+        $this->authorize('reject', $transfer);
+        $data = $request->validate(['reason' => ['required', 'string', 'max:255']]);
+
+        return $this->ok($this->transfers->reject($request->user(), $transfer, $data['reason']));
     }
 
     public function complete(Request $request, StockTransfer $transfer)

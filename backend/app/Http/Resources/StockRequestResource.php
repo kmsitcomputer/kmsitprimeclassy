@@ -16,6 +16,9 @@ class StockRequestResource extends JsonResource
             'request_number' => $this->request_number,
             'status' => $this->status,
             'items' => StockRequestItemResource::collection($this->whenLoaded('items')),
+            'order' => $this->whenLoaded('order', fn () => [
+                'id' => $this->order->id, 'order_no' => $this->order->order_no, 'status' => $this->order->status,
+            ]),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

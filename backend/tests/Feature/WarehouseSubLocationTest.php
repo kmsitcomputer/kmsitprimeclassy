@@ -40,15 +40,23 @@ class WarehouseSubLocationTest extends TestCase
         return Product::create(['sku' => 'SUB-'.uniqid(), 'name' => 'Sub Cake', 'slug' => 'sub-'.uniqid(), 'has_variations' => false, 'status' => 'active']);
     }
 
-    public function test_agent_and_admin_manage_sub_metadata_but_gudang_only_reads_and_no_sub_user_is_created(): void
+    public function test_agent_admin_and_gudang_manage_same_agent_sub_metadata_and_no_sub_user_is_created(): void
     {
         $branch = $this->branch();
         $other = $this->branch();
         $location = $this->actingAs($branch['agent'])->postJson('/api/v1/warehouse/sub-locations', ['code' => 'SUB-001', 'name' => 'Bandung Timur'])->assertCreated()->json('data');
         $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $location['id'], 'agent_id' => $branch['agent']->id, 'created_by' => $branch['agent']->id]);
         $this->actingAs($branch['admin'])->patchJson("/api/v1/warehouse/sub-locations/{$location['id']}", ['name' => 'Bandung Timur Updated'])->assertOk();
-        $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/sub-locations', ['code' => 'SUB-002', 'name' => 'Denied'])->assertForbidden();
+        $created = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/sub-locations', ['code' => 'SUB-002', 'name' => 'Cimahi', 'address' => 'Jl. Contoh No. 10', 'contact_number' => '0812000111'])->assertCreated()->json('data');
+        $this->assertSame($branch['agent']->id, $created['agent_id']);
+        $this->assertSame('Cimahi', $created['name']);
+        $this->assertSame('Jl. Contoh No. 10', $created['address']);
+        $this->assertSame('0812000111', $created['contact_number']);
+        $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $created['id'], 'agent_id' => $branch['agent']->id, 'created_by' => $branch['gudang']->id]);
+        $this->actingAs($branch['gudang'])->patchJson("/api/v1/warehouse/sub-locations/{$created['id']}", ['name' => 'Cimahi Updated'])->assertOk();
+        $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $created['id'], 'name' => 'Cimahi Updated']);
         $this->actingAs($other['gudang'])->getJson("/api/v1/warehouse/sub-locations/{$location['id']}")->assertNotFound();
+        $this->actingAs($other['gudang'])->patchJson("/api/v1/warehouse/sub-locations/{$created['id']}", ['name' => 'Hijacked'])->assertNotFound();
         $this->assertDatabaseMissing('roles', ['slug' => 'sub']);
         $this->assertDatabaseMissing('users', ['name' => 'Bandung Timur']);
     }

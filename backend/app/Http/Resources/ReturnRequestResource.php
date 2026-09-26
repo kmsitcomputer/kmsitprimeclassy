@@ -35,6 +35,12 @@ class ReturnRequestResource extends JsonResource
                 'status' => $item->status,
                 'refund_status' => $item->refund_status,
                 'condition_note' => $item->condition_note,
+                'quantity_received' => $item->quantity_received,
+                'good_quantity' => $item->good_quantity,
+                'damaged_quantity' => $item->damaged_quantity,
+                'condition_status' => $item->condition_status,
+                'disposition_status' => $item->disposition_status,
+                'inspected_at' => $item->inspected_at,
             ])),
             'created_at' => $this->created_at,
         ];

@@ -97,6 +97,17 @@ class ReturnController extends Controller
         return $this->ok($this->returnService->inspectReturn($item, $request->user(), $data['received_quantity'], $data['good_quantity'], $data['damaged_quantity'], $data['note'] ?? null));
     }
 
+    public function finalize(Request $request, ReturnItem $item)
+    {
+        $return = $item->returnRequest;
+        $this->authorizeBranch($request, $return);
+        if (! $request->user()->isRole('admin')) {
+            abort(403);
+        }
+
+        return $this->ok($this->returnService->finalizeInspection($item, $request->user()));
+    }
+
     private function authorizeBranch(Request $request, ReturnRequestModel $return): void
     {
         $actor = $request->user();

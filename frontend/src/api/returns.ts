@@ -19,6 +19,8 @@ export interface ReturnItemLine {
   good_quantity?: number
   damaged_quantity?: number
   condition_status?: string
+  disposition_status?: string
+  inspected_at?: string | null
 }
 
 export interface ReturnRequestRecord {
@@ -82,5 +84,10 @@ export async function markReturnItemRefunded(itemId: number) {
 
 export async function inspectReturn(itemId: number, payload: { received_quantity: number; good_quantity: number; damaged_quantity: number; note?: string }) {
   const { data } = await http.post<ApiEnvelope<ReturnItemLine>>(`/warehouse/returns/${itemId}/inspect`, payload)
+  return data.data
+}
+
+export async function finalizeReturn(itemId: number) {
+  const { data } = await http.post<ApiEnvelope<ReturnItemLine>>(`/warehouse/returns/${itemId}/finalize`)
   return data.data
 }

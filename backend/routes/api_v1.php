@@ -41,9 +41,11 @@ use App\Http\Controllers\Api\V1\Settings\WebsiteSettingController;
 use App\Http\Controllers\Api\V1\Stock\StockController;
 use App\Http\Controllers\Api\V1\Stock\StockOpnameController;
 use App\Http\Controllers\Api\V1\Stock\StockRequestController;
+use App\Http\Controllers\Api\V1\Stock\StockRequestProposalController;
 use App\Http\Controllers\Api\V1\Stock\StockTransferController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseSettingsController;
+use App\Http\Controllers\Api\V1\Stock\WarehouseStockRequestController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseSubLocationController;
 use App\Http\Controllers\Api\V1\User\UserController;
 use App\Http\Controllers\Api\V1\Webhook\PaymentWebhookController;
@@ -235,6 +237,9 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/returns/{item}/inspect', [ReturnController::class, 'inspect']);
     });
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/warehouse/returns/{item}/finalize', [ReturnController::class, 'finalize']);
+    });
 
     // Refund / additional-payment ledgers stay READABLE by the operational
     // roles too (oversight), but only KEUANGAN (or super_admin) may change a
@@ -321,8 +326,18 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::patch('/warehouse/settings/factory-plan', [WarehouseSettingsController::class, 'update'])
         ->middleware('role:admin');
     Route::middleware('role:gudang')->group(function () {
-        Route::post('/warehouse/transit/receive', [WarehouseController::class, 'receive']);
-        Route::post('/warehouse/factory-plan', [WarehouseController::class, 'adjustPlan']);
+        Route::post('/warehouse/stock-addition-requests', [WarehouseStockRequestController::class, 'store']);
+        Route::post('/warehouse/sub-adjustment-requests', [WarehouseStockRequestController::class, 'storeSubAdjustment']);
+    });
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/warehouse/stock-addition-requests/{warehouseStockRequest}/approve', [WarehouseStockRequestController::class, 'approve']);
+        Route::post('/warehouse/stock-addition-requests/{warehouseStockRequest}/reject', [WarehouseStockRequestController::class, 'reject']);
+    });
+    Route::middleware('role:admin,gudang')->group(function () {
+        Route::get('/warehouse/stock-addition-requests', [WarehouseStockRequestController::class, 'index']);
+        Route::get('/warehouse/stock-addition-requests/{warehouseStockRequest}', [WarehouseStockRequestController::class, 'show']);
+        Route::get('/warehouse/stock-cards', [WarehouseStockRequestController::class, 'cards']);
+        Route::get('/warehouse/sub-locations/{subLocation}/stock-cards', [WarehouseStockRequestController::class, 'subCards']);
     });
     Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
         Route::get('/warehouse/transfers', [StockTransferController::class, 'index']);
@@ -333,13 +348,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/warehouse/sub-locations/{subLocation}', [WarehouseSubLocationController::class, 'show']);
         Route::get('/warehouse/sub-locations/{subLocation}/stocks', [WarehouseSubLocationController::class, 'stocks']);
     });
-    Route::middleware('role:agen,admin')->group(function () {
+    Route::middleware('role:agen,admin,gudang')->group(function () {
         Route::post('/warehouse/sub-locations', [WarehouseSubLocationController::class, 'store']);
         Route::patch('/warehouse/sub-locations/{subLocation}', [WarehouseSubLocationController::class, 'update']);
         Route::post('/warehouse/sub-locations/{subLocation}/deactivate', [WarehouseSubLocationController::class, 'deactivate']);
     });
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/transfers', [StockTransferController::class, 'store']);
+        Route::post('/warehouse/transfers/plan-to-transit', [StockTransferController::class, 'storePlanTransfer']);
         Route::post('/warehouse/transfers/{transfer}/complete', [StockTransferController::class, 'complete']);
         Route::post('/warehouse/transfers/{transfer}/cancel', [StockTransferController::class, 'cancel']);
         Route::post('/warehouse/opnames', [StockOpnameController::class, 'store']);
@@ -354,6 +370,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:admin')->group(function () {
         Route::post('/warehouse/opnames/{opname}/approve', [StockOpnameController::class, 'approve']);
         Route::post('/warehouse/opnames/{opname}/reject', [StockOpnameController::class, 'reject']);
+        Route::post('/warehouse/transfers/{transfer}/approve', [StockTransferController::class, 'approve']);
+        Route::post('/warehouse/transfers/{transfer}/reject', [StockTransferController::class, 'reject']);
     });
     Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
         Route::get('/warehouse/stock-requests', [StockRequestController::class, 'index']);
@@ -361,6 +379,15 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     });
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/stock-requests/{stockRequest}/fulfill', [StockRequestController::class, 'fulfill']);
+        Route::post('/warehouse/stock-requests/{stockRequest}/proposals', [StockRequestProposalController::class, 'store']);
+    });
+    Route::middleware('role:admin,gudang')->group(function () {
+        Route::get('/warehouse/fulfillment-proposals', [StockRequestProposalController::class, 'index']);
+        Route::get('/warehouse/fulfillment-proposals/{proposal}', [StockRequestProposalController::class, 'show']);
+    });
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/warehouse/fulfillment-proposals/{proposal}/approve', [StockRequestProposalController::class, 'approve']);
+        Route::post('/warehouse/fulfillment-proposals/{proposal}/reject', [StockRequestProposalController::class, 'reject']);
     });
     Route::middleware('role:agen,admin')->group(function () {
         Route::post('/stock/adjust', [StockController::class, 'adjust']);

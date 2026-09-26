@@ -13,7 +13,12 @@ class StockOpnameController extends Controller
 
     public function index(Request $request)
     {
-        return $this->ok(StockOpname::query()->with(['items.product', 'items.variation.compositions.option'])->latest()->paginate($request->integer('per_page', 15)));
+        $opnames = StockOpname::query()->with(['items.product', 'items.variation.compositions.option'])->latest()->paginate($request->integer('per_page', 15));
+
+        return $this->ok($opnames->items(), meta: [
+            'current_page' => $opnames->currentPage(), 'last_page' => $opnames->lastPage(),
+            'per_page' => $opnames->perPage(), 'total' => $opnames->total(),
+        ]);
     }
 
     public function store(Request $request)

@@ -3,11 +3,13 @@
 use App\Models\Order;
 use App\Models\StockOpname;
 use App\Models\StockRequest;
+use App\Models\StockRequestProposal;
 use App\Models\StockTransfer;
 use App\Models\User;
 use App\Services\Order\OrderService;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
+use App\Services\Stock\StockRequestProposalService;
 use App\Services\Stock\StockTransferService;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\QueryException;
@@ -41,6 +43,7 @@ $longOptions = [
     'fulfillment-request:',
     'fulfillment-item:',
     'fulfillment-quantity:',
+    'fulfillment-proposal:',
     'fc-ready-a:',
     'fc-ready-b:',
     'fc-release:',
@@ -234,16 +237,26 @@ if (str_starts_with($role, 'fulfillment-')) {
 
     try {
         $actor = User::withoutGlobalScopes()->findOrFail($actorId);
-        $request = StockRequest::withoutGlobalScopes()->findOrFail((int) $options['fulfillment-request']);
-        $result = app(StockRequestFulfillmentService::class)->fulfill(
-            $actor,
-            $request,
-            [['item_id' => (int) $options['fulfillment-item'], 'quantity' => (int) $options['fulfillment-quantity']]],
-            'concurrency-'.bin2hex(random_bytes(8)),
-        );
-        $payload['outcome'] = 'success';
-        $payload['exit_code'] = 0;
-        $payload['request_status'] = $result->status;
+        if (isset($options['fulfillment-proposal'])) {
+            // Direct Gudang fulfillment is closed: physical stock only moves when an
+            // Admin approves a proposal, so the race is between concurrent approvals.
+            $proposal = StockRequestProposal::withoutGlobalScopes()->findOrFail((int) $options['fulfillment-proposal']);
+            $result = app(StockRequestProposalService::class)->approve($actor, $proposal);
+            $payload['outcome'] = 'success';
+            $payload['exit_code'] = 0;
+            $payload['proposal_status'] = $result->status;
+        } else {
+            $request = StockRequest::withoutGlobalScopes()->findOrFail((int) $options['fulfillment-request']);
+            $result = app(StockRequestFulfillmentService::class)->fulfill(
+                $actor,
+                $request,
+                [['item_id' => (int) $options['fulfillment-item'], 'quantity' => (int) $options['fulfillment-quantity']]],
+                'concurrency-'.bin2hex(random_bytes(8)),
+            );
+            $payload['outcome'] = 'success';
+            $payload['exit_code'] = 0;
+            $payload['request_status'] = $result->status;
+        }
     } catch (Throwable $e) {
         $payload['exception'] = get_class($e);
         $payload['message'] = $e->getMessage();

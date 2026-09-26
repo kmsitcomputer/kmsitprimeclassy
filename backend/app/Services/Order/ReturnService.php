@@ -162,19 +162,46 @@ class ReturnService
             if (! $actor->isRole('gudang') || $actor->agent_id !== $order->agent_id) {
                 throw new ApiException(__('messages.system.unauthorized_action'), 403);
             }
-            if ($returnItem->status !== 'approved' || $returnItem->restock_processed_at) {
+            if ($returnItem->status !== 'approved' || $returnItem->inspected_at) {
                 throw new ApiException('Return belum siap diinspeksi atau sudah diproses.', 422);
             }
             if ($received < 0 || $good < 0 || $damaged < 0 || $good + $damaged !== $received || $received > $returnItem->quantity_returned) {
                 throw new ApiException('Jumlah inspeksi return tidak valid.', 422);
             }
-            $returnItem->update(['quantity_received' => $received, 'good_quantity' => $good, 'damaged_quantity' => $damaged, 'condition_status' => $damaged > 0 && $good > 0 ? 'mixed' : ($damaged > 0 ? 'damaged' : 'good'), 'condition_note' => $note, 'inspected_by' => $actor->id, 'inspected_at' => now(), 'restock_processed_at' => now(), 'disposition_status' => $damaged > 0 ? 'pending_disposition' : 'restocked']);
+            $returnItem->update(['quantity_received' => $received, 'good_quantity' => $good, 'damaged_quantity' => $damaged, 'condition_status' => $damaged > 0 && $good > 0 ? 'mixed' : ($damaged > 0 ? 'damaged' : 'good'), 'condition_note' => $note, 'inspected_by' => $actor->id, 'inspected_at' => now(), 'disposition_status' => 'pending_disposition']);
+
+            return $returnItem->fresh();
+        });
+    }
+
+    public function finalizeInspection(ReturnItem $returnItem, User $actor): ReturnItem
+    {
+        if (! $actor->isRole('admin')) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        return DB::transaction(function () use ($returnItem, $actor) {
+            $returnItem = ReturnItem::query()->whereKey($returnItem->id)->lockForUpdate()->firstOrFail();
+            if (in_array($returnItem->disposition_status, ['restocked', 'damaged_confirmed'], true)) {
+                return $returnItem->fresh();
+            }
+            if ($returnItem->status !== 'approved' || $returnItem->disposition_status !== 'pending_disposition' || ! $returnItem->inspected_at) {
+                throw new ApiException('Return belum siap difinalisasi.', 422);
+            }
+            $orderItem = OrderItem::query()->whereKey($returnItem->order_item_id)->lockForUpdate()->firstOrFail();
+            $order = Order::withoutGlobalScopes()->whereKey($orderItem->order_id)->lockForUpdate()->firstOrFail();
+            if ((int) $actor->agent_id !== (int) $order->agent_id) {
+                throw new ApiException(__('messages.system.unauthorized_action'), 404);
+            }
+            $good = (int) $returnItem->good_quantity;
             if ($good > 0) {
                 $query = WarehouseStock::withoutGlobalScopes()->where('agent_id', $order->agent_id)->where('stock_type', 'transit')->whereNull('sub_location_id')->when($orderItem->product_id, fn ($q) => $q->where('product_id', $orderItem->product_id)->whereNull('product_variation_id'))->when($orderItem->product_variation_id, fn ($q) => $q->where('product_variation_id', $orderItem->product_variation_id)->whereNull('product_id'))->lockForUpdate();
                 $stock = $query->first() ?? WarehouseStock::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'stock_type' => 'transit', 'quantity' => 0]);
+                $before = $stock->quantity;
                 $stock->increment('quantity', $good);
-                StockMovement::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'type' => 'return_restock', 'stock_type' => 'transit', 'quantity' => $good, 'reference_type' => ReturnItem::class, 'reference_id' => $returnItem->id, 'created_by' => $actor->id, 'note' => 'good_return']);
+                StockMovement::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_variation_id ? null : $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'type' => 'return_restock', 'stock_type' => 'transit', 'quantity' => $good, 'reference_type' => ReturnItem::class, 'reference_id' => $returnItem->id, 'created_by' => $actor->id, 'note' => "before={$before};after=".($before + $good)]);
             }
+            $returnItem->update(['disposition_status' => $good > 0 ? 'restocked' : 'damaged_confirmed', 'restock_processed_at' => $good > 0 ? now() : null]);
 
             return $returnItem->fresh();
         });
@@ -317,5 +344,4 @@ class ReturnService
             throw new ApiException(__('messages.courier.not_your_delivery'), 403);
         }
     }
-
 }

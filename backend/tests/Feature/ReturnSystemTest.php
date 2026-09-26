@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\ReturnItem;
+use App\Models\StockMovement;
 use App\Models\User;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
@@ -171,8 +172,13 @@ class ReturnSystemTest extends TestCase
         $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
         $this->actingAs($gudang)->postJson("/api/v1/warehouse/returns/{$returnItem->id}/inspect", [
             'received_quantity' => 2, 'good_quantity' => 2, 'damaged_quantity' => 0,
-        ])->assertOk();
+        ])->assertOk()->assertJsonPath('data.disposition_status', 'pending_disposition');
+        $this->assertDatabaseMissing('warehouse_stocks', ['agent_id' => $agen->id, 'product_id' => $item->product_id, 'stock_type' => 'transit']);
+        $this->assertSame(0, (int) StockMovement::query()->where('type', 'return_restock')->count());
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/returns/{$returnItem->id}/finalize")
+            ->assertOk()->assertJsonPath('data.disposition_status', 'restocked');
         $this->assertDatabaseHas('warehouse_stocks', ['agent_id' => $agen->id, 'product_id' => $item->product_id, 'stock_type' => 'transit', 'quantity' => 2]);
+        $this->assertSame(1, (int) StockMovement::query()->where('type', 'return_restock')->count());
 
         // The order was COD and already delivered — Keuangan has collected the
         // cash and marked it paid, so the refund is now a valid post-paid

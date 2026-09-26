@@ -81,10 +81,15 @@ class InventoryCancellationReturnTest extends TestCase
         $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/returns/{$item->id}/inspect", ['received_quantity' => 4, 'good_quantity' => 3, 'damaged_quantity' => 1])->assertForbidden();
         $gudang = User::factory()->gudang()->create(['agent_id' => $f['agent']->id, 'parent_id' => $f['agent']->id]);
         $this->actingAs($gudang)->postJson("/api/v1/warehouse/returns/{$item->id}/inspect", ['received_quantity' => 4, 'good_quantity' => 3, 'damaged_quantity' => 1])->assertOk();
+        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 100]);
+        $this->assertDatabaseHas('return_items', ['id' => $item->id, 'good_quantity' => 3, 'damaged_quantity' => 1, 'condition_status' => 'mixed', 'disposition_status' => 'pending_disposition']);
+        $this->assertDatabaseMissing('stock_movements', ['type' => 'return_restock']);
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/returns/{$item->id}/finalize")->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 103]);
-        $this->assertDatabaseHas('return_items', ['id' => $item->id, 'good_quantity' => 3, 'damaged_quantity' => 1, 'condition_status' => 'mixed']);
         $this->assertDatabaseHas('stock_movements', ['type' => 'return_restock', 'quantity' => 3]);
         $this->actingAs($gudang)->postJson("/api/v1/warehouse/returns/{$item->id}/inspect", ['received_quantity' => 4, 'good_quantity' => 3, 'damaged_quantity' => 1])->assertUnprocessable();
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/returns/{$item->id}/finalize")->assertOk();
+        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 103]);
         $this->assertDatabaseCount('stock_movements', 1);
     }
 }

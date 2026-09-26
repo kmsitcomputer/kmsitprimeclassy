@@ -31,6 +31,7 @@ class StockRequestItemResource extends JsonResource
             'requested_qty' => $this->requested_qty,
             'fulfilled_qty' => $this->fulfilled_qty,
             'remaining_qty' => $this->remaining_qty,
+            'current_stock' => $this->current_stock ?? null,
         ];
     }
 

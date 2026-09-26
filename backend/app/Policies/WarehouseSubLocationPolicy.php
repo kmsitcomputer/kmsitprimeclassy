@@ -14,11 +14,11 @@ class WarehouseSubLocationPolicy
 
     public function create(User $user): bool
     {
-        return $user->isRole('agen', 'admin') && $user->agent_id !== null;
+        return $user->isRole('agen', 'admin', 'gudang') && $user->agent_id !== null;
     }
 
     public function update(User $user, WarehouseSubLocation $location): bool
     {
-        return $user->isRole('agen', 'admin') && $location->agent_id === $user->agent_id;
+        return $user->isRole('agen', 'admin', 'gudang') && $location->agent_id === $user->agent_id;
     }
 }

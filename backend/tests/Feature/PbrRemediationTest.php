@@ -236,7 +236,7 @@ class PbrRemediationTest extends TestCase
 
         $list = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/transfers');
         $list->assertOk();
-        $found = collect($list->json('data.data'))->firstWhere('id', $transfer['id']);
+        $found = collect($list->json('data'))->firstWhere('id', $transfer['id']);
         $this->assertNotNull($found);
         $this->assertSame('PBR Transfer Cake', $found['items'][0]['product']['name']);
         $this->assertSame($product->sku, $found['items'][0]['product']['sku']);
@@ -255,7 +255,7 @@ class PbrRemediationTest extends TestCase
 
         $list = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/opnames');
         $list->assertOk();
-        $item = $list->json('data.data.0.items.0');
+        $item = $list->json('data.0.items.0');
         $this->assertSame('PBR Opname Cake', $item['product']['name']);
         $this->assertSame($product->sku, $item['product']['sku']);
     }

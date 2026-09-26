@@ -40,6 +40,38 @@ class StockOpnameTest extends TestCase
         return Product::create(['sku' => 'OPN-'.uniqid(), 'name' => 'Opname Cake', 'slug' => 'opname-'.uniqid(), 'has_variations' => false, 'status' => 'active']);
     }
 
+    public function test_index_returns_items_array_with_pagination_meta_and_agent_scope(): void
+    {
+        $b = $this->branch();
+        $other = $this->branch();
+        $p = $this->product();
+        WarehouseStock::create(['agent_id' => $b['agent']->id, 'product_id' => $p->id, 'stock_type' => 'transit', 'quantity' => 100]);
+        for ($i = 0; $i < 16; $i++) {
+            $opname = $this->actingAs($b['gudang'])->postJson('/api/v1/warehouse/opnames', ['opname_type' => 'physical_opname', 'stock_type' => 'transit', 'items' => [['product_id' => $p->id]]])->assertCreated()->json('data');
+            $this->actingAs($b['gudang'])->patchJson("/api/v1/warehouse/opnames/{$opname['id']}/count", ['counts' => [['item_id' => $opname['items'][0]['id'], 'counted_quantity' => 100]]])->assertOk();
+        }
+        $foreign = $this->actingAs($other['gudang'])->postJson('/api/v1/warehouse/opnames', ['opname_type' => 'physical_opname', 'stock_type' => 'transit', 'items' => [['product_id' => $p->id]]])->assertCreated()->json('data');
+
+        $page1 = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/opnames?per_page=15')->assertOk();
+        $this->assertIsArray($page1->json('data'));
+        $this->assertCount(15, $page1->json('data'));
+        $this->assertSame(1, $page1->json('meta.current_page'));
+        $this->assertSame(2, $page1->json('meta.last_page'));
+        $this->assertSame(15, $page1->json('meta.per_page'));
+        $this->assertSame(16, $page1->json('meta.total'));
+        $this->assertArrayNotHasKey('data', $page1->json('data.0') ?? []);
+        foreach ($page1->json('data') as $row) {
+            $this->assertArrayHasKey('id', $row);
+            $this->assertArrayHasKey('status', $row);
+        }
+
+        $page2 = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/opnames?per_page=15&page=2')->assertOk();
+        $this->assertCount(1, $page2->json('data'));
+        $this->assertSame(2, $page2->json('meta.current_page'));
+        $this->assertNotSame(collect($page1->json('data'))->pluck('id')->all(), collect($page2->json('data'))->pluck('id')->all());
+        $this->assertNotContains($foreign['id'], collect($page2->json('data'))->pluck('id')->all());
+    }
+
     public function test_gudang_draft_and_submit_do_not_mutate_stock_and_only_admin_approves(): void
     {
         $b = $this->branch();

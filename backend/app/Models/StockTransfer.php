@@ -15,11 +15,11 @@ class StockTransfer extends Model
         static::addGlobalScope(new BelongsToAgentScope);
     }
 
-    protected $fillable = ['agent_id', 'transfer_number', 'source_stock_type', 'source_sub_location_id', 'destination_stock_type', 'destination_sub_location_id', 'status', 'reference', 'note', 'created_by', 'completed_by', 'completed_at'];
+    protected $fillable = ['agent_id', 'transfer_number', 'source_stock_type', 'source_sub_location_id', 'destination_stock_type', 'destination_sub_location_id', 'status', 'reference', 'note', 'created_by', 'completed_by', 'completed_at', 'rejected_by', 'rejected_at', 'rejection_reason'];
 
     protected function casts(): array
     {
-        return ['agent_id' => 'integer', 'source_sub_location_id' => 'integer', 'destination_sub_location_id' => 'integer', 'created_by' => 'integer', 'completed_by' => 'integer', 'completed_at' => 'datetime'];
+        return ['agent_id' => 'integer', 'source_sub_location_id' => 'integer', 'destination_sub_location_id' => 'integer', 'created_by' => 'integer', 'completed_by' => 'integer', 'completed_at' => 'datetime', 'rejected_at' => 'datetime'];
     }
 
     public function agent(): BelongsTo

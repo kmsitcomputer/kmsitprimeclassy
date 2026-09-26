@@ -465,6 +465,7 @@ class ConcurrencyHarness
             '--fulfillment-request='.(int) $configuration['request_id'],
             '--fulfillment-item='.(int) $configuration['item_id'],
             '--fulfillment-quantity='.(int) ($configuration['quantity'] ?? 6),
+            ...(isset($configuration['proposal_id']) ? ['--fulfillment-proposal='.(int) $configuration['proposal_id']] : []),
         ]);
     }
 

@@ -14,7 +14,7 @@ class WarehouseSubLocation extends Model
         static::addGlobalScope(new BelongsToAgentScope);
     }
 
-    protected $fillable = ['agent_id', 'code', 'name', 'address', 'description', 'is_active', 'created_by'];
+    protected $fillable = ['agent_id', 'code', 'name', 'address', 'contact_number', 'description', 'is_active', 'created_by'];
 
     protected function casts(): array
     {

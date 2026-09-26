@@ -15,9 +15,12 @@ export interface StockRequestItem {
   requested_qty: number
   fulfilled_qty: number
   remaining_qty: number
+  current_stock?: { transit: number; shipping: number; reserved: number } | null
   product?: { id?: number; name: string; sku?: string | null } | null
   variation?: { id?: number; label: string; sku: string } | null
 }
-export interface StockRequest { id: number; request_number: string; order_id: number; status: string; items: StockRequestItem[] }
-export async function listStockRequests() { return (await http.get<ApiEnvelope<StockRequest[]>>('/warehouse/stock-requests')).data.data }
-export async function fulfillStockRequest(id: number, idempotencyKey: string, items: { item_id: number; quantity: number }[]) { return (await http.post<ApiEnvelope<StockRequest>>(`/warehouse/stock-requests/${id}/fulfill`, { idempotency_key: idempotencyKey, items })).data.data }
+export interface StockRequest { id: number; request_number: string; order_id: number; status: string; items: StockRequestItem[]; order?: { id: number; order_no: string; status: string } | null }
+export async function listStockRequests(params: { status?: string; search?: string; page?: number } = {}) {
+  const { data } = await http.get<ApiEnvelope<StockRequest[]>>('/warehouse/stock-requests', { params: { per_page: 15, ...params } })
+  return { requests: data.data, meta: data.meta as unknown as { current_page: number; last_page: number; total: number } }
+}
