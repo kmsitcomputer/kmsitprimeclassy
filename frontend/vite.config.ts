@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 5173,
+      port: Number(env.VITE_DEV_PORT) || 5173,
       proxy: {
         '/api': { target: apiTarget, changeOrigin: false },
         '/sanctum': { target: apiTarget, changeOrigin: false },
