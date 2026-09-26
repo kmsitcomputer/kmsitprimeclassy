@@ -22,3 +22,6 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Local export/backup archive written by tooling; never commit
+/storage/app.zip

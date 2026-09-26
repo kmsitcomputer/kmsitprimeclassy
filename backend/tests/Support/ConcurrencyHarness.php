@@ -317,6 +317,60 @@ class ConcurrencyHarness
         }
     }
 
+    /**
+     * Two service operations racing on separate MySQL connections. Each side is
+     * ['op' => whitelisted operation name, 'actor_id' => int, 'subject_id' => int]
+     * (operations are resolved in .phpunit-concurrency-actor.php, never eval'd).
+     */
+    public function runServiceRace(array $sideA, array $sideB): array
+    {
+        $this->ensureRuntimeDir();
+        $readyA = $this->runtimeDir.'/sr-a.ready';
+        $readyB = $this->runtimeDir.'/sr-b.ready';
+        $release = $this->runtimeDir.'/sr.release';
+        $resultA = $this->runtimeDir.'/sr-a.result.json';
+        $resultB = $this->runtimeDir.'/sr-b.result.json';
+        $paths = [$readyA, $readyB, $release, $resultA, $resultB];
+        $this->cleanupFiles($paths);
+
+        $aProcess = $this->spawnServiceRaceActor('a', $sideA, $readyA, $readyB, $release, $resultA, $resultB);
+
+        try {
+            $this->waitForSignal($readyA, 15);
+            $bProcess = $this->spawnServiceRaceActor('b', $sideB, $readyA, $readyB, $release, $resultA, $resultB);
+            $this->waitForSignal($readyB, 15);
+            $this->writeFile($release, 'go');
+
+            $aProcess->wait();
+            $bProcess->wait();
+            $aResult = $this->readJson($resultA);
+            $bResult = $this->readJson($resultB);
+
+            if (($aResult['connection_id'] ?? null) === ($bResult['connection_id'] ?? null)) {
+                throw new \RuntimeException('Service race actors did not use different MySQL connections.');
+            }
+
+            if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
+                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                throw new \RuntimeException('Service race actors did not overlap in time.');
+            }
+
+            return [
+                'a' => $aResult,
+                'b' => $bResult,
+                'different_connections' => true,
+                'true_overlap' => true,
+            ];
+        } finally {
+            if (isset($bProcess)) {
+                $this->cleanupProcess($bProcess);
+            }
+            $this->cleanupProcess($aProcess);
+            $this->cleanupFiles($paths);
+            $this->cleanupBarrierDir();
+        }
+    }
+
     public function runOrderLockedStateRace(array $configuration, string $operation): array
     {
         $this->ensureRuntimeDir();
@@ -485,6 +539,7 @@ class ConcurrencyHarness
             '--fc-request='.(int) $configuration['request_id'],
             '--fc-item='.(int) $configuration['item_id'],
             '--fc-quantity='.(int) ($configuration['quantity'] ?? 6),
+            ...(isset($configuration['proposal_id']) ? ['--fc-proposal='.(int) $configuration['proposal_id']] : []),
         ]);
     }
 
@@ -502,6 +557,22 @@ class ConcurrencyHarness
             '--to-opname-actor='.(int) $configuration['opname_actor_id'],
             '--to-transfer='.(int) $configuration['transfer_id'],
             '--to-opname='.(int) $configuration['opname_id'],
+        ]);
+    }
+
+    protected function spawnServiceRaceActor(string $side, array $config, string $readyA, string $readyB, string $release, string $resultA, string $resultB): Process
+    {
+        return $this->startProcess([
+            '--role=sr-'.$side,
+            '--runtime-dir='.$this->runtimeDir,
+            '--sr-ready-a='.$readyA,
+            '--sr-ready-b='.$readyB,
+            '--sr-release='.$release,
+            '--sr-result-a='.$resultA,
+            '--sr-result-b='.$resultB,
+            '--sr-op='.$config['op'],
+            '--sr-actor='.(int) $config['actor_id'],
+            '--sr-subject='.(int) $config['subject_id'],
         ]);
     }
 

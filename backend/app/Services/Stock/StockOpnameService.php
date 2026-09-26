@@ -50,30 +50,44 @@ class StockOpnameService
     public function count(User $actor, StockOpname $opname, array $counts): StockOpname
     {
         $this->assertOwn($actor, $opname);
-        if (! $actor->isRole('gudang') || $opname->status !== 'draft') {
+        if (! $actor->isRole('gudang')) {
             throw new ApiException('Opname tidak dapat diedit.', 422);
         }
-        foreach ($counts as $input) {
-            $item = $opname->items()->findOrFail($input['item_id']);
-            $counted = (int) $input['counted_quantity'];
-            if ($counted < 0) {
-                throw new ApiException('Jumlah hitung tidak boleh negatif.', 422);
-            }
-            $item->update(['counted_quantity' => $counted, 'difference' => $counted - $item->system_quantity]);
-        }
 
-        return $opname->fresh()->load('items');
+        return DB::transaction(function () use ($actor, $opname, $counts) {
+            $locked = StockOpname::withoutGlobalScopes()->whereKey($opname->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'draft') {
+                throw new ApiException('Opname tidak dapat diedit.', 422);
+            }
+            foreach ($counts as $input) {
+                $item = $locked->items()->findOrFail($input['item_id']);
+                $counted = (int) $input['counted_quantity'];
+                if ($counted < 0) {
+                    throw new ApiException('Jumlah hitung tidak boleh negatif.', 422);
+                }
+                $item->update(['counted_quantity' => $counted, 'difference' => $counted - $item->system_quantity]);
+            }
+
+            return $locked->fresh()->load('items');
+        });
     }
 
     public function submit(User $actor, StockOpname $opname): StockOpname
     {
         $this->assertOwn($actor, $opname);
-        if (! $actor->isRole('gudang') || $opname->status !== 'draft' || $opname->items()->whereNull('counted_quantity')->exists()) {
+        if (! $actor->isRole('gudang')) {
             throw new ApiException('Opname belum siap disubmit.', 422);
         }
-        $opname->update(['status' => 'submitted', 'submitted_by' => $actor->id, 'submitted_at' => now()]);
 
-        return $opname->fresh()->load('items');
+        return DB::transaction(function () use ($actor, $opname) {
+            $locked = StockOpname::withoutGlobalScopes()->whereKey($opname->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'draft' || $locked->items()->whereNull('counted_quantity')->exists()) {
+                throw new ApiException('Opname belum siap disubmit.', 422);
+            }
+            $locked->update(['status' => 'submitted', 'submitted_by' => $actor->id, 'submitted_at' => now()]);
+
+            return $locked->fresh()->load('items');
+        });
     }
 
     public function approve(User $actor, StockOpname $opname): StockOpname
@@ -130,22 +144,37 @@ class StockOpnameService
     public function reject(User $actor, StockOpname $opname, string $reason): StockOpname
     {
         $this->assertOwn($actor, $opname);
-        if (! $actor->isRole('admin') || $opname->status !== 'submitted') {
+        if (! $actor->isRole('admin')) {
             throw new ApiException('Opname tidak dapat ditolak.', 422);
         }
-        $opname->update(['status' => 'rejected', 'rejected_by' => $actor->id, 'rejected_at' => now(), 'rejection_reason' => $reason]);
 
-        return $opname->fresh();
+        return DB::transaction(function () use ($actor, $opname, $reason) {
+            $locked = StockOpname::withoutGlobalScopes()->whereKey($opname->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'submitted') {
+                throw new ApiException('Opname tidak dapat ditolak.', 422);
+            }
+            $locked->update(['status' => 'rejected', 'rejected_by' => $actor->id, 'rejected_at' => now(), 'rejection_reason' => $reason]);
+
+            return $locked->fresh();
+        });
     }
 
     public function cancel(User $actor, StockOpname $opname): StockOpname
     {
         $this->assertOwn($actor, $opname);
-        if (! $actor->isRole('gudang') || $opname->status !== 'draft') {
+        if (! $actor->isRole('gudang')) {
             throw new ApiException('Opname tidak dapat dibatalkan.', 422);
-        } $opname->update(['status' => 'cancelled']);
+        }
 
-        return $opname->fresh();
+        return DB::transaction(function () use ($actor, $opname) {
+            $locked = StockOpname::withoutGlobalScopes()->whereKey($opname->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'draft') {
+                throw new ApiException('Opname tidak dapat dibatalkan.', 422);
+            }
+            $locked->update(['status' => 'cancelled']);
+
+            return $locked->fresh();
+        });
     }
 
     private function currentQuantity(int $agentId, ?int $productId, ?int $variationId, ?string $stockType, ?int $subLocationId): int

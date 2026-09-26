@@ -12,9 +12,12 @@ use App\Models\ProductStock;
 use App\Models\StockMovement;
 use App\Models\StockRequest;
 use App\Models\StockRequestItem;
+use App\Models\StockRequestProposal;
+use App\Models\StockRequestProposalItem;
 use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
+use App\Services\Stock\StockRequestProposalService;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Facades\DB;
@@ -34,7 +37,7 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
         $this->seed(PaymentMethodSeeder::class);
     }
 
-    public function test_overlapping_fulfillment_and_cancellation_match_a_valid_serial_ordering(): void
+    public function test_overlapping_proposal_approval_and_cancellation_match_a_valid_serial_ordering(): void
     {
         $reports = [];
 
@@ -44,8 +47,9 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
 
             try {
                 $report = $harness->runFulfillmentCancellation([
-                    'fulfillment_actor_id' => $fixture['gudang']->id,
+                    'fulfillment_actor_id' => $fixture['approver']->id,
                     'cancellation_actor_id' => $fixture['admin']->id,
+                    'proposal_id' => $fixture['proposal']->id,
                     'order_id' => $fixture['order']->id,
                     'request_id' => $fixture['request']->id,
                     'item_id' => $fixture['request_item']->id,
@@ -63,6 +67,14 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
                 $fulfillmentTransit = (int) StockMovement::withoutGlobalScopes()->where('reference_type', StockRequest::class)->where('reference_id', $fixture['request']->id)->where('stock_type', 'transit')->sum('quantity');
                 $reversalShipping = (int) StockMovement::withoutGlobalScopes()->where('reference_type', Order::class)->where('reference_id', $fixture['order']->id)->where('stock_type', 'shipping')->sum('quantity');
                 $reversalTransit = (int) StockMovement::withoutGlobalScopes()->where('reference_type', Order::class)->where('reference_id', $fixture['order']->id)->where('stock_type', 'transit')->sum('quantity');
+                $proposal = StockRequestProposal::withoutGlobalScopes()->findOrFail($fixture['proposal']->id);
+                $operations = DB::table('stock_request_fulfillments')->where('stock_request_id', $fixture['request']->id)->count();
+                $movementCount = StockMovement::withoutGlobalScopes()->where(function ($query) use ($fixture) {
+                    $query->where('reference_type', StockRequest::class)->where('reference_id', $fixture['request']->id)
+                        ->orWhere(function ($nested) use ($fixture) {
+                            $nested->where('reference_type', Order::class)->where('reference_id', $fixture['order']->id);
+                        });
+                })->count();
                 $fulfillmentSucceeded = $report['fulfillment']['outcome'] === 'success';
                 $cancellationSucceeded = $report['cancellation']['outcome'] === 'success';
 
@@ -76,8 +88,18 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
                 $this->assertGreaterThanOrEqual(0, $transit);
                 $this->assertGreaterThanOrEqual(0, $shipping);
 
+                // Overrun guards that hold for either serial ordering.
+                $this->assertLessThanOrEqual((int) $item->requested_qty, (int) $item->fulfilled_qty);
+                $this->assertGreaterThanOrEqual(0, (int) $item->remaining_qty);
+                $this->assertLessThanOrEqual(1, $operations);
+
                 if ($fulfillmentSucceeded) {
-                    $ordering = 'fulfillment_then_cancellation';
+                    $ordering = 'approval_then_cancellation';
+                    $this->assertSame('approved', $report['fulfillment']['proposal_status']);
+                    $this->assertSame('approved', $proposal->status);
+                    $this->assertSame(1, $operations);
+                    // one Transit/Shipping pair from the approval + one pair from the cancellation reversal
+                    $this->assertSame(4, $movementCount);
                     $this->assertSame(6, (int) $item->fulfilled_qty);
                     $this->assertSame(4, (int) $item->remaining_qty);
                     $this->assertSame(6, $fulfillmentShipping);
@@ -86,7 +108,13 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
                     $this->assertSame(6, $reversalTransit);
                     $this->assertSame(4, (int) $reversals->first()->released_quantity);
                 } else {
-                    $ordering = 'cancellation_then_fulfillment';
+                    $ordering = 'cancellation_then_approval';
+                    // The late approval is refused (request already cancelled) and leaves the
+                    // proposal pending: cancellation never touches proposals, and no stock moves.
+                    $this->assertSame(\App\Exceptions\ApiException::class, $report['fulfillment']['exception'] ?? null);
+                    $this->assertSame('pending', $proposal->status);
+                    $this->assertSame(0, $operations);
+                    $this->assertSame(0, $movementCount);
                     $this->assertSame(0, (int) $item->fulfilled_qty);
                     $this->assertSame(10, (int) $item->remaining_qty);
                     $this->assertSame(0, $fulfillmentShipping);
@@ -109,6 +137,9 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
                     'fulfillment_outcome' => $report['fulfillment']['outcome'],
                     'cancellation_outcome' => $report['cancellation']['outcome'],
                     'winning_serial_ordering' => $ordering,
+                    'proposal_status' => $proposal->status,
+                    'fulfillment_records' => $operations,
+                    'movement_count' => $movementCount,
                     'final_order_status' => $order->status,
                     'final_request_status' => $request->status,
                     'final_fulfilled' => $item->fulfilled_qty,
@@ -137,6 +168,7 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
         $agent = User::factory()->agen()->create();
         $agent->update(['agent_id' => $agent->id]);
         $admin = User::factory()->admin()->create(['agent_id' => $agent->id]);
+        $approver = User::factory()->admin()->create(['agent_id' => $agent->id]);
         $gudang = User::factory()->gudang()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $agent->id]);
         AgentProfile::create(['user_id' => $agent->id, 'store_name' => 'Fulfillment Cancellation Branch', 'address' => 'Test', 'latitude' => -6.2, 'longitude' => 106.8]);
@@ -179,10 +211,13 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
         WarehouseSetting::create(['agent_id' => $agent->id, 'factory_plan_enabled' => false]);
         $request = StockRequest::create(['agent_id' => $agent->id, 'order_id' => $order->id, 'request_number' => 'SR-'.Str::uuid(), 'status' => 'pending', 'created_by' => $agent->id]);
         $requestItem = StockRequestItem::create(['stock_request_id' => $request->id, 'order_item_id' => $orderItem->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 10, 'fulfilled_qty' => 0, 'remaining_qty' => 10]);
+        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $requestItem->id, 'quantity' => 6]]);
 
         return [
             'agent' => $agent,
             'admin' => $admin,
+            'approver' => $approver,
+            'proposal' => $proposal,
             'gudang' => $gudang,
             'konsumen' => $konsumen,
             'product' => $product,
@@ -207,6 +242,8 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
                 });
         })->delete();
         InventoryCancellationReversal::where('order_id', $fixture['order']->id)->delete();
+        StockRequestProposalItem::query()->where('stock_request_proposal_id', $fixture['proposal']->id)->delete();
+        StockRequestProposal::withoutGlobalScopes()->whereKey($fixture['proposal']->id)->delete();
         DB::table('stock_request_fulfillments')->where('stock_request_id', $fixture['request']->id)->delete();
         $fixture['request_item']->delete();
         $fixture['request']->delete();
@@ -217,6 +254,6 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
         WarehouseSetting::withoutGlobalScopes()->where('agent_id', $fixture['agent']->id)->delete();
         AgentProfile::where('user_id', $fixture['agent']->id)->delete();
         Product::whereKey($fixture['product']->id)->delete();
-        User::whereIn('id', [$fixture['admin']->id, $fixture['gudang']->id, $fixture['konsumen']->id, $fixture['agent']->id])->delete();
+        User::whereIn('id', [$fixture['admin']->id, $fixture['approver']->id, $fixture['gudang']->id, $fixture['konsumen']->id, $fixture['agent']->id])->delete();
     }
 }

@@ -21,6 +21,9 @@ class StockTransferService
 {
     private const PHYSICAL_BUCKETS = ['transit', 'shipping', 'sub'];
 
+    /** Shipping only ever changes through an Admin-approved fulfillment proposal (Reserved must move with it) or a return/cancellation reversal. */
+    private const SHIPPING_CLOSED_MESSAGE = 'Stok Shipping hanya berubah melalui fulfillment yang disetujui Admin, bukan transfer Gudang.';
+
     public function create(User $actor, string $source, ?int $sourceSubLocationId, string $destination, ?int $destinationSubLocationId, array $items, ?string $reference = null, ?string $note = null): StockTransfer
     {
         $this->assertGudang($actor);
@@ -217,6 +220,9 @@ class StockTransferService
             if ($transfer->source_stock_type === 'factory_plan' || $transfer->destination_stock_type === 'factory_plan') {
                 throw new ApiException('Transfer Plan hanya melalui persetujuan Admin.', 422);
             }
+            if ($transfer->source_stock_type === 'shipping' || $transfer->destination_stock_type === 'shipping') {
+                throw new ApiException(self::SHIPPING_CLOSED_MESSAGE, 422);
+            }
 
             $targets = [];
             foreach ($transfer->items as $item) {
@@ -272,16 +278,19 @@ class StockTransferService
     public function cancel(User $actor, StockTransfer $transfer): StockTransfer
     {
         $this->assertGudang($actor);
-        $transfer = StockTransfer::withoutGlobalScopes()->whereKey($transfer->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
-        if ($transfer->status !== 'pending') {
-            throw new ApiException('Hanya transfer pending yang dapat dibatalkan.', 422);
-        }
-        if ($transfer->source_stock_type === 'factory_plan' || $transfer->destination_stock_type === 'factory_plan') {
-            throw new ApiException('Transfer Plan hanya melalui persetujuan Admin.', 422);
-        }
-        $transfer->update(['status' => 'cancelled']);
 
-        return $transfer->fresh();
+        return DB::transaction(function () use ($actor, $transfer) {
+            $locked = StockTransfer::withoutGlobalScopes()->whereKey($transfer->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'pending') {
+                throw new ApiException('Hanya transfer pending yang dapat dibatalkan.', 422);
+            }
+            if ($locked->source_stock_type === 'factory_plan' || $locked->destination_stock_type === 'factory_plan') {
+                throw new ApiException('Transfer Plan hanya melalui persetujuan Admin.', 422);
+            }
+            $locked->update(['status' => 'cancelled']);
+
+            return $locked->fresh();
+        });
     }
 
     private function stock(int $agentId, StockTransferItem $item, string $type, ?int $subLocationId)
@@ -299,6 +308,9 @@ class StockTransferService
         }
         if ($source === 'sub' && $destination === 'shipping' || $source === 'shipping' && $destination === 'sub') {
             throw new ApiException('Transfer Shipping ke/dari Sub belum tersedia di fase ini.', 422);
+        }
+        if ($source === 'shipping' || $destination === 'shipping') {
+            throw new ApiException(self::SHIPPING_CLOSED_MESSAGE, 422);
         }
         if (($source === 'sub') !== ($sourceSubLocationId !== null) || ($destination === 'sub') !== ($destinationSubLocationId !== null)) {
             throw new ApiException('Sub location wajib sesuai dengan tipe bucket.', 422);

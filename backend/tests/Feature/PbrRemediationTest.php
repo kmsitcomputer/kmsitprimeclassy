@@ -229,8 +229,9 @@ class PbrRemediationTest extends TestCase
         $product = Product::create(['sku' => 'PBR-TRF-'.uniqid(), 'name' => 'PBR Transfer Cake', 'slug' => 'pbr-trf-'.uniqid(), 'has_variations' => false, 'status' => 'active']);
         WarehouseStock::create(['agent_id' => $b['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 50]);
 
+        $sub = \App\Models\WarehouseSubLocation::create(['agent_id' => $b['agent']->id, 'code' => 'PBR-SUB', 'name' => 'Sub', 'created_by' => $b['agent']->id]);
         $transfer = $this->actingAs($b['gudang'])->postJson('/api/v1/warehouse/transfers', [
-            'source_stock_type' => 'transit', 'destination_stock_type' => 'shipping',
+            'source_stock_type' => 'transit', 'destination_stock_type' => 'sub', 'destination_sub_location_id' => $sub->id,
             'items' => [['product_id' => $product->id, 'quantity' => 5]],
         ])->assertCreated()->json('data');
 

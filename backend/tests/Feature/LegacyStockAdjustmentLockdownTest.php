@@ -110,15 +110,17 @@ class LegacyStockAdjustmentLockdownTest extends TestCase
         $product = $this->product();
         WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 40]);
 
+        $sub = \App\Models\WarehouseSubLocation::create(['agent_id' => $branch['agent']->id, 'code' => 'LOCK-SUB', 'name' => 'Sub', 'created_by' => $branch['agent']->id]);
+
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', [
-            'source_stock_type' => 'transit', 'destination_stock_type' => 'shipping', 'reference' => 'LOCK-1',
+            'source_stock_type' => 'transit', 'destination_stock_type' => 'sub', 'destination_sub_location_id' => $sub->id, 'reference' => 'LOCK-1',
             'items' => [['product_id' => $product->id, 'quantity' => 15]],
         ])->assertCreated()->json('data');
 
         $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
 
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 25]);
-        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'shipping', 'quantity' => 15]);
+        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $sub->id, 'quantity' => 15]);
     }
 
     public function test_compatibility_mode_preserves_the_legacy_adjustment_behaviour(): void

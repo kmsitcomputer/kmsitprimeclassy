@@ -10,6 +10,7 @@ use App\Models\StockTransfer;
 use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
+use App\Models\WarehouseSubLocation;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockTransferService;
 use Database\Seeders\PaymentMethodSeeder;
@@ -48,7 +49,7 @@ class TransferOpnameConcurrencyTest extends TestCase
                 ]);
 
                 $source = $this->quantity($fixture['agent']->id, $fixture['product']->id, 'transit');
-                $destination = $this->quantity($fixture['agent']->id, $fixture['product']->id, 'shipping');
+                $destination = (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $fixture['agent']->id)->where('product_id', $fixture['product']->id)->where('stock_type', 'sub')->where('sub_location_id', $fixture['sub']->id)->value('quantity');
                 $transfer = StockTransfer::withoutGlobalScopes()->findOrFail($fixture['transfer']->id);
                 $opname = StockOpname::withoutGlobalScopes()->findOrFail($fixture['opname']->id);
                 $transferOut = (int) StockMovement::withoutGlobalScopes()->where('transfer_id', $transfer->id)->where('type', 'transfer_out')->sum('quantity');
@@ -133,15 +134,16 @@ class TransferOpnameConcurrencyTest extends TestCase
             'status' => 'active',
         ]);
         WarehouseStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 10]);
-        WarehouseStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'stock_type' => 'shipping', 'quantity' => 0]);
+        $sub = WarehouseSubLocation::create(['agent_id' => $agent->id, 'code' => 'TO-'.Str::random(6), 'name' => 'Race Sub', 'created_by' => $agent->id]);
+        WarehouseStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $sub->id, 'quantity' => 0]);
         WarehouseSetting::create(['agent_id' => $agent->id, 'factory_plan_enabled' => false]);
 
         $transfer = app(StockTransferService::class)->create(
             $gudang,
             'transit',
             null,
-            'shipping',
-            null,
+            'sub',
+            $sub->id,
             [['product_id' => $product->id, 'quantity' => 4]],
             'transfer-opname-race',
         );
@@ -158,7 +160,7 @@ class TransferOpnameConcurrencyTest extends TestCase
         app(StockOpnameService::class)->count($gudang, $opname, [['item_id' => $opnameItem->id, 'counted_quantity' => 8]]);
         app(StockOpnameService::class)->submit($gudang, $opname->fresh());
 
-        return compact('agent', 'admin', 'gudang', 'product', 'transfer', 'opname');
+        return compact('agent', 'admin', 'gudang', 'product', 'transfer', 'opname', 'sub');
     }
 
     private function quantity(int $agentId, int $productId, string $stockType): int
@@ -179,6 +181,7 @@ class TransferOpnameConcurrencyTest extends TestCase
         $fixture['opname']->delete();
         WarehouseStock::withoutGlobalScopes()->where('agent_id', $fixture['agent']->id)->delete();
         WarehouseSetting::withoutGlobalScopes()->where('agent_id', $fixture['agent']->id)->delete();
+        WarehouseSubLocation::withoutGlobalScopes()->whereKey($fixture['sub']->id)->delete();
         Product::whereKey($fixture['product']->id)->delete();
         User::whereIn('id', [$fixture['admin']->id, $fixture['gudang']->id, $fixture['agent']->id])->delete();
     }

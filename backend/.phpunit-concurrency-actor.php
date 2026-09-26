@@ -55,6 +55,15 @@ $longOptions = [
     'fc-request:',
     'fc-item:',
     'fc-quantity:',
+    'sr-ready-a:',
+    'sr-ready-b:',
+    'sr-release:',
+    'sr-result-a:',
+    'sr-result-b:',
+    'sr-op:',
+    'sr-actor:',
+    'sr-subject:',
+    'fc-proposal:',
     'to-ready-a:',
     'to-ready-b:',
     'to-release:',
@@ -269,6 +278,63 @@ if (str_starts_with($role, 'fulfillment-')) {
     exit($payload['exit_code']);
 }
 
+if (str_starts_with($role, 'sr-')) {
+    $isA = $role === 'sr-a';
+    $ready = trim((string) ($options[$isA ? 'sr-ready-a' : 'sr-ready-b'] ?? ''), " \t\n\r\0\x0B\"'");
+    $release = trim((string) ($options['sr-release'] ?? ''), " \t\n\r\0\x0B\"'");
+    $resultPath = trim((string) ($options[$isA ? 'sr-result-a' : 'sr-result-b'] ?? ''), " \t\n\r\0\x0B\"'");
+    $operation = (string) ($options['sr-op'] ?? '');
+    $actorId = (int) ($options['sr-actor'] ?? 0);
+    $subjectId = (int) ($options['sr-subject'] ?? 0);
+    $startedAt = microtime(true);
+
+    @file_put_contents($ready, 'ready');
+    $deadline = microtime(true) + 20;
+    while (microtime(true) < $deadline && ! file_exists($release)) {
+        usleep(100000);
+    }
+
+    $payload = [
+        'connection_id' => $connectionId,
+        'started_at' => $startedAt,
+        'operation' => $operation,
+        'outcome' => 'failed',
+        'exit_code' => 1,
+    ];
+
+    try {
+        $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+        switch ($operation) {
+            case 'transfer-complete':
+                $result = app(StockTransferService::class)->complete($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
+                break;
+            case 'transfer-cancel':
+                $result = app(StockTransferService::class)->cancel($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
+                break;
+            case 'opname-approve':
+                $result = app(StockOpnameService::class)->approve($actor, StockOpname::withoutGlobalScopes()->findOrFail($subjectId));
+                break;
+            case 'opname-reject':
+                $result = app(StockOpnameService::class)->reject($actor, StockOpname::withoutGlobalScopes()->findOrFail($subjectId), 'concurrency rejection');
+                break;
+            default:
+                throw new InvalidArgumentException('Unknown service race operation: '.$operation);
+        }
+        $payload['final_status'] = $result->status;
+        $payload['outcome'] = 'success';
+        $payload['exit_code'] = 0;
+    } catch (Throwable $e) {
+        $payload['exception'] = get_class($e);
+        $payload['message'] = $e->getMessage();
+        $payload['sql_state'] = $e instanceof QueryException ? $e->errorInfo[0] ?? null : null;
+        $payload['error_code'] = $e instanceof QueryException ? $e->errorInfo[1] ?? null : null;
+    }
+
+    $payload['completed_at'] = microtime(true);
+    @file_put_contents($resultPath, json_encode($payload));
+    exit($payload['exit_code']);
+}
+
 if (str_starts_with($role, 'fc-')) {
     $readyA = trim((string) ($options['fc-ready-a'] ?? ''), " \t\n\r\0\x0B\"'");
     $readyB = trim((string) ($options['fc-ready-b'] ?? ''), " \t\n\r\0\x0B\"'");
@@ -296,7 +362,15 @@ if (str_starts_with($role, 'fc-')) {
 
     try {
         $actor = User::withoutGlobalScopes()->findOrFail($actorId);
-        if ($isFulfillment) {
+        if ($isFulfillment && isset($options['fc-proposal'])) {
+            // Direct Gudang fulfillment is closed: the competing fulfillment is an
+            // Admin approving a pending proposal.
+            $proposal = StockRequestProposal::withoutGlobalScopes()->findOrFail((int) $options['fc-proposal']);
+            $result = app(StockRequestProposalService::class)->approve($actor, $proposal);
+            $payload['proposal_status'] = $result->status;
+            $payload['outcome'] = 'success';
+            $payload['exit_code'] = 0;
+        } elseif ($isFulfillment) {
             $request = StockRequest::withoutGlobalScopes()->findOrFail((int) $options['fc-request']);
             $result = app(StockRequestFulfillmentService::class)->fulfill(
                 $actor,
