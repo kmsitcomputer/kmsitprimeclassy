@@ -42,7 +42,7 @@ class TransferOpnameConcurrencyTest extends TestCase
 
             try {
                 $report = $harness->runTransferOpname([
-                    'transfer_actor_id' => $fixture['gudang']->id,
+                    'transfer_actor_id' => $fixture['admin']->id,
                     'opname_actor_id' => $fixture['admin']->id,
                     'transfer_id' => $fixture['transfer']->id,
                     'opname_id' => $fixture['opname']->id,

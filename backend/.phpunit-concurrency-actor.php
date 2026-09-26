@@ -305,8 +305,8 @@ if (str_starts_with($role, 'sr-')) {
     try {
         $actor = User::withoutGlobalScopes()->findOrFail($actorId);
         switch ($operation) {
-            case 'transfer-complete':
-                $result = app(StockTransferService::class)->complete($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
+            case 'transfer-approve':
+                $result = app(StockTransferService::class)->approve($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
                 break;
             case 'transfer-cancel':
                 $result = app(StockTransferService::class)->cancel($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
@@ -429,7 +429,7 @@ if (str_starts_with($role, 'to-')) {
         $actor = User::withoutGlobalScopes()->findOrFail($actorId);
         if ($isTransfer) {
             $transfer = StockTransfer::withoutGlobalScopes()->findOrFail((int) $options['to-transfer']);
-            $result = app(StockTransferService::class)->complete($actor, $transfer);
+            $result = app(StockTransferService::class)->approve($actor, $transfer);
             $payload['transfer_status'] = $result->status;
         } else {
             $opname = StockOpname::withoutGlobalScopes()->findOrFail((int) $options['to-opname']);

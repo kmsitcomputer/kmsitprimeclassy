@@ -81,13 +81,6 @@ class StockTransferController extends Controller
         return $this->ok($this->transfers->reject($request->user(), $transfer, $data['reason']));
     }
 
-    public function complete(Request $request, StockTransfer $transfer)
-    {
-        $this->authorize('complete', $transfer);
-
-        return $this->ok($this->transfers->complete($request->user(), $transfer)->load(['items.product', 'items.variation.compositions.option', 'handover']));
-    }
-
     public function cancel(Request $request, StockTransfer $transfer)
     {
         $this->authorize('cancel', $transfer);

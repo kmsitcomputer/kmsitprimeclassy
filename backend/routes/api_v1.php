@@ -356,7 +356,6 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/transfers', [StockTransferController::class, 'store']);
         Route::post('/warehouse/transfers/plan-to-transit', [StockTransferController::class, 'storePlanTransfer']);
-        Route::post('/warehouse/transfers/{transfer}/complete', [StockTransferController::class, 'complete']);
         Route::post('/warehouse/transfers/{transfer}/cancel', [StockTransferController::class, 'cancel']);
         Route::post('/warehouse/opnames', [StockOpnameController::class, 'store']);
         Route::patch('/warehouse/opnames/{opname}/count', [StockOpnameController::class, 'count']);

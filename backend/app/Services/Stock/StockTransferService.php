@@ -130,6 +130,9 @@ class StockTransferService
             if ($locked->status !== 'pending') {
                 throw new ApiException('Transfer ini tidak dapat disetujui.', 422);
             }
+            if ($locked->source_stock_type !== 'factory_plan' && $locked->destination_stock_type !== 'factory_plan') {
+                return $this->executeApprovedTransfer($actor, $locked);
+            }
             if ($locked->source_stock_type !== 'factory_plan' || $locked->destination_stock_type !== 'transit' || $locked->source_sub_location_id !== null || $locked->destination_sub_location_id !== null) {
                 throw new ApiException('Transfer ini bukan Plan Pabrik ke Transit.', 422);
             }
@@ -205,74 +208,66 @@ class StockTransferService
         return (bool) (WarehouseSetting::query()->where('agent_id', $agentId)->value('factory_plan_enabled') ?? false);
     }
 
-    public function complete(User $actor, StockTransfer $transfer): StockTransfer
+    /**
+     * Executes an APPROVED non-Plan transfer (Transit <-> Sub, Sub <-> Sub). Only ever
+     * reached from approve(), which already holds the transfer row lock inside its
+     * transaction and has re-checked the status. Gudang can request and cancel but
+     * can never execute a transfer itself — the Admin's approval is what moves stock.
+     */
+    private function executeApprovedTransfer(User $approver, StockTransfer $transfer): StockTransfer
     {
-        $this->assertGudang($actor);
+        if ($transfer->source_stock_type === 'shipping' || $transfer->destination_stock_type === 'shipping') {
+            throw new ApiException(self::SHIPPING_CLOSED_MESSAGE, 422);
+        }
 
-        return DB::transaction(function () use ($actor, $transfer) {
-            $transfer = StockTransfer::withoutGlobalScopes()->with('items')->whereKey($transfer->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
-            if ($transfer->status === 'completed') {
-                return $transfer->load(['items.product', 'items.variation', 'handover']);
+        $targets = [];
+        foreach ($transfer->items as $item) {
+            $targetKey = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
+            $targets[$targetKey] = ['item' => $item, 'key' => $targetKey];
+        }
+        ksort($targets);
+        $locked = [];
+        foreach ($targets as $target) {
+            $item = $target['item'];
+            $source = $this->stock($transfer->agent_id, $item, $transfer->source_stock_type, $transfer->source_sub_location_id)->lockForUpdate()->first();
+            if (! $source || $source->quantity < $item->quantity) {
+                throw new ApiException('Stok sumber tidak mencukupi.', 422);
             }
-            if ($transfer->status !== 'pending') {
-                throw new ApiException('Transfer ini tidak dapat diselesaikan.', 422);
+            if ($transfer->source_stock_type === 'transit' && $transfer->destination_stock_type === 'sub') {
+                $this->assertTransitReservationSafety($transfer->agent_id, $item, $item->quantity, $source->quantity);
             }
-            if ($transfer->source_stock_type === 'factory_plan' || $transfer->destination_stock_type === 'factory_plan') {
-                throw new ApiException('Transfer Plan hanya melalui persetujuan Admin.', 422);
-            }
-            if ($transfer->source_stock_type === 'shipping' || $transfer->destination_stock_type === 'shipping') {
-                throw new ApiException(self::SHIPPING_CLOSED_MESSAGE, 422);
-            }
+            $destination = $this->stock($transfer->agent_id, $item, $transfer->destination_stock_type, $transfer->destination_sub_location_id)->lockForUpdate()->first();
+            $locked[] = [$item, $source, $destination];
+        }
 
-            $targets = [];
-            foreach ($transfer->items as $item) {
-                $targetKey = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
-                $targets[$targetKey] = ['item' => $item, 'key' => $targetKey];
-            }
-            ksort($targets);
-            $locked = [];
-            foreach ($targets as $target) {
-                $item = $target['item'];
-                $source = $this->stock($transfer->agent_id, $item, $transfer->source_stock_type, $transfer->source_sub_location_id)->lockForUpdate()->first();
-                if (! $source || $source->quantity < $item->quantity) {
-                    throw new ApiException('Stok sumber tidak mencukupi.', 422);
-                }
-                if ($transfer->source_stock_type === 'transit' && $transfer->destination_stock_type === 'sub') {
-                    $this->assertTransitReservationSafety($transfer->agent_id, $item, $item->quantity, $source->quantity);
-                }
-                $destination = $this->stock($transfer->agent_id, $item, $transfer->destination_stock_type, $transfer->destination_sub_location_id)->lockForUpdate()->first();
-                $locked[] = [$item, $source, $destination];
-            }
+        $handover = StockHandover::create([
+            'agent_id' => $transfer->agent_id, 'stock_transfer_id' => $transfer->id,
+            'handover_number' => $this->uniqueNumber('HOV'), 'handed_over_by' => $transfer->created_by ?? $approver->id,
+            'status' => 'handed_over', 'handed_over_at' => now(), 'note' => $transfer->note,
+        ]);
 
-            $handover = StockHandover::create([
-                'agent_id' => $transfer->agent_id, 'stock_transfer_id' => $transfer->id,
-                'handover_number' => $this->uniqueNumber('HOV'), 'handed_over_by' => $actor->id,
-                'status' => 'handed_over', 'handed_over_at' => now(), 'note' => $transfer->note,
+        foreach ($locked as [$item, $source, $destination]) {
+            $sourceBefore = $source->quantity;
+            $source->decrement('quantity', $item->quantity);
+            $destination ??= WarehouseStock::create([
+                'agent_id' => $transfer->agent_id,
+                'product_id' => $item->product_id,
+                'product_variation_id' => $item->product_variation_id,
+                'stock_type' => $transfer->destination_stock_type,
+                'sub_location_id' => $transfer->destination_sub_location_id,
+                'quantity' => 0,
             ]);
+            $destinationBefore = $destination->quantity;
+            $destination->increment('quantity', $item->quantity);
+            $common = ['agent_id' => $transfer->agent_id, 'product_id' => $item->product_id, 'product_variation_id' => $item->product_variation_id, 'transfer_id' => $transfer->id, 'handover_id' => $handover->id, 'reference_type' => StockTransfer::class, 'reference_id' => $transfer->id, 'created_by' => $approver->id];
+            StockMovement::create($common + ['type' => 'transfer_out', 'stock_type' => $transfer->source_stock_type, 'sub_location_id' => $transfer->source_sub_location_id, 'counterpart_stock_type' => $transfer->destination_stock_type, 'quantity' => -$item->quantity, 'note' => "before={$sourceBefore};after=".($sourceBefore - $item->quantity)]);
+            StockMovement::create($common + ['type' => 'transfer_in', 'stock_type' => $transfer->destination_stock_type, 'sub_location_id' => $transfer->destination_sub_location_id, 'counterpart_stock_type' => $transfer->source_stock_type, 'quantity' => $item->quantity, 'note' => "before={$destinationBefore};after=".($destinationBefore + $item->quantity)]);
+        }
 
-            foreach ($locked as [$item, $source, $destination]) {
-                $sourceBefore = $source->quantity;
-                $source->decrement('quantity', $item->quantity);
-                $destination ??= WarehouseStock::create([
-                    'agent_id' => $transfer->agent_id,
-                    'product_id' => $item->product_id,
-                    'product_variation_id' => $item->product_variation_id,
-                    'stock_type' => $transfer->destination_stock_type,
-                    'sub_location_id' => $transfer->destination_sub_location_id,
-                    'quantity' => 0,
-                ]);
-                $destinationBefore = $destination->quantity;
-                $destination->increment('quantity', $item->quantity);
-                $common = ['agent_id' => $transfer->agent_id, 'product_id' => $item->product_id, 'product_variation_id' => $item->product_variation_id, 'transfer_id' => $transfer->id, 'handover_id' => $handover->id, 'reference_type' => StockTransfer::class, 'reference_id' => $transfer->id, 'created_by' => $actor->id];
-                StockMovement::create($common + ['type' => 'transfer_out', 'stock_type' => $transfer->source_stock_type, 'sub_location_id' => $transfer->source_sub_location_id, 'counterpart_stock_type' => $transfer->destination_stock_type, 'quantity' => -$item->quantity, 'note' => "before={$sourceBefore};after=".($sourceBefore - $item->quantity)]);
-                StockMovement::create($common + ['type' => 'transfer_in', 'stock_type' => $transfer->destination_stock_type, 'sub_location_id' => $transfer->destination_sub_location_id, 'counterpart_stock_type' => $transfer->source_stock_type, 'quantity' => $item->quantity, 'note' => "before={$destinationBefore};after=".($destinationBefore + $item->quantity)]);
-            }
+        $transfer->update(['status' => 'completed', 'completed_by' => $approver->id, 'completed_at' => now()]);
+        ActivityLog::create(['causer_id' => $approver->id, 'subject_type' => StockTransfer::class, 'subject_id' => $transfer->id, 'event' => 'stock_transfer.approved', 'properties' => ['agent_id' => $transfer->agent_id, 'handover_id' => $handover->id]]);
 
-            $transfer->update(['status' => 'completed', 'completed_by' => $actor->id, 'completed_at' => now()]);
-            ActivityLog::create(['causer_id' => $actor->id, 'subject_type' => StockTransfer::class, 'subject_id' => $transfer->id, 'event' => 'stock_transfer.completed', 'properties' => ['agent_id' => $transfer->agent_id, 'handover_id' => $handover->id]]);
-
-            return $transfer->fresh()->load(['items.product', 'items.variation', 'handover']);
-        });
+        return $transfer->fresh()->load(['items.product', 'items.variation.compositions.option', 'handover']);
     }
 
     public function cancel(User $actor, StockTransfer $transfer): StockTransfer

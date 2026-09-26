@@ -17,11 +17,6 @@ class StockTransferPolicy
         return $user->isRole('gudang') && $user->agent_id !== null;
     }
 
-    public function complete(User $user, StockTransfer $transfer): bool
-    {
-        return $user->isRole('gudang') && $transfer->agent_id === $user->agent_id;
-    }
-
     public function approve(User $user, StockTransfer $transfer): bool
     {
         return $user->isRole('admin') && $transfer->agent_id === $user->agent_id;

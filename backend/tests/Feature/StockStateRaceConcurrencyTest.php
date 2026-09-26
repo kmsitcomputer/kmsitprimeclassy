@@ -23,7 +23,7 @@ use Tests\TestCase;
 
 /**
  * Terminal-state protection under real concurrency (separate processes and
- * MySQL connections): a completed transfer can never be cancelled afterwards,
+ * MySQL connections): an approved transfer can never be cancelled afterwards,
  * and an approved opname can never be flipped to rejected after its stock
  * adjustment was applied. Exactly one side wins each round.
  */
@@ -38,7 +38,7 @@ class StockStateRaceConcurrencyTest extends TestCase
         $this->seed(PaymentMethodSeeder::class);
     }
 
-    public function test_transfer_complete_and_cancel_never_leave_a_cancelled_transfer_with_moved_stock(): void
+    public function test_transfer_approve_and_cancel_never_leave_a_cancelled_transfer_with_moved_stock(): void
     {
         $outcomes = [];
 
@@ -47,7 +47,7 @@ class StockStateRaceConcurrencyTest extends TestCase
 
             try {
                 $report = (new ConcurrencyHarness)->runServiceRace(
-                    ['op' => 'transfer-complete', 'actor_id' => $fixture['gudang']->id, 'subject_id' => $fixture['transfer']->id],
+                    ['op' => 'transfer-approve', 'actor_id' => $fixture['admin']->id, 'subject_id' => $fixture['transfer']->id],
                     ['op' => 'transfer-cancel', 'actor_id' => $fixture['gudang_b']->id, 'subject_id' => $fixture['transfer']->id],
                 );
 
@@ -59,11 +59,11 @@ class StockStateRaceConcurrencyTest extends TestCase
 
                 $this->assertTrue($report['different_connections']);
                 $this->assertTrue($report['true_overlap']);
-                $this->assertSame(1, $successes, 'Exactly one of complete/cancel may win: '.json_encode($report));
+                $this->assertSame(1, $successes, 'Exactly one of approve/cancel may win: '.json_encode($report));
                 $this->assertSame(10, $transit + $sub, 'Physical stock must be conserved.');
 
                 if ($report['a']['outcome'] === 'success') {
-                    $outcomes[] = 'complete_wins';
+                    $outcomes[] = 'approve_wins';
                     $this->assertSame('completed', $transfer->status);
                     $this->assertSame(6, $transit);
                     $this->assertSame(4, $sub);

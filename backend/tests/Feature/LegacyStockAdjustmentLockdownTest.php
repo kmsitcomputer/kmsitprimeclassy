@@ -117,7 +117,7 @@ class LegacyStockAdjustmentLockdownTest extends TestCase
             'items' => [['product_id' => $product->id, 'quantity' => 15]],
         ])->assertCreated()->json('data');
 
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertOk();
 
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 25]);
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $sub->id, 'quantity' => 15]);

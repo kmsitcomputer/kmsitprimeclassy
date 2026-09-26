@@ -72,14 +72,14 @@ class WarehouseSubLocationTest extends TestCase
         WarehouseSetting::create(['agent_id' => $branch['agent']->id, 'factory_plan_enabled' => false]);
 
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', ['source_stock_type' => 'transit', 'destination_stock_type' => 'sub', 'destination_sub_location_id' => $location->id, 'items' => [['product_id' => $product->id, 'quantity' => 30]]])->assertCreated()->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 70]);
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $location->id, 'quantity' => 50]);
         $this->actingAs($branch['gudang'])->getJson('/api/v1/warehouse/sellable?product_id='.$product->id)->assertJsonPath('data.available', 60);
         $this->assertSame(120, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $branch['agent']->id)->sum('quantity'));
 
         $back = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', ['source_stock_type' => 'sub', 'source_sub_location_id' => $location->id, 'destination_stock_type' => 'transit', 'items' => [['product_id' => $product->id, 'quantity' => 20]]])->assertCreated()->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$back['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$back['id']}/approve")->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 90]);
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $location->id, 'quantity' => 30]);
         $this->assertSame(120, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $branch['agent']->id)->sum('quantity'));
@@ -98,7 +98,7 @@ class WarehouseSubLocationTest extends TestCase
             $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $payload)->assertUnprocessable();
         }
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', ['source_stock_type' => 'transit', 'destination_stock_type' => 'sub', 'destination_sub_location_id' => $location->id, 'items' => [['product_id' => $product->id, 'quantity' => 30]]])->assertCreated()->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertUnprocessable();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertUnprocessable();
         $this->assertDatabaseCount('stock_movements', 0);
     }
 
@@ -112,7 +112,7 @@ class WarehouseSubLocationTest extends TestCase
         $same = ['source_stock_type' => 'sub', 'source_sub_location_id' => $a->id, 'destination_stock_type' => 'sub', 'destination_sub_location_id' => $a->id, 'items' => [['product_id' => $product->id, 'quantity' => 1]]];
         $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $same)->assertUnprocessable();
         $move = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', [...$same, 'destination_sub_location_id' => $b->id, 'items' => [['product_id' => $product->id, 'quantity' => 20]]])->assertCreated()->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$move['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$move['id']}/approve")->assertOk();
         $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/sub-locations/{$b->id}/deactivate")->assertUnprocessable();
         $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/sub-locations/{$a->id}/deactivate")->assertUnprocessable();
         $empty = WarehouseSubLocation::create(['agent_id' => $branch['agent']->id, 'code' => 'SUB-C', 'name' => 'C', 'created_by' => $branch['agent']->id]);

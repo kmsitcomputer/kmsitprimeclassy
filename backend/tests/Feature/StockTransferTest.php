@@ -28,10 +28,11 @@ class StockTransferTest extends TestCase
     {
         $agent = User::factory()->agen()->create();
         $agent->update(['agent_id' => $agent->id]);
+        $admin = User::factory()->admin()->create(['agent_id' => $agent->id]);
         $gudang = User::factory()->gudang()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
         $sub = WarehouseSubLocation::create(['agent_id' => $agent->id, 'code' => 'TRF-SUB', 'name' => 'Sub', 'created_by' => $agent->id]);
 
-        return compact('agent', 'gudang', 'sub');
+        return compact('agent', 'admin', 'gudang', 'sub');
     }
 
     private function product(): Product
@@ -53,14 +54,14 @@ class StockTransferTest extends TestCase
         return (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $branch['agent']->id)->where('product_id', $product->id)->where('stock_type', 'sub')->where('sub_location_id', $branch['sub']->id)->sum('quantity');
     }
 
-    public function test_gudang_completes_physical_transfer_with_paired_movements_and_handover(): void
+    public function test_admin_approval_executes_the_transfer_with_paired_movements_and_handover(): void
     {
         $branch = $this->branch();
         $product = $this->product();
         WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 100]);
 
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $this->toSub($branch, $product, 30, ['reference' => 'SUB-1']))->assertCreated()->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertOk();
 
         $this->assertDatabaseHas('warehouse_stocks', ['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 70]);
         $this->assertSame(30, $this->subQuantity($branch, $product));
@@ -70,14 +71,14 @@ class StockTransferTest extends TestCase
         $this->assertDatabaseHas('stock_handovers', ['stock_transfer_id' => $transfer['id'], 'agent_id' => $branch['agent']->id, 'status' => 'handed_over']);
     }
 
-    public function test_completion_is_idempotent_and_cancellation_only_applies_to_pending_transfers(): void
+    public function test_approval_is_idempotent_and_cancellation_only_applies_to_pending_transfers(): void
     {
         $branch = $this->branch();
         $product = $this->product();
         WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 10]);
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $this->toSub($branch, $product, 7))->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 3]);
         $this->assertDatabaseCount('stock_movements', 2);
         $this->assertDatabaseCount('stock_handovers', 1);
@@ -94,7 +95,7 @@ class StockTransferTest extends TestCase
         }
         WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 2]);
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $this->toSub($branch, $product, 3))->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertUnprocessable();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertUnprocessable();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 2]);
     }
 
@@ -114,7 +115,7 @@ class StockTransferTest extends TestCase
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'shipping', 'quantity' => 5]);
     }
 
-    public function test_a_legacy_pending_shipping_transfer_cannot_be_completed(): void
+    public function test_a_legacy_pending_shipping_transfer_cannot_be_approved(): void
     {
         $branch = $this->branch();
         $product = $this->product();
@@ -122,7 +123,7 @@ class StockTransferTest extends TestCase
         $legacy = StockTransfer::create(['agent_id' => $branch['agent']->id, 'transfer_number' => 'LEGACY-'.uniqid(), 'source_stock_type' => 'transit', 'destination_stock_type' => 'shipping', 'status' => 'pending', 'created_by' => $branch['gudang']->id]);
         $legacy->items()->create(['product_id' => $product->id, 'quantity' => 4]);
 
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$legacy->id}/complete")->assertUnprocessable();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$legacy->id}/approve")->assertUnprocessable();
 
         $this->assertSame('pending', $legacy->fresh()->status);
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 20]);
@@ -147,12 +148,50 @@ class StockTransferTest extends TestCase
         $product = $this->product();
         WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 5]);
         $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $this->toSub($branch, $product, 1))->json('data');
-        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertOk();
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertOk();
         $handoverId = StockTransfer::withoutGlobalScopes()->findOrFail($transfer['id'])->handover->id;
         $before = WarehouseStock::withoutGlobalScopes()->where('agent_id', $branch['agent']->id)->sum('quantity');
         $this->actingAs($branch['gudang'])->get("/api/v1/warehouse/handovers/{$handoverId}/print")->assertOk()->assertSee($transfer['id'] ? 'Stock Handover' : '');
         $this->actingAs($foreign['gudang'])->get("/api/v1/warehouse/handovers/{$handoverId}/print")->assertNotFound();
         $this->assertSame($before, WarehouseStock::withoutGlobalScopes()->where('agent_id', $branch['agent']->id)->sum('quantity'));
         $this->assertSame(2, StockMovement::query()->count());
+    }
+
+    public function test_gudang_can_only_request_never_execute_a_transfer_and_pending_has_zero_stock_effect(): void
+    {
+        $branch = $this->branch();
+        $product = $this->product();
+        WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 20]);
+        $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $this->toSub($branch, $product, 6))->assertCreated()->json('data');
+
+        $this->assertSame('pending', $transfer['status']);
+        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 20]);
+        $this->assertSame(0, $this->subQuantity($branch, $product));
+        $this->assertDatabaseCount('stock_movements', 0);
+
+        // No Gudang execution path exists: the old /complete endpoint is gone and approve is Admin-only.
+        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/complete")->assertStatus(404);
+        $this->actingAs($branch['gudang'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertForbidden();
+        $this->actingAs($branch['agent'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertForbidden();
+        $this->assertSame('pending', StockTransfer::withoutGlobalScopes()->findOrFail($transfer['id'])->status);
+        $this->assertDatabaseCount('stock_movements', 0);
+    }
+
+    public function test_admin_rejection_leaves_stock_untouched_and_foreign_admin_cannot_decide(): void
+    {
+        $branch = $this->branch();
+        $foreign = $this->branch();
+        $product = $this->product();
+        WarehouseStock::create(['agent_id' => $branch['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 20]);
+        $transfer = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/transfers', $this->toSub($branch, $product, 6))->json('data');
+
+        $this->actingAs($foreign['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertStatus(404);
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/reject", ['reason' => 'Tidak sesuai'])->assertOk();
+
+        $this->assertSame('rejected', StockTransfer::withoutGlobalScopes()->findOrFail($transfer['id'])->status);
+        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 20]);
+        $this->assertSame(0, $this->subQuantity($branch, $product));
+        $this->actingAs($branch['admin'])->postJson("/api/v1/warehouse/transfers/{$transfer['id']}/approve")->assertUnprocessable();
+        $this->assertDatabaseCount('stock_movements', 0);
     }
 }
