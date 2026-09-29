@@ -137,6 +137,10 @@ class WarehouseStockRequestService
         if ($after < 0) {
             throw new ApiException('Stok Sub tidak boleh negatif.', 422);
         }
+        if ($locked->quantity < 0) {
+            // R-02: a Sub adjustment may never cut physical below active Sub reservations.
+            app(SubStockService::class)->assertPhysicalDecreaseAllowed($locked->sub_location_id, $locked->product_variation_id ? null : $locked->product_id, $locked->product_variation_id, $before, -$locked->quantity);
+        }
         $stock ??= WarehouseStock::create(['agent_id' => $locked->agent_id, 'product_id' => $locked->product_id, 'product_variation_id' => $locked->product_variation_id, 'stock_type' => 'sub', 'sub_location_id' => $locked->sub_location_id, 'quantity' => 0]);
         $stock->update(['quantity' => $after]);
         StockMovement::create(['agent_id' => $locked->agent_id, 'product_id' => $locked->product_id, 'product_variation_id' => $locked->product_variation_id, 'type' => 'sub_adjustment', 'quantity' => $locked->quantity, 'stock_type' => 'sub', 'sub_location_id' => $locked->sub_location_id, 'reference_type' => WarehouseStockRequest::class, 'reference_id' => $locked->id, 'note' => "before={$before};after={$after}", 'warehouse_stock_request_id' => $locked->id, 'created_by' => $actor->id]);

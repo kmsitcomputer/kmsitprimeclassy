@@ -6,12 +6,14 @@ use App\Models\StockOpname;
 use App\Models\StockRequest;
 use App\Models\StockRequestProposal;
 use App\Models\StockTransfer;
+use App\Models\SubStockRequest;
 use App\Models\User;
 use App\Services\Order\OrderService;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
 use App\Services\Stock\StockRequestProposalService;
 use App\Services\Stock\StockTransferService;
+use App\Services\Stock\SubStockRequestService;
 use App\Services\Stock\SubStockService;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\QueryException;
@@ -323,6 +325,12 @@ if (str_starts_with($role, 'sr-')) {
             case 'sub-reserve':
                 $item = OrderItem::findOrFail($subjectId);
                 $result = DB::transaction(fn () => app(SubStockService::class)->reserve($item, (int) $item->sub_location_id, (int) Order::withoutGlobalScopes()->whereKey($item->order_id)->value('agent_id'), (int) $item->original_quantity, $actor));
+                break;
+            case 'sub-request-approve':
+                $result = app(SubStockRequestService::class)->approve($actor, SubStockRequest::withoutGlobalScopes()->findOrFail($subjectId));
+                break;
+            case 'sub-request-execute':
+                $result = app(SubStockRequestService::class)->execute($actor, SubStockRequest::withoutGlobalScopes()->findOrFail($subjectId));
                 break;
             case 'sub-consume':
                 $item = OrderItem::findOrFail($subjectId);

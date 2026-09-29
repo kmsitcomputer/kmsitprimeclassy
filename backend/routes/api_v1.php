@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\V1\Stock\StockOpnameController;
 use App\Http\Controllers\Api\V1\Stock\StockRequestController;
 use App\Http\Controllers\Api\V1\Stock\StockRequestProposalController;
 use App\Http\Controllers\Api\V1\Stock\StockTransferController;
+use App\Http\Controllers\Api\V1\Stock\SubStockRequestController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseSettingsController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseStockRequestController;
@@ -359,6 +360,25 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:agen,admin')->group(function () {
         Route::post('/warehouse/sub-locations', [WarehouseSubLocationController::class, 'store']);
         Route::post('/warehouse/sub-locations/{subLocation}/assign-owner', [WarehouseSubLocationController::class, 'assignOwner']);
+    });
+    // R-02: Sales-Kurir-Sub stock requests. Sub requests/cancels/receives, Admin approves/rejects,
+    // Gudang executes the physical move. The service re-checks role + same-Agent; nothing moves before execute.
+    Route::middleware('role:sales-kurir-sub,agen,admin,gudang')->group(function () {
+        Route::get('/sub-stock/requests', [SubStockRequestController::class, 'index']);
+        Route::get('/sub-stock/requests/{subStockRequest}', [SubStockRequestController::class, 'show']);
+    });
+    Route::middleware('role:sales-kurir-sub')->group(function () {
+        Route::get('/sub-stock/my', [SubStockRequestController::class, 'myStock']);
+        Route::post('/sub-stock/requests', [SubStockRequestController::class, 'store']);
+        Route::post('/sub-stock/requests/{subStockRequest}/cancel', [SubStockRequestController::class, 'cancel']);
+        Route::post('/sub-stock/requests/{subStockRequest}/receive', [SubStockRequestController::class, 'receive']);
+    });
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/sub-stock/requests/{subStockRequest}/approve', [SubStockRequestController::class, 'approve']);
+        Route::post('/sub-stock/requests/{subStockRequest}/reject', [SubStockRequestController::class, 'reject']);
+    });
+    Route::middleware('role:gudang')->group(function () {
+        Route::post('/sub-stock/requests/{subStockRequest}/execute', [SubStockRequestController::class, 'execute']);
     });
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/transfers', [StockTransferController::class, 'store']);

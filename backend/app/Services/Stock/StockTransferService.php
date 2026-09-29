@@ -31,6 +31,7 @@ class StockTransferService
             throw new ApiException('Transfer Plan hanya melalui Stock Transfer Plan ke Transit dengan persetujuan Admin.', 422);
         }
         $this->assertBucketPair($actor, $source, $sourceSubLocationId, $destination, $destinationSubLocationId);
+        $this->assertNoOwnedSubLocation([$sourceSubLocationId, $destinationSubLocationId]);
         if ($items === []) {
             throw new ApiException('Transfer harus memiliki item.', 422);
         }
@@ -236,6 +237,10 @@ class StockTransferService
             if ($transfer->source_stock_type === 'transit' && $transfer->destination_stock_type === 'sub') {
                 $this->assertTransitReservationSafety($transfer->agent_id, $item, $item->quantity, $source->quantity);
             }
+            if ($transfer->source_stock_type === 'sub') {
+                // R-02: stock leaving a Sub Location may never cut physical below its active Sub reservations.
+                app(SubStockService::class)->assertPhysicalDecreaseAllowed((int) $transfer->source_sub_location_id, $item->product_variation_id ? null : $item->product_id, $item->product_variation_id, $source->quantity, $item->quantity);
+            }
             $destination = $this->stock($transfer->agent_id, $item, $transfer->destination_stock_type, $transfer->destination_sub_location_id)->lockForUpdate()->first();
             $locked[] = [$item, $source, $destination];
         }
@@ -268,6 +273,54 @@ class StockTransferService
         ActivityLog::create(['causer_id' => $approver->id, 'subject_type' => StockTransfer::class, 'subject_id' => $transfer->id, 'event' => 'stock_transfer.approved', 'properties' => ['agent_id' => $transfer->agent_id, 'handover_id' => $handover->id]]);
 
         return $transfer->fresh()->load(['items.product', 'items.variation.compositions.option', 'handover']);
+    }
+
+    /**
+     * R-02: an owned Sub Location (a Sales-Kurir-Sub's own stock) only moves through the Sub request flow —
+     * Sales-Kurir-Sub requests, Admin approves, Gudang executes. The generic Gudang transfer stays for
+     * legacy, unowned Sub Locations.
+     *
+     * @param  array<int, ?int>  $subLocationIds
+     */
+    private function assertNoOwnedSubLocation(array $subLocationIds): void
+    {
+        $ids = array_filter($subLocationIds);
+        if ($ids !== [] && WarehouseSubLocation::withoutGlobalScopes()->whereIn('id', $ids)->whereNotNull('owner_user_id')->exists()) {
+            throw new ApiException('Sub Location milik Sales-Kurir-Sub hanya dapat dipindah melalui Permintaan Stok Sub (Admin menyetujui, Gudang mengeksekusi).', 422);
+        }
+    }
+
+    /**
+     * R-02: executes an already Admin-approved Sub request (Transit -> Sub replenish, Sub -> Transit return)
+     * as a fully audited transfer — stock rows locked in a fixed order, transfer_out/transfer_in movements,
+     * and a handover. Must be called inside the caller's transaction, after that request's row is locked.
+     */
+    public function executeForSubRequest(User $gudang, int $agentId, string $direction, int $subLocationId, int $requesterId, iterable $items, string $reference): StockTransfer
+    {
+        $replenish = $direction === 'replenish';
+        $transfer = StockTransfer::withoutGlobalScopes()->create([
+            'agent_id' => $agentId,
+            'transfer_number' => $this->uniqueNumber('TRF'),
+            'source_stock_type' => $replenish ? 'transit' : 'sub',
+            'source_sub_location_id' => $replenish ? null : $subLocationId,
+            'destination_stock_type' => $replenish ? 'sub' : 'transit',
+            'destination_sub_location_id' => $replenish ? $subLocationId : null,
+            'status' => 'pending',
+            'reference' => $reference,
+            'note' => $replenish ? 'Pengisian stok Sub' : 'Pengembalian stok Sub',
+            'created_by' => $requesterId,
+        ]);
+        foreach ($items as $item) {
+            $transfer->items()->create(['product_id' => $item->product_id, 'product_variation_id' => $item->product_variation_id, 'quantity' => $item->quantity]);
+        }
+        $done = $this->executeApprovedTransfer($gudang, $transfer->load('items'));
+
+        $handover = StockHandover::withoutGlobalScopes()->where('stock_transfer_id', $transfer->id)->firstOrFail();
+        $replenish
+            ? $handover->update(['handed_over_by' => $gudang->id]) // Gudang hands goods to the Sub; the Sub confirms receipt later
+            : $handover->update(['handed_over_by' => $requesterId, 'received_by' => $gudang->id, 'status' => 'received', 'received_at' => now()]);
+
+        return $done->refresh();
     }
 
     public function cancel(User $actor, StockTransfer $transfer): StockTransfer

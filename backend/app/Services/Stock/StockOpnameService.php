@@ -119,6 +119,10 @@ class StockOpnameService
                 if ($delta === 0) {
                     continue;
                 }
+                if ($physical && $lockedOpname->stock_type === 'sub' && $delta < 0) {
+                    // R-02: a Sub opname may never cut physical below active Sub reservations.
+                    app(SubStockService::class)->assertPhysicalDecreaseAllowed($item->sub_location_id, $item->product_variation_id ? null : $item->product_id, $item->product_variation_id, $current, -$delta);
+                }
                 if ($plan) {
                     $enabled = WarehouseSetting::query()->where('agent_id', $lockedOpname->agent_id)->value('factory_plan_enabled') ?? false;
                     if (! $enabled || $current + $delta < 0) {

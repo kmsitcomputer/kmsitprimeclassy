@@ -60,13 +60,18 @@ class SubStockService
         if ($quantity < 1) {
             throw new ApiException(__('messages.order.invalid_quantity'), 422);
         }
-        $existing = SubStockReservation::query()->where('order_item_id', $item->id)->lockForUpdate()->first();
+        // Lock order everywhere in this domain: Sub stock row FIRST, reservation rows second (no deadlocks).
+        $existing = SubStockReservation::query()->where('order_item_id', $item->id)->first();
         if ($existing) {
             return $existing;
         }
 
         $productId = $item->product_variation_id ? null : $item->product_id;
         $stock = $this->stockQuery($subLocationId, $productId, $item->product_variation_id)->lockForUpdate()->first();
+        $existing = SubStockReservation::query()->where('order_item_id', $item->id)->lockForUpdate()->first();
+        if ($existing) {
+            return $existing;
+        }
         $physical = (int) ($stock?->quantity ?? 0);
         $available = $physical - $this->reserved($subLocationId, $productId, $item->product_variation_id, forWrite: true);
         if (! $stock || $available < $quantity) {
@@ -83,15 +88,19 @@ class SubStockService
     /** Actual shipment: physical -= quantity and the reservation is consumed. Exactly once (idempotent). */
     public function consume(OrderItem $item, ?User $actor): ?SubStockReservation
     {
+        $probe = SubStockReservation::query()->where('order_item_id', $item->id)->first();
+        if (! $probe) {
+            return null;
+        }
+        $stock = $this->stockQuery($probe->sub_location_id, $probe->product_id, $probe->product_variation_id)->lockForUpdate()->first();
         $reservation = SubStockReservation::query()->where('order_item_id', $item->id)->lockForUpdate()->first();
-        if (! $reservation || $reservation->status === SubStockReservation::CONSUMED) {
+        if ($reservation->status === SubStockReservation::CONSUMED) {
             return $reservation;
         }
         if ($reservation->status !== SubStockReservation::ACTIVE) {
             throw new ApiException('Reservasi stok Sub sudah dilepas dan tidak dapat dikirim.', 422);
         }
 
-        $stock = $this->stockQuery($reservation->sub_location_id, $reservation->product_id, $reservation->product_variation_id)->lockForUpdate()->first();
         if (! $stock || $stock->quantity < $reservation->quantity) {
             throw new ApiException('Stok fisik Sub tidak mencukupi untuk pengiriman.', 422);
         }
@@ -111,12 +120,16 @@ class SubStockService
     /** Cancellation/rejection before shipment: reservation released, physical unchanged. Idempotent. */
     public function release(OrderItem $item, ?User $actor, string $reason): ?SubStockReservation
     {
+        $probe = SubStockReservation::query()->where('order_item_id', $item->id)->first();
+        if (! $probe) {
+            return null;
+        }
+        // Serialise with reserve/consume/transfer on the same target (stock row first).
+        $this->stockQuery($probe->sub_location_id, $probe->product_id, $probe->product_variation_id)->lockForUpdate()->first();
         $reservation = SubStockReservation::query()->where('order_item_id', $item->id)->lockForUpdate()->first();
-        if (! $reservation || $reservation->status !== SubStockReservation::ACTIVE) {
+        if ($reservation->status !== SubStockReservation::ACTIVE) {
             return $reservation;
         }
-        // Serialise with reserve/consume/transfer on the same target.
-        $this->stockQuery($reservation->sub_location_id, $reservation->product_id, $reservation->product_variation_id)->lockForUpdate()->first();
         $reservation->update(['status' => SubStockReservation::RELEASED, 'released_at' => now(), 'released_by' => $actor?->id, 'release_reason' => $reason]);
 
         return $reservation->fresh();

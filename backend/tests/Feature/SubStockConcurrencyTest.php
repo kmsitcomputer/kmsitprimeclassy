@@ -7,10 +7,13 @@ use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\StockMovement;
+use App\Models\StockTransfer;
+use App\Models\SubStockRequest;
 use App\Models\SubStockReservation;
 use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
+use App\Services\Stock\SubStockRequestService;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Str;
@@ -96,6 +99,33 @@ class SubStockConcurrencyTest extends TestCase
             $this->assertSame(1, StockMovement::withoutGlobalScopes()->where('stock_type', 'sub')->where('type', 'out')->where('sub_location_id', $f['location']->id)->count());
             $this->assertSame('consumed', SubStockReservation::query()->where('order_item_id', $f['items'][0]->id)->value('status'));
             fwrite(STDOUT, 'SUB_CONSUME_RACE '.json_encode(['iteration' => $iteration, 'a' => $report['a']['outcome'], 'b' => $report['b']['outcome']]).PHP_EOL);
+        }
+    }
+
+    public function test_duplicate_gudang_execution_moves_transit_to_sub_exactly_once(): void
+    {
+        for ($iteration = 1; $iteration <= 3; $iteration++) {
+            $f = $this->fixture(0, 0, 1);
+            $admin = User::factory()->admin()->create(['agent_id' => $f['agent']->id]);
+            $gudang = User::factory()->gudang()->create(['agent_id' => $f['agent']->id, 'parent_id' => $f['agent']->id]);
+            WarehouseStock::create(['agent_id' => $f['agent']->id, 'product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 20]);
+            $service = app(SubStockRequestService::class);
+            $request = $service->create($f['sub'], 'replenish', [['product_id' => $f['product']->id, 'quantity' => 6]]);
+            $service->approve($admin, $request);
+
+            $report = (new ConcurrencyHarness)->runServiceRace(
+                ['op' => 'sub-request-execute', 'actor_id' => $gudang->id, 'subject_id' => $request->id],
+                ['op' => 'sub-request-execute', 'actor_id' => $gudang->id, 'subject_id' => $request->id],
+            );
+
+            $transit = (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $f['agent']->id)->where('stock_type', 'transit')->value('quantity');
+            $sub = (int) WarehouseStock::withoutGlobalScopes()->where('sub_location_id', $f['location']->id)->value('quantity');
+            $this->assertTrue($report['true_overlap']);
+            $this->assertSame([14, 6], [$transit, $sub], 'two racing executions must move stock once: '.json_encode($report));
+            $this->assertSame(1, StockTransfer::withoutGlobalScopes()->where('agent_id', $f['agent']->id)->count());
+            $this->assertSame(2, StockMovement::withoutGlobalScopes()->where('agent_id', $f['agent']->id)->whereIn('type', ['transfer_in', 'transfer_out'])->count());
+            $this->assertSame('executed', SubStockRequest::withoutGlobalScopes()->find($request->id)->status);
+            fwrite(STDOUT, 'SUB_EXECUTE_RACE '.json_encode(['iteration' => $iteration, 'a' => $report['a']['outcome'], 'b' => $report['b']['outcome'], 'transit' => $transit, 'sub' => $sub]).PHP_EOL);
         }
     }
 }
