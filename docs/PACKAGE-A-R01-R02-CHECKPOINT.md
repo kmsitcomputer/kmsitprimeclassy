@@ -28,11 +28,11 @@ CourierService, WarehouseSubLocation model/policy/controller, stock_* migrations
 - Agent sellable formula untouched (Transit + Plan - Agent Reserved).
 - Guards deferred to R-03: quantity adjust / split / return of Sub-sourced items throw a clear 422.
 
-## Commits so far
-C1 role compat · C2 Sub Location ownership · C3 reservation ledger + stock source · C6 checkout/cancel/ship integration + tests
+## Commits
+C1 role compat (03787fc) · C2 ownership (b4502cc) · C3 reservation ledger (53c0bd6) · C6 checkout integration (5a280aa) · C4/C5 request/return flow (4296af0) · C7 frontend (7b11d15) · C8 docs
 
-## Remaining
-C4 Transit->Sub request/approve/Gudang-execute/handover flow · C5 Sub->Transit return flow · C7 frontend/API compat · C8 full regression, docs, final report
+## Final test results
+Backend `vendor/bin/phpunit`: Tests: 706, Assertions: 4540, Failures: 2 (baseline network-only RajaOngkir failures, identical to pre-change baseline of 663 tests / 2 failures).
+Frontend: `npm run type-check` clean, `npm run build-only` OK (no frontend test script in repo).
 
-## Tests so far
-Focused suites green (SalesKurirSubRoleTest 8, SubLocationOwnershipTest 8, SubStockSourceTest 15, SubStockConcurrencyTest 2). Full-suite baseline failures = 2 network-only (RajaOngkir via proxy 403).
+## Status: COMPLETE — nothing remaining in Package A. See docs/R01-R02-SALES-KURIR-SUB-AND-SUB-STOCK.md.
