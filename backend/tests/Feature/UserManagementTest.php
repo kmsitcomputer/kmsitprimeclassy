@@ -84,13 +84,17 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseHas('agent_profiles', ['user_id' => $agen->id]);
     }
 
-    public function test_agen_cannot_delete_users_even_within_their_own_branch(): void
+    public function test_agen_can_delete_every_role_beneath_it_in_its_own_branch(): void
     {
         $agen = User::factory()->agen()->create();
         $agen->update(['agent_id' => $agen->id]);
-        $sales = User::factory()->sales()->create(['agent_id' => $agen->id]);
 
-        $this->actingAs($agen)->deleteJson("/api/v1/users/{$sales->id}")->assertStatus(403);
+        foreach (['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'salesKurir', 'konsumen'] as $role) {
+            $target = User::factory()->{$role}()->create(['agent_id' => $agen->id]);
+
+            $this->actingAs($agen)->deleteJson("/api/v1/users/{$target->id}")->assertOk();
+            $this->assertSoftDeleted('users', ['id' => $target->id]);
+        }
     }
 
     public function test_agen_can_create_korsal_sales_admin_and_kurir_but_not_another_agen(): void
@@ -175,21 +179,32 @@ class UserManagementTest extends TestCase
         ]))->assertForbidden();
     }
 
-    public function test_agen_can_delete_admin_and_kurir_in_its_own_branch_but_not_another_agents(): void
+    public function test_agen_can_never_delete_another_agen_itself_or_anyone_in_another_branch(): void
     {
         $agenA = User::factory()->agen()->create();
         $agenA->update(['agent_id' => $agenA->id]);
         $agenB = User::factory()->agen()->create();
         $agenB->update(['agent_id' => $agenB->id]);
 
-        $ownAdmin = User::factory()->admin()->create(['agent_id' => $agenA->id]);
         $otherAdmin = User::factory()->admin()->create(['agent_id' => $agenB->id]);
-        $ownKorsal = User::factory()->korsal()->create(['agent_id' => $agenA->id]);
+        $otherSales = User::factory()->sales()->create(['agent_id' => $agenB->id]);
 
-        $this->actingAs($agenA)->deleteJson("/api/v1/users/{$ownAdmin->id}")->assertOk();
         $this->actingAs($agenA)->deleteJson("/api/v1/users/{$otherAdmin->id}")->assertForbidden();
-        // Delete stays undelegated for korsal/sales — create rights don't imply delete rights there.
-        $this->actingAs($agenA)->deleteJson("/api/v1/users/{$ownKorsal->id}")->assertForbidden();
+        $this->actingAs($agenA)->deleteJson("/api/v1/users/{$otherSales->id}")->assertForbidden();
+        $this->actingAs($agenA)->deleteJson("/api/v1/users/{$agenB->id}")->assertForbidden();
+        $this->actingAs($agenA)->deleteJson("/api/v1/users/{$agenA->id}")->assertForbidden();
+    }
+
+    public function test_korsal_and_sales_can_never_delete_anyone(): void
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agen->id]);
+        $sales = User::factory()->sales()->create(['agent_id' => $agen->id, 'korsal_id' => $korsal->id]);
+        $peer = User::factory()->sales()->create(['agent_id' => $agen->id, 'korsal_id' => $korsal->id]);
+
+        $this->actingAs($korsal)->deleteJson("/api/v1/users/{$sales->id}")->assertForbidden();
+        $this->actingAs($sales)->deleteJson("/api/v1/users/{$peer->id}")->assertForbidden();
     }
 
     public function test_korsal_can_only_create_sales(): void

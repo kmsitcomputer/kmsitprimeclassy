@@ -26,14 +26,19 @@ const ALLOWED_CREATIONS: Record<string, CreateUserPayload['role'][]> = {
   korsal: ['sales', 'sales-kurir'],
 }
 
-/** Mirrors UserPolicy::delete — super_admin deletes any non-self, non-super-admin, non-agent account; an agen may delete only admin/keuangan/kurir within its own branch. */
+/** Mirrors UserPolicy::delete — super_admin deletes any non-self, non-super-admin, non-agent account; an agen may delete every role beneath it (anything except another agen/super_admin) within its own branch. */
 function canDelete(user: AuthUser): boolean {
   if (auth.user?.role === 'super_admin') {
     return user.id !== auth.user.id && user.role !== 'super_admin' && user.role !== 'agen'
   }
 
   if (auth.user?.role === 'agen') {
-    return ['admin', 'keuangan', 'kurir'].includes(user.role) && user.agent_id === auth.user.agent_id
+    return (
+      user.id !== auth.user.id &&
+      user.role !== 'super_admin' &&
+      user.role !== 'agen' &&
+      user.agent_id === auth.user.agent_id
+    )
   }
 
   return false

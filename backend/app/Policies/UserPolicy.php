@@ -65,14 +65,13 @@ class UserPolicy
 
     /**
      * Deleting a downline account is destructive enough (orphans referral
-     * chains, hierarchy, historical order/commission attribution) to keep
-     * un-delegated for most roles — super_admin always may (except itself,
-     * see UserController::destroy for the "never the last super_admin"
-     * rule). The one delegated exception: an agen may delete an
-     * admin/keuangan/kurir it created within its own branch, mirroring the
-     * create permission it already has for those roles — korsal/sales still
-     * can never delete anyone, and an agen can never delete another agen or
-     * another agent's staff.
+     * chains, hierarchy, historical order/commission attribution) that only
+     * two roles may do it. super_admin always may (except itself and other
+     * super_admins/agens, see UserController::destroy for the "never the last
+     * super_admin" rule). An agen may delete EVERY role beneath it within its
+     * own branch (korsal, sales, sales-kurir, admin, keuangan, kurir, gudang,
+     * konsumen) — but never another agen, a super_admin, itself, or anyone in
+     * another agent's branch. korsal/sales can never delete anyone.
      */
     public function delete(User $user, User $target): bool
     {
@@ -84,8 +83,9 @@ class UserPolicy
             return $target->role?->slug !== 'super_admin' && $target->role?->slug !== 'agen';
         }
 
-        if ($user->isRole('agen') && in_array($target->role?->slug, ['admin', 'keuangan', 'kurir'], true)) {
-            return $target->agent_id === $user->agent_id;
+        if ($user->isRole('agen') && $user->agent_id !== null) {
+            return ! in_array($target->role?->slug, ['super_admin', 'agen'], true)
+                && $target->agent_id === $user->agent_id;
         }
 
         return false;
