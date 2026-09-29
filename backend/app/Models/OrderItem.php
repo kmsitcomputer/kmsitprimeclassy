@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class OrderItem extends Model
 {
     protected $fillable = [
-        'order_id', 'shipment_id', 'product_id', 'product_variation_id', 'additional_payment_id',
+        'order_id', 'shipment_id', 'product_id', 'product_variation_id', 'stock_source', 'sub_location_id', 'additional_payment_id',
         'product_name_snapshot', 'variation_label_snapshot', 'sku_snapshot',
         'unit_price_snapshot', 'agent_fee_amount', 'sales_fee_amount', 'courier_fee_amount', 'subtotal_snapshot',
         'original_quantity', 'fulfilled_quantity',
@@ -33,9 +33,15 @@ class OrderItem extends Model
         'kembali' => [],
     ];
 
+    public function isSubSourced(): bool
+    {
+        return $this->stock_source === 'sub';
+    }
+
     protected function casts(): array
     {
         return [
+            'sub_location_id' => 'integer',
             // See User::casts() — order_id/shipment_id are compared with strict
             // ===/!== against already-int ids (OrderFulfillmentController,
             // CourierService); uncast they return as strings on some
