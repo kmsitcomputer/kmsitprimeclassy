@@ -21,7 +21,7 @@ const tab = ref<'orders' | 'returns' | 'selesai'>('orders')
 const auth = useAuthStore()
 
 /* Sales-Kurir referral visibility (PBR-001) — same code/link/copy UX as ProfileView. */
-const isSalesKurir = computed(() => auth.user?.role === 'sales-kurir')
+const isSalesKurir = computed(() => auth.user?.role === 'sales-kurir-sub')
 const referralLink = computed(() => (auth.user?.referral_code ? `${window.location.origin}/?ref=${auth.user.referral_code}` : ''))
 const referralCopied = ref(false)
 const referralLinkCopied = ref(false)

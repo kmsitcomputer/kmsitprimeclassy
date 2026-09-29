@@ -13,7 +13,7 @@ export default {
   },
   roles: {
     gudang: 'Warehouse',
-    salesKurir: 'Sales-Courier',
+    salesKurir: 'Sales-Courier-Sub',
   },
   warehouse: {
       subLocation: { title: 'Sub Locations', physicalStock: 'Physical stock at Sub location', notSellable: 'Not available stock for sale' },

@@ -17,7 +17,7 @@ const ui = useUiStore()
 const site = useSiteStore()
 
 /** All roles except konsumen (customer) get a dashboard shortcut from the storefront. */
-const DASHBOARD_ROLES = ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir', 'kurir', 'gudang', 'keuangan']
+const DASHBOARD_ROLES = ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub', 'kurir', 'gudang', 'keuangan']
 const canSeeDashboard = computed(() => !!auth.user && DASHBOARD_ROLES.includes(auth.user.role))
 
 const searchTerm = ref('')

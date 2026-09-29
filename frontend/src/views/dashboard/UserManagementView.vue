@@ -22,8 +22,8 @@ const { t } = useI18n()
 
 const ALLOWED_CREATIONS: Record<string, CreateUserPayload['role'][]> = {
   super_admin: ['agen'],
-  agen: ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir'],
-  korsal: ['sales', 'sales-kurir'],
+  agen: ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub'],
+  korsal: ['sales', 'sales-kurir-sub'],
 }
 
 /** Mirrors UserPolicy::delete — super_admin deletes any non-self, non-super-admin, non-agent account; an agen may delete every role beneath it (anything except another agen/super_admin) within its own branch. */
@@ -67,7 +67,7 @@ const ROLE_LABELS: Record<string, string> = {
   keuangan: 'Keuangan',
   kurir: 'Kurir',
   gudang: t('roles.gudang'),
-  'sales-kurir': t('roles.salesKurir'),
+  'sales-kurir-sub': t('roles.salesKurir'),
   konsumen: 'Konsumen',
 }
 
@@ -90,7 +90,7 @@ const createError = ref('')
 const creating = ref(false)
 
 const needsKorsalId = computed(
-  () => ['sales', 'sales-kurir'].includes(form.value.role) && auth.user?.role === 'agen',
+  () => ['sales', 'sales-kurir-sub'].includes(form.value.role) && auth.user?.role === 'agen',
 )
 const korsalCandidates = ref<AuthUser[]>([])
 const korsalLoading = ref(false)

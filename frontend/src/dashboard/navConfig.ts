@@ -65,14 +65,14 @@ const ROLE_ITEMS: NavItem[] = [
     label: 'Pengiriman Saya',
     routeName: 'kurir-dashboard',
     icon: 'truck',
-    show: (auth) => isRole(auth, 'kurir', 'sales-kurir'),
+    show: (auth) => isRole(auth, 'kurir', 'sales-kurir-sub'),
   },
   {
     key: 'orders',
     label: 'Order',
     routeName: 'orders',
     icon: 'box',
-    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir'),
+    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub'),
   },
   {
     key: 'commissions',
@@ -80,7 +80,7 @@ const ROLE_ITEMS: NavItem[] = [
     routeName: 'commissions',
     icon: 'cash',
     show: (auth) =>
-      isRole(auth, 'super_admin', 'agen', 'sales', 'sales-kurir', 'korsal', 'kurir', 'admin', 'keuangan'),
+      isRole(auth, 'super_admin', 'agen', 'sales', 'sales-kurir-sub', 'korsal', 'kurir', 'admin', 'keuangan'),
   },
 ]
 
@@ -239,7 +239,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Konsumen Saya',
         routeName: 'sales-customers-report',
         icon: 'users',
-        show: (auth) => isRole(auth, 'sales', 'sales-kurir'),
+        show: (auth) => isRole(auth, 'sales', 'sales-kurir-sub'),
       },
     ],
   },

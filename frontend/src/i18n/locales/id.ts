@@ -11,7 +11,7 @@ export default {
   },
   roles: {
     gudang: 'Gudang',
-    salesKurir: 'Sales-Kurir',
+    salesKurir: 'Sales-Kurir-Sub',
   },
   warehouse: {
       subLocation: { title: 'Lokasi Sub', physicalStock: 'Stok fisik lokasi Sub', notSellable: 'Bukan stok tersedia untuk dijual' },

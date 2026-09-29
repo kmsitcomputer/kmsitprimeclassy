@@ -127,14 +127,14 @@ const router = createRouter({
       component: () => import('@/views/dashboard/DashboardHomeView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'korsal', 'sales', 'admin', 'kurir', 'sales-kurir', 'gudang', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'korsal', 'sales', 'admin', 'kurir', 'sales-kurir-sub', 'gudang', 'keuangan'],
       },
     },
     {
       path: '/dashboard/kurir',
       name: 'kurir-dashboard',
       component: () => import('@/views/dashboard/KurirDashboardView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['kurir', 'sales-kurir'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['kurir', 'sales-kurir-sub'] },
     },
     {
       path: '/dashboard/stock',
@@ -224,7 +224,7 @@ const router = createRouter({
       component: () => import('@/views/dashboard/CommissionsView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'sales', 'sales-kurir', 'korsal', 'kurir', 'admin', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'sales', 'sales-kurir-sub', 'korsal', 'kurir', 'admin', 'keuangan'],
       },
     },
     {
@@ -293,7 +293,7 @@ const router = createRouter({
       path: '/dashboard/reports/my-customers',
       name: 'sales-customers-report',
       component: () => import('@/views/dashboard/SalesCustomersReportView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['sales', 'sales-kurir'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['sales', 'sales-kurir-sub'] },
     },
     {
       path: '/dashboard/agent/store-profile',
