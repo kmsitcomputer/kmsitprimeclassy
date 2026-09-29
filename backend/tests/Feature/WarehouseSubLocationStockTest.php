@@ -63,12 +63,13 @@ class WarehouseSubLocationStockTest extends TestCase
         return (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('stock_type', $type)->where('product_id', $productId)->sum('quantity');
     }
 
-    public function test_gudang_creates_location_with_contact_and_zero_inventory(): void
+    public function test_agent_creates_owned_location_with_contact_and_zero_inventory(): void
     {
         $b = $this->branch();
+        $owner = User::factory()->salesKurirSub()->create(['agent_id' => $b['agent']->id, 'parent_id' => $b['agent']->id]);
 
-        $response = $this->actingAs($b['gudang'])->postJson('/api/v1/warehouse/sub-locations', [
-            'code' => 'CIMAHI', 'name' => 'Sub Gudang Cimahi', 'address' => 'Jl. Contoh No. 10', 'contact_number' => '0812999888',
+        $response = $this->actingAs($b['agent'])->postJson('/api/v1/warehouse/sub-locations', [
+            'owner_user_id' => $owner->id, 'code' => 'CIMAHI', 'name' => 'Sub Gudang Cimahi', 'address' => 'Jl. Contoh No. 10', 'contact_number' => '0812999888',
         ])->assertCreated();
 
         $this->assertSame('0812999888', $response->json('data.contact_number'));

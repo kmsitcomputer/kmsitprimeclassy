@@ -44,15 +44,18 @@ class WarehouseSubLocationTest extends TestCase
     {
         $branch = $this->branch();
         $other = $this->branch();
-        $location = $this->actingAs($branch['agent'])->postJson('/api/v1/warehouse/sub-locations', ['code' => 'SUB-001', 'name' => 'Bandung Timur'])->assertCreated()->json('data');
+        $ownerA = User::factory()->salesKurirSub()->create(['agent_id' => $branch['agent']->id, 'parent_id' => $branch['agent']->id]);
+        $ownerB = User::factory()->salesKurirSub()->create(['agent_id' => $branch['agent']->id, 'parent_id' => $branch['agent']->id]);
+        $location = $this->actingAs($branch['agent'])->postJson('/api/v1/warehouse/sub-locations', ['owner_user_id' => $ownerA->id, 'code' => 'SUB-001', 'name' => 'Bandung Timur'])->assertCreated()->json('data');
         $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $location['id'], 'agent_id' => $branch['agent']->id, 'created_by' => $branch['agent']->id]);
         $this->actingAs($branch['admin'])->patchJson("/api/v1/warehouse/sub-locations/{$location['id']}", ['name' => 'Bandung Timur Updated'])->assertOk();
-        $created = $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/sub-locations', ['code' => 'SUB-002', 'name' => 'Cimahi', 'address' => 'Jl. Contoh No. 10', 'contact_number' => '0812000111'])->assertCreated()->json('data');
+        $this->actingAs($branch['gudang'])->postJson('/api/v1/warehouse/sub-locations', ['owner_user_id' => $ownerB->id, 'code' => 'SUB-002', 'name' => 'Cimahi'])->assertForbidden();
+        $created = $this->actingAs($branch['admin'])->postJson('/api/v1/warehouse/sub-locations', ['owner_user_id' => $ownerB->id, 'code' => 'SUB-002', 'name' => 'Cimahi', 'address' => 'Jl. Contoh No. 10', 'contact_number' => '0812000111'])->assertCreated()->json('data');
         $this->assertSame($branch['agent']->id, $created['agent_id']);
         $this->assertSame('Cimahi', $created['name']);
         $this->assertSame('Jl. Contoh No. 10', $created['address']);
         $this->assertSame('0812000111', $created['contact_number']);
-        $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $created['id'], 'agent_id' => $branch['agent']->id, 'created_by' => $branch['gudang']->id]);
+        $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $created['id'], 'agent_id' => $branch['agent']->id, 'created_by' => $branch['admin']->id]);
         $this->actingAs($branch['gudang'])->patchJson("/api/v1/warehouse/sub-locations/{$created['id']}", ['name' => 'Cimahi Updated'])->assertOk();
         $this->assertDatabaseHas('warehouse_sub_locations', ['id' => $created['id'], 'name' => 'Cimahi Updated']);
         $this->actingAs($other['gudang'])->getJson("/api/v1/warehouse/sub-locations/{$location['id']}")->assertNotFound();

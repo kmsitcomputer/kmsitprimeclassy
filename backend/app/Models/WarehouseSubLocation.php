@@ -18,12 +18,18 @@ class WarehouseSubLocation extends Model
 
     protected function casts(): array
     {
-        return ['agent_id' => 'integer', 'created_by' => 'integer', 'is_active' => 'boolean'];
+        return ['agent_id' => 'integer', 'owner_user_id' => 'integer', 'previous_owner_user_id' => 'integer', 'created_by' => 'integer', 'is_active' => 'boolean'];
     }
 
     public function agent(): BelongsTo
     {
         return $this->belongsTo(User::class, 'agent_id');
+    }
+
+    /** R-01: the single Sales-Kurir-Sub that owns this location (null for legacy, unmapped locations). */
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_user_id');
     }
 
     public function creator(): BelongsTo

@@ -352,9 +352,13 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/warehouse/sub-locations/{subLocation}/stocks', [WarehouseSubLocationController::class, 'stocks']);
     });
     Route::middleware('role:agen,admin,gudang')->group(function () {
-        Route::post('/warehouse/sub-locations', [WarehouseSubLocationController::class, 'store']);
         Route::patch('/warehouse/sub-locations/{subLocation}', [WarehouseSubLocationController::class, 'update']);
         Route::post('/warehouse/sub-locations/{subLocation}/deactivate', [WarehouseSubLocationController::class, 'deactivate']);
+    });
+    // R-01: Gudang never creates Sub Locations or maps owners (policy + route both refuse it).
+    Route::middleware('role:agen,admin')->group(function () {
+        Route::post('/warehouse/sub-locations', [WarehouseSubLocationController::class, 'store']);
+        Route::post('/warehouse/sub-locations/{subLocation}/assign-owner', [WarehouseSubLocationController::class, 'assignOwner']);
     });
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/transfers', [StockTransferController::class, 'store']);

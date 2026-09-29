@@ -110,6 +110,12 @@ class User extends Authenticatable
         return $this->hasMany(Order::class, 'konsumen_id');
     }
 
+    /** R-01: the Sub Location owned by this Sales-Kurir-Sub (1:1, keyed by warehouse_sub_locations.owner_user_id). */
+    public function ownedSubLocation(): HasOne
+    {
+        return $this->hasOne(WarehouseSubLocation::class, 'owner_user_id')->withoutGlobalScopes();
+    }
+
     public function isRole(string ...$slugs): bool
     {
         $mine = Role::canonicalSlug($this->role?->slug);
