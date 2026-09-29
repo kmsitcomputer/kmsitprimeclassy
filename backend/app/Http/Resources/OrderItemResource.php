@@ -13,6 +13,8 @@ class OrderItemResource extends JsonResource
             'id' => $this->id,
             'product_id' => $this->product_id,
             'product_variation_id' => $this->product_variation_id,
+            'stock_source' => $this->stock_source,
+            'sub_location_id' => $this->sub_location_id,
             'product_name' => $this->product_name_snapshot,
             'variation_label' => $this->variation_label_snapshot,
             'sku' => $this->sku_snapshot,

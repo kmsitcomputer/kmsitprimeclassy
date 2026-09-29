@@ -47,6 +47,11 @@ class OrderFulfillmentService
             $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
 
+            // R-02 boundary: Sub reservations are per order item; quantity redesign for Sub items is R-03.
+            if ($item->isSubSourced()) {
+                throw new ApiException('Item bersumber dari stok Sub; penyesuaian jumlah, pemecahan, dan retur item Sub akan ditangani pada tahap R-03.', 422);
+            }
+
             if ($order->status !== 'diproses') {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
@@ -236,6 +241,10 @@ class OrderFulfillmentService
                 }
 
                 if ($quantity < $item->fulfilled_quantity) {
+                    if ($item->isSubSourced()) {
+                        throw new ApiException('Item bersumber dari stok Sub; penyesuaian jumlah, pemecahan, dan retur item Sub akan ditangani pada tahap R-03.', 422);
+                    }
+
                     return $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
                 }
             }

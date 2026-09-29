@@ -30,6 +30,11 @@ class StoreOrderRequest extends BaseFormRequest
         return [
             'konsumen_id' => ['nullable', 'integer', 'exists:users,id'],
 
+            // R-02: which stock domain to draw from. Only a Sales-Kurir-Sub may ask for 'sub', and only for
+            // their own purchase / own-referral consumer (StockSourceResolver enforces it — never this rule).
+            'stock_source' => ['nullable', 'string', 'in:agent,sub'],
+            'sub_location_id' => ['nullable', 'integer'],
+
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
             'items.*.product_variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],

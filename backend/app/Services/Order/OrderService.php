@@ -19,6 +19,7 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingProvider;
 use App\Models\User;
+use App\Models\WarehouseSubLocation;
 use App\Models\Village;
 use App\Services\Fee\FeeService;
 use App\Services\Logging\ActivityLogger;
@@ -26,6 +27,8 @@ use App\Services\Payment\AvailablePaymentMethodService;
 use App\Services\Payment\PaymentService;
 use App\Services\Shipping\ShippingQuoteService;
 use App\Services\Stock\StockRequestService;
+use App\Services\Stock\StockSourceResolver;
+use App\Services\Stock\SubStockService;
 use App\Services\Stock\StockService;
 use App\Services\Stock\WarehouseStockService;
 use Illuminate\Database\QueryException;
@@ -51,6 +54,8 @@ class OrderService
         private readonly PaymentService $paymentService,
         private readonly CourierService $courierService,
         private readonly AvailablePaymentMethodService $availablePaymentMethodService,
+        private readonly SubStockService $subStockService,
+        private readonly StockSourceResolver $stockSourceResolver,
     ) {}
 
     /**
@@ -75,6 +80,8 @@ class OrderService
         ?string $shippingMethod = null,
         ?float $dpAmount = null,
         ?array $selectedCourierOption = null,
+        ?string $stockSource = null,
+        ?int $subLocationId = null,
     ): Order {
         $actor ??= $konsumen;
 
@@ -99,8 +106,12 @@ class OrderService
 
         $paymentMethod = $this->resolvePaymentMethod($paymentMethodCode);
 
+        // R-02: the stock domain is decided server-side (own purchase / own-referral order only may use
+        // Sub stock); the client's stock_source is a request, never an entitlement.
+        $subLocation = $this->stockSourceResolver->resolve($actor, $konsumen, $stockSource, $subLocationId)['sub_location'];
+
         try {
-            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption) {
+            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption, $subLocation) {
                 $agentId = $konsumen->agent_id;
 
                 $agentProfile = AgentProfile::query()->where('user_id', $agentId)->first();
@@ -149,7 +160,7 @@ class OrderService
                 $totalWeightGrams = 0;
 
                 foreach ($lines as $line) {
-                    [$lineSubtotal, $lineWeight] = $this->priceAndReserveLine($order, $agentId, $konsumen, $actor, $line);
+                    [$lineSubtotal, $lineWeight] = $this->priceAndReserveLine($order, $agentId, $konsumen, $actor, $line, $subLocation);
                     $subtotal += $lineSubtotal;
                     $totalWeightGrams += $lineWeight;
                 }
@@ -457,7 +468,7 @@ class OrderService
     }
 
     /** Prices one order line, reserves its stock, records its fee/commission snapshot. Returns [subtotal, weightGrams]. */
-    private function priceAndReserveLine(Order $order, int $agentId, User $konsumen, User $actor, array $line): array
+    private function priceAndReserveLine(Order $order, int $agentId, User $konsumen, User $actor, array $line, ?WarehouseSubLocation $subLocation = null): array
     {
         $product = Product::query()->where('status', 'active')->findOrFail($line['product_id']);
         $qty = (int) $line['quantity'];
@@ -489,10 +500,14 @@ class OrderService
             throw new ApiException('Berat produk belum dikonfigurasi.', 422, ['items' => 'Berat produk wajib minimal 1 gram.']);
         }
 
-        if ($variation) {
-            $this->stockService->reserveForVariation($agentId, $variation, $qty, 'order', $order->id, $actor->id);
-        } else {
-            $this->stockService->reserveForProduct($agentId, $product, $qty, 'order', $order->id, $actor->id);
+        // Agent stock is reserved only for Agent-sourced lines. A Sub-sourced line reserves in the Sub
+        // ledger instead (below, once the item row exists) and never touches Agent Reserved.
+        if (! $subLocation) {
+            if ($variation) {
+                $this->stockService->reserveForVariation($agentId, $variation, $qty, 'order', $order->id, $actor->id);
+            } else {
+                $this->stockService->reserveForProduct($agentId, $product, $qty, 'order', $order->id, $actor->id);
+            }
         }
 
         // Snapshotted onto the order_item below — a later change to product_fees/
@@ -511,6 +526,8 @@ class OrderService
             'order_id' => $order->id,
             'product_id' => $product->id,
             'product_variation_id' => $variation?->id,
+            'stock_source' => $subLocation ? StockSourceResolver::SUB : StockSourceResolver::AGENT,
+            'sub_location_id' => $subLocation?->id,
             'product_name_snapshot' => $product->name,
             'variation_label_snapshot' => $variation?->label(),
             'sku_snapshot' => $variation ? $variation->sku : $product->sku,
@@ -527,6 +544,10 @@ class OrderService
             'requested_delivery_date' => $order->delivery_date_estimate,
             'status' => $order->status,
         ]);
+
+        if ($subLocation) {
+            $this->subStockService->reserve($orderItem, $subLocation->id, $agentId, $qty, $actor);
+        }
 
         // Sales commission recipient:
         //
@@ -684,6 +705,9 @@ class OrderService
             foreach ($order->items as $item) {
                 if ($item->canTransitionTo($newStatus)) {
                     $item->update(['status' => $newStatus]);
+                    if ($newStatus === 'dikirim' && $item->isSubSourced()) {
+                        $this->subStockService->consume($item, $actor);
+                    }
                     if ($item->shipment_id) {
                         $shipmentIds[$item->shipment_id] = true;
                     }

@@ -79,6 +79,8 @@ class OrderController extends Controller
             $request->input('shipping_method'),
             $request->filled('dp_amount') ? (float) $request->input('dp_amount') : null,
             $request->selectedCourierOption(),
+            $request->input('stock_source'),
+            $request->filled('sub_location_id') ? $request->integer('sub_location_id') : null,
         );
 
         Log::info('order.created', [

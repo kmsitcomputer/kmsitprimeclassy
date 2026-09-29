@@ -9,7 +9,9 @@ use App\Models\OrderItem;
 use App\Models\StockMovement;
 use App\Models\StockRequest;
 use App\Models\WarehouseStock;
+use App\Models\User;
 use App\Services\Stock\StockService;
+use App\Services\Stock\SubStockService;
 
 class InventoryCancellationService
 {
@@ -32,6 +34,13 @@ class InventoryCancellationService
     private function reverseItem(Order $order, OrderItem $item, int $actorId, ?StockRequest $request): void
     {
         if (InventoryCancellationReversal::where('order_item_id', $item->id)->lockForUpdate()->exists()) {
+            return;
+        }
+        if ($item->isSubSourced()) {
+            // Sub-sourced: release the Sub reservation (physical Sub stock unchanged); nothing to do in Agent stock.
+            app(SubStockService::class)->release($item, User::query()->find($actorId), 'order_cancellation');
+            InventoryCancellationReversal::create(['agent_id' => $order->agent_id, 'order_id' => $order->id, 'order_item_id' => $item->id, 'stock_request_id' => null, 'fulfilled_quantity' => 0, 'released_quantity' => 0, 'processed_by' => $actorId]);
+
             return;
         }
         $requestItem = $request?->items()->where('order_item_id', $item->id)->lockForUpdate()->first();

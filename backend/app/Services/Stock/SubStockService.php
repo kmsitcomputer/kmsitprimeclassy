@@ -29,11 +29,17 @@ class SubStockService
         return (int) $this->stockQuery($subLocationId, $productId, $variationId)->value('quantity');
     }
 
-    public function reserved(int $subLocationId, ?int $productId, ?int $variationId): int
+    /**
+     * Active reservations for a target. $forWrite MUST be true whenever the result guards a write: a plain
+     * SELECT is a snapshot read under REPEATABLE READ and can be older than the row lock we just waited for,
+     * so it would let two concurrent reservations both see the same free quantity and oversell.
+     */
+    public function reserved(int $subLocationId, ?int $productId, ?int $variationId, bool $forWrite = false): int
     {
-        return (int) SubStockReservation::query()->where('sub_location_id', $subLocationId)->where('status', SubStockReservation::ACTIVE)
-            ->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId), fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'))
-            ->sum('quantity');
+        $query = SubStockReservation::query()->where('sub_location_id', $subLocationId)->where('status', SubStockReservation::ACTIVE)
+            ->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId), fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'));
+
+        return (int) ($forWrite ? $query->lockForUpdate()->pluck('quantity')->sum() : $query->sum('quantity'));
     }
 
     /** @return array{physical:int, reserved:int, sellable:int} */
@@ -62,7 +68,7 @@ class SubStockService
         $productId = $item->product_variation_id ? null : $item->product_id;
         $stock = $this->stockQuery($subLocationId, $productId, $item->product_variation_id)->lockForUpdate()->first();
         $physical = (int) ($stock?->quantity ?? 0);
-        $available = $physical - $this->reserved($subLocationId, $productId, $item->product_variation_id);
+        $available = $physical - $this->reserved($subLocationId, $productId, $item->product_variation_id, forWrite: true);
         if (! $stock || $available < $quantity) {
             throw new InsufficientStockException($item->variation_label_snapshot ?? $item->product_name_snapshot ?? $item->sku_snapshot, max(0, $available), $quantity);
         }
@@ -123,7 +129,7 @@ class SubStockService
      */
     public function assertPhysicalDecreaseAllowed(int $subLocationId, ?int $productId, ?int $variationId, int $currentPhysical, int $decrease): void
     {
-        if ($currentPhysical - $decrease < $this->reserved($subLocationId, $productId, $variationId)) {
+        if ($currentPhysical - $decrease < $this->reserved($subLocationId, $productId, $variationId, forWrite: true)) {
             throw new ApiException('Pengurangan stok Sub akan berada di bawah reservasi aktif.', 422);
         }
     }

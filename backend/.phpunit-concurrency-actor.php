@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\StockOpname;
 use App\Models\StockRequest;
 use App\Models\StockRequestProposal;
@@ -11,8 +12,10 @@ use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
 use App\Services\Stock\StockRequestProposalService;
 use App\Services\Stock\StockTransferService;
+use App\Services\Stock\SubStockService;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 
 $longOptions = [
     'role:',
@@ -316,6 +319,14 @@ if (str_starts_with($role, 'sr-')) {
                 break;
             case 'opname-reject':
                 $result = app(StockOpnameService::class)->reject($actor, StockOpname::withoutGlobalScopes()->findOrFail($subjectId), 'concurrency rejection');
+                break;
+            case 'sub-reserve':
+                $item = OrderItem::findOrFail($subjectId);
+                $result = DB::transaction(fn () => app(SubStockService::class)->reserve($item, (int) $item->sub_location_id, (int) Order::withoutGlobalScopes()->whereKey($item->order_id)->value('agent_id'), (int) $item->original_quantity, $actor));
+                break;
+            case 'sub-consume':
+                $item = OrderItem::findOrFail($subjectId);
+                $result = DB::transaction(fn () => app(SubStockService::class)->consume($item, $actor));
                 break;
             default:
                 throw new InvalidArgumentException('Unknown service race operation: '.$operation);

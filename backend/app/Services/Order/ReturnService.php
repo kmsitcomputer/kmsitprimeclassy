@@ -65,6 +65,11 @@ class ReturnService
                     throw new ApiException(__('messages.return.item_not_delivered'), 422);
                 }
 
+                // R-02 boundary: returned Sub goods must not restock into Agent Transit; Sub returns are R-03.
+                if ($item->isSubSourced()) {
+                    throw new ApiException('Item bersumber dari stok Sub; penyesuaian jumlah, pemecahan, dan retur item Sub akan ditangani pada tahap R-03.', 422);
+                }
+
                 $quantity = (int) $line['quantity'];
                 $maxReturnable = $item->fulfilled_quantity - $item->cancelled_quantity - $item->returned_quantity;
 

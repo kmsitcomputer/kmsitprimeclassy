@@ -10,8 +10,10 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Media\MediaService;
+use App\Services\Stock\SubStockService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
@@ -31,7 +33,7 @@ use Illuminate\Support\Facades\DB;
  */
 class CourierService
 {
-    public function __construct(private readonly MediaService $mediaService) {}
+    public function __construct(private readonly MediaService $mediaService, private readonly SubStockService $subStockService) {}
 
     /**
      * "Kurir wajib berada di bawah Agen" — a courier may only ever be
@@ -86,6 +88,21 @@ class CourierService
     }
 
     /**
+     * R-02: Sub-sourced goods sit in ONE Sales-Kurir-Sub's Sub Location, so only that owner (or the
+     * office paths, which never reach here) may mark them shipped — another kurir/Sales-Kurir-Sub can
+     * never consume someone else's Sub stock. The full Sub-order delivery redesign is R-03.
+     */
+    private function assertMayShipSubStock(Shipment $shipment, User $actor): void
+    {
+        $foreignSub = OrderItem::query()->where('shipment_id', $shipment->id)->where('stock_source', 'sub')
+            ->whereNotIn('sub_location_id', WarehouseSubLocation::withoutGlobalScopes()->where('owner_user_id', $actor->id)->select('id'))
+            ->exists();
+        if ($foreignSub) {
+            throw new ApiException(__('messages.courier.not_your_delivery'), 403);
+        }
+    }
+
+    /**
      * The kurir-facing counterpart of OrderService::updateStatus — moves every
      * item on THIS shipment (never its siblings on other shipments of the
      * same order) diproses->dikirim or dikirim->terkirim, keeps the
@@ -99,6 +116,7 @@ class CourierService
         }
 
         if ($newStatus === 'dikirim' && $actor->isRole('kurir', 'sales-kurir-sub')) {
+            $this->assertMayShipSubStock($shipment, $actor);
             $this->selfAssignIfUnassigned($shipment, $actor);
         }
 
@@ -126,6 +144,10 @@ class CourierService
             foreach ($items as $item) {
                 if ($item->canTransitionTo($newStatus)) {
                     $item->update(['status' => $newStatus]);
+                    if ($newStatus === 'dikirim' && $item->isSubSourced()) {
+                        // Actual shipment of Sub-sourced goods: Sub physical -= qty, reservation consumed (once).
+                        $this->subStockService->consume($item, $actor);
+                    }
                     $anyTransitioned = true;
                 }
             }
