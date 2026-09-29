@@ -307,19 +307,19 @@ class UserManagementTest extends TestCase
         ]);
         $originalId = $sales->id;
 
-        $response = $this->actingAs($agen)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir");
+        $response = $this->actingAs($agen)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir-sub");
 
         $response->assertOk();
         $sales->refresh();
         $this->assertSame($originalId, $sales->id);
-        $this->assertSame('sales-kurir', $sales->role->slug);
+        $this->assertSame('sales-kurir-sub', $sales->role->slug);
         $this->assertSame('SA-KEEP01', $sales->referral_code);
         $this->assertSame($agen->id, $sales->agent_id);
         $this->assertSame($korsal->id, $sales->korsal_id);
         $this->assertSame($korsal->id, $sales->parent_id);
         $this->assertDatabaseHas('couriers', ['user_id' => $sales->id, 'type' => 'internal', 'agent_id' => $agen->id, 'is_active' => true]);
 
-        $this->actingAs($agen)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir")->assertUnprocessable();
+        $this->actingAs($agen)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir-sub")->assertUnprocessable();
         $this->assertSame(1, Courier::query()->where('user_id', $sales->id)->count());
     }
 
@@ -333,7 +333,7 @@ class UserManagementTest extends TestCase
         $sales = User::factory()->sales()->create(['agent_id' => $owner->id, 'korsal_id' => $korsal->id]);
 
         foreach ([User::factory()->superAdmin()->create(), User::factory()->admin()->create(['agent_id' => $owner->id]), $korsal, User::factory()->sales()->create(['agent_id' => $owner->id]), $other] as $actor) {
-            $this->actingAs($actor)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir")->assertForbidden();
+            $this->actingAs($actor)->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir-sub")->assertForbidden();
         }
     }
 
@@ -343,9 +343,9 @@ class UserManagementTest extends TestCase
         $agent->update(['agent_id' => $agent->id]);
         $korsal = User::factory()->korsal()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
 
-        $created = $this->actingAs($agent)->postJson('/api/v1/users', $this->payload(['role' => 'sales-kurir', 'korsal_id' => $korsal->id]))->assertCreated();
+        $created = $this->actingAs($agent)->postJson('/api/v1/users', $this->payload(['role' => 'sales-kurir-sub', 'korsal_id' => $korsal->id]))->assertCreated();
         $createdUser = User::query()->where('email', $created->json('data.email'))->firstOrFail();
-        $this->assertStringStartsWith('SK-', $createdUser->referral_code);
+        $this->assertStringStartsWith('SS-', $createdUser->referral_code);
         $this->assertSame($agent->id, $createdUser->agent_id);
         $this->assertSame($korsal->id, $createdUser->korsal_id);
         $this->assertSame($korsal->id, $createdUser->parent_id);
@@ -353,13 +353,13 @@ class UserManagementTest extends TestCase
 
         $sales = User::factory()->sales()->create(['agent_id' => $agent->id, 'korsal_id' => $korsal->id, 'parent_id' => $korsal->id, 'referral_code' => 'SA-ABC123']);
         $id = $sales->id;
-        $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir")->assertOk();
+        $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir-sub")->assertOk();
         $sales->refresh();
         $this->assertSame($id, $sales->id);
-        $this->assertSame('sales-kurir', $sales->role->slug);
+        $this->assertSame('sales-kurir-sub', $sales->role->slug);
         $this->assertSame('SA-ABC123', $sales->referral_code);
         $this->assertDatabaseCount('couriers', 2);
-        $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir")->assertUnprocessable();
+        $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir-sub")->assertUnprocessable();
         $this->assertDatabaseCount('couriers', 2);
     }
 }

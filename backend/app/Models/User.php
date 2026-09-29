@@ -112,7 +112,9 @@ class User extends Authenticatable
 
     public function isRole(string ...$slugs): bool
     {
-        return in_array($this->role?->slug, $slugs, true);
+        $mine = Role::canonicalSlug($this->role?->slug);
+
+        return $mine !== null && in_array($mine, array_map(Role::canonicalSlug(...), $slugs), true);
     }
 
     public function avatar(): BelongsTo

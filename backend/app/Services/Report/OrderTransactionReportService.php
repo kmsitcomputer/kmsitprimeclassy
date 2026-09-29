@@ -27,8 +27,8 @@ class OrderTransactionReportService
 
     public function query(?int $agentId = null, ?int $korsalScopeId = null, array $filters = []): Builder
     {
-        $salesReferrerId = "CASE WHEN customer_roles.slug IN ('agen','korsal','sales','sales-kurir') THEN customers.id ELSE COALESCE(o.sales_id, o.korsal_id, o.agent_id) END";
-        $salesReferrerName = "CASE WHEN customer_roles.slug IN ('agen','korsal','sales','sales-kurir') THEN customers.name ELSE COALESCE(sales_users.name, korsal_users.name, agent_users.name) END";
+        $salesReferrerId = "CASE WHEN customer_roles.slug IN ('agen','korsal','sales','sales-kurir-sub','sales-kurir') THEN customers.id ELSE COALESCE(o.sales_id, o.korsal_id, o.agent_id) END";
+        $salesReferrerName = "CASE WHEN customer_roles.slug IN ('agen','korsal','sales','sales-kurir-sub','sales-kurir') THEN customers.name ELSE COALESCE(sales_users.name, korsal_users.name, agent_users.name) END";
         $korsalName = "CASE WHEN customer_roles.slug = 'agen' THEN NULL WHEN customer_roles.slug = 'korsal' THEN customers.name ELSE korsal_users.name END";
 
         $query = DB::table('order_items as i')

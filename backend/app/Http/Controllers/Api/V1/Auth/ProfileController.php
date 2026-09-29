@@ -68,7 +68,7 @@ class ProfileController extends Controller
         return $this->ok(null, __('messages.profile.password_updated'));
     }
 
-    /** Sets a custom referral code — route already gated to role:agen,korsal,sales,sales-kurir. */
+    /** Sets a custom referral code — route already gated to role:agen,korsal,sales,sales-kurir-sub. */
     public function updateReferralCode(Request $request)
     {
         $user = $request->user();

@@ -35,7 +35,7 @@ class CommissionController extends Controller
             // Sales-Kurir earns BOTH a Sales Fee (referral attribution) and a
             // Courier Fee (delivery) — both ledgers must stay visible and
             // independently auditable, never merged.
-            $user->isRole('sales-kurir') => ['sales', 'courier'],
+            $user->isRole('sales-kurir-sub') => ['sales', 'courier'],
             $user->isRole('korsal') => ['sales'],
             default => [],
         };

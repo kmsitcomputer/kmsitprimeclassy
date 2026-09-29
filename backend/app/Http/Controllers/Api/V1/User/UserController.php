@@ -8,6 +8,7 @@ use App\Http\Requests\User\CreateUserRequest;
 use App\Http\Requests\User\ReassignReferralRequest;
 use App\Http\Requests\User\UpdateUserRequest;
 use App\Http\Resources\UserResource;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Referral\ReferralReassignmentService;
@@ -65,15 +66,15 @@ class UserController extends Controller
         return $this->ok(new UserResource($updated));
     }
 
-    public function convertToSalesKurir(Request $request, User $user)
+    public function convertToSalesKurirSub(Request $request, User $user)
     {
-        $this->authorize('convertToSalesKurir', $user);
+        $this->authorize('convertToSalesKurirSub', $user);
 
-        $converted = $this->userManagementService->convertSalesToSalesKurir($request->user(), $user);
+        $converted = $this->userManagementService->convertSalesToSalesKurirSub($request->user(), $user);
 
         ActivityLogger::log($request->user()->id, $converted, 'user.role_converted', null, [
             'actor_role' => $request->user()->role?->slug,
-            'previous_role' => 'sales', 'target_role' => 'sales-kurir',
+            'previous_role' => 'sales', 'target_role' => Role::SALES_KURIR_SUB,
         ]);
 
         return $this->ok(new UserResource($converted));
@@ -92,7 +93,7 @@ class UserController extends Controller
 
         $query = User::query()->with('role')->whereHas(
             'role',
-            fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang'])
+            fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir-sub', 'sales-kurir', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang'])
         );
 
         if (! $user->isRole('super_admin')) {
@@ -103,7 +104,7 @@ class UserController extends Controller
 
         if ($user->isRole('korsal')) {
             $query->where(fn ($q) => $q->where('korsal_id', $user->id)->orWhere('id', $user->id));
-        } elseif ($user->isRole('sales', 'sales-kurir')) {
+        } elseif ($user->isRole('sales', 'sales-kurir-sub')) {
             $query->where(fn ($q) => $q->where('sales_id', $user->id)->orWhere('id', $user->id));
         }
         // agen/admin/super_admin: the agent_id filter above (or none, for super_admin) is enough.
@@ -114,7 +115,7 @@ class UserController extends Controller
         // can never escape the whereIn() roster above, so this can't be used
         // to reach a role the actor couldn't otherwise list.
         if ($request->filled('role')) {
-            $query->whereHas('role', fn ($q) => $q->where('slug', $request->string('role')->toString()));
+            $query->whereHas('role', fn ($q) => $q->whereIn('slug', Role::slugsFor(Role::canonicalSlug($request->string('role')->toString()))));
         }
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();

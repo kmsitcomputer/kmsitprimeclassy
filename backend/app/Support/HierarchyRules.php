@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Role;
+
 /**
  * Single source of truth for "who can create which role" and the per-role
  * account-shape rules from the Blueprint (referral code ownership, mandatory
@@ -13,36 +15,38 @@ class HierarchyRules
     /** @var array<string, list<string>> creator role slug => roles it may create */
     public const ALLOWED_CREATIONS = [
         'super_admin' => ['agen'],
-        'agen' => ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir'],
-        'korsal' => ['sales', 'sales-kurir'],
+        'agen' => ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub'],
+        'korsal' => ['sales', 'sales-kurir-sub'],
     ];
 
     /** Roles that own a referral_code. */
-    public const ROLES_WITH_REFERRAL_CODE = ['agen', 'korsal', 'sales', 'sales-kurir'];
+    public const ROLES_WITH_REFERRAL_CODE = ['agen', 'korsal', 'sales', 'sales-kurir-sub'];
 
     /** Explicit prefixes preserve semantic uniqueness when role names change. */
     public const REFERRAL_PREFIXES = [
         'agen' => 'AG-',
         'korsal' => 'KO-',
         'sales' => 'SA-',
-        'sales-kurir' => 'SK-',
+        // R-01: only NEW Sales-Kurir-Sub codes get SS-. Historical SA-*/SK-* codes are never rewritten
+        // (Sales -> Sales-Kurir-Sub conversion also keeps the user's existing code).
+        'sales-kurir-sub' => 'SS-',
     ];
 
     /** Roles that must always have a non-null agent_id ("wajib terhubung ke agen"). */
-    public const ROLES_REQUIRING_AGENT_LINK = ['korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir'];
+    public const ROLES_REQUIRING_AGENT_LINK = ['korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub'];
 
     public static function canCreate(string $creatorRoleSlug, string $targetRoleSlug): bool
     {
-        return in_array($targetRoleSlug, self::ALLOWED_CREATIONS[$creatorRoleSlug] ?? [], true);
+        return in_array(Role::canonicalSlug($targetRoleSlug), self::ALLOWED_CREATIONS[Role::canonicalSlug($creatorRoleSlug)] ?? [], true);
     }
 
     public static function ownsReferralCode(string $roleSlug): bool
     {
-        return in_array($roleSlug, self::ROLES_WITH_REFERRAL_CODE, true);
+        return in_array(Role::canonicalSlug($roleSlug), self::ROLES_WITH_REFERRAL_CODE, true);
     }
 
     public static function requiresAgentLink(string $roleSlug): bool
     {
-        return in_array($roleSlug, self::ROLES_REQUIRING_AGENT_LINK, true);
+        return in_array(Role::canonicalSlug($roleSlug), self::ROLES_REQUIRING_AGENT_LINK, true);
     }
 }

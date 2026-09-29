@@ -3,6 +3,7 @@
 namespace App\Services\Referral;
 
 use App\Exceptions\ApiException;
+use App\Models\Role;
 use App\Models\User;
 use App\Support\SafeSchema;
 
@@ -28,16 +29,16 @@ class ReferralService
             throw new ApiException(__('messages.referral.not_linked_to_agent'), 422);
         }
 
-        $roleSlug = $referrer->role->slug;
+        $roleSlug = Role::canonicalSlug($referrer->role->slug);
 
         return [
             // The code owner is always the new konsumen's direct upline in
             // the user_closures adjacency list, regardless of which level
             // (sales/korsal/agen) they sit at.
             'parent_id' => $referrer->id,
-            'sales_id' => in_array($roleSlug, ['sales', 'sales-kurir'], true) ? $referrer->id : null,
+            'sales_id' => in_array($roleSlug, ['sales', 'sales-kurir-sub'], true) ? $referrer->id : null,
             'korsal_id' => match ($roleSlug) {
-                'sales', 'sales-kurir' => $referrer->korsal_id,
+                'sales', 'sales-kurir-sub' => $referrer->korsal_id,
                 'korsal' => $referrer->id,
                 default => null,
             },
@@ -83,7 +84,7 @@ class ReferralService
         $referralCode = strtoupper(trim($referralCode));
 
         $referrer = User::query()
-            ->whereHas('role', fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir']))
+            ->whereHas('role', fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', ...Role::slugsFor(Role::SALES_KURIR_SUB)]))
             ->where('status', 'active')
             ->where('referral_code', $referralCode)
             ->with('role')

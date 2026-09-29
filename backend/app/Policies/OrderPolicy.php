@@ -38,7 +38,7 @@ class OrderPolicy
             return $order->korsal_id === $user->id;
         }
 
-        if ($user->isRole('sales', 'sales-kurir')) {
+        if ($user->isRole('sales', 'sales-kurir-sub')) {
             return $order->sales_id === $user->id;
         }
 
@@ -79,7 +79,7 @@ class OrderPolicy
             return $order->korsal_id === $user->id;
         }
 
-        if ($user->isRole('sales', 'sales-kurir')) {
+        if ($user->isRole('sales', 'sales-kurir-sub')) {
             return $order->sales_id === $user->id;
         }
 
@@ -91,7 +91,7 @@ class OrderPolicy
     }
 
     /**
-     * Konsumen always creates their own order. agen/korsal/sales/sales-kurir may place an
+     * Konsumen always creates their own order. agen/korsal/sales/sales-kurir-sub may place an
      * order on behalf of a konsumen, but only one within their own network
      * (Blueprint: "AGEN/KORSAL/SALES dapat membuat order") — never an
      * arbitrary konsumen_id from another branch. agen/korsal/sales may also
@@ -102,7 +102,7 @@ class OrderPolicy
     public function create(User $user, User $targetKonsumen): bool
     {
         if ($user->id === $targetKonsumen->id) {
-            return $user->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir');
+            return $user->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir-sub');
         }
 
         if (! $targetKonsumen->isRole('konsumen')) {
@@ -112,7 +112,7 @@ class OrderPolicy
         return match (true) {
             $user->isRole('agen') => $targetKonsumen->agent_id === $user->agent_id,
             $user->isRole('korsal') => $targetKonsumen->korsal_id === $user->id,
-            $user->isRole('sales', 'sales-kurir') => $targetKonsumen->sales_id === $user->id,
+            $user->isRole('sales', 'sales-kurir-sub') => $targetKonsumen->sales_id === $user->id,
             default => false,
         };
     }

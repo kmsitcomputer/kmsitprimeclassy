@@ -40,8 +40,8 @@ class SalesCourierDualFeeTest extends TestCase
         $this->assertSame($salesKurir->id, $fixture['buyer']->sales_id);
         $this->assertSame($salesKurir->id, $fixture['buyer']->parent_id);
         $this->assertSame($salesKurir->id, $fixture['courier']->user_id);
-        $this->assertSame('sales-kurir', $salesKurir->role->slug);
-        $this->assertStringStartsWith('SK-', $salesKurir->referral_code);
+        $this->assertSame('sales-kurir-sub', $salesKurir->role->slug);
+        $this->assertStringStartsWith('SS-', $salesKurir->referral_code);
 
         $order = $this->placeOrder($fixture['buyer'], $fixture['product']);
         $item = $order->items()->firstOrFail();
@@ -72,7 +72,7 @@ class SalesCourierDualFeeTest extends TestCase
         $this->assertSame($fixture['courier']->id, Shipment::findOrFail($shipment->id)->courier_id);
 
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $salesKurir);
-        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $salesKurir, UploadedFile::fake()->image('sales-kurir-proof.jpg'));
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $salesKurir, UploadedFile::fake()->image('sales-kurir-sub-proof.jpg'));
 
         $salesFee = Commission::query()->where('order_item_id', $item->id)->where('beneficiary_user_id', $salesKurir->id)->where('beneficiary_role', 'sales')->get();
         $courierFee = Commission::query()->where('order_item_id', $item->id)->where('beneficiary_user_id', $salesKurir->id)->where('beneficiary_role', 'courier')->get();
@@ -113,7 +113,7 @@ class SalesCourierDualFeeTest extends TestCase
         $agent->update(['agent_id' => $agent->id]);
         AgentProfile::create(['user_id' => $agent->id, 'store_name' => 'Dual Fee Branch', 'address' => 'Test', 'latitude' => -6.2, 'longitude' => 106.8]);
         $korsal = User::factory()->korsal()->create(['agent_id' => $agent->id, 'parent_id' => $agent->id]);
-        $salesKurir = app(UserManagementService::class)->create($korsal, 'sales-kurir', [
+        $salesKurir = app(UserManagementService::class)->create($korsal, 'sales-kurir-sub', [
             'name' => 'Dual Fee Sales Kurir',
             'email' => 'sk-'.Str::uuid().'@example.test',
             'phone' => '0812000000',

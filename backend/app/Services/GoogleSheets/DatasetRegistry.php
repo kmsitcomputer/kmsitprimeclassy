@@ -84,7 +84,7 @@ class DatasetRegistry
                     ->select(['id', 'sku', 'product_name', 'quantity', 'reserved_quantity']);
             }
         } elseif (in_array($dataset, ['sales', 'korsal'])) {
-            $q = DB::table('users as u')->join('roles as r', 'r.id', '=', 'u.role_id')->whereIn('r.slug', $dataset === 'sales' ? ['sales', 'sales-kurir'] : ['korsal'])->whereNull('u.deleted_at')->select($dataset === 'sales' ? ['u.id', 'u.name', 'u.korsal_id', 'u.status'] : ['u.id', 'u.name', 'u.status']);
+            $q = DB::table('users as u')->join('roles as r', 'r.id', '=', 'u.role_id')->whereIn('r.slug', $dataset === 'sales' ? ['sales', 'sales-kurir-sub', 'sales-kurir'] : ['korsal'])->whereNull('u.deleted_at')->select($dataset === 'sales' ? ['u.id', 'u.name', 'u.korsal_id', 'u.status'] : ['u.id', 'u.name', 'u.status']);
             if ($agentId !== null) {
                 $q->where('u.agent_id', $agentId);
             }

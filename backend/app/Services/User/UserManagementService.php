@@ -27,7 +27,8 @@ class UserManagementService
      */
     public function create(User $creator, string $targetRoleSlug, array $data): User
     {
-        $creatorRoleSlug = $creator->role?->slug;
+        $creatorRoleSlug = Role::canonicalSlug($creator->role?->slug);
+        $targetRoleSlug = Role::canonicalSlug($targetRoleSlug);
 
         if (! $creatorRoleSlug || ! HierarchyRules::canCreate($creatorRoleSlug, $targetRoleSlug)) {
             throw new ApiException(__('messages.user.role_not_authorized', ['role' => $creatorRoleSlug, 'target' => $targetRoleSlug]), 403);
@@ -51,9 +52,9 @@ class UserManagementService
 
                 $targetRoleSlug === 'korsal' && $creatorRoleSlug === 'agen' => [$creator->id, $creator->agent_id, null],
 
-                in_array($targetRoleSlug, ['sales', 'sales-kurir'], true) && $creatorRoleSlug === 'korsal' => [$creator->id, $creator->agent_id, $creator->id],
+                in_array($targetRoleSlug, ['sales', 'sales-kurir-sub'], true) && $creatorRoleSlug === 'korsal' => [$creator->id, $creator->agent_id, $creator->id],
 
-                in_array($targetRoleSlug, ['sales', 'sales-kurir'], true) && $creatorRoleSlug === 'agen' => [
+                in_array($targetRoleSlug, ['sales', 'sales-kurir-sub'], true) && $creatorRoleSlug === 'agen' => [
                     $korsalId = $this->resolveRequiredKorsalUnderAgent($data['korsal_id'] ?? null, $creator->id),
                     $creator->id,
                     $korsalId,
@@ -70,7 +71,7 @@ class UserManagementService
                 default => throw new ApiException(__('messages.user.unsupported_role_combination'), 422),
             };
 
-            $roleId = Role::query()->where('slug', $targetRoleSlug)->value('id');
+            $roleId = $this->roleId($targetRoleSlug);
             $ownsReferralCode = HierarchyRules::ownsReferralCode($targetRoleSlug);
 
             $baseAttributes = [
@@ -94,7 +95,7 @@ class UserManagementService
                 $user->update(['agent_id' => $user->id]);
             }
 
-            if (in_array($targetRoleSlug, ['kurir', 'sales-kurir'], true)) {
+            if (in_array($targetRoleSlug, ['kurir', 'sales-kurir-sub'], true)) {
                 // "Kurir wajib berada di bawah Agen" — the Courier profile row
                 // (assignable to shipments, carries is_active) is created
                 // alongside the account itself, never as a separate step an
@@ -111,7 +112,13 @@ class UserManagementService
         });
     }
 
-    public function convertSalesToSalesKurir(User $actor, User $target): User
+    /** Resolves a role id by canonical slug, tolerating the pre-migration legacy row. */
+    private function roleId(string $canonicalSlug): ?int
+    {
+        return Role::query()->whereIn('slug', Role::slugsFor($canonicalSlug))->orderByRaw('slug = ? desc', [$canonicalSlug])->value('id');
+    }
+
+    public function convertSalesToSalesKurirSub(User $actor, User $target): User
     {
         if (! $actor->isRole('agen')) {
             throw new ApiException('Hanya Agen pemilik network yang dapat melakukan konversi.', 403);
@@ -137,8 +144,11 @@ class UserManagementService
         }
 
         return DB::transaction(function () use ($actor, $target) {
+            // Identity and referral code are preserved. A historical SA-* code stays as-is; only a
+            // Sales that never had a code gets a fresh SS-* one.
             $target->update([
-                'role_id' => Role::query()->where('slug', 'sales-kurir')->value('id'),
+                'role_id' => $this->roleId(Role::SALES_KURIR_SUB),
+                'referral_code' => $target->referral_code ?: $this->generateCandidateReferralCode(Role::SALES_KURIR_SUB),
             ]);
 
             Courier::firstOrCreate([
@@ -198,7 +208,7 @@ class UserManagementService
     /** Public — also reused by ProfileController::regenerateReferralCode for a role's own self-service regenerate action. */
     public function generateCandidateReferralCode(string $roleSlug): string
     {
-        $prefix = HierarchyRules::REFERRAL_PREFIXES[$roleSlug]
+        $prefix = HierarchyRules::REFERRAL_PREFIXES[Role::canonicalSlug($roleSlug)]
             ?? throw new ApiException('Role referral tidak valid.', 422);
 
         do {

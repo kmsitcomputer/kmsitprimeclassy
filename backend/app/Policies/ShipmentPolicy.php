@@ -21,7 +21,7 @@ class ShipmentPolicy
             return true;
         }
 
-        return $user->isRole('agen', 'admin', 'kurir', 'sales-kurir') && $shipment->order?->agent_id === $user->agent_id;
+        return $user->isRole('agen', 'admin', 'kurir', 'sales-kurir-sub') && $shipment->order?->agent_id === $user->agent_id;
     }
 
     /** Proactively assigning a courier to a shipment is an office decision — a kurir self-assigns instead, via updateStatus. */
@@ -67,7 +67,7 @@ class ShipmentPolicy
             return $shipment->order?->agent_id === $user->agent_id;
         }
 
-        if ($user->isRole('kurir', 'sales-kurir')) {
+        if ($user->isRole('kurir', 'sales-kurir-sub')) {
             return $shipment->courier_id !== null && $shipment->courier?->user_id === $user->id;
         }
 

@@ -24,8 +24,13 @@ class RoleSeeder extends Seeder
             ['slug' => 'keuangan', 'name' => 'Keuangan'],
             ['slug' => 'kurir', 'name' => 'Kurir'],
             ['slug' => 'gudang', 'name' => 'Gudang'],
-            ['slug' => 'sales-kurir', 'name' => 'Sales-Kurir'],
+            ['slug' => 'sales-kurir-sub', 'name' => 'Sales-Kurir-Sub'],
         ];
+
+        // R-01: rename the pre-existing legacy row in place (never insert an 11th role).
+        if (DB::table('roles')->where('slug', 'sales-kurir')->exists() && ! DB::table('roles')->where('slug', 'sales-kurir-sub')->exists()) {
+            DB::table('roles')->where('slug', 'sales-kurir')->update(['slug' => 'sales-kurir-sub']);
+        }
 
         foreach ($roles as $role) {
             DB::table('roles')->updateOrInsert(

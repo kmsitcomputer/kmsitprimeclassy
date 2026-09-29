@@ -13,7 +13,7 @@ class UserPolicy
         return HierarchyRules::canCreate($user->role?->slug ?? '', $targetRoleSlug);
     }
 
-    public function convertToSalesKurir(User $user, User $target): bool
+    public function convertToSalesKurirSub(User $user, User $target): bool
     {
         return $user->isRole('agen')
             && $user->agent_id !== null
@@ -39,7 +39,7 @@ class UserPolicy
             return $target->korsal_id === $user->id || $target->id === $user->id;
         }
 
-        if ($user->isRole('sales', 'sales-kurir')) {
+        if ($user->isRole('sales', 'sales-kurir-sub')) {
             return $target->sales_id === $user->id;
         }
 
@@ -69,7 +69,7 @@ class UserPolicy
      * two roles may do it. super_admin always may (except itself and other
      * super_admins/agens, see UserController::destroy for the "never the last
      * super_admin" rule). An agen may delete EVERY role beneath it within its
-     * own branch (korsal, sales, sales-kurir, admin, keuangan, kurir, gudang,
+     * own branch (korsal, sales, sales-kurir-sub, admin, keuangan, kurir, gudang,
      * konsumen) — but never another agen, a super_admin, itself, or anyone in
      * another agent's branch. korsal/sales can never delete anyone.
      */

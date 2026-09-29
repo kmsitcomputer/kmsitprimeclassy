@@ -140,7 +140,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::patch('/profile/password', [ProfileController::class, 'updatePassword']);
 
     // Self-service referral code — agen/korsal/sales only (konsumen/admin/kurir never carry one).
-    Route::middleware('role:agen,korsal,sales,sales-kurir')->group(function () {
+    Route::middleware('role:agen,korsal,sales,sales-kurir-sub')->group(function () {
         Route::patch('/profile/referral-code', [ProfileController::class, 'updateReferralCode']);
         Route::post('/profile/referral-code/regenerate', [ProfileController::class, 'regenerateReferralCode']);
         Route::delete('/profile/referral-code', [ProfileController::class, 'deleteReferralCode']);
@@ -161,19 +161,22 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/users', [UserController::class, 'store']);
     });
 
-    Route::middleware('role:super_admin,agen,korsal,sales,sales-kurir,admin,keuangan,kurir')->group(function () {
+    Route::middleware('role:super_admin,agen,korsal,sales,sales-kurir-sub,admin,keuangan,kurir')->group(function () {
         Route::get('/users', [UserController::class, 'index']);
         Route::get('/users/{user}', [UserController::class, 'show']);
         Route::patch('/users/{user}', [UserController::class, 'update']);
         Route::delete('/users/{user}', [UserController::class, 'destroy']);
         Route::patch('/users/{user}/reassign-referral', [UserController::class, 'reassignReferral']);
-        Route::patch('/users/{user}/convert-to-sales-kurir', [UserController::class, 'convertToSalesKurir'])
+        Route::patch('/users/{user}/convert-to-sales-kurir-sub', [UserController::class, 'convertToSalesKurirSub'])
+            ->middleware('role:agen');
+        // Legacy alias (pre-R-01 clients); same handler, same authority.
+        Route::patch('/users/{user}/convert-to-sales-kurir', [UserController::class, 'convertToSalesKurirSub'])
             ->middleware('role:agen');
     });
 
     // Order creation: konsumen for themselves, or agen/korsal/sales on behalf
     // of a konsumen in their own network (OrderPolicy::create enforces which).
-    Route::middleware(['role:konsumen,agen,korsal,sales,sales-kurir', 'throttle:30,1'])->group(function () {
+    Route::middleware(['role:konsumen,agen,korsal,sales,sales-kurir-sub', 'throttle:30,1'])->group(function () {
         Route::post('/checkout/quote', [CheckoutController::class, 'quote']);
         Route::post('/checkout/courier-options', [CheckoutController::class, 'courierOptions']);
         Route::post('/orders', [OrderController::class, 'store']);
@@ -208,7 +211,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // counterpart of the order-wide route above, scoped to one courier's own
     // batch of items (ShipmentPolicy/CourierService enforce WHOSE delivery
     // and WHICH transitions).
-    Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir-sub')->group(function () {
         Route::patch('/shipments/{shipment}/status', [ShipmentController::class, 'updateStatus']);
         // Thermal shipping receipt — read-only, before/after pickup mode is
         // derived server-side (ShipmentReceiptResource), never picked by the
@@ -263,7 +266,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Kurir dashboard — "tidak boleh melakukan transaksi/mengubah harga/fee/
     // payment/melihat data agen lain": every action here is read-only or a
     // pure logistics status flip, scoped to the kurir's own agent branch.
-    Route::middleware('role:kurir,sales-kurir')->group(function () {
+    Route::middleware('role:kurir,sales-kurir-sub')->group(function () {
         Route::get('/kurir/orders', [CourierDashboardController::class, 'orders']);
         Route::get('/kurir/returns', [CourierDashboardController::class, 'returns']);
         Route::patch('/kurir/returns/{item}/pickup', [CourierDashboardController::class, 'pickupReturn']);
@@ -423,14 +426,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
 
     // Sales' own konsumen roster + fee earned from each — never another
     // sales' customers, never agen-level fee (Blueprint §Sales dashboard).
-    Route::middleware('role:sales,sales-kurir')->group(function () {
+    Route::middleware('role:sales,sales-kurir-sub')->group(function () {
         Route::get('/reports/my-customers', [ReportController::class, 'salesCustomers']);
     });
 
     // Fee configuration — never kurir ("fee tidak boleh dilihat selain agen
     // dan super admin" for courier_fee specifically; FeeResource narrows it
     // further still for sales — see FeeResource docblock).
-    Route::middleware('role:super_admin,agen,sales,sales-kurir')->group(function () {
+    Route::middleware('role:super_admin,agen,sales,sales-kurir-sub')->group(function () {
         Route::get('/products/{product}/fees', [FeeController::class, 'showForProduct']);
         Route::get('/products/{product}/variations/{variation}/fees', [FeeController::class, 'showForVariation']);
     });
@@ -444,7 +447,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // CommissionController::allowedBeneficiaryRoles. keuangan sees the same
     // financial slice as admin (sales+courier freely, agent fee only for
     // direct agent referrals).
-    Route::middleware('role:super_admin,agen,sales,sales-kurir,kurir,admin,korsal,keuangan')->group(function () {
+    Route::middleware('role:super_admin,agen,sales,sales-kurir-sub,kurir,admin,korsal,keuangan')->group(function () {
         Route::get('/commissions', [CommissionController::class, 'index']);
         Route::get('/commissions/summary', [CommissionController::class, 'summary']);
     });

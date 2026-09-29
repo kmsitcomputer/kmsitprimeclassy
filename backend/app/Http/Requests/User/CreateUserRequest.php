@@ -18,7 +18,7 @@ class CreateUserRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'role' => ['required', 'string', 'in:agen,korsal,sales,admin,keuangan,kurir,gudang,sales-kurir'],
+            'role' => ['required', 'string', 'in:agen,korsal,sales,admin,keuangan,kurir,gudang,sales-kurir-sub,sales-kurir'],
             'name' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'phone' => ['required', 'string', 'max:20'],
@@ -26,7 +26,7 @@ class CreateUserRequest extends BaseFormRequest
 
             'agent_id' => ['nullable', 'integer', Rule::in([$this->user()?->agent_id])],
             'korsal_id' => [
-                Rule::requiredIf(fn () => in_array($this->targetRole(), ['sales', 'sales-kurir'], true) && $this->user()?->isRole('agen')),
+                Rule::requiredIf(fn () => in_array($this->targetRole(), ['sales', 'sales-kurir-sub'], true) && $this->user()?->isRole('agen')),
                 'nullable', 'integer',
                 Rule::exists('users', 'id')->where(fn ($q) => $q
                     ->where('agent_id', $this->user()?->agent_id)
@@ -39,7 +39,8 @@ class CreateUserRequest extends BaseFormRequest
 
     public function targetRole(): string
     {
-        return $this->string('role')->toString();
+        // Legacy `sales-kurir` payloads are accepted and normalised to the canonical slug.
+        return Role::canonicalSlug($this->string('role')->toString());
     }
 
     public function extraData(): array

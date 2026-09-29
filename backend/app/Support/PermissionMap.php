@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Role;
+
 /**
  * Read-only capability hints for the frontend (nav visibility, showing/
  * hiding buttons) — never a security boundary. Every capability listed here
@@ -13,7 +15,7 @@ class PermissionMap
 {
     public static function forRole(string $roleSlug): array
     {
-        $capabilities = match ($roleSlug) {
+        $capabilities = match (Role::canonicalSlug($roleSlug)) {
             'super_admin' => [
                 'system.config.manage', 'system.payment.manage', 'system.shipping.manage', 'system.cms.manage',
                 'users.view.all', 'orders.view.all', 'orders.manage.status', 'orders.manage.payment',
@@ -55,7 +57,7 @@ class PermissionMap
             'gudang' => [
                 'stock.view.own', 'orders.view.assigned',
             ],
-            'sales-kurir' => [
+            'sales-kurir-sub' => [
                 'users.view.network', 'orders.create', 'orders.view.assigned', 'orders.manage.shipment',
             ],
             default => [],

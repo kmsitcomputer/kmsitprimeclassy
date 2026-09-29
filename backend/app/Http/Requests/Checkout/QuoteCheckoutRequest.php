@@ -12,7 +12,7 @@ class QuoteCheckoutRequest extends BaseFormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir') ?? false;
+        return $this->user()?->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir-sub') ?? false;
     }
 
     public function rules(): array

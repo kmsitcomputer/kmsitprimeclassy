@@ -157,7 +157,7 @@ class SalesCourierOrderIsolationTest extends TestCase
     {
         $product = Product::create([
             'sku' => 'SK-CHECKOUT-'.Str::uuid(), 'name' => 'Sales Kurir Cake',
-            'slug' => 'sales-kurir-cake-'.Str::uuid(), 'has_variations' => false,
+            'slug' => 'sales-kurir-sub-cake-'.Str::uuid(), 'has_variations' => false,
             'base_price' => 10000, 'weight_grams' => 100, 'status' => 'active',
         ]);
         ProductStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);

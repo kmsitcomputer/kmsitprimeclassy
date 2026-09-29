@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Role;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -15,7 +16,7 @@ class UserResource extends JsonResource
             'email' => $this->email,
             'phone' => $this->phone,
             'avatar_url' => $this->avatarUrl(),
-            'role' => $this->role?->slug,
+            'role' => Role::canonicalSlug($this->role?->slug),
             'referral_code' => $this->referral_code,
             'agent_id' => $this->agent_id,
             'korsal_id' => $this->korsal_id,

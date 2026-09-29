@@ -9,7 +9,7 @@ use App\Http\Requests\BaseFormRequest;
  * client — only identifiers and quantities. OrderService recomputes every
  * amount from the database. See Blueprint §Security and §Order.
  *
- * konsumen_id is only meaningful when the actor is agen/korsal/sales/sales-kurir.
+ * konsumen_id is only meaningful when the actor is agen/korsal/sales/sales-kurir-sub.
  * Omitted, they're buying for themselves (self-purchase — Blueprint: account
  * role never changes just because they check out). Supplied, they're
  * placing an order on behalf of that konsumen in their own network
@@ -22,7 +22,7 @@ class StoreOrderRequest extends BaseFormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir') ?? false;
+        return $this->user()?->isRole('konsumen', 'agen', 'korsal', 'sales', 'sales-kurir-sub') ?? false;
     }
 
     public function rules(): array

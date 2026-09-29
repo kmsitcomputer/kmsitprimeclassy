@@ -63,7 +63,7 @@ class PbrRemediationTest extends TestCase
 
     private function createSalesKurir(User $creator, User $korsal): User
     {
-        return app(UserManagementService::class)->create($creator, 'sales-kurir', [
+        return app(UserManagementService::class)->create($creator, 'sales-kurir-sub', [
             'name' => 'PBR Sales Kurir',
             'email' => 'pbr-sk-'.Str::uuid().'@example.test',
             'phone' => '0812000000',
@@ -81,12 +81,12 @@ class PbrRemediationTest extends TestCase
         $response = $this->actingAs($b['agent'])->postJson('/api/v1/users', [
             'name' => 'New SK', 'email' => 'new-sk-'.uniqid().'@example.test', 'phone' => '0812000001',
             'password' => 'password123', 'password_confirmation' => 'password123',
-            'role' => 'sales-kurir', 'korsal_id' => $b['korsal']->id,
+            'role' => 'sales-kurir-sub', 'korsal_id' => $b['korsal']->id,
         ]);
 
         $response->assertCreated();
         $this->assertNotNull($response->json('data.referral_code'));
-        $this->assertStringStartsWith('SK-', $response->json('data.referral_code'));
+        $this->assertStringStartsWith('SS-', $response->json('data.referral_code'));
     }
 
     public function test_converted_sales_preserves_historical_s_a_referral_code(): void
@@ -97,10 +97,10 @@ class PbrRemediationTest extends TestCase
             'parent_id' => $b['korsal']->id, 'referral_code' => 'SA-KEEP01',
         ]);
 
-        $this->actingAs($b['agent'])->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir")->assertOk();
+        $this->actingAs($b['agent'])->patchJson("/api/v1/users/{$sales->id}/convert-to-sales-kurir-sub")->assertOk();
 
         $this->assertSame('SA-KEEP01', $sales->fresh()->referral_code);
-        $this->assertSame('sales-kurir', $sales->fresh()->role->slug);
+        $this->assertSame('sales-kurir-sub', $sales->fresh()->role->slug);
     }
 
     public function test_konsumen_registers_with_s_k_referral_code_and_attribution_links_to_sales_kurir(): void
@@ -129,7 +129,7 @@ class PbrRemediationTest extends TestCase
 
         $response->assertOk();
         $this->assertNotNull($response->json('data.user.referral_code'));
-        $this->assertStringStartsWith('SK-', $response->json('data.user.referral_code'));
+        $this->assertStringStartsWith('SS-', $response->json('data.user.referral_code'));
     }
 
     /* ---------------- PBR-002 ---------------- */
