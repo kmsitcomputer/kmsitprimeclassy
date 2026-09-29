@@ -7,6 +7,7 @@ use App\Http\Requests\Catalog\StoreProductRequest;
 use App\Http\Requests\Catalog\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
+use App\Models\ProductVariation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Sanitizer\HtmlSanitizerService;
 use App\Services\Stock\WarehouseStockService;
@@ -41,13 +42,28 @@ class ProductController extends Controller
 
         $random = $request->boolean('random');
 
+        // A variation-bearing product has no base_price of its own — this
+        // aggregate gives filter/sort a single "starting price" to work with
+        // (base_price when set, otherwise its cheapest active variant),
+        // without ever assuming one mode's price column means anything for
+        // the other mode. It is joined rather than withMin() + HAVING because
+        // MariaDB rejects a plain column inside HAVING ("Unknown column
+        // 'base_price' in 'HAVING'") unless it is an aggregate select alias,
+        // and filtering in WHERE keeps the range applied per row.
+        $startingPrice = 'COALESCE(products.base_price, cheapest_variation.min_price)';
+
         $query = Product::query()
-            ->where('status', 'active')
-            // A variation-bearing product has no base_price of its own — this
-            // subquery gives search/sort/filter a single "starting price" to
-            // work with (its cheapest active variant), without ever assuming
-            // one mode's price column means anything for the other mode.
-            ->withMin(['variations' => fn ($q) => $q->where('is_active', true)], 'price')
+            ->where('products.status', 'active')
+            ->leftJoinSub(
+                ProductVariation::query()
+                    ->selectRaw('product_id, MIN(price) as min_price')
+                    ->where('is_active', true)
+                    ->groupBy('product_id'),
+                'cheapest_variation',
+                'cheapest_variation.product_id', '=', 'products.id'
+            )
+            ->select('products.*')
+            ->addSelect('cheapest_variation.min_price as variations_min_price')
             ->with(['category', 'images' => fn ($q) => $q->where('is_primary', true), 'variations' => fn ($q) => $q->where('is_active', true)])
             ->when($request->filled('category'), fn ($q) => $q->whereHas(
                 'category',
@@ -60,15 +76,15 @@ class ProductController extends Controller
                 $qq->where('name', 'like', $term)->orWhere('sku', 'like', $term)
                     ->orWhereHas('variations', fn ($v) => $v->where('sku', 'like', $term));
             }))
-            ->when($request->filled('min_price'), fn ($q) => $q->havingRaw(
-                'COALESCE(base_price, variations_min_price) >= ?', [$request->float('min_price')]
+            ->when($request->filled('min_price'), fn ($q) => $q->whereRaw(
+                $startingPrice.' >= ?', [$request->float('min_price')]
             ))
-            ->when($request->filled('max_price'), fn ($q) => $q->havingRaw(
-                'COALESCE(base_price, variations_min_price) <= ?', [$request->float('max_price')]
+            ->when($request->filled('max_price'), fn ($q) => $q->whereRaw(
+                $startingPrice.' <= ?', [$request->float('max_price')]
             ))
             // "Produk lainnya" on the detail page: exclude the product currently
             // being viewed so it never recommends itself.
-            ->when($request->filled('exclude'), fn ($q) => $q->where('id', '!=', $request->integer('exclude')));
+            ->when($request->filled('exclude'), fn ($q) => $q->where('products.id', '!=', $request->integer('exclude')));
 
         if ($random) {
             // Random selection happens here, not in the frontend, so the
@@ -77,8 +93,8 @@ class ProductController extends Controller
             $query->inRandomOrder();
         } else {
             match ($request->string('sort')->toString()) {
-                'price_asc' => $query->orderByRaw('COALESCE(base_price, variations_min_price) ASC'),
-                'price_desc' => $query->orderByRaw('COALESCE(base_price, variations_min_price) DESC'),
+                'price_asc' => $query->orderByRaw($startingPrice.' ASC'),
+                'price_desc' => $query->orderByRaw($startingPrice.' DESC'),
                 default => $query->latest(),
             };
         }
