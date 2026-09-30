@@ -18,7 +18,17 @@ export interface WarehouseRow {
   variation?: { id: number; label: string; sku: string } | null
   sub_location?: { id: number; code: string; name: string } | null
 }
-export interface SubLocation { id: number; code: string; name: string; address: string | null; contact_number?: string | null; description: string | null; is_active: boolean }
+export interface SubLocation {
+  id: number
+  code: string
+  name: string
+  address: string | null
+  contact_number?: string | null
+  description: string | null
+  is_active: boolean
+  owner_user_id?: number | null
+  owner?: { id: number; name: string } | null
+}
 export interface SellableStock { transit: number; factory_plan: number; factory_plan_enabled: boolean; sellable_base: number; reserved: number; available: number; physical_stock: number; has_commitment_deficit: boolean }
 
 export interface SubStockCard {
@@ -131,6 +141,7 @@ export async function setWarehouseSetting(factory_plan_enabled: boolean) {
 }
 
 export async function listSubLocations() { return (await http.get<ApiEnvelope<SubLocation[]>>('/warehouse/sub-locations')).data.data }
-export async function createSubLocation(payload: { code: string; name: string; address?: string; contact_number?: string; description?: string }) { return (await http.post<ApiEnvelope<SubLocation>>('/warehouse/sub-locations', payload)).data.data }
+export async function createSubLocation(payload: { owner_user_id: number; code: string; name: string; address?: string; contact_number?: string; description?: string }) { return (await http.post<ApiEnvelope<SubLocation>>('/warehouse/sub-locations', payload)).data.data }
 export async function updateSubLocation(id: number, payload: Partial<{ code: string; name: string; address: string; description: string }>) { return (await http.patch<ApiEnvelope<SubLocation>>(`/warehouse/sub-locations/${id}`, payload)).data.data }
 export async function deactivateSubLocation(id: number) { return (await http.post<ApiEnvelope<SubLocation>>(`/warehouse/sub-locations/${id}/deactivate`)).data.data }
+export async function assignSubLocationOwner(id: number, ownerUserId: number) { return (await http.post<ApiEnvelope<SubLocation>>(`/warehouse/sub-locations/${id}/assign-owner`, { owner_user_id: ownerUserId })).data.data }
