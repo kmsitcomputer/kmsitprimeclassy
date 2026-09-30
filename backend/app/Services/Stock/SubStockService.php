@@ -52,6 +52,25 @@ class SubStockService
     }
 
     /**
+     * Acquires the Sub WarehouseStock row locks every reserve() call for a multi-line Sub checkout
+     * will need, in the SAME canonical target order the Agent domain uses
+     * (StockService::canonicalReservationTargets), before the per-line reserve loop runs. Two
+     * concurrent Sub checkouts listing the same targets in opposite orders then serialise instead of
+     * each holding one target and waiting on the other.
+     *
+     * Rows that do not exist are NOT created — locking a missing row is a no-op/gap lock and reserve()
+     * still reports normal insufficient stock. This only takes locks; it never reserves or moves stock.
+     *
+     * @param  iterable<array{product_id:?int, product_variation_id:?int}>  $targets
+     */
+    public function lockReservationTargets(int $subLocationId, iterable $targets): void
+    {
+        foreach (StockService::canonicalReservationTargets($targets) as $target) {
+            $this->stockQuery($subLocationId, $target['product_id'], $target['product_variation_id'])->lockForUpdate()->first();
+        }
+    }
+
+    /**
      * Reserve Sub stock for an order item. Idempotent per order item: a retry returns the existing
      * reservation instead of reserving twice. Physical stock is NOT touched.
      */
