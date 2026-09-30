@@ -97,6 +97,14 @@ async function loadRequests() {
   }
 }
 
+// No-location is not a dead end: an Agen/Admin can assign the Sub Location while this screen stays
+// open, so retry re-runs the whole loading flow (location + stock + replenishment targets + requests)
+// and the screen appears without a browser reload. loadStock() clears noLocation/stale error up front
+// and re-sets them on failure, so a still-unassigned Sub keeps its explicit error state.
+async function retry() {
+  await Promise.all([loadStock(), loadRequests()])
+}
+
 async function submitRequest() {
   if (submitting.value) return
   error.value = ''; success.value = ''
@@ -167,8 +175,8 @@ onMounted(async () => {
       <div v-if="stockState === 'loading'" class="text-sm text-stone-400">Memuat stok Sub...</div>
       <div v-else-if="stockState === 'error'" class="rounded-lg border p-3 text-sm" :class="noLocation ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-red-200 bg-red-50 text-red-600'">
         {{ stockError }}
-        <span v-if="noLocation"> Hubungi Agen/Admin untuk menetapkan Sub Location Anda.</span>
-        <button v-else type="button" class="ml-2 underline" @click="loadStock">Coba lagi</button>
+        <span v-if="noLocation">Hubungi Agen/Admin untuk menetapkan Sub Location Anda, lalu coba lagi.</span>
+        <button type="button" class="ml-2 underline" @click="retry">Coba lagi</button>
       </div>
       <template v-else>
         <div v-if="!stocks.length" class="mb-3 text-sm text-stone-400">Belum ada stok tercatat di lokasi Sub ini.</div>
