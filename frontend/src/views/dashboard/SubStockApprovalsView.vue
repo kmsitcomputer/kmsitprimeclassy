@@ -8,6 +8,8 @@ const requests = ref<SubStockRequest[]>([])
 const meta = ref({ current_page: 1, last_page: 1, total: 0 })
 const status = ref<'requested' | ''>('requested')
 const rejectReason = ref<Record<number, string>>({})
+const listState = ref<'loading' | 'error' | 'ready'>('loading')
+const listError = ref('')
 const error = ref('')
 const success = ref('')
 
@@ -19,9 +21,19 @@ function itemName(item: SubStockRequestItem): string {
 
 async function load(reset = false) {
   if (reset) meta.value.current_page = 1
-  const { requests: rows, meta: m } = await listSubStockRequests({ status: status.value || undefined, page: meta.value.current_page })
-  requests.value = rows
-  meta.value = m
+  listState.value = 'loading'
+  listError.value = ''
+  try {
+    const { requests: rows, meta: m } = await listSubStockRequests({ status: status.value || undefined, page: meta.value.current_page })
+    requests.value = rows
+    meta.value = m
+    listState.value = 'ready'
+  } catch (e) {
+    // A failed load (initial, filter, pagination or retry) must never look like an empty result.
+    requests.value = []
+    listState.value = 'error'
+    listError.value = e instanceof Error ? e.message : 'Gagal memuat permintaan.'
+  }
 }
 
 async function approve(id: number) {
@@ -71,12 +83,17 @@ onMounted(() => load())
       </select>
     </div>
 
-    <div v-if="!requests.length" class="text-sm text-stone-400">Tidak ada permintaan.</div>
-    <ul class="grid gap-3">
+    <div v-if="listState === 'loading'" class="text-sm text-stone-400">Memuat permintaan...</div>
+    <div v-else-if="listState === 'error'" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+      {{ listError }}
+      <button type="button" class="ml-2 underline" @click="load()">Coba lagi</button>
+    </div>
+    <div v-else-if="!requests.length" class="text-sm text-stone-400">Tidak ada permintaan.</div>
+    <ul v-else class="grid gap-3">
       <li v-for="request in requests" :key="request.id" class="rounded-xl border border-stone-200 bg-white p-4">
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
           <span class="font-medium">{{ request.request_number }}</span>
-          <span class="text-xs text-stone-400">{{ request.subLocation?.name ?? '' }} · {{ request.requester?.name ?? '' }} · {{ request.direction === 'replenish' ? 'Isi ulang' : 'Retur' }}</span>
+          <span class="text-xs text-stone-400">{{ request.sub_location?.name ?? '' }} · {{ request.requester?.name ?? '' }} · {{ request.direction === 'replenish' ? 'Isi ulang' : 'Retur' }}</span>
           <span class="rounded-full bg-stone-100 px-2 py-0.5 text-xs">{{ request.status }}</span>
         </div>
         <ul class="mb-2 grid gap-1 text-xs text-stone-500">
@@ -90,7 +107,7 @@ onMounted(() => load())
         </div>
       </li>
     </ul>
-    <div v-if="meta.last_page > 1" class="mt-3 flex items-center gap-2 text-sm">
+    <div v-if="listState === 'ready' && meta.last_page > 1" class="mt-3 flex items-center gap-2 text-sm">
       <button type="button" class="rounded-lg border border-stone-200 px-3 py-1" :disabled="meta.current_page <= 1" @click="onPage(-1)">Prev</button>
       <span>Halaman {{ meta.current_page }} / {{ meta.last_page }} ({{ meta.total }})</span>
       <button type="button" class="rounded-lg border border-stone-200 px-3 py-1" :disabled="meta.current_page >= meta.last_page" @click="onPage(1)">Next</button>

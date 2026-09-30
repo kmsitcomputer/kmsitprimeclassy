@@ -33,7 +33,7 @@ export interface SubStockRequest {
   sub_location_id: number
   note: string | null
   items: SubStockRequestItem[]
-  subLocation?: { id: number; code: string; name: string } | null
+  sub_location?: { id: number; code: string; name: string } | null
   requester?: { id: number; name: string } | null
   rejection_reason: string | null
   created_at?: string | null
@@ -52,6 +52,15 @@ export interface SubStockRow {
   sellable: number
   product?: SubStockProductRef | null
   variation?: SubStockVariationRef | null
+}
+
+export interface SubStockTarget extends SubStockRow {
+  transit: number
+}
+
+export async function replenishmentTargets() {
+  const { data } = await http.get<ApiEnvelope<SubStockTarget[]>>('/sub-stock/replenishment-targets')
+  return data.data
 }
 
 export async function listSubStockRequests(params: { status?: string; direction?: string; page?: number } = {}) {
