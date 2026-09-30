@@ -35,6 +35,7 @@ return [
         'status_endpoint_required' => '请使用专用接口设置状态":status"。',
         'payment_not_verified' => '付款尚未核实，订单无法处理。',
         'invalid_village' => '所选村/里无效。',
+        'sub_item_requires_owner_shipment' => '该商品来自 Sub 库存，只能由其所属的 Sales-Kurir-Sub 自行发货。',
     ],
 
     'product' => [

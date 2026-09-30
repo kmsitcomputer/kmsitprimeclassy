@@ -253,6 +253,38 @@ class SubStockSourceTest extends TestCase
         }
     }
 
+    public function test_admin_cannot_ship_sub_goods_via_the_shipment_endpoint(): void
+    {
+        $id = $this->order($this->b['sub'], $this->payload(3, null, ['stock_source' => 'sub']))->assertCreated()->json('data.id');
+        $order = Order::query()->findOrFail($id);
+        $shipment = $order->items()->firstOrFail()->shipment;
+
+        $this->expectException(ApiException::class);
+        try {
+            app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $this->b['agen']);
+        } finally {
+            $this->assertSame(10, $this->subPhysical());
+            $this->assertSame('active', SubStockReservation::query()->firstOrFail()->status);
+        }
+    }
+
+    public function test_admin_cannot_ship_sub_goods_via_the_generic_order_status_endpoint(): void
+    {
+        $id = $this->order($this->b['sub'], $this->payload(3, null, ['stock_source' => 'sub']))->assertCreated()->json('data.id');
+        $order = Order::query()->findOrFail($id);
+        $order->update(['status' => 'diproses']);
+        $order->items()->update(['status' => 'diproses']);
+
+        $this->expectException(ApiException::class);
+        try {
+            app(\App\Services\Order\OrderService::class)->updateStatus($order->fresh(), 'dikirim', $this->b['agen']);
+        } finally {
+            $this->assertSame(10, $this->subPhysical());
+            $this->assertSame('active', SubStockReservation::query()->firstOrFail()->status);
+            $this->assertSame('diproses', OrderItem::query()->firstOrFail()->status);
+        }
+    }
+
     public function test_cancellation_releases_the_reservation_and_leaves_physical_unchanged(): void
     {
         $id = $this->order($this->b['sub'], $this->payload(3, null, ['stock_source' => 'sub']))->assertCreated()->json('data.id');

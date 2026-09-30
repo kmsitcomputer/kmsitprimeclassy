@@ -35,6 +35,7 @@ return [
         'status_endpoint_required' => 'Use the dedicated endpoint for status ":status".',
         'payment_not_verified' => 'Payment has not been verified yet; the order cannot be processed.',
         'invalid_village' => 'The selected village is invalid.',
+        'sub_item_requires_owner_shipment' => 'This item is sourced from Sub stock and can only be shipped by its owning Sales-Kurir-Sub.',
     ],
 
     'product' => [

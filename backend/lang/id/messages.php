@@ -46,6 +46,7 @@ return [
         'status_endpoint_required' => 'Gunakan endpoint khusus untuk status ":status".',
         'payment_not_verified' => 'Pembayaran belum diverifikasi, order belum dapat diproses.',
         'invalid_village' => 'Kelurahan/desa yang dipilih tidak valid.',
+        'sub_item_requires_owner_shipment' => 'Item ini bersumber dari stok Sub dan hanya dapat dikirim oleh Sales-Kurir-Sub pemiliknya.',
     ],
 
     'product' => [

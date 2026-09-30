@@ -35,6 +35,7 @@ return [
         'status_endpoint_required' => 'استخدم نقطة الوصول المخصصة لحالة ":status".',
         'payment_not_verified' => 'لم يتم التحقق من الدفع بعد، لا يمكن معالجة الطلب.',
         'invalid_village' => 'القرية/الحي المختار غير صالح.',
+        'sub_item_requires_owner_shipment' => 'هذا العنصر مصدره مخزون Sub ولا يمكن شحنه إلا من قبل Sales-Kurir-Sub المالك.',
     ],
 
     'product' => [

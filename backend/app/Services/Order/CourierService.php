@@ -88,9 +88,10 @@ class CourierService
     }
 
     /**
-     * R-02: Sub-sourced goods sit in ONE Sales-Kurir-Sub's Sub Location, so only that owner (or the
-     * office paths, which never reach here) may mark them shipped — another kurir/Sales-Kurir-Sub can
-     * never consume someone else's Sub stock. The full Sub-order delivery redesign is R-03.
+     * R-02: Sub-sourced goods sit in ONE Sales-Kurir-Sub's Sub Location, so only that owner may
+     * mark them shipped — checked for every actor reaching this endpoint, office (agen/admin/
+     * super_admin) included, since ShipmentPolicy::updateStatus lets them here too. The full
+     * Sub-order delivery redesign is R-03.
      */
     private function assertMayShipSubStock(Shipment $shipment, User $actor): void
     {
@@ -115,8 +116,15 @@ class CourierService
             throw new ApiException(__('messages.order.status_endpoint_required', ['status' => $newStatus]), 422);
         }
 
-        if ($newStatus === 'dikirim' && $actor->isRole('kurir', 'sales-kurir-sub')) {
+        if ($newStatus === 'dikirim') {
+            // Applies regardless of actor role — an office actor (agen/admin/super_admin)
+            // reaches this same per-shipment endpoint (see ShipmentPolicy::updateStatus) and
+            // must be blocked from consuming another user's Sub stock exactly like a foreign
+            // kurir/Sales-Kurir-Sub is.
             $this->assertMayShipSubStock($shipment, $actor);
+        }
+
+        if ($newStatus === 'dikirim' && $actor->isRole('kurir', 'sales-kurir-sub')) {
             $this->selfAssignIfUnassigned($shipment, $actor);
         }
 
