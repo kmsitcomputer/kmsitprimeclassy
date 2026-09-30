@@ -173,3 +173,25 @@ None blocking. The Area 7 MINOR (migration rollback edge case) is documented abo
 intentionally left as-is.
 
 ### Status: Package A remediation COMPLETE. Working tree has the remediation diff only (see git log on `remed/package-a-vps`); production untouched.
+
+---
+
+## Codex Round-2 remediation (branch `remed/package-a-vps`)
+
+| Finding | Fix | Tests | Commit |
+|---|---|---|---|
+| MAJOR-1 agent reservation vs Sub replenishment capacity race | serialized capacity check/reservation | `AgentSubCapacityConcurrencyTest` | 5d545ec |
+| MAJOR-2 generic transfer approved after Sub got an owner | `approve()` re-checks ownership under lock (same row `assignOwner` locks) | `GenericTransferOwnershipBypassTest`, `TransferOwnershipAssignmentConcurrencyTest` | 2ecc2e5 |
+| MAJOR-3 Sub Location UI ≠ API | Agen/Admin-only create with `owner_user_id` selector, owner shown, explicit assign for unowned legacy locations; Gudang sees no controls (`WarehouseSubLocationsView.vue`, `api/warehouse.ts`) | existing backend forged/cross-Agent owner tests; type-check + build (no frontend test framework, per instruction) | 4ea8295 |
+| MAJOR-4 first / new-SKU replenishment impossible | `GET /sub-stock/replenishment-targets` (Agent Transit stock, no Sub row needed); `create()` rejects replenish targets not in the Agent's Transit; return stays limited to Sub sellable; no fake zero rows | `SubStockReplenishmentTargetsTest` (zero-row first flow, new SKU, forged/foreign/no-Transit/invalid variation, role gate) | 3729084 (backend), afaec33 (UI) |
+| MINOR-5 relation key | canonical `sub_location` (API already emitted it); TS type + Approvals/Execution views fixed | `SubStockReplenishmentTargetsTest::test_request_responses_use_the_canonical_snake_case_sub_location_key` (sub/admin/gudang, asserts `subLocation` absent) | afaec33 |
+| MINOR-6 load/pagination error states | explicit loading / error(+retry) / empty in SubStock, Approvals, Execution; backend 404 "no active Sub Location" shown as such | type-check + build | afaec33 |
+
+### Results
+Backend `vendor/bin/phpunit`: **718 tests, 4674 assertions, 0 failures**. Frontend `npm run type-check` clean, `npm run build-only` OK (pre-existing chunk-size warning only).
+
+### Remaining
+None. Manual DEV/UAT still needed for role visibility/interaction in the Sub Location and Sub stock screens. `main` not merged; production untouched; R-03/R-04 untouched. Branch not pushed yet.
+
+### EXACT NEXT ACTION
+Push `remed/package-a-vps` to origin (original brief asked for it) on user confirmation; then DEV/UAT.
