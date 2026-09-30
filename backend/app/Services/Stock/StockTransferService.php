@@ -132,6 +132,13 @@ class StockTransferService
                 throw new ApiException('Transfer ini tidak dapat disetujui.', 422);
             }
             if ($locked->source_stock_type !== 'factory_plan' && $locked->destination_stock_type !== 'factory_plan') {
+                // Re-check ownership from CURRENT locked state, not the state at create() time: a
+                // legacy unowned Sub Location can be assigned an owner between a generic transfer's
+                // creation and its approval (SubLocationOwnershipService::assignOwner locks the
+                // exact same row before writing owner_user_id, so this serializes against it
+                // instead of racing on stale reads).
+                $this->assertNoOwnedSubLocation([$locked->source_sub_location_id, $locked->destination_sub_location_id], lock: true);
+
                 return $this->executeApprovedTransfer($actor, $locked);
             }
             if ($locked->source_stock_type !== 'factory_plan' || $locked->destination_stock_type !== 'transit' || $locked->source_sub_location_id !== null || $locked->destination_sub_location_id !== null) {
@@ -230,12 +237,25 @@ class StockTransferService
         $locked = [];
         foreach ($targets as $target) {
             $item = $target['item'];
+            // Canonical lock order for a stock-capacity decision: the Agent commitment row
+            // (ProductStock/ProductVariationStock.quantity_reserved) FIRST, then the Warehouse
+            // row(s) it competes with — exactly what StockService::reserveFor*() does via
+            // SellableStockService::forProduct/forVariation($lockWarehouse: true). A
+            // Transit -> Sub move is the one transfer direction that can starve an Agent
+            // checkout's already-committed reservation, so it must serialize against
+            // reserveFor*() through the SAME first lock, and read Transit/Plan under FOR
+            // UPDATE too — a plain SELECT is a REPEATABLE READ snapshot that can be older
+            // than the lock we just waited for (see SubStockService's docblock for the same
+            // class of bug).
+            $capacity = ($transfer->source_stock_type === 'transit' && $transfer->destination_stock_type === 'sub')
+                ? $this->lockAgentCapacityForTransitToSub($transfer->agent_id, $item->product_id, $item->product_variation_id)
+                : null;
             $source = $this->stock($transfer->agent_id, $item, $transfer->source_stock_type, $transfer->source_sub_location_id)->lockForUpdate()->first();
             if (! $source || $source->quantity < $item->quantity) {
                 throw new ApiException('Stok sumber tidak mencukupi.', 422);
             }
-            if ($transfer->source_stock_type === 'transit' && $transfer->destination_stock_type === 'sub') {
-                $this->assertTransitReservationSafety($transfer->agent_id, $item, $item->quantity, $source->quantity);
+            if ($capacity !== null) {
+                $this->assertTransitReservationSafety($item->quantity, $source->quantity, $capacity['reserved'], $capacity['plan'], $capacity['plan_enabled']);
             }
             if ($transfer->source_stock_type === 'sub') {
                 // R-02: stock leaving a Sub Location may never cut physical below its active Sub reservations.
@@ -280,13 +300,33 @@ class StockTransferService
      * Sales-Kurir-Sub requests, Admin approves, Gudang executes. The generic Gudang transfer stays for
      * legacy, unowned Sub Locations.
      *
+     * $lock true is the authoritative re-check at approval time: every involved Sub Location row is
+     * locked in deterministic id order (never create()'s insertion order) so two transfers touching
+     * the same pair of locations can't deadlock each other, and so it serializes against
+     * SubLocationOwnershipService::assignOwner — which locks that exact row before writing
+     * owner_user_id — instead of reading a stale pre-assignment snapshot.
+     *
      * @param  array<int, ?int>  $subLocationIds
      */
-    private function assertNoOwnedSubLocation(array $subLocationIds): void
+    private function assertNoOwnedSubLocation(array $subLocationIds, bool $lock = false): void
     {
-        $ids = array_filter($subLocationIds);
-        if ($ids !== [] && WarehouseSubLocation::withoutGlobalScopes()->whereIn('id', $ids)->whereNotNull('owner_user_id')->exists()) {
-            throw new ApiException('Sub Location milik Sales-Kurir-Sub hanya dapat dipindah melalui Permintaan Stok Sub (Admin menyetujui, Gudang mengeksekusi).', 422);
+        $ids = array_values(array_unique(array_filter($subLocationIds)));
+        if ($ids === []) {
+            return;
+        }
+        if (! $lock) {
+            if (WarehouseSubLocation::withoutGlobalScopes()->whereIn('id', $ids)->whereNotNull('owner_user_id')->exists()) {
+                throw new ApiException('Sub Location milik Sales-Kurir-Sub hanya dapat dipindah melalui Permintaan Stok Sub (Admin menyetujui, Gudang mengeksekusi).', 422);
+            }
+
+            return;
+        }
+        sort($ids);
+        foreach ($ids as $id) {
+            $location = WarehouseSubLocation::withoutGlobalScopes()->whereKey($id)->lockForUpdate()->first();
+            if ($location && $location->owner_user_id !== null) {
+                throw new ApiException('Sub Location milik Sales-Kurir-Sub hanya dapat dipindah melalui Permintaan Stok Sub (Admin menyetujui, Gudang mengeksekusi).', 422);
+            }
         }
     }
 
@@ -396,16 +436,33 @@ class StockTransferService
         }
     }
 
-    private function assertTransitReservationSafety(int $agentId, StockTransferItem $item, int $quantity, int $currentTransit): void
+    /**
+     * Locks the same two rows, in the same order, that StockService::reserveFor*() locks for
+     * this target — the Agent commitment row, then the Warehouse Transit/Plan row(s) — so a
+     * concurrent Agent checkout reservation and a Transit -> Sub execution against the same
+     * target always serialize through this one row instead of racing on independent reads.
+     *
+     * @return array{reserved:int, plan:int, plan_enabled:bool}
+     */
+    private function lockAgentCapacityForTransitToSub(int $agentId, ?int $productId, ?int $variationId): array
     {
-        $reserved = $item->product_variation_id
-            ? (int) (ProductVariationStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_variation_id', $item->product_variation_id)->value('quantity_reserved') ?? 0)
-            : (int) (ProductStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_id', $item->product_id)->value('quantity_reserved') ?? 0);
-        $plan = $item->product_variation_id
-            ? (int) (WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_variation_id', $item->product_variation_id)->whereNull('product_id')->where('stock_type', 'factory_plan')->value('quantity') ?? 0)
-            : (int) (WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_id', $item->product_id)->whereNull('product_variation_id')->where('stock_type', 'factory_plan')->value('quantity') ?? 0);
-        $enabled = (bool) (WarehouseSetting::query()->where('agent_id', $agentId)->value('factory_plan_enabled') ?? false);
-        if (($currentTransit - $quantity) + ($enabled ? $plan : 0) < $reserved) {
+        $stock = $variationId
+            ? ProductVariationStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_variation_id', $variationId)->lockForUpdate()->first()
+            : ProductStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_id', $productId)->lockForUpdate()->first();
+        $plan = WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('stock_type', 'factory_plan')
+            ->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId)->whereNull('product_id'), fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'))
+            ->lockForUpdate()->first();
+
+        return [
+            'reserved' => (int) ($stock->quantity_reserved ?? 0),
+            'plan' => (int) ($plan->quantity ?? 0),
+            'plan_enabled' => $this->planEnabled($agentId),
+        ];
+    }
+
+    private function assertTransitReservationSafety(int $quantity, int $currentTransit, int $reserved, int $plan, bool $planEnabled): void
+    {
+        if (($currentTransit - $quantity) + ($planEnabled ? $plan : 0) < $reserved) {
             throw new ApiException('Transfer akan mengurangi stok Transit di bawah komitmen reservasi.', 422);
         }
     }

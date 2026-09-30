@@ -79,20 +79,28 @@ class SellableStockService
      * $reservedOverride lets a caller that already holds the stock row under
      * lockForUpdate pass the authoritative reserved quantity instead of
      * re-reading it, so delegation never adds a query on the checkout path.
+     *
+     * $lockWarehouse: true makes the Warehouse Transit/Plan read itself a locking read
+     * (SELECT ... FOR UPDATE) instead of a plain snapshot read. A capacity DECISION (reserve,
+     * or a Transit -> Sub transfer) must pass true — under REPEATABLE READ a plain SELECT can
+     * still return a snapshot older than the row lock the caller just waited for, which is
+     * exactly the race that let a Transit -> Sub transfer and an Agent checkout reservation
+     * both observe enough capacity and both commit. A read-only display (product page, report)
+     * must NOT lock and should leave this false.
      */
-    public function forProduct(int $agentId, int $productId, ?int $reservedOverride = null): array
+    public function forProduct(int $agentId, int $productId, ?int $reservedOverride = null, bool $lockWarehouse = false): array
     {
         $reserved = $reservedOverride ?? (int) (ProductStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_id', $productId)->value('quantity_reserved') ?? 0);
 
-        return $this->calculate($agentId, $productId, null, $reserved);
+        return $this->calculate($agentId, $productId, null, $reserved, $lockWarehouse);
     }
 
     /** Canonical sellable for a product variation — see forProduct(). */
-    public function forVariation(int $agentId, int $variationId, ?int $reservedOverride = null): array
+    public function forVariation(int $agentId, int $variationId, ?int $reservedOverride = null, bool $lockWarehouse = false): array
     {
         $reserved = $reservedOverride ?? (int) (ProductVariationStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('product_variation_id', $variationId)->value('quantity_reserved') ?? 0);
 
-        return $this->calculate($agentId, null, $variationId, $reserved);
+        return $this->calculate($agentId, null, $variationId, $reserved, $lockWarehouse);
     }
 
     /** @return array<string, array<string, mixed>> keyed by p:{id} or v:{id} */
@@ -118,16 +126,18 @@ class SellableStockService
         return $result;
     }
 
-    private function calculate(int $agentId, ?int $productId, ?int $variationId, int $reserved): array
+    private function calculate(int $agentId, ?int $productId, ?int $variationId, int $reserved, bool $lockWarehouse = false): array
     {
         $query = WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)
             ->whereIn('stock_type', ['transit', 'factory_plan']);
         $query->when($productId, fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'));
         $query->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId)->whereNull('product_id'));
+        $query->when($lockWarehouse, fn ($q) => $q->lockForUpdate());
         $rows = $query->get();
         $hasWarehouseRows = WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)
             ->when($productId, fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'))
             ->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId)->whereNull('product_id'))
+            ->when($lockWarehouse, fn ($q) => $q->lockForUpdate())
             ->exists();
         $planEnabled = (bool) (WarehouseSetting::query()->where('agent_id', $agentId)->value('factory_plan_enabled') ?? false);
         $transit = (int) $rows->where('stock_type', 'transit')->sum('quantity');

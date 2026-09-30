@@ -562,7 +562,7 @@ class ConcurrencyHarness
 
     protected function spawnServiceRaceActor(string $side, array $config, string $readyA, string $readyB, string $release, string $resultA, string $resultB): Process
     {
-        return $this->startProcess([
+        $arguments = [
             '--role=sr-'.$side,
             '--runtime-dir='.$this->runtimeDir,
             '--sr-ready-a='.$readyA,
@@ -572,8 +572,16 @@ class ConcurrencyHarness
             '--sr-result-b='.$resultB,
             '--sr-op='.$config['op'],
             '--sr-actor='.(int) $config['actor_id'],
-            '--sr-subject='.(int) $config['subject_id'],
-        ]);
+            '--sr-subject='.(int) ($config['subject_id'] ?? 0),
+        ];
+        // Generic bag for ops that need more than one subject id (e.g. an Agent
+        // stock-capacity reservation needs agent/product/variation/quantity, never
+        // eval'd — only ever json_decode'd in .phpunit-concurrency-actor.php).
+        if (isset($config['extra'])) {
+            $arguments[] = '--sr-extra='.base64_encode(json_encode($config['extra']));
+        }
+
+        return $this->startProcess($arguments);
     }
 
     protected function startProcess(array $arguments): Process

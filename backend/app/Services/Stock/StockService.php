@@ -271,14 +271,17 @@ class StockService
      */
     private function availableProduct(int $agentId, int $productId, ?ProductStock $stock): int
     {
+        // lockWarehouse: true — this feeds a reserve decision, so it must serialize against a
+        // concurrent Transit -> Sub transfer through the same canonical lock order (see
+        // StockTransferService::lockAgentCapacityForTransitToSub's docblock).
         return app(SellableStockService::class)
-            ->forProduct($agentId, $productId, $stock?->quantity_reserved === null ? null : (int) $stock->quantity_reserved)['available'];
+            ->forProduct($agentId, $productId, $stock?->quantity_reserved === null ? null : (int) $stock->quantity_reserved, lockWarehouse: true)['available'];
     }
 
     private function availableVariation(int $agentId, int $variationId, ?ProductVariationStock $stock): int
     {
         return app(SellableStockService::class)
-            ->forVariation($agentId, $variationId, $stock?->quantity_reserved === null ? null : (int) $stock->quantity_reserved)['available'];
+            ->forVariation($agentId, $variationId, $stock?->quantity_reserved === null ? null : (int) $stock->quantity_reserved, lockWarehouse: true)['available'];
     }
 
     private function assertLegacyAdjustmentAllowed(): void

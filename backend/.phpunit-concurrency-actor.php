@@ -2,6 +2,8 @@
 
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
+use App\Models\ProductVariation;
 use App\Models\StockOpname;
 use App\Models\StockRequest;
 use App\Models\StockRequestProposal;
@@ -12,6 +14,7 @@ use App\Services\Order\OrderService;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
 use App\Services\Stock\StockRequestProposalService;
+use App\Services\Stock\StockService;
 use App\Services\Stock\StockTransferService;
 use App\Services\Stock\SubStockRequestService;
 use App\Services\Stock\SubStockService;
@@ -68,6 +71,7 @@ $longOptions = [
     'sr-op:',
     'sr-actor:',
     'sr-subject:',
+    'sr-extra:',
     'fc-proposal:',
     'to-ready-a:',
     'to-ready-b:',
@@ -291,6 +295,7 @@ if (str_starts_with($role, 'sr-')) {
     $operation = (string) ($options['sr-op'] ?? '');
     $actorId = (int) ($options['sr-actor'] ?? 0);
     $subjectId = (int) ($options['sr-subject'] ?? 0);
+    $extra = isset($options['sr-extra']) ? (json_decode(base64_decode((string) $options['sr-extra']), true) ?? []) : [];
     $startedAt = microtime(true);
 
     @file_put_contents($ready, 'ready');
@@ -336,10 +341,36 @@ if (str_starts_with($role, 'sr-')) {
                 $item = OrderItem::findOrFail($subjectId);
                 $result = DB::transaction(fn () => app(SubStockService::class)->consume($item, $actor));
                 break;
+            case 'sub-location-assign-owner':
+                // MAJOR-2 remediation: concurrent owner assignment vs. generic transfer approval
+                // must serialize on the same WarehouseSubLocation row lock (see
+                // StockTransferService::assertNoOwnedSubLocation's locked branch).
+                $result = app(\App\Services\Stock\SubLocationOwnershipService::class)->assignOwner(
+                    $actor,
+                    \App\Models\WarehouseSubLocation::withoutGlobalScopes()->findOrFail((int) $extra['location_id']),
+                    (int) $extra['owner_user_id'],
+                );
+                break;
+            case 'agent-reserve':
+                // MAJOR-1 remediation: an Agent checkout reservation must serialize against a
+                // concurrent Transit -> Sub execution through the same canonical lock order
+                // (see StockTransferService::lockAgentCapacityForTransitToSub).
+                $agentId = (int) $extra['agent_id'];
+                $quantity = (int) $extra['quantity'];
+                $result = DB::transaction(function () use ($agentId, $quantity, $extra, $actorId) {
+                    if (! empty($extra['variation_id'])) {
+                        app(StockService::class)->reserveForVariation($agentId, ProductVariation::findOrFail((int) $extra['variation_id']), $quantity, 'concurrency-test', 0, $actorId);
+                    } else {
+                        app(StockService::class)->reserveForProduct($agentId, Product::findOrFail((int) $extra['product_id']), $quantity, 'concurrency-test', 0, $actorId);
+                    }
+
+                    return null;
+                });
+                break;
             default:
                 throw new InvalidArgumentException('Unknown service race operation: '.$operation);
         }
-        $payload['final_status'] = $result->status;
+        $payload['final_status'] = $result?->status;
         $payload['outcome'] = 'success';
         $payload['exit_code'] = 0;
     } catch (Throwable $e) {
