@@ -206,3 +206,79 @@ None. Manual DEV/UAT still needed for role visibility/interaction in the Sub Loc
 
 ### EXACT NEXT ACTION
 Push `remed/package-a-vps` to origin (original brief asked for it) on user confirmation; then DEV/UAT.
+
+---
+
+## Codex Round-3 remediation (branch `remed/package-a-vps`)
+
+Three confirmed remaining findings: MAJOR-1 multi-target deadlock inversion, MAJOR-3 Sub Location
+owner selector pagination, MINOR-6 no retry after no-active-Sub 404. R-03/R-04 untouched;
+`main` not merged; production untouched. Starting HEAD `b2a2f98`.
+
+| Finding | Fix | Tests | Commit |
+|---|---|---|---|
+| MAJOR-1 multi-target deadlock inversion | one canonical target order for every multi-target Agent-capacity transaction | `MultiTargetInventoryLockOrderTest` | `remed: enforce canonical multi-target inventory lock order` |
+| MAJOR-3 Sub Location owner selector pagination | `GET /warehouse/sub-locations/eligible-owners` (server-authoritative, paged + searchable) + selector wired to it | `SubLocationEligibleOwnersTest` | `remed: make sub owner selection fully eligible and pageable` |
+| MINOR-6 no retry after no-active-Sub 404 | no-location state exposes Retry, which re-runs stock + replenishment-targets + requests | type-check + build (no frontend test framework) | `remed: allow retry after missing sub location` |
+
+### MAJOR-1 — canonical multi-target lock order
+- `StockService::canonicalTargetKey()` / `canonicalReservationTargets()` is now the ONE ordering
+  vocabulary: `p:{product_id}` / `v:{variation_id}`, `ksort`ed. `StockTransferService` (both the
+  Plan→Transit approval and `executeApprovedTransfer`) and the checkout path key off it, so the two
+  paths can never acquire the same targets in opposite orders.
+- `StockService::lockReservationTarget()` locks one target in the already-correct per-target order
+  (Agent commitment row first, then Warehouse Transit/Plan). `lockReservationTargets()` sorts
+  `ksort` then locks each — `OrderService::createOrder` calls it once for Agent-sourced orders
+  (Sub-sourced orders reserve entirely in the Sub ledger, no Agent capacity locks) BEFORE the
+  per-line reserve loop. The loop still runs in the incoming order, so order-item creation and
+  presentation order are untouched; the rows are simply already held.
+- The 5d545ec per-target order (commitment → Transit) is unchanged; this finding only fixed the
+  cross-target order. No `reserveFor*` semantics changed.
+- Deterministic regression: `MultiTargetInventoryLockOrderTest` runs real two-connection races with
+  a file barrier after each side's first target — an inverted order deadlocks (positive control),
+  the canonical order never does — plus reversed real-path races (real `OrderService::createOrder`
+  vs real `SubStockRequestService::execute`) for product+product, variation+variation, and
+  product+variation, asserting no deadlock, exactly one winner, and Transit ≥ committed Reserved.
+- Residual (out of scope, unchanged): `InventoryCancellationService::reverseOrder` can lock several
+  Agent commitment rows in `$order->items` order, and a Sub-sourced checkout reserves several Sub
+  rows in line order. Neither is a Package-A checkout Agent-capacity path; left as-is.
+
+### MAJOR-3 — fully eligible, pageable owner selection
+- New Agen/Admin-only `GET /warehouse/sub-locations/eligible-owners` (registered before the
+  `/{subLocation}` wildcard): active, non-deleted Sales-Kurir-Sub of the actor's own network that do
+  not already own a Sub Location; `search` + `per_page`/`page`; returns `UserResource[]` + meta.
+- `WarehouseSubLocationsView.vue` now uses it (search box + Prev/Next), so any eligible owner is
+  reachable regardless of pagination; ineligible candidates are never presented. Create/assign
+  endpoints remain authoritative and re-check everything server-side.
+- Tests: later page + search reachable; inactive / soft-deleted / already-assigned / foreign-Agent /
+  normal-Sales all excluded; gudang/sales/non-managers forbidden; forged owner ids still 422.
+
+### MINOR-6 — retry after no active Sub Location
+- The 404 "no active Sub Location" branch now always shows **Coba lagi**, calling `retry()` which
+  re-runs `loadStock()` (my Sub stock + replenishment targets) and `loadRequests()`. On success
+  `noLocation`/stale error clear and the stock screen appears without a browser reload; on failure
+  the explicit error state is retained.
+
+### Results
+Backend `php artisan test`: **727 tests, 4854 assertions, 0 failures** (719 baseline + 8 new).
+Frontend `npm run type-check` clean, `npm run build-only` OK (pre-existing chunk-size warning only).
+
+### Files changed (Round-3)
+- `backend/app/Services/Stock/StockService.php` — canonical key/order helpers + `lockReservationTarget(s)`
+- `backend/app/Services/Order/OrderService.php` — canonical pre-lock before the per-line reserve loop
+- `backend/app/Services/Stock/StockTransferService.php` — use the shared canonical target key
+- `backend/.phpunit-concurrency-actor.php` — `agent-lock-multi` + `checkout-order` race ops
+- `backend/app/Http/Controllers/Api/V1/Stock/WarehouseSubLocationController.php` — `eligibleOwners`
+- `backend/routes/api_v1.php` — eligible-owners route (before the `{subLocation}` wildcard)
+- `backend/tests/Feature/MultiTargetInventoryLockOrderTest.php` (new)
+- `backend/tests/Feature/SubLocationEligibleOwnersTest.php` (new)
+- `frontend/src/api/warehouse.ts` — `listEligibleSubLocationOwners`
+- `frontend/src/views/dashboard/WarehouseSubLocationsView.vue` — searchable/pageable eligible selector
+- `frontend/src/views/dashboard/SubStockView.vue` — Retry in the no-location state
+
+### Remaining
+Manual DEV/UAT still needed for role visibility/interaction in the Sub Location and Sub stock
+screens. `main` not merged; production untouched; R-03/R-04 untouched.
+
+### EXACT NEXT ACTION
+Push `remed/package-a-vps` to origin on user confirmation; then DEV/UAT.
