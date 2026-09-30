@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
-import { assignSubLocationOwner, createSubLocation, deactivateSubLocation, listSubLocations, type SubLocation } from '@/api/warehouse'
-import { listUsers } from '@/api/users'
+import { assignSubLocationOwner, createSubLocation, deactivateSubLocation, listEligibleSubLocationOwners, listSubLocations, type SubLocation } from '@/api/warehouse'
 import type { AuthUser } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
@@ -13,9 +12,17 @@ const router = useRouter()
 const canManageOwnership = computed(() => auth.user?.role === 'agen' || auth.user?.role === 'admin')
 
 const locations = ref<SubLocation[]>([])
-const eligibleOwners = ref<AuthUser[]>([])
 const listState = ref<'loading' | 'error' | 'ready'>('loading')
 const listError = ref('')
+
+// Server-authoritative owner candidates: active Sales-Kurir-Sub of this network that do not already
+// own a Sub Location. Searchable + paginated so every eligible owner is reachable, not just page 1.
+const eligibleOwners = ref<AuthUser[]>([])
+const ownerSearch = ref('')
+const ownerPage = ref(1)
+const ownerMeta = ref({ current_page: 1, last_page: 1, total: 0 })
+const ownerListState = ref<'loading' | 'error' | 'ready'>('loading')
+const ownerListError = ref('')
 
 const code = ref('')
 const name = ref('')
@@ -34,16 +41,44 @@ async function load() {
   listState.value = 'loading'
   listError.value = ''
   try {
-    const tasks: Promise<unknown>[] = [listSubLocations().then((rows) => { locations.value = rows })]
-    if (canManageOwnership.value) {
-      tasks.push(listUsers(1, { role: 'sales-kurir-sub' }).then(({ users }) => { eligibleOwners.value = users }))
-    }
-    await Promise.all(tasks)
+    locations.value = await listSubLocations()
     listState.value = 'ready'
   } catch (e) {
     listState.value = 'error'
     listError.value = e instanceof Error ? e.message : 'Gagal memuat daftar Sub Location.'
   }
+}
+
+async function loadOwners(page = ownerPage.value) {
+  if (!canManageOwnership.value) return
+  ownerListState.value = 'loading'
+  ownerListError.value = ''
+  try {
+    const { owners, meta } = await listEligibleSubLocationOwners({ page, search: ownerSearch.value.trim() || undefined })
+    // An assignment can empty the page we are on — walk back to a page that still holds rows.
+    if (owners.length === 0 && page > 1 && meta.total > 0) {
+      return loadOwners(Math.min(page, meta.last_page))
+    }
+    eligibleOwners.value = owners
+    ownerMeta.value = meta
+    ownerPage.value = meta.current_page
+    ownerListState.value = 'ready'
+  } catch (e) {
+    eligibleOwners.value = []
+    ownerListState.value = 'error'
+    ownerListError.value = e instanceof Error ? e.message : 'Gagal memuat calon pemilik.'
+  }
+}
+
+let ownerSearchTimer: ReturnType<typeof setTimeout> | null = null
+watch(ownerSearch, () => {
+  if (ownerSearchTimer) clearTimeout(ownerSearchTimer)
+  ownerSearchTimer = setTimeout(() => { void loadOwners(1) }, 300)
+})
+
+function ownerPageMove(delta: number) {
+  if (ownerListState.value === 'loading') return
+  void loadOwners(Math.max(1, ownerPage.value + delta))
 }
 
 async function create() {
@@ -59,7 +94,7 @@ async function create() {
     })
     code.value = ''; name.value = ''; address.value = ''; contact.value = ''; ownerUserId.value = ''
     success.value = 'Sub Location berhasil dibuat dan dimiliki oleh Sales-Kurir-Sub terpilih.'
-    await load()
+    await Promise.all([load(), loadOwners(1)])
   } catch (e) {
     createError.value = e instanceof Error ? e.message : 'Gagal menyimpan lokasi Sub.'
   } finally {
@@ -87,7 +122,7 @@ async function assignOwner(location: SubLocation) {
   try {
     await assignSubLocationOwner(location.id, Number(selected))
     success.value = `Kepemilikan ${location.name} berhasil ditetapkan.`
-    await load()
+    await Promise.all([load(), loadOwners(ownerPage.value)])
   } catch (e) {
     assignError.value = { ...assignError.value, [location.id]: e instanceof Error ? e.message : 'Gagal menetapkan pemilik.' }
   } finally {
@@ -99,7 +134,9 @@ function detail(id: number) {
   void router.push({ name: 'warehouse-sub-location-detail', params: { id } })
 }
 
-onMounted(load)
+onMounted(() => {
+  void Promise.all([load(), loadOwners(1)])
+})
 </script>
 
 <template>
@@ -115,11 +152,25 @@ onMounted(load)
       <input v-model="name" required placeholder="Nama Lokasi (mis. Sub Gudang Cimahi)" class="rounded-lg border border-stone-200 px-3 py-2 text-sm" />
       <input v-model="address" placeholder="Alamat (opsional)" class="rounded-lg border border-stone-200 px-3 py-2 text-sm" />
       <input v-model="contact" placeholder="Nomor Kontak (opsional)" class="rounded-lg border border-stone-200 px-3 py-2 text-sm" />
-      <select v-model="ownerUserId" required class="rounded-lg border border-stone-200 px-3 py-2 text-sm">
-        <option value="" disabled>Pilih Sales-Kurir-Sub pemilik...</option>
-        <option v-for="owner in eligibleOwners" :key="owner.id" :value="owner.id">{{ owner.name }}</option>
-      </select>
-      <p v-if="canManageOwnership && !eligibleOwners.length" class="text-xs text-amber-600">Belum ada Sales-Kurir-Sub aktif di network ini untuk dijadikan pemilik.</p>
+      <div class="grid gap-1 rounded-lg border border-stone-200 p-2">
+        <input v-model="ownerSearch" type="search" placeholder="Cari Sales-Kurir-Sub (nama/telepon)..." class="rounded-lg border border-stone-200 px-2 py-1 text-sm" />
+        <select v-model="ownerUserId" required class="rounded-lg border border-stone-200 px-3 py-2 text-sm" :disabled="ownerListState === 'loading'">
+          <option value="" disabled>Pilih Sales-Kurir-Sub pemilik...</option>
+          <option v-for="owner in eligibleOwners" :key="owner.id" :value="owner.id">{{ owner.name }}</option>
+        </select>
+        <div v-if="ownerListState === 'error'" class="text-xs text-red-600">
+          {{ ownerListError }}
+          <button type="button" class="ml-1 underline" @click="loadOwners()">Coba lagi</button>
+        </div>
+        <div v-else-if="ownerListState === 'ready' && !eligibleOwners.length" class="text-xs text-amber-600">
+          {{ ownerSearch.trim() ? 'Tidak ada calon pemilik yang cocok dengan pencarian.' : 'Belum ada Sales-Kurir-Sub aktif yang belum memiliki Sub Location di network ini.' }}
+        </div>
+        <div v-if="ownerMeta.last_page > 1" class="flex items-center gap-2 text-xs text-stone-500">
+          <button type="button" class="rounded border border-stone-200 px-2 py-0.5 disabled:opacity-40" :disabled="ownerPage <= 1" @click="ownerPageMove(-1)">Prev</button>
+          <span>Halaman {{ ownerMeta.current_page }} / {{ ownerMeta.last_page }} ({{ ownerMeta.total }})</span>
+          <button type="button" class="rounded border border-stone-200 px-2 py-0.5 disabled:opacity-40" :disabled="ownerPage >= ownerMeta.last_page" @click="ownerPageMove(1)">Next</button>
+        </div>
+      </div>
       <button :disabled="creating" class="rounded-xl bg-brand-600 px-4 py-2 font-semibold text-white disabled:opacity-40">{{ creating ? 'Menyimpan...' : 'Tambah Lokasi' }}</button>
     </form>
 

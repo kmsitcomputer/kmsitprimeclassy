@@ -1,5 +1,6 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
+import type { AuthUser, PaginationMeta } from './types'
 
 export interface WarehouseRow {
   id: number
@@ -145,3 +146,13 @@ export async function createSubLocation(payload: { owner_user_id: number; code: 
 export async function updateSubLocation(id: number, payload: Partial<{ code: string; name: string; address: string; description: string }>) { return (await http.patch<ApiEnvelope<SubLocation>>(`/warehouse/sub-locations/${id}`, payload)).data.data }
 export async function deactivateSubLocation(id: number) { return (await http.post<ApiEnvelope<SubLocation>>(`/warehouse/sub-locations/${id}/deactivate`)).data.data }
 export async function assignSubLocationOwner(id: number, ownerUserId: number) { return (await http.post<ApiEnvelope<SubLocation>>(`/warehouse/sub-locations/${id}/assign-owner`, { owner_user_id: ownerUserId })).data.data }
+
+/**
+ * R-01 server-authoritative owner candidates for a Sub Location: active Sales-Kurir-Sub in the
+ * actor's own network that do not already own a Sub Location. Paginated + searchable so every
+ * eligible owner is reachable, not just page 1 of the generic user listing.
+ */
+export async function listEligibleSubLocationOwners(params: { page?: number; per_page?: number; search?: string } = {}) {
+  const { data } = await http.get<ApiEnvelope<AuthUser[]>>('/warehouse/sub-locations/eligible-owners', { params })
+  return { owners: data.data, meta: data.meta as unknown as PaginationMeta }
+}

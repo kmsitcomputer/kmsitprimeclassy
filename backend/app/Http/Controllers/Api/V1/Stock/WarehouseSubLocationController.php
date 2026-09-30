@@ -2,7 +2,11 @@
 
 namespace App\Http\Controllers\Api\V1\Stock;
 
+use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\UserResource;
+use App\Models\Role;
+use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
 use App\Services\Stock\SubLocationOwnershipService;
@@ -16,6 +20,43 @@ class WarehouseSubLocationController extends Controller
     public function index(Request $request)
     {
         return $this->ok(WarehouseSubLocation::query()->with('owner:id,name')->orderBy('name')->get());
+    }
+
+    /**
+     * R-01: server-authoritative Sub Location owner candidates for Agen/Admin.
+     *
+     * Every Sales-Kurir-Sub in this Agent's network that could legally be assigned a Sub Location
+     * right now: active, not deleted, and not already owning one. Paginated and searchable so an
+     * eligible owner on any page is reachable — the generic /users listing returns page 1 only and
+     * mixes in candidates the create/assign endpoints would reject. Those endpoints stay
+     * authoritative and re-check all of these conditions on write.
+     */
+    public function eligibleOwners(Request $request)
+    {
+        $actor = $request->user();
+        if (! $actor->isRole('agen', 'admin') || ! $actor->agent_id) {
+            throw new ApiException('Hanya Agen/Admin yang dapat melihat calon pemilik Sub Location.', 403);
+        }
+
+        $query = User::query()->with('role')
+            ->where('agent_id', $actor->agent_id)
+            ->where('status', 'active')
+            ->whereHas('role', fn ($q) => $q->whereIn('slug', Role::slugsFor(Role::SALES_KURIR_SUB)))
+            ->whereDoesntHave('ownedSubLocation');
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('phone', 'like', "%{$search}%"));
+        }
+
+        $perPage = min(max($request->integer('per_page', 15), 1), 50);
+        $owners = $query->orderBy('name')->paginate($perPage);
+
+        return $this->ok(UserResource::collection($owners)->resolve(), meta: [
+            'current_page' => $owners->currentPage(),
+            'last_page' => $owners->lastPage(),
+            'total' => $owners->total(),
+        ]);
     }
 
     public function store(Request $request)

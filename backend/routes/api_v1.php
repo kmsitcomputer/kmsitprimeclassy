@@ -343,6 +343,12 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/warehouse/stock-cards', [WarehouseStockRequestController::class, 'cards']);
         Route::get('/warehouse/sub-locations/{subLocation}/stock-cards', [WarehouseStockRequestController::class, 'subCards']);
     });
+    // R-01: server-authoritative Sub Location owner candidates (Agen/Admin only — Gudang never
+    // selects owners). Registered BEFORE the `/{subLocation}` wildcard below so the literal path is
+    // never captured as a location id.
+    Route::middleware('role:agen,admin')->group(function () {
+        Route::get('/warehouse/sub-locations/eligible-owners', [WarehouseSubLocationController::class, 'eligibleOwners']);
+    });
     Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
         Route::get('/warehouse/transfers', [StockTransferController::class, 'index']);
         Route::get('/warehouse/transfers/{transfer}', [StockTransferController::class, 'show']);
