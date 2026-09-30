@@ -411,3 +411,35 @@ Manual DEV/UAT still needed. `main` not merged; production untouched; R-03/R-04 
 
 ### EXACT NEXT ACTION
 Push `remed/package-a-vps` to origin on user confirmation; then DEV/UAT.
+
+---
+
+## Final independent review (HEAD ab461d2, branch `remed/package-a-vps`)
+
+Diff-first review of `9d97961..ab461d2` (99 files) across all 19 priority areas: role/referral compatibility
+(canonical slug aliasing in `User::isRole`/`EnsureRole`/`HierarchyRules`, SS- only for new codes, SA-/SK- preserved,
+role migration renames in place), Sub Location ownership (1:1 UNIQUE, same-Agent/active eligibility under lock, no silent
+legacy mapping, Gudang excluded at policy + route), stock-source authorization (`StockSourceResolver`), Agent capacity
+locking, Sub reservation lifecycle, request workflow, generic-transfer ownership re-check under lock, generic office
+shipment guard (`OrderService` + `CourierService`), effective target normalization, canonical multi-target lock order in
+checkout/cancellation/execution, Sub-domain order (location shared -> Sub stock -> reservations; executor location
+exclusive -> stock), frontend/backend contracts (`sub_location`, `eligible-owners` route registered before `{subLocation}`),
+zero-Transit replenish semantics, no-active-Sub retry, migration data safety (additive/nullable, defaults, CHECK guarded by
+driver), and R-03/R-04 leakage (Sub-item quantity adjust/split/return blocked with a clear 422 only).
+
+**Result: no concrete defect found; no code changed in this pass.**
+
+### Results
+Backend `php artisan test`: **738 passed, 5052 assertions, 0 failures** (Pest/artisan counting; the earlier 5055 figure came
+from a different runner's assertion tally — test count identical). Frontend `npm run type-check` clean,
+`npm run build-only` OK (pre-existing >500 KB chunk warning only).
+Migrations unchanged; production untouched; R-03/R-04 untouched.
+
+### Remaining technical debt (outside Package A)
+- R-03: invoices, splitting, final delivery verification, Sub-order quantity adjust/split/return.
+- R-04: order authority, Gudang financial projection, Kurir queue, reports, Admin Product CRU.
+- Role migration `down()` is not a clean inverse after a fold (documented, no forward risk).
+
+### EXACT NEXT ACTION
+Manual DEV/UAT (role visibility for Agen/Admin/Gudang/Sales-Kurir-Sub; owner assignment; Sub checkout; Transit<->Sub
+request approve/execute/receive). Then push on user confirmation.
