@@ -46,6 +46,7 @@ return [
         'variation_requires_attribute' => '规格必须至少包含一个属性-值组合。',
         'variation_not_enabled' => '产品":name"未启用规格功能（has_variations = false）。',
         'variation_required' => '产品":name"需要选择规格。',
+        'variation_not_allowed' => '产品":name"不使用规格，必须不带规格下单。',
         'stock_uses_variation' => '产品":name"含有规格 — 库存必须按规格管理，而不是在主产品上设置。',
     ],
 

@@ -46,6 +46,7 @@ return [
         'variation_requires_attribute' => 'يجب أن يحتوي المتغير على زوج خاصية-قيمة واحد على الأقل.',
         'variation_not_enabled' => 'المنتج ":name" غير مُفعّل لدعم المتغيرات (has_variations = false).',
         'variation_required' => 'المنتج ":name" يتطلب اختيار متغير.',
+        'variation_not_allowed' => 'المنتج ":name" لا يستخدم متغيرات؛ يجب طلبه بدون متغير.',
         'stock_uses_variation' => 'المنتج ":name" لديه متغيرات — يجب إدارة المخزون لكل متغير، وليس على المنتج الرئيسي.',
     ],
 

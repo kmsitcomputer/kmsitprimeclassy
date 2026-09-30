@@ -12,9 +12,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
-use App\Models\ProductStock;
 use App\Models\ProductVariation;
-use App\Models\ProductVariationStock;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingProvider;
@@ -159,20 +157,31 @@ class OrderService
                 $subtotal = 0.0;
                 $totalWeightGrams = 0;
 
-                // Canonical multi-target lock order. A multi-line Agent checkout must acquire its
-                // Agent capacity locks in the SAME deterministic target order a multi-target
-                // Transit -> Sub execution uses (StockService::canonicalTargetKey), or two
-                // concurrent transactions listing the same targets in opposite orders can each
-                // hold one target and wait on the other (deadlock). Only Agent-sourced orders take
-                // Agent capacity locks; a Sub-sourced order reserves entirely in the Sub ledger.
-                // The per-line loop below still runs in the incoming order, so presentation and
-                // order-item creation order are untouched — the rows are simply already held.
-                if (! $subLocation) {
-                    $this->stockService->lockReservationTargets($agentId, $lines);
+                // Resolve every line to its ONE authoritative inventory target BEFORE any inventory
+                // lock is taken. A simple product is a product target and must not carry a variation
+                // id; a variation product is a variation target. The same resolution feeds both the
+                // canonical prelock below and the per-line reserve, so the prelocked target can never
+                // differ from the target actually reserved (the mismatch MAJOR A closed).
+                $resolvedLines = [];
+                foreach ($lines as $line) {
+                    $resolvedLines[] = $this->resolveLine($line);
+                }
+                $reservationTargets = array_map(fn (array $resolved) => $this->resolvedTarget($resolved), $resolvedLines);
+
+                // Canonical multi-target lock order: acquire every effective target in the same
+                // deterministic order a multi-target Transit -> Sub execution uses, so two concurrent
+                // transactions listing the same targets in opposite orders cannot each hold one and
+                // wait on the other. Agent and Sub targets lock different rows but share the vocabulary.
+                if ($subLocation) {
+                    $this->subStockService->lockReservationTargets($subLocation->id, $reservationTargets);
+                } else {
+                    $this->stockService->lockReservationTargets($agentId, $reservationTargets);
                 }
 
-                foreach ($lines as $line) {
-                    [$lineSubtotal, $lineWeight] = $this->priceAndReserveLine($order, $agentId, $konsumen, $actor, $line, $subLocation);
+                // The per-line loop still runs in the incoming order, so order-item creation and
+                // presentation order are untouched — the rows are already held by then.
+                foreach ($resolvedLines as $resolved) {
+                    [$lineSubtotal, $lineWeight] = $this->priceAndReserveLine($order, $agentId, $konsumen, $actor, $resolved, $subLocation);
                     $subtotal += $lineSubtotal;
                     $totalWeightGrams += $lineWeight;
                 }
@@ -436,31 +445,64 @@ class OrderService
         ));
     }
 
-    /** @return array{0: float, 1: int, 2: ?array{product_id:int, product_variation_id:?int, message:string}} */
-    private function quoteLine(int $agentId, array $line): array
+    /**
+     * Resolves the ONE authoritative inventory target of an order line. This is the single source of
+     * truth consumed by both the canonical capacity prelock and the actual reserve/deduct path, so
+     * the prelocked target can never differ from the target actually reserved.
+     *
+     * A product with has_variations = false is a PRODUCT target and must not carry a variation id; a
+     * variation product is a VARIATION target and requires an active variation of THAT product.
+     *
+     * @param  array{product_id:int, product_variation_id?:?int, quantity?:int}  $line
+     * @return array{product: Product, variation: ?ProductVariation, quantity: int}
+     */
+    private function resolveLine(array $line): array
     {
         $product = Product::query()->where('status', 'active')->findOrFail($line['product_id']);
-        $qty = max(1, (int) $line['quantity']);
-        $variation = null;
+        $variationId = $line['product_variation_id'] ?? null;
 
         if ($product->has_variations) {
-            if (empty($line['product_variation_id'])) {
+            if (empty($variationId)) {
                 throw new ApiException(__('messages.product.variation_required', ['name' => $product->name]), 422);
             }
 
             $variation = ProductVariation::query()
                 ->where('product_id', $product->id)->where('is_active', true)
-                ->findOrFail($line['product_variation_id']);
+                ->findOrFail($variationId);
+        } else {
+            if (! empty($variationId)) {
+                // A simple product has no variation target. Refuse the line outright rather than
+                // silently ignoring the supplied id — ignoring it would prelock a variation the
+                // reserve path never touches.
+                throw new ApiException(__('messages.product.variation_not_allowed', ['name' => $product->name]), 422);
+            }
 
+            $variation = null;
+        }
+
+        return ['product' => $product, 'variation' => $variation, 'quantity' => (int) ($line['quantity'] ?? 0)];
+    }
+
+    /** @param array{product: Product, variation: ?ProductVariation} $resolved @return array{product_id:int, product_variation_id:?int} */
+    private function resolvedTarget(array $resolved): array
+    {
+        return ['product_id' => $resolved['product']->id, 'product_variation_id' => $resolved['variation']?->id];
+    }
+
+    /** @return array{0: float, 1: int, 2: ?array{product_id:int, product_variation_id:?int, message:string}} */
+    private function quoteLine(int $agentId, array $line): array
+    {
+        $resolved = $this->resolveLine($line);
+        $product = $resolved['product'];
+        $variation = $resolved['variation'];
+        $qty = max(1, $resolved['quantity']);
+
+        if ($variation) {
             $unitPrice = (float) $variation->price;
             $unitWeight = (int) ($variation->weight_grams ?: $product->weight_grams);
-            $stock = ProductVariationStock::withoutGlobalScopes()
-                ->where('agent_id', $agentId)->where('product_variation_id', $variation->id)->first();
         } else {
             $unitPrice = (float) $product->base_price;
             $unitWeight = (int) $product->weight_grams;
-            $stock = ProductStock::withoutGlobalScopes()
-                ->where('agent_id', $agentId)->where('product_id', $product->id)->first();
         }
 
         if ($unitWeight < 1) {
@@ -479,28 +521,24 @@ class OrderService
         return [$unitPrice * $qty, $unitWeight * $qty, $warning];
     }
 
-    /** Prices one order line, reserves its stock, records its fee/commission snapshot. Returns [subtotal, weightGrams]. */
-    private function priceAndReserveLine(Order $order, int $agentId, User $konsumen, User $actor, array $line, ?WarehouseSubLocation $subLocation = null): array
+    /**
+     * Prices one already-resolved line, reserves its stock, records its fee/commission snapshot.
+     * Returns [subtotal, weightGrams]. $resolved comes from resolveLine() so the reserved target is
+     * exactly the target the caller prelocked.
+     *
+     * @param  array{product: Product, variation: ?ProductVariation, quantity: int}  $resolved
+     */
+    private function priceAndReserveLine(Order $order, int $agentId, User $konsumen, User $actor, array $resolved, ?WarehouseSubLocation $subLocation = null): array
     {
-        $product = Product::query()->where('status', 'active')->findOrFail($line['product_id']);
-        $qty = (int) $line['quantity'];
+        $product = $resolved['product'];
+        $variation = $resolved['variation'];
+        $qty = $resolved['quantity'];
 
         if ($qty < 1) {
             throw new ApiException(__('messages.order.invalid_quantity'), 422);
         }
 
-        $variation = null;
-
-        if ($product->has_variations) {
-            if (empty($line['product_variation_id'])) {
-                throw new ApiException(__('messages.product.variation_required', ['name' => $product->name]), 422);
-            }
-
-            $variation = ProductVariation::query()
-                ->where('product_id', $product->id)
-                ->where('is_active', true)
-                ->findOrFail($line['product_variation_id']);
-
+        if ($variation) {
             $unitPrice = (float) $variation->price;
             $unitWeight = (int) ($variation->weight_grams ?: $product->weight_grams);
         } else {

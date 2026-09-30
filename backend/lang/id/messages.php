@@ -57,6 +57,7 @@ return [
         'variation_requires_attribute' => 'Varian harus memiliki minimal satu pasangan atribut-nilai.',
         'variation_not_enabled' => 'Produk ":name" tidak diaktifkan untuk memiliki varian (has_variations = false).',
         'variation_required' => 'Produk ":name" memerlukan pilihan varian.',
+        'variation_not_allowed' => 'Produk ":name" tidak memakai varian; produk ini harus dipesan tanpa varian.',
         'stock_uses_variation' => 'Produk ":name" memiliki varian — stok harus diatur per varian, bukan pada produk induk.',
     ],
 

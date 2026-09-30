@@ -46,6 +46,7 @@ return [
         'variation_requires_attribute' => 'A variation must have at least one attribute-value pair.',
         'variation_not_enabled' => 'Product ":name" is not enabled for variations (has_variations = false).',
         'variation_required' => 'Product ":name" requires a variation to be selected.',
+        'variation_not_allowed' => 'Product ":name" does not use variations; it must be ordered without a variation.',
         'stock_uses_variation' => 'Product ":name" has variations — stock must be managed per variation, not on the parent product.',
     ],
 
