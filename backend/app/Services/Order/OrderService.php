@@ -173,6 +173,11 @@ class OrderService
                 // transactions listing the same targets in opposite orders cannot each hold one and
                 // wait on the other. Agent and Sub targets lock different rows but share the vocabulary.
                 if ($subLocation) {
+                    // Canonical Sub-domain order: the Sub Location parent row FIRST (shared), then the
+                    // Sub stock target rows. Without the parent lock first, a concurrent Gudang
+                    // execution (location exclusive -> stock) can cycle with the checkout's
+                    // order_item FK insert (stock held -> parent shared lock needed).
+                    $subLocation = $this->lockSubLocationForCheckout($subLocation, $actor);
                     $this->subStockService->lockReservationTargets($subLocation->id, $reservationTargets);
                 } else {
                     $this->stockService->lockReservationTargets($agentId, $reservationTargets);
@@ -487,6 +492,37 @@ class OrderService
     private function resolvedTarget(array $resolved): array
     {
         return ['product_id' => $resolved['product']->id, 'product_variation_id' => $resolved['variation']?->id];
+    }
+
+    /**
+     * Canonical Sub-domain lock order, parent first: a Sub-sourced checkout takes the Sub Location row
+     * BEFORE any Sub stock target lock. A concurrent Gudang execution locks the SAME location
+     * exclusively and then the stock rows (SubStockRequestService::execute), so if checkout instead
+     * held stock first and only needed the parent at the order_item FK insert, the two would form a
+     * location <-> stock cycle.
+     *
+     * A SHARED lock is sufficient and preferred: checkout only needs the parent to stay stable while
+     * it creates FK-backed order items and reserves stock, and multiple checkouts may hold it
+     * concurrently, while the executor's exclusive lock waits at the location boundary. The freshly
+     * locked row is re-validated — the pre-transaction snapshot is never trusted.
+     */
+    private function lockSubLocationForCheckout(WarehouseSubLocation $location, User $actor): WarehouseSubLocation
+    {
+        $locked = WarehouseSubLocation::withoutGlobalScopes()
+            ->whereKey($location->id)
+            ->sharedLock()
+            ->first();
+
+        $valid = $locked
+            && $locked->is_active
+            && $locked->agent_id === $actor->agent_id
+            && $locked->owner_user_id === $actor->id;
+
+        if (! $valid) {
+            throw new ApiException('Sub Location tidak lagi aktif atau bukan milik Anda.', 422, ['stock_source' => 'Sub Location tidak tersedia.']);
+        }
+
+        return $locked;
     }
 
     /** @return array{0: float, 1: int, 2: ?array{product_id:int, product_variation_id:?int, message:string}} */
