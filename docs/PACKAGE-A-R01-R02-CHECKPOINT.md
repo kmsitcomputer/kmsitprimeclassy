@@ -352,3 +352,62 @@ Manual DEV/UAT still needed. `main` not merged; production untouched; R-03/R-04 
 
 ### EXACT NEXT ACTION
 Push `remed/package-a-vps` to origin on user confirmation; then DEV/UAT.
+
+---
+
+## Codex Round-5 remediation — final MAJOR C (branch `remed/package-a-vps`)
+
+Findings A (effective target) and B (cancellation) are CLOSED and untouched. Only MAJOR C remained:
+multi-target Sub **ordering** was fixed, but a higher-level inversion persisted between Sub checkout
+and `SubStockRequestService::execute()`.
+
+### The defect
+Checkout acquired Sub stock target locks first and only needed the `warehouse_sub_locations` parent
+row later, at the `order_items.sub_location_id` FK insert. Execution locks the location exclusively
+(`SubStockRequestService::execute`, line 201) and then the stock rows. So: checkout holds stock →
+waits for the parent; execution holds the parent → waits for stock. A single target with sufficient
+stock could deadlock.
+
+### Location-before-stock invariant + chosen mechanism
+Canonical Sub-domain order is now **WarehouseSubLocation parent row → Sub WarehouseStock target rows
+→ Sub reservation rows**. `OrderService::lockSubLocationForCheckout()` runs inside the checkout
+transaction BEFORE `SubStockService::lockReservationTargets()` and takes a **SHARED** lock
+(`WarehouseSubLocation::...->sharedLock()`), then re-validates the freshly locked row (exists, active,
+same agent, still owned by the acting Sales-Kurir-Sub) instead of trusting the pre-transaction
+snapshot; a failed re-check is a 422.
+
+Shared (not exclusive) is sufficient and preferred: checkout only needs the parent to stay
+stable/owned while it creates FK-backed order items and reserves stock, and multiple checkouts may
+hold it concurrently; the Gudang executor keeps its exclusive location lock, so it simply waits at
+the location boundary and the location↔stock cycle cannot form. MariaDB 10.11 / Laravel's
+`sharedLock()` (`LOCK IN SHARE MODE`) is supported and conflicts with the executor's `FOR UPDATE`, so
+the serialization is real. No FK removed, no FK checks disabled, no deadlock retry. Execution order
+(location exclusive → stock) is unchanged; `SubLocationOwnershipService` is untouched.
+
+### Test added
+`SubCheckoutConcurrencyTest`:
+- `test_real_sub_checkout_and_sub_execution_never_deadlock_and_keep_invariants` — real
+  `OrderService::createOrder()` (Sub-sourced) racing real `SubStockRequestService::execute()` on the
+  same location/target: no deadlock, both succeed, physical 10→15 (only the executed replenishment
+  moves stock), reservation 5 ≤ physical, Transit moved once (2 transfer movements), request
+  `executed`, one order.
+- `test_parent_location_lock_precedes_stock_targets_and_inverted_order_deadlocks` — deterministic
+  barrier control: the pre-fix order (stock targets first, parent at the FK insert) deadlocks against
+  the executor's parent-first order (positive control), while the parent-first order never does.
+- Existing methods retained: multi-target Sub race (product/variation/mixed), Sub prelock control,
+  functional real checkout.
+
+### Results
+Backend `php artisan test`: **738 passed, 5055 assertions, 0 failures** (736 baseline + 2 new).
+Frontend `npm run type-check` clean, `npm run build-only` OK (pre-existing chunk-size warning only).
+
+### Files changed (Round-5)
+- `backend/app/Services/Order/OrderService.php` — `lockSubLocationForCheckout` (shared parent lock + re-validation) before the Sub stock prelock
+- `backend/.phpunit-concurrency-actor.php` — `sub-location-stock-lock` lock-order op
+- `backend/tests/Feature/SubCheckoutConcurrencyTest.php` — real checkout-vs-execution race + parent-first control
+
+### Remaining
+Manual DEV/UAT still needed. `main` not merged; production untouched; R-03/R-04 untouched.
+
+### EXACT NEXT ACTION
+Push `remed/package-a-vps` to origin on user confirmation; then DEV/UAT.
