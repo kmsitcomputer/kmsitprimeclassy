@@ -4,12 +4,17 @@ namespace Tests\Feature;
 
 use App\Models\Product;
 use App\Models\ProductStock;
+use App\Models\StockHandover;
+use App\Models\StockMovement;
+use App\Models\StockTransfer;
+use App\Models\SubStockRequest;
 use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -85,7 +90,7 @@ class SubStockReplenishmentTargetsTest extends TestCase
         $this->assertSame(0, WarehouseStock::withoutGlobalScopes()->where('stock_type', 'sub')->where('sub_location_id', $this->location->id)->count());
 
         $this->actingAs($this->sub)->getJson('/api/v1/sub-stock/replenishment-targets')->assertOk()
-            ->assertJsonPath('data.0.product_id', $product->id)->assertJsonPath('data.0.transit', 20);
+            ->assertJsonFragment(['product_id' => $product->id, 'current_transit' => 20]);
 
         $this->replenishFully($product, 7);
 
@@ -106,13 +111,41 @@ class SubStockReplenishmentTargetsTest extends TestCase
         $this->assertSame(3, $this->subQty($stocked));
     }
 
-    public function test_forged_or_ineligible_targets_are_rejected_and_targets_are_agent_scoped(): void
+    public function test_zero_current_transit_target_can_be_requested_but_execution_fails_safely_until_transit_exists(): void
     {
-        [$otherAgen] = $this->branch();
-        $foreignOnly = $this->product($otherAgen);      // Transit only at another Agent
-        $noTransit = $this->product(null, 0);           // exists, but this Agent holds none
+        $product = $this->product(null, 0);
 
-        foreach ([$foreignOnly->id, $noTransit->id, 999999] as $productId) {
+        $listed = collect($this->actingAs($this->sub)->getJson('/api/v1/sub-stock/replenishment-targets')->assertOk()->json('data'))->firstWhere('product_id', $product->id);
+        $this->assertNotNull($listed, 'a valid target is listed even with zero Transit');
+        $this->assertSame(0, $listed['current_transit']);
+
+        $id = $this->actingAs($this->sub)->postJson('/api/v1/sub-stock/requests', [
+            'direction' => 'replenish', 'items' => [['product_id' => $product->id, 'quantity' => 4]],
+        ])->assertCreated()->json('data.id');
+        $this->actingAs($this->admin)->postJson("/api/v1/sub-stock/requests/{$id}/approve")->assertOk();
+
+        $this->actingAs($this->gudang)->postJson("/api/v1/sub-stock/requests/{$id}/execute")->assertUnprocessable();
+        $this->assertNull($this->subQty($product));
+        $this->assertSame(0, StockMovement::withoutGlobalScopes()->where('product_id', $product->id)->count());
+        $this->assertSame(0, StockHandover::withoutGlobalScopes()->count());
+        $this->assertSame(0, StockTransfer::withoutGlobalScopes()->count());
+        $this->assertSame('approved', SubStockRequest::withoutGlobalScopes()->findOrFail($id)->status);
+
+        WarehouseStock::create(['agent_id' => $this->agen->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 10]);
+        $this->actingAs($this->gudang)->postJson("/api/v1/sub-stock/requests/{$id}/execute")->assertOk()->assertJsonPath('data.status', 'executed');
+        $this->assertSame(4, $this->subQty($product));
+    }
+
+    public function test_invalid_or_ineligible_targets_are_rejected(): void
+    {
+        $inactive = $this->product();
+        DB::table('products')->where('id', $inactive->id)->update(['status' => 'draft']);
+        $deleted = $this->product();
+        $deleted->delete();
+        $withVariations = $this->product();
+        DB::table('products')->where('id', $withVariations->id)->update(['has_variations' => true]);
+
+        foreach ([$inactive->id, $deleted->id, $withVariations->id, 999999] as $productId) {
             $this->actingAs($this->sub)->postJson('/api/v1/sub-stock/requests', [
                 'direction' => 'replenish', 'items' => [['product_id' => $productId, 'quantity' => 1]],
             ])->assertUnprocessable();
@@ -121,9 +154,10 @@ class SubStockReplenishmentTargetsTest extends TestCase
             'direction' => 'replenish', 'items' => [['product_variation_id' => 999999, 'quantity' => 1]],
         ])->assertUnprocessable();
 
-        $ids = collect($this->actingAs($this->sub)->getJson('/api/v1/sub-stock/replenishment-targets')->assertOk()->json('data'))->pluck('product_id');
-        $this->assertNotContains($foreignOnly->id, $ids->all());
-        $this->assertNotContains($noTransit->id, $ids->all());
+        $ids = collect($this->actingAs($this->sub)->getJson('/api/v1/sub-stock/replenishment-targets')->assertOk()->json('data'))->pluck('product_id')->all();
+        $this->assertNotContains($inactive->id, $ids);
+        $this->assertNotContains($deleted->id, $ids);
+        $this->assertNotContains($withVariations->id, $ids);
 
         $this->actingAs($this->admin)->getJson('/api/v1/sub-stock/replenishment-targets')->assertForbidden();
         $this->actingAs($this->gudang)->getJson('/api/v1/sub-stock/replenishment-targets')->assertForbidden();

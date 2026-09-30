@@ -183,12 +183,23 @@ intentionally left as-is.
 | MAJOR-1 agent reservation vs Sub replenishment capacity race | serialized capacity check/reservation | `AgentSubCapacityConcurrencyTest` | 5d545ec |
 | MAJOR-2 generic transfer approved after Sub got an owner | `approve()` re-checks ownership under lock (same row `assignOwner` locks) | `GenericTransferOwnershipBypassTest`, `TransferOwnershipAssignmentConcurrencyTest` | 2ecc2e5 |
 | MAJOR-3 Sub Location UI ≠ API | Agen/Admin-only create with `owner_user_id` selector, owner shown, explicit assign for unowned legacy locations; Gudang sees no controls (`WarehouseSubLocationsView.vue`, `api/warehouse.ts`) | existing backend forged/cross-Agent owner tests; type-check + build (no frontend test framework, per instruction) | 4ea8295 |
-| MAJOR-4 first / new-SKU replenishment impossible | `GET /sub-stock/replenishment-targets` (Agent Transit stock, no Sub row needed); `create()` rejects replenish targets not in the Agent's Transit; return stays limited to Sub sellable; no fake zero rows | `SubStockReplenishmentTargetsTest` (zero-row first flow, new SKU, forged/foreign/no-Transit/invalid variation, role gate) | 3729084 (backend), afaec33 (UI) |
+| MAJOR-4 first / new-SKU replenishment impossible | `GET /sub-stock/replenishment-targets` (valid active catalog targets, no Sub row and no Transit>0 needed; returns informational `current_transit`); `create()` rejects only invalid/inactive/deleted/wrong-kind targets (see Correction below); return stays limited to Sub sellable; no fake zero rows | `SubStockReplenishmentTargetsTest` (zero-row first flow, new SKU, forged/foreign/no-Transit/invalid variation, role gate) | 3729084 (backend), afaec33 (UI) |
 | MINOR-5 relation key | canonical `sub_location` (API already emitted it); TS type + Approvals/Execution views fixed | `SubStockReplenishmentTargetsTest::test_request_responses_use_the_canonical_snake_case_sub_location_key` (sub/admin/gudang, asserts `subLocation` absent) | afaec33 |
 | MINOR-6 load/pagination error states | explicit loading / error(+retry) / empty in SubStock, Approvals, Execution; backend 404 "no active Sub Location" shown as such | type-check + build | afaec33 |
 
+### Correction (post Round-2): replenish request must not require Transit > 0
+A replenish request is demand only (request -> Admin approve -> Gudang execute). Commit 3729084 wrongly required
+current Transit > 0 for listing/creating. Corrected: targets = active Products without variations + active Variations of
+active variation-products (catalog is global, so eligible for every Agent network); `current_transit` is returned for UI
+information only. Execution stays authoritative: Transit sufficiency and the 5d545ec Agent reservation/capacity locks are
+untouched, insufficient Transit fails 422 with no transfer/movement/handover and the request stays `approved`.
+Return remains limited to the Sub's own sellable stock. Tests: `SubStockReplenishmentTargetsTest`
+(zero-Transit request -> execute fails safely -> add Transit -> execute succeeds; inactive/deleted/variation-mismatch/
+nonexistent targets rejected; first-stock and new-SKU flows unchanged).
+
 ### Results
-Backend `vendor/bin/phpunit`: **718 tests, 4674 assertions, 0 failures**. Frontend `npm run type-check` clean, `npm run build-only` OK (pre-existing chunk-size warning only).
+Backend `vendor/bin/phpunit`: **719 tests, 4684 assertions, 0 failures**. Frontend type-check clean, `build-only` OK (chunk-size warning only).
+
 
 ### Remaining
 None. Manual DEV/UAT still needed for role visibility/interaction in the Sub Location and Sub stock screens. `main` not merged; production untouched; R-03/R-04 untouched. Branch not pushed yet.

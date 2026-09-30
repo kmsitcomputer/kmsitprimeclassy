@@ -182,14 +182,14 @@ onMounted(async () => {
           <span class="rounded bg-white px-2 py-1 text-xs">Sellable: <strong>{{ row.sellable }}</strong></span>
         </div>
 
-        <h3 class="mb-2 mt-4 text-sm font-semibold">{{ direction === 'replenish' ? 'Pilih produk dari stok Transit Agen' : 'Pilih produk dari stok Sub Anda' }}</h3>
-        <div v-if="!draftRows.length" class="mb-2 text-sm text-stone-400">{{ direction === 'replenish' ? 'Tidak ada stok Transit Agen yang dapat diminta saat ini.' : 'Tidak ada stok Sub yang dapat diretur.' }}</div>
+        <h3 class="mb-2 mt-4 text-sm font-semibold">{{ direction === 'replenish' ? 'Pilih produk yang diminta (ketersediaan Transit dicek Gudang saat eksekusi)' : 'Pilih produk dari stok Sub Anda' }}</h3>
+        <div v-if="!draftRows.length" class="mb-2 text-sm text-stone-400">{{ direction === 'replenish' ? 'Belum ada produk aktif yang dapat diminta.' : 'Tidak ada stok Sub yang dapat diretur.' }}</div>
         <div v-for="row in draftRows" :key="'d-' + rowKey(row)" class="mb-2 flex flex-wrap items-center gap-3 rounded-lg bg-stone-50 p-2 text-sm">
           <span class="min-w-0 flex-1 basis-48">
             <span class="font-medium">{{ itemName(row) }}</span>
             <span class="block text-xs text-stone-400">{{ skuLabel(row.product?.sku ?? row.variation?.sku ?? null) }}</span>
           </span>
-          <span v-if="'transit' in row" class="rounded bg-white px-2 py-1 text-xs">Transit: <strong>{{ row.transit }}</strong></span>
+          <span v-if="'current_transit' in row" class="rounded bg-white px-2 py-1 text-xs">Transit saat ini: <strong>{{ row.current_transit }}</strong></span>
           <span v-else class="rounded bg-white px-2 py-1 text-xs">Sellable: <strong>{{ row.sellable }}</strong></span>
           <input v-model.number="draftQuantities[rowKey(row)]" type="number" min="0" class="w-24 rounded-lg border border-stone-200 p-2" placeholder="Jml" :disabled="submitting" />
         </div>

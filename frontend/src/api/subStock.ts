@@ -54,8 +54,8 @@ export interface SubStockRow {
   variation?: SubStockVariationRef | null
 }
 
-export interface SubStockTarget extends SubStockRow {
-  transit: number
+export interface SubStockTarget extends Omit<SubStockRow, 'physical' | 'reserved' | 'sellable'> {
+  current_transit: number
 }
 
 export async function replenishmentTargets() {

@@ -4,6 +4,8 @@ namespace App\Services\Stock;
 
 use App\Exceptions\ApiException;
 use App\Models\ActivityLog;
+use App\Models\Product;
+use App\Models\ProductVariation;
 use App\Models\Role;
 use App\Models\StockHandover;
 use App\Models\SubStockRequest;
@@ -46,7 +48,7 @@ class SubStockRequestService
             ?? throw new ApiException('Anda belum memiliki Sub Location aktif.', 422);
         $normalized = $this->normalizeItems($items);
         if ($direction === SubStockRequest::REPLENISH) {
-            $this->assertReplenishable($actor->agent_id, $normalized);
+            $this->assertReplenishable($normalized);
         }
 
         if ($idempotencyKey) {
@@ -86,32 +88,41 @@ class SubStockRequestService
     }
 
     /**
-     * Server-authoritative replenishment targets: everything the Agent holds in Transit, independent of whether
-     * this Sub has ever stocked it (no fake zero Sub rows needed). Return targets stay the Sub's own stock.
+     * Server-authoritative replenishment targets: every active catalog Product (without variations) and active
+     * Variation, whether or not this Sub or the Agent currently holds any stock. A request is demand only;
+     * `current_transit` is informational and execute() stays authoritative for sufficiency.
      *
-     * @return \Illuminate\Support\Collection<int, WarehouseStock>
+     * @return list<array<string, mixed>>
      */
-    public function replenishmentTargets(User $actor)
+    public function replenishmentTargets(User $actor): array
     {
         if (! $actor->isRole(Role::SALES_KURIR_SUB) || ! $actor->agent_id) {
             throw new ApiException('Hanya Sales-Kurir-Sub yang dapat melihat target pengisian stok.', 403);
         }
+        $transit = WarehouseStock::withoutGlobalScopes()->where('agent_id', $actor->agent_id)->where('stock_type', 'transit')
+            ->whereNull('sub_location_id')->get()
+            ->mapWithKeys(fn ($row) => [($row->product_variation_id ? 'v:'.$row->product_variation_id : 'p:'.$row->product_id) => (int) $row->quantity]);
 
-        return WarehouseStock::withoutGlobalScopes()->where('agent_id', $actor->agent_id)->where('stock_type', 'transit')
-            ->whereNull('sub_location_id')->where('quantity', '>', 0)->with(['product:id,name,sku', 'variation'])->get();
+        $targets = [];
+        foreach (Product::query()->where('status', 'active')->where('has_variations', false)->orderBy('name')->get(['id', 'name', 'sku']) as $product) {
+            $targets[] = ['product_id' => $product->id, 'product_variation_id' => null, 'product' => $product->only(['id', 'name', 'sku']), 'variation' => null, 'current_transit' => $transit->get('p:'.$product->id, 0)];
+        }
+        foreach (ProductVariation::query()->where('is_active', true)->whereHas('product', fn ($q) => $q->where('status', 'active')->where('has_variations', true))->with('product:id,name,sku')->orderBy('product_id')->orderBy('sort_order')->get() as $variation) {
+            $targets[] = ['product_id' => null, 'product_variation_id' => $variation->id, 'product' => $variation->product?->only(['id', 'name', 'sku']), 'variation' => ['id' => $variation->id, 'sku' => $variation->sku], 'current_transit' => $transit->get('v:'.$variation->id, 0)];
+        }
+
+        return $targets;
     }
 
     /** @param list<array{product_id:?int, product_variation_id:?int, quantity:int}> $rows */
-    private function assertReplenishable(int $agentId, array $rows): void
+    private function assertReplenishable(array $rows): void
     {
         foreach ($rows as $row) {
-            $eligible = WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('stock_type', 'transit')
-                ->whereNull('sub_location_id')->where('quantity', '>', 0)
-                ->when($row['product_variation_id'], fn ($q, $id) => $q->where('product_variation_id', $id)->whereNull('product_id'))
-                ->when($row['product_id'], fn ($q, $id) => $q->where('product_id', $id)->whereNull('product_variation_id'))
-                ->exists();
+            $eligible = $row['product_variation_id']
+                ? ProductVariation::query()->whereKey($row['product_variation_id'])->where('is_active', true)->whereHas('product', fn ($q) => $q->where('status', 'active')->where('has_variations', true))->exists()
+                : Product::query()->whereKey($row['product_id'])->where('status', 'active')->where('has_variations', false)->exists();
             if (! $eligible) {
-                throw new ApiException('Produk/varian tidak tersedia di stok Transit Agen untuk pengisian Sub.', 422, ['items' => 'Target tidak valid.']);
+                throw new ApiException('Produk/varian tidak valid atau tidak aktif untuk pengisian Sub.', 422, ['items' => 'Target tidak valid.']);
             }
         }
     }
