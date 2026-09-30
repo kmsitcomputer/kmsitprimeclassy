@@ -412,7 +412,8 @@ if (str_starts_with($role, 'sr-')) {
             case 'checkout-order':
                 // Finding 1: the REAL multi-line checkout path (OrderService::createOrder) so a
                 // reversed-line order genuinely exercises the pre-lock canonicalisation, racing a
-                // real Transit -> Sub execution in the sibling op.
+                // real Transit -> Sub execution in the sibling op. `stock_source`/`sub_location_id`
+                // drive the Sub-sourced MAJOR C race through the same real path.
                 $buyer = User::withoutGlobalScopes()->findOrFail((int) $extra['buyer_id']);
                 $result = app(OrderService::class)->createOrder(
                     $buyer,
@@ -425,7 +426,62 @@ if (str_starts_with($role, 'sr-')) {
                     null,
                     null,
                     null,
+                    $extra['stock_source'] ?? null,
+                    isset($extra['sub_location_id']) ? (int) $extra['sub_location_id'] : null,
                 );
+                break;
+            case 'cancel-order':
+                // MAJOR B: the REAL cancellation reversal path, racing a real Transit -> Sub
+                // execution. Its Agent capacity prelock must be canonical.
+                $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+                $order = Order::withoutGlobalScopes()->findOrFail((int) $extra['order_id']);
+                $result = app(OrderService::class)->cancel($order, $actor, (string) ($extra['reason'] ?? 'concurrency cancellation'));
+                break;
+            case 'sub-reserve-order':
+                // MAJOR C: the real multi-target Sub reservation sequence OrderService uses — the
+                // production canonical prelock (SubStockService::lockReservationTargets) followed by
+                // the production per-item reserve() in the caller's line order. `canonicalize` false
+                // skips the prelock (the pre-fix behaviour) and is used as a positive control.
+                $subLocationId = (int) $extra['sub_location_id'];
+                $itemIds = array_map('intval', $extra['order_item_ids']);
+                $canonicalize = (bool) ($extra['canonicalize'] ?? true);
+                $barrierDir = $extra['barrier_dir'] ?? null;
+                $side = (string) ($extra['side'] ?? 'a');
+                $peerFirstKey = $extra['peer_first_key'] ?? null;
+                $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+                $result = DB::transaction(function () use ($subLocationId, $itemIds, $canonicalize, $barrierDir, $side, $peerFirstKey, $actor) {
+                    $items = OrderItem::whereIn('id', $itemIds)->get()->keyBy('id');
+                    $ordered = [];
+                    foreach ($itemIds as $id) {
+                        $ordered[] = $items[$id];
+                    }
+                    $subStock = app(SubStockService::class);
+                    if ($canonicalize) {
+                        $subStock->lockReservationTargets($subLocationId, array_map(fn ($item) => [
+                            'product_id' => $item->product_variation_id ? null : $item->product_id,
+                            'product_variation_id' => $item->product_variation_id,
+                        ], $ordered));
+                    }
+                    $firstKey = StockService::canonicalTargetKey($ordered[0]->product_variation_id ? null : $ordered[0]->product_id, $ordered[0]->product_variation_id);
+                    foreach ($ordered as $index => $item) {
+                        $agentId = (int) Order::withoutGlobalScopes()->whereKey($item->order_id)->value('agent_id');
+                        $subStock->reserve($item, $subLocationId, $agentId, (int) $item->original_quantity, $actor);
+
+                        // Positive-control barrier: only when the prelock is skipped and the two sides
+                        // start on DIFFERENT targets, pause after the first reserve so each holds one
+                        // Sub row before either attempts its second (a guaranteed cycle).
+                        if ($index === 0 && ! $canonicalize && $barrierDir !== null && $peerFirstKey !== null && $peerFirstKey !== $firstKey) {
+                            @file_put_contents($barrierDir.'/'.$side.'.first', '1');
+                            $peer = $barrierDir.'/'.($side === 'a' ? 'b' : 'a').'.first';
+                            $deadline = microtime(true) + 20;
+                            while (! file_exists($peer) && microtime(true) < $deadline) {
+                                usleep(20000);
+                            }
+                        }
+                    }
+
+                    return null;
+                });
                 break;
             default:
                 throw new InvalidArgumentException('Unknown service race operation: '.$operation);

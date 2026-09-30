@@ -20,6 +20,7 @@ class InventoryCancellationService
     public function reverseOrder(Order $order, int $actorId): void
     {
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->lockForUpdate()->first();
+        $this->lockAgentCapacityForReversal($order);
         foreach ($order->items as $item) {
             if (! $item->canTransitionTo('dibatalkan')) {
                 continue;
@@ -28,6 +29,34 @@ class InventoryCancellationService
         }
         if ($request && $request->status !== 'cancelled') {
             $request->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+        }
+    }
+
+    /**
+     * Canonical Agent capacity prelock for a reversal. Every non-Sub item's release touches the Agent
+     * commitment row, and a fulfilled item also touches Transit/Shipping, so this acquires the Agent
+     * capacity locks in the SAME canonical target order checkout and Transit -> Sub replenishment use
+     * — BEFORE the per-item reversal loop runs. The loop still executes in its original item order.
+     *
+     * Sub-sourced items reserve nothing in Agent stock, so they are excluded (they release in the Sub
+     * ledger). Locking the commitment and Transit/Plan rows here also fixes the ordering relative to
+     * reverseShippingToTransit(): the Transit row is already held, so the later Shipping lock can never
+     * invert against a concurrent Transit -> Sub execution.
+     */
+    private function lockAgentCapacityForReversal(Order $order): void
+    {
+        $targets = [];
+        foreach ($order->items as $item) {
+            if ($item->isSubSourced()) {
+                continue;
+            }
+            $targets[] = [
+                'product_id' => $item->product_variation_id ? null : $item->product_id,
+                'product_variation_id' => $item->product_variation_id,
+            ];
+        }
+        if ($targets !== []) {
+            $this->stockService->lockReservationTargets($order->agent_id, $targets);
         }
     }
 
