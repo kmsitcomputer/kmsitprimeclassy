@@ -189,6 +189,24 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['gudang'] },
     },
     {
+      path: '/dashboard/sub-stock',
+      name: 'sub-stock',
+      component: () => import('@/views/dashboard/SubStockView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['sales-kurir-sub'] },
+    },
+    {
+      path: '/dashboard/sub-stock/approvals',
+      name: 'sub-stock-approvals',
+      component: () => import('@/views/dashboard/SubStockApprovalsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['admin'] },
+    },
+    {
+      path: '/dashboard/sub-stock/execution',
+      name: 'sub-stock-execution',
+      component: () => import('@/views/dashboard/SubStockExecutionView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang'] },
+    },
+    {
       path: '/dashboard/products',
       name: 'product-management',
       component: () => import('@/views/dashboard/ProductManagementView.vue'),

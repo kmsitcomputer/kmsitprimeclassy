@@ -1,0 +1,86 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import DashboardLayout from '@/layouts/DashboardLayout.vue'
+import { listSubStockRequests, subStockAction, type SubStockRequest, type SubStockRequestItem } from '@/api/subStock'
+import { skuLabel } from '@/utils/format'
+
+const requests = ref<SubStockRequest[]>([])
+const meta = ref({ current_page: 1, last_page: 1, total: 0 })
+const status = ref<'approved' | ''>('approved')
+const error = ref('')
+const success = ref('')
+const executing = ref<number | null>(null)
+
+function itemName(item: SubStockRequestItem): string {
+  return item.variation?.sku
+    ? `${item.product?.name ?? 'Produk'} — ${item.variation.sku}`
+    : (item.product?.name ?? (item.product_variation_id != null ? `Varian #${item.product_variation_id}` : `Produk #${item.product_id}`))
+}
+
+async function load(reset = false) {
+  if (reset) meta.value.current_page = 1
+  const { requests: rows, meta: m } = await listSubStockRequests({ status: status.value || undefined, page: meta.value.current_page })
+  requests.value = rows
+  meta.value = m
+}
+
+async function execute(id: number) {
+  if (executing.value) return
+  error.value = ''; success.value = ''
+  executing.value = id
+  try {
+    await subStockAction(id, 'execute')
+    success.value = 'Pergerakan stok dieksekusi.'
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Gagal mengeksekusi permintaan.'
+  } finally {
+    executing.value = null
+  }
+}
+
+function onPage(d: number) {
+  meta.value.current_page = Math.max(1, meta.value.current_page + d)
+  void load()
+}
+
+onMounted(() => load())
+</script>
+
+<template>
+  <DashboardLayout>
+    <h1 class="mb-1 font-display text-2xl font-semibold">Eksekusi Stok Sub</h1>
+    <p class="mb-5 text-sm text-stone-500">Isi ulang: Transit → Sub. Retur: Sub → Transit. Hanya permintaan yang sudah disetujui Admin yang dapat dieksekusi.</p>
+    <p v-if="error" class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{{ error }}</p>
+    <p v-if="success" class="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-600">{{ success }}</p>
+
+    <div class="mb-4 flex max-w-xl gap-2">
+      <select v-model="status" class="rounded-lg border border-stone-200 px-3 py-2 text-sm" @change="load(true)">
+        <option value="approved">Siap dieksekusi</option>
+        <option value="executed">Sudah dieksekusi</option>
+        <option value="received">Diterima Sub</option>
+        <option value="">Semua</option>
+      </select>
+    </div>
+
+    <div v-if="!requests.length" class="text-sm text-stone-400">Tidak ada permintaan.</div>
+    <ul class="grid gap-3">
+      <li v-for="request in requests" :key="request.id" class="rounded-xl border border-stone-200 bg-white p-4">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <span class="font-medium">{{ request.request_number }}</span>
+          <span class="text-xs text-stone-400">{{ request.subLocation?.name ?? '' }} · {{ request.requester?.name ?? '' }} · {{ request.direction === 'replenish' ? 'Isi ulang (Transit → Sub)' : 'Retur (Sub → Transit)' }}</span>
+          <span class="rounded-full bg-stone-100 px-2 py-0.5 text-xs">{{ request.status }}</span>
+        </div>
+        <ul class="mb-2 grid gap-1 text-xs text-stone-500">
+          <li v-for="item in request.items" :key="item.id">{{ itemName(item) }} · {{ skuLabel(item.product?.sku ?? item.variation?.sku ?? null) }} · {{ item.quantity }}</li>
+        </ul>
+        <button v-if="request.status === 'approved'" type="button" :disabled="executing === request.id" class="rounded-xl bg-brand-600 px-4 py-2 font-semibold text-white disabled:opacity-40" @click="execute(request.id)">Eksekusi</button>
+      </li>
+    </ul>
+    <div v-if="meta.last_page > 1" class="mt-3 flex items-center gap-2 text-sm">
+      <button type="button" class="rounded-lg border border-stone-200 px-3 py-1" :disabled="meta.current_page <= 1" @click="onPage(-1)">Prev</button>
+      <span>Halaman {{ meta.current_page }} / {{ meta.last_page }} ({{ meta.total }})</span>
+      <button type="button" class="rounded-lg border border-stone-200 px-3 py-1" :disabled="meta.current_page >= meta.last_page" @click="onPage(1)">Next</button>
+    </div>
+  </DashboardLayout>
+</template>

@@ -5,11 +5,24 @@ import type { ApiEnvelope } from './client'
 export type SubStockDirection = 'replenish' | 'return'
 export type SubStockRequestStatus = 'requested' | 'approved' | 'rejected' | 'cancelled' | 'executed' | 'received'
 
+export interface SubStockProductRef {
+  id: number
+  name: string
+  sku?: string | null
+}
+
+export interface SubStockVariationRef {
+  id: number
+  sku?: string | null
+}
+
 export interface SubStockRequestItem {
   id: number
   product_id: number | null
   product_variation_id: number | null
   quantity: number
+  product?: SubStockProductRef | null
+  variation?: SubStockVariationRef | null
 }
 
 export interface SubStockRequest {
@@ -20,6 +33,15 @@ export interface SubStockRequest {
   sub_location_id: number
   note: string | null
   items: SubStockRequestItem[]
+  subLocation?: { id: number; code: string; name: string } | null
+  requester?: { id: number; name: string } | null
+  rejection_reason: string | null
+  created_at?: string | null
+  approved_at?: string | null
+  rejected_at?: string | null
+  cancelled_at?: string | null
+  executed_at?: string | null
+  received_at?: string | null
 }
 
 export interface SubStockRow {
@@ -28,11 +50,13 @@ export interface SubStockRow {
   physical: number
   reserved: number
   sellable: number
+  product?: SubStockProductRef | null
+  variation?: SubStockVariationRef | null
 }
 
 export async function listSubStockRequests(params: { status?: string; direction?: string; page?: number } = {}) {
   const { data } = await http.get<ApiEnvelope<SubStockRequest[]>>('/sub-stock/requests', { params })
-  return data.data
+  return { requests: data.data, meta: data.meta as { current_page: number; last_page: number; total: number } }
 }
 
 export async function createSubStockRequest(
@@ -51,6 +75,6 @@ export async function subStockAction(id: number, action: 'approve' | 'reject' | 
 }
 
 export async function mySubStock() {
-  const { data } = await http.get<ApiEnvelope<{ sub_location: { id: number; code: string; name: string }; stocks: SubStockRow[] }>>('/sub-stock/my')
+  const { data } = await http.get<ApiEnvelope<{ sub_location: { id: number; code: string; name: string; address?: string | null; contact_number?: string | null }; stocks: SubStockRow[] }>>('/sub-stock/my')
   return data.data
 }

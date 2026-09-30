@@ -142,6 +142,27 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'gudang'),
       },
       {
+        key: 'sub-stock',
+        label: 'Stok Sub Saya',
+        routeName: 'sub-stock',
+        icon: 'box',
+        show: (auth) => isRole(auth, 'sales-kurir-sub'),
+      },
+      {
+        key: 'sub-stock-approvals',
+        label: 'Persetujuan Stok Sub',
+        routeName: 'sub-stock-approvals',
+        icon: 'document',
+        show: (auth) => isRole(auth, 'admin'),
+      },
+      {
+        key: 'sub-stock-execution',
+        label: 'Eksekusi Stok Sub',
+        routeName: 'sub-stock-execution',
+        icon: 'truck',
+        show: (auth) => isRole(auth, 'gudang'),
+      },
+      {
         key: 'products',
         label: 'Produk & Kategori',
         routeName: 'product-management',
