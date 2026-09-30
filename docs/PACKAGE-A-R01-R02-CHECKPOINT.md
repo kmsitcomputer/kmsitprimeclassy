@@ -282,3 +282,73 @@ screens. `main` not merged; production untouched; R-03/R-04 untouched.
 
 ### EXACT NEXT ACTION
 Push `remed/package-a-vps` to origin on user confirmation; then DEV/UAT.
+
+---
+
+## Codex Round-4 remediation (branch `remed/package-a-vps`)
+
+Three remaining MAJOR concurrency findings: A (prelock target ≠ reserved target), B (cancellation vs
+Sub replenishment lock inversion), C (concurrent multi-target Sub checkout). Starting HEAD `046db5e`.
+R-03/R-04 untouched; `main` not merged; production untouched; no migrations.
+
+| Finding | Fix | Tests | Commit |
+|---|---|---|---|
+| A prelock target ≠ reserved target | one effective inventory target per line, resolved once and used by both prelock and reserve | `OrderInventoryTargetResolutionTest` | `remed: normalize order inventory targets before locking` |
+| B cancellation vs replenishment inversion | canonical Agent capacity prelock before the reversal loop | `CancellationReplenishmentConcurrencyTest` | `remed: canonicalize cancellation inventory locks` |
+| C concurrent multi-target Sub checkout | canonical Sub WarehouseStock prelock before the per-line Sub reserve | `SubCheckoutConcurrencyTest` | `remed: canonicalize multi-target sub checkout locks` |
+
+### Target-resolution decision (MAJOR A)
+`OrderService::resolveLine()` is now the single source of truth for a line's EFFECTIVE inventory
+target: a product with `has_variations = false` is a PRODUCT target and must NOT carry a variation id
+(supplying one is now a 422 `messages.product.variation_not_allowed`, not silently ignored); a
+variation product is a VARIATION target and requires an active variation of THAT product (missing →
+422 `variation_required`; foreign/inactive → 404, unchanged). `createOrder` resolves every line once
+(`$resolvedLines`), builds `$reservationTargets` from it, and both the canonical prelock and
+`priceAndReserveLine()` consume those resolved lines — so the prelocked target can never differ from
+the target actually reserved. `quoteLine()` uses the same resolver, so quote and order share line
+semantics. The per-line loop still runs in the incoming order (presentation/order-item order
+unchanged). New lang key in all 4 locales.
+
+### Canonical Agent cancellation locking (MAJOR B)
+`InventoryCancellationService::lockAgentCapacityForReversal()` runs before the per-item reversal
+loop: it collects each non-Sub item's target, locks them via `StockService::lockReservationTargets()`
+(canonical order, commitment row → Transit/Plan), then the loop releases in its original item order.
+Sub-sourced items are excluded (they release in the Sub ledger). Because the Transit row is already
+held, the later `reverseShippingToTransit()` Shipping lock cannot invert against a concurrent
+Transit → Sub execution.
+
+### Canonical Sub checkout locking (MAJOR C)
+`SubStockService::lockReservationTargets($subLocationId, $targets)` locks the Sub WarehouseStock rows
+for every effective target in the same canonical order the Agent domain uses
+(`StockService::canonicalReservationTargets`), creating no rows (a missing row stays normal
+insufficient stock). `OrderService::createOrder` calls it for Sub-sourced orders before the per-line
+Sub `reserve()` loop. Per-target order (Sub stock row → reservation rows) and the
+Sellable = Physical − Reserved formula are unchanged.
+
+### Results
+Backend `php artisan test`: **736 tests, 5013 assertions, 0 failures** (727 baseline + 9 new).
+Frontend `npm run type-check` clean, `npm run build-only` OK (pre-existing chunk-size warning only).
+
+### Files changed (Round-4)
+- `backend/app/Services/Order/OrderService.php` — `resolveLine`/`resolvedTarget`; canonical Agent prelock and Sub prelock from resolved targets; `priceAndReserveLine` takes a resolved line
+- `backend/app/Services/Order/InventoryCancellationService.php` — `lockAgentCapacityForReversal` prelock
+- `backend/app/Services/Stock/SubStockService.php` — `lockReservationTargets`
+- `backend/lang/{en,id,ar,zh}/messages.php` — `product.variation_not_allowed`
+- `backend/.phpunit-concurrency-actor.php` — `cancel-order`, `sub-reserve-order` race ops; `checkout-order` gains `stock_source`/`sub_location_id`
+- `backend/tests/Feature/OrderInventoryTargetResolutionTest.php` (new)
+- `backend/tests/Feature/CancellationReplenishmentConcurrencyTest.php` (new)
+- `backend/tests/Feature/SubCheckoutConcurrencyTest.php` (new)
+
+### Residual concurrency note (concrete competing path only)
+Two REAL checkouts cannot be made to race on Sub rows because they serialize on the global unique
+`orders.order_no` placeholder `'TEMP'` (set on insert, updated after pricing) — an unrelated
+pre-existing checkout artifact, not a Sub-domain lock. MAJOR C's Sub lock ordering is therefore
+covered by a deterministic race of the production Sub prelock + reserve sequence (with a positive
+control that deadlocks when the prelock is skipped) plus a functional real-checkout test. This was
+left unchanged (out of scope, and changing order numbering would be risky).
+
+### Remaining
+Manual DEV/UAT still needed. `main` not merged; production untouched; R-03/R-04 untouched.
+
+### EXACT NEXT ACTION
+Push `remed/package-a-vps` to origin on user confirmation; then DEV/UAT.
