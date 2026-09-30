@@ -88,6 +88,17 @@ class SubStockRequestController extends Controller
         return $this->ok($this->requests->receive($request->user(), $subStockRequest)->load(self::WITH));
     }
 
+    /** Transit-backed replenishment targets; does not require any existing Sub stock row. */
+    public function replenishmentTargets(Request $request)
+    {
+        $rows = $this->requests->replenishmentTargets($request->user())->map(fn ($row) => [
+            'product_id' => $row->product_id, 'product_variation_id' => $row->product_variation_id,
+            'product' => $row->product, 'variation' => $row->variation, 'transit' => $row->quantity,
+        ])->values();
+
+        return $this->ok($rows);
+    }
+
     /** The Sales-Kurir-Sub's own Sub Location with physical / reserved / sellable per target. */
     public function myStock(Request $request, SubLocationOwnershipService $ownership, SubStockService $subStock)
     {

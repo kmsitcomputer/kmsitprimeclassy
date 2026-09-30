@@ -8,6 +8,7 @@ use App\Models\Role;
 use App\Models\StockHandover;
 use App\Models\SubStockRequest;
 use App\Models\User;
+use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -44,6 +45,9 @@ class SubStockRequestService
         $location = $this->ownership->locationOf($actor)
             ?? throw new ApiException('Anda belum memiliki Sub Location aktif.', 422);
         $normalized = $this->normalizeItems($items);
+        if ($direction === SubStockRequest::REPLENISH) {
+            $this->assertReplenishable($actor->agent_id, $normalized);
+        }
 
         if ($idempotencyKey) {
             $existing = SubStockRequest::withoutGlobalScopes()->where('requested_by', $actor->id)->where('idempotency_key', $idempotencyKey)->first();
@@ -78,6 +82,37 @@ class SubStockRequestService
                 return SubStockRequest::withoutGlobalScopes()->where('requested_by', $actor->id)->where('idempotency_key', $idempotencyKey)->firstOrFail()->load('items');
             }
             throw $e;
+        }
+    }
+
+    /**
+     * Server-authoritative replenishment targets: everything the Agent holds in Transit, independent of whether
+     * this Sub has ever stocked it (no fake zero Sub rows needed). Return targets stay the Sub's own stock.
+     *
+     * @return \Illuminate\Support\Collection<int, WarehouseStock>
+     */
+    public function replenishmentTargets(User $actor)
+    {
+        if (! $actor->isRole(Role::SALES_KURIR_SUB) || ! $actor->agent_id) {
+            throw new ApiException('Hanya Sales-Kurir-Sub yang dapat melihat target pengisian stok.', 403);
+        }
+
+        return WarehouseStock::withoutGlobalScopes()->where('agent_id', $actor->agent_id)->where('stock_type', 'transit')
+            ->whereNull('sub_location_id')->where('quantity', '>', 0)->with(['product:id,name,sku', 'variation'])->get();
+    }
+
+    /** @param list<array{product_id:?int, product_variation_id:?int, quantity:int}> $rows */
+    private function assertReplenishable(int $agentId, array $rows): void
+    {
+        foreach ($rows as $row) {
+            $eligible = WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('stock_type', 'transit')
+                ->whereNull('sub_location_id')->where('quantity', '>', 0)
+                ->when($row['product_variation_id'], fn ($q, $id) => $q->where('product_variation_id', $id)->whereNull('product_id'))
+                ->when($row['product_id'], fn ($q, $id) => $q->where('product_id', $id)->whereNull('product_variation_id'))
+                ->exists();
+            if (! $eligible) {
+                throw new ApiException('Produk/varian tidak tersedia di stok Transit Agen untuk pengisian Sub.', 422, ['items' => 'Target tidak valid.']);
+            }
         }
     }
 

@@ -369,6 +369,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     });
     Route::middleware('role:sales-kurir-sub')->group(function () {
         Route::get('/sub-stock/my', [SubStockRequestController::class, 'myStock']);
+        Route::get('/sub-stock/replenishment-targets', [SubStockRequestController::class, 'replenishmentTargets']);
         Route::post('/sub-stock/requests', [SubStockRequestController::class, 'store']);
         Route::post('/sub-stock/requests/{subStockRequest}/cancel', [SubStockRequestController::class, 'cancel']);
         Route::post('/sub-stock/requests/{subStockRequest}/receive', [SubStockRequestController::class, 'receive']);
