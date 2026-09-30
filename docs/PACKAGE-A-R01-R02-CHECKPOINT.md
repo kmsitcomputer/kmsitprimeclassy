@@ -36,3 +36,140 @@ Backend `vendor/bin/phpunit`: Tests: 706, Assertions: 4540, Failures: 2 (baselin
 Frontend: `npm run type-check` clean, `npm run build-only` OK (no frontend test script in repo).
 
 ## Status: COMPLETE — nothing remaining in Package A. See docs/R01-R02-SALES-KURIR-SUB-AND-SUB-STOCK.md.
+
+---
+
+## Remediation pass (branch `remed/package-a-vps`)
+
+Structured review of the Package A diff (`9d97961..3c79f42`) against the 7 mandatory review
+areas. VPS baseline confirmed before remediation: 706 tests / 4542 assertions / 0 failures
+(RajaOngkir passes clean on this VPS; the 2 Cloud-sandbox failures do not reproduce here and
+were not touched).
+
+### Findings
+
+**BLOCKER — Area 1, Sub stock shipment boundary.**
+Sub-sourced order items could have their Sub reservation consumed through two generic paths that
+never checked the acting user owned the Sub Location:
+- `OrderService::updateStatus` (`backend/app/Services/Order/OrderService.php`) — the Admin/Agen
+  bulk office override called `SubStockService::consume()` for any `dikirim` item with
+  `isSubSourced()`, unconditionally.
+- `CourierService::updateShipmentStatus` (`backend/app/Services/Order/CourierService.php`) — the
+  ownership guard `assertMayShipSubStock()` only ran when `$actor->isRole('kurir',
+  'sales-kurir-sub')`, so an Admin/Agen calling the same per-shipment endpoint (allowed by
+  `ShipmentPolicy::updateStatus` for same-agent agen/admin/super_admin) bypassed it entirely.
+  `SubStockService::consume()` itself does no actor/ownership validation — it fully trusts the
+  caller, by design, with all authorization expected upstream.
+- Expected: only the owning Sales-Kurir-Sub's own self-fulfillment path
+  (`CourierService::updateShipmentStatus`, already correctly gated for kurir/sales-kurir-sub) may
+  consume an active Sub reservation. Full delivery redesign is R-03; Package A only needed to stop
+  the accidental consumption.
+- Remediation: `OrderService::updateStatus` now throws a 422
+  (`messages.order.sub_item_requires_owner_shipment`, added to all 4 locale files) before
+  transitioning any Sub-sourced item to `dikirim` — that endpoint is never reached by
+  sales-kurir-sub in the first place (`OrderPolicy::updateStatus` only allows agen/admin/
+  super_admin), so Sub-sourced items must ship exclusively through the shipment endpoint.
+  `CourierService::updateShipmentStatus` now runs `assertMayShipSubStock()` for every actor on
+  `dikirim` (not just kurir/sales-kurir-sub), so an office actor hitting the shipment endpoint on
+  someone else's Sub Location is blocked with the same 403 as a foreign courier.
+- Tests: `SubStockSourceTest::test_admin_cannot_ship_sub_goods_via_the_shipment_endpoint`,
+  `::test_admin_cannot_ship_sub_goods_via_the_generic_order_status_endpoint`.
+
+**MAJOR — Area 2, R-02 frontend operational completeness.**
+`frontend/src/api/subStock.ts` existed but no route/view consumed it — Sales-Kurir-Sub, Admin and
+Gudang had no UI for Sub stock requests at all (confirmed by `docs/R01-R02-...md`'s own "Deferred"
+section). Added:
+- `SubStockView.vue` (`/dashboard/sub-stock`, role `sales-kurir-sub`) — own Sub stock (physical/
+  reserved/sellable), create replenish/return requests, own request history with cancel and
+  receive-handover actions.
+- `SubStockApprovalsView.vue` (`/dashboard/sub-stock/approvals`, role `admin`) — list + approve/
+  reject pending requests (agent-scoped by the existing backend query).
+- `SubStockExecutionView.vue` (`/dashboard/sub-stock/execution`, role `gudang`) — list approved
+  requests and execute (covers both replenish Transit→Sub and return Sub→Transit; `execute()` is
+  the single idempotent action for both directions per `SubStockRequestService`).
+- Wired into `router/index.ts` and `dashboard/navConfig.ts`. Fixed `api/subStock.ts` types to
+  match actual backend serialization (`SubStockRequest.subLocation`, not `sub_location` — the
+  controller returns the raw Eloquent model, so the JSON key is the relation method name; the
+  `ProductVariation` model has no `attribute_value`/`label` accessor exposed on the eager-loaded
+  `variation` relation, only `sku`) and added missing `meta`/pagination fields.
+- No R-03 invoice/delivery UI, no R-04 authority UI added.
+
+**NOT-A-FINDING — Area 3, Sub Location ownership audit.**
+`previous_owner_user_id` is a single-value column and does lose finer-grained history on repeated
+remap, but it is not the only historical record: `SubLocationOwnershipService` durably logs
+`sub_location.created` / `owner_assigned` / `deactivated` to `ActivityLog` with the
+`owner_user_id`/`released_owner_user_id` on every write, so full ownership history is
+reconstructable from `activity_logs`. Cross-Agent assignment, one-owner-one-location, and
+one-user-one-location are all enforced server-side (`lockEligibleOwner`, the `UNIQUE` index).
+Deactivation blocks on `WarehouseStock.quantity > 0`, which — given the reservation lifecycle
+(reserve never touches physical; every other physical-decrease path is guarded by
+`SubStockService::assertPhysicalDecreaseAllowed`) — already implies no active reservation can be
+bypassed. No remediation applied.
+
+**NOT-A-FINDING — Area 4, role/referral compatibility.**
+Verified: exactly 10 roles (`RoleSeeder`), `sales-kurir` renamed in place (migration
+`2026_09_29_090000`, idempotent, no 11th role), `User::isRole`/`Role::canonicalSlug` alias the
+legacy slug, SS- prefix only for new codes (`HierarchyRules::REFERRAL_PREFIXES` +
+`UserManagementService::generateCandidateReferralCode`), historical SA-/SK- codes never rewritten,
+Sales→Sales-Kurir-Sub conversion keeps the existing code. No remediation applied.
+
+**NOT-A-FINDING — Area 5, stock concurrency/idempotency.**
+`SubStockService` locks the Sub stock row before the reservation rows, consistently, in
+reserve/consume/release; reservation sums used to guard a write always use `forWrite: true`
+(locking read) to avoid the REPEATABLE READ snapshot-read oversell the code's own docblock warns
+about. `sub_stock_reservations.order_item_id` is UNIQUE, making reserve/consume naturally
+idempotent per item. `SubStockConcurrencyTest` already exercises real two-MySQL-connection races
+(oversell, double reserve/consume/transfer). No gap found; existing race tests left as-is per
+instructions.
+
+**NOT-A-FINDING — Area 6, stock source forgery.**
+`SubStockSourceTest::test_other_actors_can_never_consume_another_users_sub_stock` and
+`::test_cross_agent_sales_kurir_sub_cannot_use_a_foreign_location` already forge `sub_location_id`
+and actor identity across: other Sales, Korsal, Agen, another Sales-Kurir-Sub (both by referred
+consumer and by forged location id), the owner's own forged foreign location, a non-network
+consumer, and a mismatched `stock_source`/`sub_location_id` pair — all correctly rejected
+server-side (403/422). Extended with the two Area 1 tests above (Admin/office forgery via the
+shipment/order-status endpoints). No further gap found.
+
+**MINOR (documented, not fixed) — Area 7, migration safety.**
+`2026_09_29_090000_rename_sales_kurir_role_to_sales_kurir_sub.php`'s `down()` unconditionally
+renames `sales-kurir-sub` back to `sales-kurir`. If the migration's rare "fold" branch ran at
+`up()` time (both the legacy and canonical role rows already existed, e.g. seeder ran before this
+migration on a specific ordering), a legacy row was deleted and its users repointed — `down()`
+does not recreate that deleted row, so a rollback after a fold is not a clean inverse. This path
+requires an unusual migration/seeder ordering to trigger and has no production impact (this
+migration already ran once in Package A); rollback correctness for a role-rename migration is low
+risk. Left undocumented-but-known rather than adding speculative down() recovery logic for a path
+that cannot occur from this point forward. All 5 migrations are otherwise additive/nullable,
+MariaDB-10.11-compatible (`CHECK` constraint guarded by driver check), correctly indexed, assign
+no production ownership, and create no 11th role.
+
+### Files changed (remediation)
+- `backend/app/Services/Order/OrderService.php` — block Sub-sourced `dikirim` via generic path (422)
+- `backend/app/Services/Order/CourierService.php` — ownership check applies to every actor, not just kurir/sales-kurir-sub
+- `backend/lang/{en,id,ar,zh}/messages.php` — new `order.sub_item_requires_owner_shipment` key
+- `backend/tests/Feature/SubStockSourceTest.php` — 2 new remediation tests
+- `frontend/src/api/subStock.ts` — corrected response types (relation key casing, pagination meta)
+- `frontend/src/views/dashboard/SubStockView.vue` (new) — Sales-Kurir-Sub operational screen
+- `frontend/src/views/dashboard/SubStockApprovalsView.vue` (new) — Admin approval screen
+- `frontend/src/views/dashboard/SubStockExecutionView.vue` (new) — Gudang execution screen
+- `frontend/src/router/index.ts`, `frontend/src/dashboard/navConfig.ts` — wiring
+
+No new migrations.
+
+### Test results (remediation)
+Backend `vendor/bin/phpunit` / `php artisan test`: **708 passed, 4551 assertions, 0 failures**
+(706 baseline + 2 new; all pass including RajaOngkir on this VPS).
+Frontend: `npm run type-check` clean, `npm run build-only` OK (only the pre-existing >500 KB
+chunk warning, non-blocking).
+
+### Deferred (unchanged — R-03/R-04, out of scope here)
+Same list as the original doc: R-03 invoices/splitting/final delivery verification/Sub-order
+quantity adjust-split-return; R-04 order authority/Gudang financial projection/Kurir queue/
+reports/Admin Product CRU.
+
+### Unresolved issues
+None blocking. The Area 7 MINOR (migration rollback edge case) is documented above and
+intentionally left as-is.
+
+### Status: Package A remediation COMPLETE. Working tree has the remediation diff only (see git log on `remed/package-a-vps`); production untouched.
