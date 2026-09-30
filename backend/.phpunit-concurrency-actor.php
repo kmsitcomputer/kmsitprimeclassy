@@ -483,6 +483,63 @@ if (str_starts_with($role, 'sr-')) {
                     return null;
                 });
                 break;
+            case 'sub-location-stock-lock':
+                // MAJOR C (final): models the two Sub-domain lock orders for a deterministic
+                // cross-transaction test. `location_first` true is the canonical order (location
+                // shared/exclusive, then stock targets); false is the pre-fix checkout order (stock
+                // targets, then the parent row at the order_item FK insert). The optional barrier pauses
+                // each side after its FIRST lock, so an inverted order deterministically deadlocks.
+                $locationId = (int) $extra['location_id'];
+                $targets = $extra['targets'] ?? [];
+                $locationMode = (string) ($extra['location_mode'] ?? 'none'); // none|share|exclusive
+                $locationFirst = (bool) ($extra['location_first'] ?? true);
+                $canonicalize = (bool) ($extra['canonicalize'] ?? true);
+                $barrierDir = $extra['barrier_dir'] ?? null;
+                $side = (string) ($extra['side'] ?? 'a');
+                $peerFirstKey = $extra['peer_first_key'] ?? null;
+                $result = DB::transaction(function () use ($locationId, $targets, $locationMode, $locationFirst, $canonicalize, $barrierDir, $side, $peerFirstKey) {
+                    $normalized = [];
+                    foreach ($targets as $t) {
+                        $normalized[] = [
+                            'product_id' => isset($t['product_id']) ? (int) $t['product_id'] : null,
+                            'product_variation_id' => ! empty($t['variation_id']) ? (int) $t['variation_id'] : (! empty($t['product_variation_id']) ? (int) $t['product_variation_id'] : null),
+                        ];
+                    }
+                    $ordered = $canonicalize ? StockService::canonicalReservationTargets($normalized) : $normalized;
+                    $subStock = app(SubStockService::class);
+                    $lockStock = fn (array $t) => $subStock->lockReservationTargets($locationId, [$t]);
+                    $lockLocation = function () use ($locationId, $locationMode) {
+                        $query = \App\Models\WarehouseSubLocation::withoutGlobalScopes()->whereKey($locationId);
+                        $locationMode === 'share' ? $query->sharedLock() : $query->lockForUpdate();
+
+                        return $query->first();
+                    };
+                    if ($locationFirst && $locationMode !== 'none') {
+                        $lockLocation();
+                        $firstKey = 'loc:'.$locationId;
+                    } else {
+                        $first = array_shift($ordered);
+                        $firstKey = StockService::canonicalTargetKey($first['product_id'], $first['product_variation_id']);
+                        $lockStock($first);
+                    }
+                    if ($barrierDir !== null && $peerFirstKey !== null && $peerFirstKey !== $firstKey) {
+                        @file_put_contents($barrierDir.'/'.$side.'.first', '1');
+                        $peer = $barrierDir.'/'.($side === 'a' ? 'b' : 'a').'.first';
+                        $deadline = microtime(true) + 20;
+                        while (! file_exists($peer) && microtime(true) < $deadline) {
+                            usleep(20000);
+                        }
+                    }
+                    foreach ($ordered as $t) {
+                        $lockStock($t);
+                    }
+                    if (! $locationFirst && $locationMode !== 'none') {
+                        $lockLocation();
+                    }
+
+                    return null;
+                });
+                break;
             default:
                 throw new InvalidArgumentException('Unknown service race operation: '.$operation);
         }

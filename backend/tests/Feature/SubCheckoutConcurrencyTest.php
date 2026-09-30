@@ -10,10 +10,12 @@ use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductVariation;
 use App\Models\SubStockReservation;
+use App\Models\SubStockRequest;
 use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
 use App\Services\Order\OrderService;
+use App\Services\Stock\SubStockRequestService;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Str;
@@ -193,6 +195,85 @@ class SubCheckoutConcurrencyTest extends TestCase
         }
     }
 
+    public function test_real_sub_checkout_and_sub_execution_never_deadlock_and_keep_invariants(): void
+    {
+        for ($iteration = 1; $iteration <= 3; $iteration++) {
+            $f = $this->subFixture('product', stock: 10, quantity: 5);
+            $target = $f['targets']['a'];
+            WarehouseStock::create(['agent_id' => $f['agent']->id, 'product_id' => $target['product_id'], 'stock_type' => 'transit', 'quantity' => 10]);
+            $admin = User::factory()->admin()->create(['agent_id' => $f['agent']->id]);
+            $gudang = User::factory()->gudang()->create(['agent_id' => $f['agent']->id, 'parent_id' => $f['agent']->id]);
+            $service = app(SubStockRequestService::class);
+            $request = $service->create($f['sub'], 'replenish', [['product_id' => $target['product_id'], 'quantity' => 5]]);
+            $service->approve($admin, $request);
+
+            $report = (new ConcurrencyHarness)->runServiceRace(
+                ['op' => 'checkout-order', 'actor_id' => $f['sub']->id, 'extra' => [
+                    'buyer_id' => $f['sub']->id, 'destination' => self::DESTINATION, 'stock_source' => 'sub', 'sub_location_id' => $f['location']->id,
+                    'lines' => [['product_id' => $target['product_id'], 'quantity' => 5]],
+                ]],
+                ['op' => 'sub-request-execute', 'actor_id' => $gudang->id, 'subject_id' => $request->id],
+            );
+
+            $this->assertTrue($report['different_connections']);
+            $this->assertTrue($report['true_overlap']);
+            $this->assertSame(0, $this->deadlockCount($report), 'checkout vs execution must never deadlock: '.json_encode(['a' => $report['a'], 'b' => $report['b']]));
+            $this->assertSame(2, collect([$report['a'], $report['b']])->where('outcome', 'success')->count(), 'both operations have legitimate capacity and must succeed');
+
+            $physical = $this->physical($f, $target);
+            $reserved = $this->activeReserved($f, $target);
+
+            // Reservation never changes physical; only the executed replenishment does (10 -> 15).
+            $this->assertSame(15, $physical, 'physical only changes for the operation that moves stock');
+            $this->assertSame(5, $reserved, 'checkout reservation');
+            $this->assertLessThanOrEqual($physical, $reserved, 'reservation must never exceed physical');
+
+            $transit = (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $f['agent']->id)->where('product_id', $target['product_id'])->where('stock_type', 'transit')->value('quantity');
+            $this->assertSame(5, $transit, 'replenishment moved 5 out of Transit exactly once');
+
+            $this->assertSame('executed', SubStockRequest::withoutGlobalScopes()->find($request->id)->status);
+            $this->assertSame(1, Order::withoutGlobalScopes()->where('konsumen_id', $f['sub']->id)->count());
+            $this->assertSame(2, \App\Models\StockMovement::withoutGlobalScopes()->whereIn('type', ['transfer_in', 'transfer_out'])->where('agent_id', $f['agent']->id)->count(), 'one transfer moves stock at most once');
+
+            fwrite(STDOUT, 'SUB_CHECKOUT_EXECUTE_RACE '.json_encode(['iteration' => $iteration, 'checkout' => $report['a']['outcome'], 'execute' => $report['b']['outcome']]).PHP_EOL);
+        }
+    }
+
+    public function test_parent_location_lock_precedes_stock_targets_and_inverted_order_deadlocks(): void
+    {
+        $f = $this->subFixture('product');
+        $keys = array_keys($f['targets']);
+        $aTarget = ['product_id' => $f['targets'][$keys[0]]['product_id']];
+        $bTarget = ['product_id' => $f['targets'][$keys[1]]['product_id']];
+        $locationId = $f['location']->id;
+        $locKey = 'loc:'.$locationId;
+        $aKey = 'p:'.$f['targets'][$keys[0]]['product_id'];
+        $barrier = $this->createBarrierDir();
+
+        try {
+            // Positive control: the pre-fix checkout order (stock targets first, parent row only at the
+            // FK insert) deadlocks against the executor's parent-first order.
+            $inverted = (new ConcurrencyHarness)->runServiceRace(
+                ['op' => 'sub-location-stock-lock', 'actor_id' => $f['sub']->id, 'extra' => ['location_id' => $locationId, 'location_mode' => 'share', 'location_first' => false, 'canonicalize' => true, 'targets' => [$aTarget, $bTarget], 'barrier_dir' => $barrier, 'side' => 'a', 'peer_first_key' => $locKey]],
+                ['op' => 'sub-location-stock-lock', 'actor_id' => $f['sub']->id, 'extra' => ['location_id' => $locationId, 'location_mode' => 'exclusive', 'location_first' => true, 'canonicalize' => true, 'targets' => [$aTarget, $bTarget], 'barrier_dir' => $barrier, 'side' => 'b', 'peer_first_key' => $aKey]],
+            );
+            $this->clearBarrierDir($barrier);
+            $this->assertSame(1, $this->deadlockCount($inverted), 'stock-before-parent order must deadlock (positive control)');
+
+            // Fixed: the checkout takes the parent (shared) first, so both sides serialize at the
+            // location boundary and no cycle can form.
+            $fixed = (new ConcurrencyHarness)->runServiceRace(
+                ['op' => 'sub-location-stock-lock', 'actor_id' => $f['sub']->id, 'extra' => ['location_id' => $locationId, 'location_mode' => 'share', 'location_first' => true, 'canonicalize' => true, 'targets' => [$aTarget, $bTarget], 'barrier_dir' => $barrier, 'side' => 'a', 'peer_first_key' => $locKey]],
+                ['op' => 'sub-location-stock-lock', 'actor_id' => $f['sub']->id, 'extra' => ['location_id' => $locationId, 'location_mode' => 'exclusive', 'location_first' => true, 'canonicalize' => true, 'targets' => [$aTarget, $bTarget], 'barrier_dir' => $barrier, 'side' => 'b', 'peer_first_key' => $locKey]],
+            );
+
+            $this->assertSame(0, $this->deadlockCount($fixed), 'parent-first order must never deadlock: '.json_encode(['a' => $fixed['a'], 'b' => $fixed['b']]));
+            $this->assertSame(2, collect([$fixed['a'], $fixed['b']])->where('outcome', 'success')->count());
+        } finally {
+            $this->removeDir($barrier);
+        }
+    }
+
     private function physical(array $f, array $target): int
     {
         return (int) WarehouseStock::withoutGlobalScopes()->where('sub_location_id', $f['location']->id)->where('stock_type', 'sub')
@@ -230,11 +311,16 @@ class SubCheckoutConcurrencyTest extends TestCase
         return $dir;
     }
 
-    private function removeDir(string $dir): void
+    private function clearBarrierDir(string $dir): void
     {
         foreach (glob($dir.'/*') ?: [] as $file) {
             @unlink($file);
         }
+    }
+
+    private function removeDir(string $dir): void
+    {
+        $this->clearBarrierDir($dir);
         @rmdir($dir);
     }
 }
