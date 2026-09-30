@@ -170,6 +170,83 @@ class StockService
     }
 
     /**
+     * Canonical key for one inventory target: `p:{product_id}` for a bare product, `v:{variation_id}`
+     * for a variation. It is the SINGLE ordering vocabulary every multi-target inventory lock in a
+     * transaction must sort by — a multi-line Agent checkout and a multi-target Transit -> Sub
+     * execution must acquire the same target order, or two concurrent transactions that list the
+     * same targets in opposite orders can each hold one and wait on the other (deadlock).
+     */
+    public static function canonicalTargetKey(?int $productId, ?int $variationId): string
+    {
+        return $variationId !== null ? 'v:'.$variationId : 'p:'.$productId;
+    }
+
+    /**
+     * Sorts reservation targets into the canonical target order (see canonicalTargetKey) and drops
+     * duplicate targets. Deterministic across every caller that must lock more than one target.
+     *
+     * @param  iterable<array{product_id:?int, product_variation_id:?int}>  $targets
+     * @return list<array{product_id:?int, product_variation_id:?int}>
+     */
+    public static function canonicalReservationTargets(iterable $targets): array
+    {
+        $ordered = [];
+        foreach ($targets as $target) {
+            $productId = isset($target['product_id']) ? (int) $target['product_id'] : null;
+            $variationId = ! empty($target['product_variation_id']) ? (int) $target['product_variation_id'] : null;
+            $ordered[self::canonicalTargetKey($productId, $variationId)] = [
+                'product_id' => $variationId !== null ? null : $productId,
+                'product_variation_id' => $variationId,
+            ];
+        }
+        ksort($ordered);
+
+        return array_values($ordered);
+    }
+
+    /**
+     * Locks one Agent inventory target exactly as reserveForProduct()/reserveForVariation() will:
+     * the Agent commitment row (ProductStock/ProductVariationStock) FIRST, then the Warehouse
+     * Transit/Plan row(s) it competes with. Callers reserving more than one target must take them
+     * in canonicalReservationTargets() order (see lockReservationTargets()).
+     */
+    public function lockReservationTarget(int $agentId, ?int $productId, ?int $variationId): void
+    {
+        $sellable = app(SellableStockService::class);
+
+        if ($variationId !== null) {
+            ProductVariationStock::withoutGlobalScopes()
+                ->where('agent_id', $agentId)->where('product_variation_id', $variationId)
+                ->lockForUpdate()->first();
+            $sellable->forVariation($agentId, $variationId, null, lockWarehouse: true);
+
+            return;
+        }
+
+        ProductStock::withoutGlobalScopes()
+            ->where('agent_id', $agentId)->where('product_id', $productId)
+            ->lockForUpdate()->first();
+        $sellable->forProduct($agentId, $productId, null, lockWarehouse: true);
+    }
+
+    /**
+     * Acquires every Agent capacity lock a reservation pass will need, in ONE canonical
+     * deterministic target order, BEFORE any per-line reserve call runs. This is what serialises a
+     * multi-line checkout against a multi-target Transit -> Sub execution (and against another
+     * checkout) that lists the same targets in a different order. Presentation/creation order is
+     * untouched — the caller still processes its own lines in the original order afterwards; the
+     * per-line reserve re-locks rows this transaction already holds without acquiring anything new.
+     *
+     * @param  iterable<array{product_id:?int, product_variation_id:?int}>  $targets
+     */
+    public function lockReservationTargets(int $agentId, iterable $targets): void
+    {
+        foreach (self::canonicalReservationTargets($targets) as $target) {
+            $this->lockReservationTarget($agentId, $target['product_id'], $target['product_variation_id']);
+        }
+    }
+
+    /**
      * Manual stock correction by an agent/admin/super_admin (restock, stock
      * opname, initial setup) — distinct from the order-driven reserve/deduct/
      * release above. Creates the underlying stock row on first use (an agent

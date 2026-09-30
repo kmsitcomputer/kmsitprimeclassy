@@ -147,8 +147,10 @@ class StockTransferService
 
             $targets = [];
             foreach ($locked->items as $item) {
-                $targetKey = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
-                $targets[$targetKey] = $item;
+                // Shared canonical target key — the SAME order a multi-line Agent checkout uses
+                // (StockService::canonicalTargetKey), so the two paths can never acquire the same
+                // targets in opposite orders.
+                $targets[StockService::canonicalTargetKey($item->product_id, $item->product_variation_id)] = $item;
             }
             ksort($targets);
             $pairs = [];
@@ -230,7 +232,7 @@ class StockTransferService
 
         $targets = [];
         foreach ($transfer->items as $item) {
-            $targetKey = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
+            $targetKey = StockService::canonicalTargetKey($item->product_id, $item->product_variation_id);
             $targets[$targetKey] = ['item' => $item, 'key' => $targetKey];
         }
         ksort($targets);

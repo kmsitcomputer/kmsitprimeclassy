@@ -159,6 +159,18 @@ class OrderService
                 $subtotal = 0.0;
                 $totalWeightGrams = 0;
 
+                // Canonical multi-target lock order. A multi-line Agent checkout must acquire its
+                // Agent capacity locks in the SAME deterministic target order a multi-target
+                // Transit -> Sub execution uses (StockService::canonicalTargetKey), or two
+                // concurrent transactions listing the same targets in opposite orders can each
+                // hold one target and wait on the other (deadlock). Only Agent-sourced orders take
+                // Agent capacity locks; a Sub-sourced order reserves entirely in the Sub ledger.
+                // The per-line loop below still runs in the incoming order, so presentation and
+                // order-item creation order are untouched — the rows are simply already held.
+                if (! $subLocation) {
+                    $this->stockService->lockReservationTargets($agentId, $lines);
+                }
+
                 foreach ($lines as $line) {
                     [$lineSubtotal, $lineWeight] = $this->priceAndReserveLine($order, $agentId, $konsumen, $actor, $line, $subLocation);
                     $subtotal += $lineSubtotal;

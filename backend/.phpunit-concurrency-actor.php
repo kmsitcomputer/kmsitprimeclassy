@@ -367,6 +367,66 @@ if (str_starts_with($role, 'sr-')) {
                     return null;
                 });
                 break;
+            case 'agent-lock-multi':
+                // Finding 1: exercises ONLY the production per-target lock sequence used by every
+                // multi-target inventory transaction (StockService::lockReservationTarget). With
+                // `canonicalize` false the caller-supplied order is used verbatim; with true the
+                // production canonicalReservationTargets() order is used. The optional file barrier
+                // pauses each side after its FIRST target so an inverted order deterministically
+                // deadlocks, proving the ordering contract is real.
+                $agentId = (int) $extra['agent_id'];
+                $targets = $extra['targets'];
+                $canonicalize = (bool) ($extra['canonicalize'] ?? true);
+                $barrierDir = $extra['barrier_dir'] ?? null;
+                $side = (string) ($extra['side'] ?? 'a');
+                $peerFirstKey = $extra['peer_first_key'] ?? null;
+                $result = DB::transaction(function () use ($agentId, $targets, $canonicalize, $barrierDir, $side, $peerFirstKey) {
+                    $normalized = [];
+                    foreach ($targets as $t) {
+                        $normalized[] = [
+                            'product_id' => isset($t['product_id']) ? (int) $t['product_id'] : null,
+                            'product_variation_id' => ! empty($t['variation_id']) ? (int) $t['variation_id'] : (! empty($t['product_variation_id']) ? (int) $t['product_variation_id'] : null),
+                        ];
+                    }
+                    $ordered = $canonicalize ? StockService::canonicalReservationTargets($normalized) : $normalized;
+                    $stock = app(StockService::class);
+                    $lock = fn (array $t) => $stock->lockReservationTarget($agentId, $t['product_id'], $t['product_variation_id']);
+                    $first = array_shift($ordered);
+                    $firstKey = StockService::canonicalTargetKey($first['product_id'], $first['product_variation_id']);
+                    $lock($first);
+                    if ($barrierDir !== null && $peerFirstKey !== null && $peerFirstKey !== $firstKey) {
+                        @file_put_contents($barrierDir.'/'.$side.'.first', '1');
+                        $peer = $barrierDir.'/'.($side === 'a' ? 'b' : 'a').'.first';
+                        $deadline = microtime(true) + 20;
+                        while (! file_exists($peer) && microtime(true) < $deadline) {
+                            usleep(20000);
+                        }
+                    }
+                    foreach ($ordered as $t) {
+                        $lock($t);
+                    }
+
+                    return null;
+                });
+                break;
+            case 'checkout-order':
+                // Finding 1: the REAL multi-line checkout path (OrderService::createOrder) so a
+                // reversed-line order genuinely exercises the pre-lock canonicalisation, racing a
+                // real Transit -> Sub execution in the sibling op.
+                $buyer = User::withoutGlobalScopes()->findOrFail((int) $extra['buyer_id']);
+                $result = app(OrderService::class)->createOrder(
+                    $buyer,
+                    $extra['lines'],
+                    $extra['destination'],
+                    $buyer,
+                    'cod',
+                    null,
+                    'concurrency-'.bin2hex(random_bytes(8)),
+                    null,
+                    null,
+                    null,
+                );
+                break;
             default:
                 throw new InvalidArgumentException('Unknown service race operation: '.$operation);
         }
