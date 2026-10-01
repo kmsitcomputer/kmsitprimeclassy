@@ -22,6 +22,13 @@ class OrderController extends Controller
     {
         $user = $request->user();
 
+        // R-04 / §C: a normal Kurir must not use the generic order list — /kurir/orders is the only
+        // authorized (minimized) discovery surface, and generic OrderResource would leak
+        // recipient/contact/address + sibling items.
+        if ($user->isRole('kurir')) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
         $query = Order::query()->with(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'shipments.courier.user', 'shipments.proof'])->latest();
 
         if ($user->isRole('konsumen')) {
@@ -95,7 +102,7 @@ class OrderController extends Controller
     {
         $this->authorize('view', $order);
 
-        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'returnRequests.items']);
+        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'shipments.selfDeliveredBy', 'shipments.deliveryVerifications.verifiedBy', 'deliveryVerifications.verifiedBy', 'returnRequests.items']);
 
         return $this->ok(new OrderResource($order));
     }

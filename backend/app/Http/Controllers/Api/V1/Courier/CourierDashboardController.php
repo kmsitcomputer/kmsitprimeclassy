@@ -10,6 +10,7 @@ use App\Models\Commission;
 use App\Models\Order;
 use App\Models\ReturnItem;
 use App\Models\ReturnRequest;
+use App\Models\Shipment;
 use App\Services\Order\ReturnService;
 use Illuminate\Http\Request;
 
@@ -23,31 +24,67 @@ class CourierDashboardController extends Controller
     public function __construct(private readonly ReturnService $returnService) {}
 
     /**
-     * The delivery queue: every 'diproses' item in this kurir's branch is
-     * visible to EVERY kurir regardless of any pre-assignment — "semua order
-     * diproses bisa dilihat semua kurir." Only once an item is actually
-     * picked up (self-assigned the moment it's marked 'dikirim' — see
-     * CourierService::selfAssignIfUnassigned) does it become exclusive:
-     * 'dikirim' items only ever show to the kurir holding that shipment,
-     * never a sibling kurir in the same branch (Blueprint: "status dikirim
-     * ... tidak bisa dilihat kurir lain").
+     * The delivery queue.
+     *
+     * Normal Kurir: every 'diproses' item in their branch is visible to every kurir
+     * ("semua order diproses bisa dilihat semua kurir"); once picked up ('dikirim') an item is
+     * exclusive to the kurir holding that shipment.
+     *
+     * R-03: a Sales-Kurir-Sub is NOT a normal Kurir — they may only ever see orders containing
+     * their OWN self_sub shipment (delivery_mode = self_sub AND self_delivered_by_user_id = self),
+     * for both 'diproses' and 'dikirim'. They must never see Agent-sourced standard shipments or
+     * another Sales-Kurir-Sub's self_sub shipment.
      */
     public function orders(Request $request)
     {
         $actor = $request->user();
         $courierId = $actor->courierProfile?->id;
+        $isSubActor = $actor->isRole('sales-kurir-sub');
+        $status = $request->string('status')->toString();
+        $validStatuses = ['diproses', 'dikirim', 'terkirim'];
 
         $orders = Order::query()
             ->where('agent_id', $actor->agent_id)
-            ->whereHas('items', function ($q) use ($courierId) {
+            ->whereHas('items', function ($q) use ($courierId, $actor, $isSubActor, $status, $validStatuses) {
                 // Grouped in its own closure — an ungrouped top-level orWhere()
                 // here would escape whereHas's own order_id correlation constraint.
-                $q->where(function ($sq) use ($courierId) {
-                    $sq->where('status', 'diproses')
-                        ->orWhere(function ($dq) use ($courierId) {
-                            $dq->where('status', 'dikirim')
-                                ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
-                        });
+                $q->where(function ($sq) use ($courierId, $actor, $isSubActor, $status, $validStatuses) {
+                    if ($isSubActor) {
+                        // Sales-Kurir-Sub: ONLY their own self_sub shipments, for every status
+                        // (their "Selesai" history is status=terkirim). Never an Agent-source
+                        // standard shipment and never another Sales-Kurir-Sub's shipment.
+                        $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
+                        $sq->whereIn('status', $statuses)
+                            ->whereHas('shipment', function ($ssq) use ($actor) {
+                                $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB)
+                                    ->where('self_delivered_by_user_id', $actor->id);
+                            });
+
+                        return;
+                    }
+
+                    // Normal Kurir never sees (or can claim) a Sales-Kurir-Sub self-delivery shipment —
+                    // that goods sit in the Sub's own Sub Location and ship only through its owner.
+                    $sq->whereDoesntHave('shipment', fn ($ssq) => $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB));
+
+                    // Normal Kurir — a requested status narrows the queue; ownership stays the same.
+                    if (in_array($status, $validStatuses, true)) {
+                        $sq->where('status', $status);
+                        if ($status !== 'diproses') {
+                            $sq->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
+                        }
+
+                        return;
+                    }
+
+                    // Nested so the self_sub exclusion above stays AND-ed with both alternatives.
+                    $sq->where(function ($qq) use ($courierId) {
+                        $qq->where('status', 'diproses')
+                            ->orWhere(function ($dq) use ($courierId) {
+                                $dq->where('status', 'dikirim')
+                                    ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
+                            });
+                    });
                 });
             })
             ->with('items.shipment.courier')

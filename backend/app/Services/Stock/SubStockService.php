@@ -155,6 +155,85 @@ class SubStockService
     }
 
     /**
+     * R-03 (decision E): pre-shipment REDUCTION — shrink this order item's ACTIVE reservation by
+     * $quantity. Physical Sub stock is unchanged (the units simply become sellable again). Reducing
+     * more than currently reserved is rejected; a reservation driven to zero is released so no
+     * lingering zero-quantity active row survives. Same canonical lock order used by reserve().
+     */
+    public function reduce(OrderItem $item, int $quantity, ?User $actor, string $reason): ?SubStockReservation
+    {
+        if ($quantity < 1) {
+            throw new ApiException(__('messages.order.invalid_quantity'), 422);
+        }
+
+        $probe = SubStockReservation::query()->where('order_item_id', $item->id)->first();
+        if (! $probe) {
+            throw new ApiException('Reservasi stok Sub tidak ditemukan.', 422);
+        }
+
+        // Sub stock row FIRST, reservation rows second (canonical order, no deadlocks).
+        $this->stockQuery($probe->sub_location_id, $probe->product_id, $probe->product_variation_id)->lockForUpdate()->first();
+        $reservation = SubStockReservation::query()->where('order_item_id', $item->id)->lockForUpdate()->first();
+
+        if ($reservation->status !== SubStockReservation::ACTIVE) {
+            throw new ApiException('Reservasi stok Sub tidak aktif dan tidak dapat dikurangi.', 422);
+        }
+        if ($reservation->quantity < $quantity) {
+            throw new ApiException('Jumlah pengurangan melebihi reservasi stok Sub.', 422);
+        }
+
+        $remaining = $reservation->quantity - $quantity;
+        if ($remaining <= 0) {
+            $reservation->update(['quantity' => 0, 'status' => SubStockReservation::RELEASED, 'released_at' => now(), 'released_by' => $actor?->id, 'release_reason' => $reason]);
+        } else {
+            $reservation->update(['quantity' => $remaining]);
+        }
+
+        return $reservation->fresh();
+    }
+
+    /**
+     * R-03 (decision E): pre-shipment INCREASE — grow this order item's reservation by $quantity
+     * after re-checking Sub sellable capacity. Physical Sub stock is unchanged. A previously
+     * released (zeroed) reservation is reactivated rather than duplicated (UNIQUE order_item_id).
+     * Agent reservations are never touched.
+     */
+    public function increase(OrderItem $item, int $quantity, ?User $actor, string $reason): SubStockReservation
+    {
+        if ($quantity < 1) {
+            throw new ApiException(__('messages.order.invalid_quantity'), 422);
+        }
+
+        $probe = SubStockReservation::query()->where('order_item_id', $item->id)->first();
+        if (! $probe) {
+            throw new ApiException('Reservasi stok Sub tidak ditemukan.', 422);
+        }
+
+        $productId = $probe->product_variation_id ? null : $probe->product_id;
+        $stock = $this->stockQuery($probe->sub_location_id, $productId, $probe->product_variation_id)->lockForUpdate()->first();
+        $reservation = SubStockReservation::query()->where('order_item_id', $item->id)->lockForUpdate()->first();
+
+        $physical = (int) ($stock?->quantity ?? 0);
+        // reserved() forWrite includes THIS reservation's current quantity, so the free headroom is
+        // exactly physical - reserved.
+        $available = $physical - $this->reserved($probe->sub_location_id, $productId, $probe->product_variation_id, forWrite: true);
+
+        if (! $stock || $available < $quantity) {
+            throw new InsufficientStockException($item->variation_label_snapshot ?? $item->product_name_snapshot ?? $item->sku_snapshot, max(0, $available), $quantity);
+        }
+
+        $reservation->update([
+            'quantity' => $reservation->quantity + $quantity,
+            'status' => SubStockReservation::ACTIVE,
+            'released_at' => null,
+            'released_by' => null,
+            'release_reason' => null,
+        ]);
+
+        return $reservation->fresh();
+    }
+
+    /**
      * Guard for every operation that lowers Sub physical stock outside a sale (Sub -> Transit return,
      * Sub -> Sub transfer, opname): it may never cut physical below the active reservations.
      * Caller must already hold the Sub stock row lock.

@@ -162,6 +162,11 @@ return [
         'window_closed' => 'Jumlah item hanya dapat diubah selama order berstatus diproses.',
         'adjusted' => 'Jumlah pemenuhan item berhasil diperbarui.',
         'rescheduled' => 'Tanggal pengiriman item berhasil diubah.',
+        'split_stock_request_locked' => 'Pemecahan tidak dapat dilakukan karena permintaan stok gudang sudah dipenuhi sebagian dan sisa tidak mencukupi.',
+        'cannot_increase_cancelled' => 'Item yang sudah dibatalkan sepenuhnya tidak dapat ditambah kembali.',
+        'pending_refund_blocks_increase' => 'Tidak dapat menambah jumlah selama masih ada refund yang belum diproses untuk item ini.',
+        'pending_additional_payment_blocks_reduction' => 'Tidak dapat mengurangi jumlah selama pembayaran tambahan untuk penambahan ini masih belum lunas.',
+        'pending_additional_payment_blocks_increase' => 'Tidak dapat menambah jumlah lagi selama pembayaran tambahan sebelumnya masih belum lunas.',
     ],
 
     'courier' => [
@@ -172,10 +177,22 @@ return [
         'assigned' => 'Kurir berhasil ditugaskan.',
         'return_confirmed' => 'Status pengembalian berhasil diperbarui.',
         'delivery_proof_required' => 'Kurir wajib mengunggah bukti pengiriman untuk menandai order sebagai terkirim.',
+        'sales_kurir_sub_standard_forbidden' => 'Sales-Kurir-Sub hanya dapat mengantar pengiriman yang bersumber dari stok Sub miliknya sendiri.',
+        'self_delivery_no_courier' => 'Pengiriman self-delivery tidak dapat ditugaskan ke kurir.',
+    ],
+
+    'delivery_verification' => [
+        'invalid_outcome' => 'Hasil verifikasi pengiriman tidak valid.',
+        'not_delivered' => 'Pengiriman belum selesai; verifikasi belum dapat dilakukan.',
+        'recorded' => 'Verifikasi pengiriman berhasil dicatat.',
+        'idempotency_key_required' => 'Header Idempotency-Key wajib diisi.',
+        'idempotency_key_invalid' => 'Header Idempotency-Key tidak valid (maksimal 100 karakter).',
+        'idempotency_conflict' => 'Idempotency-Key sudah dipakai untuk permintaan verifikasi yang berbeda.',
     ],
 
     'return' => [
         'item_not_delivered' => 'Item hanya dapat diajukan pengembalian setelah berstatus terkirim.',
+        'sub_location_unavailable' => 'Sub Location asal pengembalian tidak tersedia atau tidak aktif; retur stok Sub tidak dapat diproses.',
         'invalid_quantity' => 'Jumlah pengembalian melebihi jumlah yang dapat dikembalikan.',
         'requested' => 'Pengajuan pengembalian berhasil dikirim.',
         'reviewed' => 'Pengajuan pengembalian berhasil diproses.',

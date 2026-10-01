@@ -8,10 +8,14 @@ use App\Models\OrderAdditionalPayment;
 use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
 use App\Models\Shipment;
+use App\Models\StockRequest;
+use App\Models\StockRequestItem;
 use App\Models\User;
+use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Payment\PaymentService;
 use App\Services\Stock\StockService;
+use App\Services\Stock\SubStockService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -33,6 +37,7 @@ class OrderFulfillmentService
 {
     public function __construct(
         private readonly StockService $stockService,
+        private readonly SubStockService $subStockService,
         private readonly PaymentService $paymentService,
         private readonly OrderTotalCalculator $orderTotalCalculator,
     ) {}
@@ -46,11 +51,6 @@ class OrderFulfillmentService
         return DB::transaction(function () use ($item, $newFulfilledQuantity, $actor, $reason, $additionalPaymentMethod) {
             $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
-
-            // R-02 boundary: Sub reservations are per order item; quantity redesign for Sub items is R-03.
-            if ($item->isSubSourced()) {
-                throw new ApiException('Item bersumber dari stok Sub; penyesuaian jumlah, pemecahan, dan retur item Sub akan ditangani pada tahap R-03.', 422);
-            }
 
             if ($order->status !== 'diproses') {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
@@ -89,7 +89,29 @@ class OrderFulfillmentService
      */
     private function reduceFulfillment(Order $order, OrderItem $item, int $quantityReduced, User $actor, string $reason): void
     {
-        if ($item->product_variation_id) {
+        // R-03 / MAJOR-7 + MAJOR-10: never reverse a quantity increase while its additional-payment
+        // obligation is still outstanding. Normal read — NOT FOR UPDATE: OrderItem is already locked
+        // (concurrent adjustments on this item serialise), and a stale pending read only produces a
+        // conservative 422. Taking a financial-row lock here would create an
+        // Order -> financial-row cycle against Keuangan settlement (deadlock).
+        if ($item->additional_payment_id) {
+            $additional = OrderAdditionalPayment::query()->whereKey($item->additional_payment_id)->first();
+            if ($additional && $additional->status === 'pending') {
+                throw new ApiException(__('messages.fulfillment.pending_additional_payment_blocks_reduction'), 422);
+            }
+        }
+
+        // R-03 / MAJOR-8: the courier fee is not earned until delivery, so it must track the
+        // currently active fulfilled quantity. Per-unit rate is derived from the PRE-mutation
+        // snapshot (courier_fee_amount is already a historical snapshot — never catalog config).
+        $courierPerUnit = $item->fulfilled_quantity > 0 ? (float) $item->courier_fee_amount / $item->fulfilled_quantity : 0.0;
+        $releasedCourierFee = round($courierPerUnit * $quantityReduced, 2);
+
+        // R-03: a Sub-sourced line releases in its own Sub ledger (reservation shrunk, physical
+        // Sub stock unchanged) — never Agent stock. Agent lines keep the existing release path.
+        if ($item->isSubSourced()) {
+            $this->subStockService->reduce($item, $quantityReduced, $actor, 'order_item_adjustment');
+        } elseif ($item->product_variation_id) {
             $this->stockService->releaseVariation($order->agent_id, $item->product_variation_id, $quantityReduced, 'order_item_adjustment', $item->id, $actor->id);
         } else {
             $this->stockService->releaseProduct($order->agent_id, $item->product_id, $quantityReduced, 'order_item_adjustment', $item->id, $actor->id);
@@ -101,6 +123,7 @@ class OrderFulfillmentService
         $item->update([
             'fulfilled_quantity' => $item->fulfilled_quantity - $quantityReduced,
             'cancelled_quantity' => $item->cancelled_quantity + $quantityReduced,
+            'courier_fee_amount' => max(0.0, round((float) $item->courier_fee_amount - $releasedCourierFee, 2)),
             'status' => ($item->fulfilled_quantity - $quantityReduced) <= 0 ? 'dibatalkan' : $item->status,
         ]);
 
@@ -135,7 +158,50 @@ class OrderFulfillmentService
      */
     private function increaseFulfillment(Order $order, OrderItem $item, int $quantityAdded, User $actor, string $reason, string $additionalPaymentMethod): void
     {
-        if ($item->product_variation_id) {
+        // R-03 / MAJOR-7 + MAJOR-10: an increase must not run while an unresolved fulfillment-refund
+        // obligation still exists for this item. Normal read — NOT FOR UPDATE (see the reduction guard
+        // below): OrderItem is already locked, and a financial-row lock here would invert against
+        // Keuangan settlement and deadlock.
+        $pendingRefund = OrderItemAdjustment::query()
+            ->where('order_item_id', $item->id)
+            ->where('refund_status', 'pending')
+            ->exists();
+        if ($pendingRefund) {
+            throw new ApiException(__('messages.fulfillment.pending_refund_blocks_increase'), 422);
+        }
+
+        // R-03 / MAJOR-11: a second increase while the linked additional-payment obligation is still
+        // pending would push Order.remaining_amount past its pending financial obligation. Normal
+        // read, no FOR UPDATE (same MAJOR-10 reasoning).
+        if ($item->additional_payment_id) {
+            $pendingAdditional = OrderAdditionalPayment::query()->whereKey($item->additional_payment_id)->first();
+            if ($pendingAdditional && $pendingAdditional->status === 'pending') {
+                throw new ApiException(__('messages.fulfillment.pending_additional_payment_blocks_increase'), 422);
+            }
+        }
+
+        // R-03: a fully cancelled line (reduced to zero / cancelled) is TERMINAL — do not silently
+        // resurrect it, and never reactivate its Sub reservation while it remains dibatalkan.
+        if ($item->status === 'dibatalkan' || $item->fulfilled_quantity <= 0) {
+            throw new ApiException(__('messages.fulfillment.cannot_increase_cancelled'), 422);
+        }
+
+        // R-03 counter reconciliation: an increase first RESTORES previously cancelled units before
+        // anything counts as a genuinely additional quantity. `fulfilled_quantity` is the current
+        // active/billed quantity, so this keeps fulfilled/cancelled/additional mutually consistent.
+        $restoreCancelled = min($quantityAdded, $item->cancelled_quantity);
+        $trulyAdditional = $quantityAdded - $restoreCancelled;
+
+        // R-03 / MAJOR-8: scale the not-yet-earned courier fee with the active fulfilled quantity,
+        // from the PRE-mutation snapshot (never catalog config).
+        $courierPerUnit = $item->fulfilled_quantity > 0 ? (float) $item->courier_fee_amount / $item->fulfilled_quantity : 0.0;
+        $addedCourierFee = round($courierPerUnit * $quantityAdded, 2);
+
+        // R-03: a Sub-sourced increase grows the existing Sub reservation after re-checking Sub
+        // sellable — never Agent stock, physical Sub stock unchanged.
+        if ($item->isSubSourced()) {
+            $this->subStockService->increase($item, $quantityAdded, $actor, 'order_item_adjustment');
+        } elseif ($item->product_variation_id) {
             $this->stockService->reserveForVariation($order->agent_id, $item->variation, $quantityAdded, 'order_item_adjustment', $item->id, $actor->id);
         } else {
             $this->stockService->reserveForProduct($order->agent_id, $item->product, $quantityAdded, 'order_item_adjustment', $item->id, $actor->id);
@@ -146,7 +212,9 @@ class OrderFulfillmentService
 
         $item->update([
             'fulfilled_quantity' => $item->fulfilled_quantity + $quantityAdded,
-            'additional_quantity' => $item->additional_quantity + $quantityAdded,
+            'cancelled_quantity' => $item->cancelled_quantity - $restoreCancelled,
+            'additional_quantity' => $item->additional_quantity + $trulyAdditional,
+            'courier_fee_amount' => round((float) $item->courier_fee_amount + $addedCourierFee, 2),
         ]);
 
         $order = $this->orderTotalCalculator->recalculate($order);
@@ -241,10 +309,6 @@ class OrderFulfillmentService
                 }
 
                 if ($quantity < $item->fulfilled_quantity) {
-                    if ($item->isSubSourced()) {
-                        throw new ApiException('Item bersumber dari stok Sub; penyesuaian jumlah, pemecahan, dan retur item Sub akan ditangani pada tahap R-03.', 422);
-                    }
-
                     return $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
                 }
             }
@@ -268,12 +332,15 @@ class OrderFulfillmentService
      * its original date/shipment. subtotal_snapshot and original_quantity are
      * split in proportion so the two rows still sum to the pre-split totals
      * (unit_price_snapshot itself never changes — it's already per unit).
-     * agent_fee_amount/sales_fee_amount/courier_fee_amount stay on the
-     * original row untouched and are zeroed on the new one: these were
-     * already computed for the item's full original_quantity and recorded
-     * once in `commissions` against the original item id at order creation —
-     * duplicating them onto the new row would make it look like the split
-     * doubled the agent/sales/courier fee.
+     * agent_fee_amount/sales_fee_amount stay on the original row untouched and are zeroed on the new
+     * one: these were already computed for the item's full original_quantity and recorded once in
+     * `commissions` against the original item id at order creation — duplicating them would make it
+     * look like the split doubled the agent/sales fee.
+     *
+     * courier_fee_amount is different (R-03 / MAJOR-8): the courier fee is earned ON DELIVERY, PER
+     * ITEM, so the moved units' share must follow them onto the child. It is allocated proportionally
+     * from the PRE-split snapshot (per-unit = pre fee / pre active qty), with the rounding remainder
+     * kept on the parent, so parent + child exactly equals the pre-split courier fee.
      */
     private function splitItemForReschedule(OrderItem $item, int $quantityMoved, string $newDate, User $actor, string $reason): OrderItem
     {
@@ -281,17 +348,31 @@ class OrderFulfillmentService
         $remainingQuantity = $item->fulfilled_quantity - $quantityMoved;
         $movedSubtotal = round((float) $item->unit_price_snapshot * $quantityMoved, 2);
 
+        // R-03 / MAJOR-8: proportional courier-fee allocation from the pre-split snapshot.
+        $courierPerUnit = $item->fulfilled_quantity > 0 ? (float) $item->courier_fee_amount / $item->fulfilled_quantity : 0.0;
+        $movedCourierFee = round($courierPerUnit * $quantityMoved, 2);
+        $retainedCourierFee = round((float) $item->courier_fee_amount - $movedCourierFee, 2);
+
+        // R-03 / decision G: validate + lock the order-generated StockRequest line BEFORE the split
+        // child exists, so a request whose unfulfilled remainder cannot cover the moved quantity is
+        // rejected (422) without leaving inconsistent StockRequestItem state. Sub orders carry no
+        // Agent stock request, so this is a no-op for them.
+        $requestItem = $item->isSubSourced() ? null : $this->lockStockRequestItemForSplit($item, $quantityMoved);
+
         $newItem = OrderItem::create([
             'order_id' => $item->order_id,
+            'split_from_order_item_id' => $item->id,
             'product_id' => $item->product_id,
             'product_variation_id' => $item->product_variation_id,
+            'stock_source' => $item->stock_source,
+            'sub_location_id' => $item->sub_location_id,
             'product_name_snapshot' => $item->product_name_snapshot,
             'variation_label_snapshot' => $item->variation_label_snapshot,
             'sku_snapshot' => $item->sku_snapshot,
             'unit_price_snapshot' => $item->unit_price_snapshot,
             'agent_fee_amount' => 0,
             'sales_fee_amount' => 0,
-            'courier_fee_amount' => 0,
+            'courier_fee_amount' => $movedCourierFee,
             'subtotal_snapshot' => $movedSubtotal,
             'original_quantity' => $quantityMoved,
             'fulfilled_quantity' => $quantityMoved,
@@ -299,12 +380,25 @@ class OrderFulfillmentService
             'status' => $item->status,
         ]);
 
+        if ($requestItem) {
+            $this->applyStockRequestSplit($requestItem, $newItem, $quantityMoved);
+        }
+
         $this->assignFreshShipment($newItem, $order, $actor);
+
+        // R-03 / decision E: Sub inventory reconciliation — the source reservation is reduced by the
+        // moved quantity, then the child receives its own ACTIVE reservation for it. Physical Sub
+        // stock is unchanged and the two reservations still sum to the pre-split total.
+        if ($item->isSubSourced()) {
+            $this->subStockService->reduce($item, $quantityMoved, $actor, 'order_item_split');
+            $this->subStockService->reserve($newItem, $item->sub_location_id, $order->agent_id, $quantityMoved, $actor);
+        }
 
         $item->update([
             'original_quantity' => $item->original_quantity - $quantityMoved,
             'fulfilled_quantity' => $remainingQuantity,
             'subtotal_snapshot' => (float) $item->subtotal_snapshot - $movedSubtotal,
+            'courier_fee_amount' => $retainedCourierFee,
         ]);
 
         ActivityLogger::log($actor->id, $newItem, 'order_item.split_for_reschedule', $reason, [
@@ -315,10 +409,71 @@ class OrderFulfillmentService
         return $newItem->fresh();
     }
 
+    /**
+     * R-03 / decision G: lock the StockRequestItem backing this OrderItem and reject the split when
+     * its unfulfilled remainder cannot cover the moved quantity. Moved units are always carved from
+     * the REMAINING quantity, so already-fulfilled warehouse history is never rewritten.
+     */
+    private function lockStockRequestItemForSplit(OrderItem $item, int $quantityMoved): ?StockRequestItem
+    {
+        $request = StockRequest::withoutGlobalScopes()->where('order_id', $item->order_id)->lockForUpdate()->first();
+
+        if (! $request || $request->status === 'cancelled') {
+            return null;
+        }
+
+        $requestItem = StockRequestItem::query()
+            ->where('stock_request_id', $request->id)
+            ->where('order_item_id', $item->id)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $requestItem) {
+            return null;
+        }
+
+        if ($requestItem->remaining_qty < $quantityMoved) {
+            throw new ApiException(__('messages.fulfillment.split_stock_request_locked'), 422);
+        }
+
+        return $requestItem;
+    }
+
+    /** Move the request demand onto the split child, conserving requested/fulfilled/remaining totals. */
+    private function applyStockRequestSplit(StockRequestItem $requestItem, OrderItem $newItem, int $quantityMoved): void
+    {
+        $requestItem->update([
+            'requested_qty' => $requestItem->requested_qty - $quantityMoved,
+            'remaining_qty' => $requestItem->remaining_qty - $quantityMoved,
+        ]);
+
+        StockRequestItem::create([
+            'stock_request_id' => $requestItem->stock_request_id,
+            'order_item_id' => $newItem->id,
+            'product_id' => $newItem->product_id,
+            'product_variation_id' => $newItem->product_variation_id,
+            'sku_snapshot' => $newItem->sku_snapshot,
+            'requested_qty' => $quantityMoved,
+            'fulfilled_qty' => 0,
+            'remaining_qty' => $quantityMoved,
+        ]);
+    }
+
     /** Always gives $item its own brand new pending Shipment, cloning the order's destination/provider snapshot — used for a newly split-off item, which never shares a shipment with anything yet. */
     private function assignFreshShipment(OrderItem $item, Order $order, User $actor): void
     {
         $reference = Shipment::query()->where('order_id', $order->id)->latest('id')->first();
+
+        // R-03: a Sub-sourced child stays on the self-delivery path — self_sub + the owning
+        // Sales-Kurir-Sub actor, never a Kurir (courier_id stays NULL).
+        $isSub = $item->isSubSourced();
+        $selfDeliveredBy = null;
+        if ($isSub) {
+            $selfDeliveredBy = $reference?->self_delivered_by_user_id
+                ?? ($item->sub_location_id
+                    ? WarehouseSubLocation::withoutGlobalScopes()->whereKey($item->sub_location_id)->value('owner_user_id')
+                    : null);
+        }
 
         $shipment = Shipment::create([
             'order_id' => $order->id,
@@ -331,6 +486,8 @@ class OrderFulfillmentService
             'distance_km' => $reference?->distance_km,
             'provider_meta' => $reference?->provider_meta,
             'status' => 'pending',
+            'delivery_mode' => $isSub ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD,
+            'self_delivered_by_user_id' => $selfDeliveredBy,
         ]);
 
         $item->update(['shipment_id' => $shipment->id]);
@@ -368,6 +525,9 @@ class OrderFulfillmentService
             'distance_km' => $original->distance_km,
             'provider_meta' => $original->provider_meta,
             'status' => 'pending',
+            // R-03: preserve the delivery path (self_sub + owning actor) across the shipment split.
+            'delivery_mode' => $original->delivery_mode,
+            'self_delivered_by_user_id' => $original->self_delivered_by_user_id,
         ]);
 
         $item->update(['shipment_id' => $split->id]);

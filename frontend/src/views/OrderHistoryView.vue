@@ -65,7 +65,7 @@ const STATUS_STYLES: Record<string, string> = {
           </p>
           <div class="mt-2 flex items-center justify-between">
             <span class="text-xs text-stone-500 dark:text-stone-400">{{ t('orders.itemsCount', { count: order.items.length }) }}</span>
-            <span class="font-display text-sm font-semibold text-brand-700 dark:text-brand-300">{{ formatRupiah(order.total_amount) }}</span>
+            <span v-if="order.total_amount !== undefined" class="font-display text-sm font-semibold text-brand-700 dark:text-brand-300">{{ formatRupiah(order.total_amount) }}</span>
           </div>
         </RouterLink>
       </li>

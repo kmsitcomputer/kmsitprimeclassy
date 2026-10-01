@@ -58,7 +58,7 @@ class ShipmentReceiptResource extends JsonResource
             'shipping_method_code' => $this->shipping_provider_code,
             'shipping_method_label' => $shippingMethodLabels[$this->shipping_provider_code] ?? $this->shipping_provider_code,
             'is_official_carrier_label' => $isOfficialCarrierLabel,
-            'courier_name' => $this->courier?->name,
+            'courier_name' => $this->courier?->name ?? $this->selfDeliveredBy?->name,
             // Authoritative pickup timestamp — never "now()" at print time, so
             // a reprint always shows the original moment the courier actually
             // picked this shipment up (Shipment.shipped_at is set exactly

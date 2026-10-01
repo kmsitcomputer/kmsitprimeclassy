@@ -14,6 +14,7 @@ use App\Models\ProductStock;
 use App\Models\ProductVariation;
 use App\Models\User;
 use App\Models\WarehouseStock;
+use App\Models\WarehouseSubLocation;
 use App\Services\Order\CourierService;
 use App\Services\Order\OrderService;
 use App\Services\Referral\ReferralService;
@@ -336,6 +337,11 @@ class PbrRemediationTest extends TestCase
             'has_variations' => false, 'base_price' => 10000, 'weight_grams' => 100, 'status' => 'active',
         ]);
         ProductStock::create(['agent_id' => $b['agent']->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
+        // R-03 / decision A: a Sub-sourced order is self-delivered by the Sales-Kurir-Sub (first
+        // class path, no Courier assignment) — the dual-fee behavior stays, now via self-delivery.
+        $location = WarehouseSubLocation::create(['agent_id' => $b['agent']->id, 'code' => 'PBR1', 'name' => 'PBR1', 'created_by' => $b['agent']->id]);
+        $location->forceFill(['owner_user_id' => $salesKurir->id])->save();
+        WarehouseStock::create(['agent_id' => $b['agent']->id, 'product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $location->id, 'quantity' => 10]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'agent', 'amount' => 1000, 'is_active' => true]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'sales', 'amount' => 500, 'is_active' => true]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'courier', 'amount' => 250, 'is_active' => true]);
@@ -344,16 +350,18 @@ class PbrRemediationTest extends TestCase
             $buyer,
             [['product_id' => $product->id, 'product_variation_id' => null, 'quantity' => 1]],
             ['address_id' => null, 'recipient_name' => 'PBR Dual Buyer', 'recipient_phone' => '0812111111', 'address_line' => 'Test Address', 'village_id' => $this->seedTestVillage(), 'latitude' => -6.914744, 'longitude' => 107.609810],
-            $buyer,
+            $salesKurir,
             'cod',
             null,
             (string) Str::uuid(),
+            null,
+            null,
+            null,
+            'sub',
         );
         $item = $order->items()->firstOrFail();
         $shipment = $order->shipments()->firstOrFail();
-        $courier = $salesKurir->courierProfile()->firstOrFail();
 
-        app(CourierService::class)->assignCourier($shipment->fresh(), $courier, $b['admin']);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $salesKurir);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $salesKurir, UploadedFile::fake()->image('pbr-proof.jpg'));
 

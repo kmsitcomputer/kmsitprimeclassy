@@ -302,6 +302,13 @@ cd frontend && npm run dev
 4. `php artisan storage:link`
 5. `php artisan config:cache && php artisan route:cache`
 6. Build the frontend (§26) and deploy the static `frontend/dist/` output to your web server / CDN.
+   - **Never delete `public_html/laravel.php`.** On the single-domain layout the document root contains `laravel.php`, which routes `/api`, `/sanctum`, and `/up` to Laravel. A destructive sync (`rsync --delete`) against that root removes the bridge; the frontend still loads but every API request returns 404 (a real Package B production incident). Always exclude it:
+     ```bash
+     sudo rsync -a --delete \
+       --exclude='laravel.php' \
+       /www/dev/primeclassy/frontend/dist/ \
+       /www/wwwroot/primeccookies.com/primeclassy/public_html/
+     ```
 7. Point the backend's web server document root at `backend/public` (§20), and the frontend's at `frontend/dist` (with SPA fallback routing, §21).
 
 ## 20. Apache

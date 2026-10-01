@@ -328,13 +328,17 @@ class SubStockSourceTest extends TestCase
         OrderItem::query()->where('order_id', $id)->update(['stock_source' => 'sub', 'sub_location_id' => null]);
     }
 
-    public function test_sub_items_are_guarded_from_quantity_split_and_return_flows_deferred_to_r03(): void
+    public function test_sub_item_quantity_reduction_releases_reservation_and_leaves_physical_unchanged(): void
     {
         $id = $this->order($this->b['sub'], $this->payload(3, null, ['stock_source' => 'sub']))->assertCreated()->json('data.id');
         $item = OrderItem::query()->where('order_id', $id)->firstOrFail();
 
-        $this->expectException(ApiException::class);
-        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 1, $this->b['agen'], 'test');
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 2, $this->b['agen'], 'test');
+
+        $this->assertSame(2, $item->fresh()->fulfilled_quantity);
+        $this->assertSame(1, $item->fresh()->cancelled_quantity);
+        $this->assertSame(10, $this->subPhysical(), 'Sub physical is unchanged by a pre-shipment reduction');
+        $this->assertSame(2, app(SubStockService::class)->reserved($this->b['location']->id, $this->b['product']->id, null));
     }
 
     public function test_sub_physical_cannot_be_cut_below_active_reservations(): void

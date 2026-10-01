@@ -9,10 +9,11 @@ import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } fro
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { getCourierReport } from '@/api/reports'
+import { recordDeliveryVerification } from '@/api/deliveries'
 import { adjustItemFulfillment, rescheduleOrderItem } from '@/api/orderAdjustments'
 import { requestReturn } from '@/api/returns'
 import { useAuthStore } from '@/stores/auth'
-import type { Order, OrderItem } from '@/api/types'
+import type { DeliveryVerificationOutcome, Order, OrderItem } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
 import { ApiError } from '@/api/client'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
@@ -155,7 +156,10 @@ const deliveryProofFiles = reactive<Record<number, File | null>>({})
 /** One action row per distinct shipment, never per item — several items can share one shipment. */
 const shipmentGroups = computed(() => {
   if (!order.value) return []
-  const groups = new Map<number, { shipmentId: number; status: string; productNames: string[]; courierUserId: number | null }>()
+  const groups = new Map<
+    number,
+    { shipmentId: number; status: string; productNames: string[]; courierUserId: number | null; deliveryMode: string | null; selfDeliveredByUserId: number | null }
+  >()
   for (const item of order.value.items ?? []) {
     if (!item.shipment_id || !['diproses', 'dikirim'].includes(item.status)) continue
     const existing = groups.get(item.shipment_id)
@@ -167,11 +171,19 @@ const shipmentGroups = computed(() => {
         status: item.status,
         productNames: [item.product_name],
         courierUserId: item.courier?.user_id ?? null,
+        deliveryMode: item.delivery_mode ?? null,
+        selfDeliveredByUserId: item.self_delivered_by_user_id ?? null,
       })
     }
   }
   return Array.from(groups.values())
 })
+
+const isSubRole = computed(() => auth.user?.role === 'sales-kurir-sub')
+
+function isSelfSubGroup(group: { deliveryMode: string | null }): boolean {
+  return group.deliveryMode === 'self_sub'
+}
 
 /** A kurir must never see another kurir's already-picked-up shipment rendered as actionable — office roles still can. */
 function shipmentActionableByViewer(group: { courierUserId: number | null }): boolean {
@@ -180,25 +192,57 @@ function shipmentActionableByViewer(group: { courierUserId: number | null }): bo
 }
 
 /**
+ * R-03 UX gating (the backend stays authoritative): a self_sub shipment is operated ONLY by its
+ * recorded Sales-Kurir-Sub owner; a standard shipment is NEVER operated by a Sales-Kurir-Sub.
+ */
+function canOperateShipmentGroup(group: { deliveryMode: string | null; selfDeliveredByUserId: number | null; courierUserId: number | null }): boolean {
+  if (!canManageShipment.value) return false
+  if (isSelfSubGroup(group)) {
+    return isSubRole.value && auth.user?.id === group.selfDeliveredByUserId
+  }
+  if (isSubRole.value) return false
+  return shipmentActionableByViewer(group)
+}
+
+/**
  * Every shipment eligible for a thermal receipt — unlike shipmentGroups
  * above (which drops out once 'terkirim', since there's no more pickup/
  * deliver action left to take), a receipt must stay printable/reprintable
  * even after delivery. A kurir only sees this for shipments actually
- * assigned to them (mirrors ShipmentPolicy::printReceipt server-side).
+ * assigned to them; a Sales-Kurir-Sub only for their own self_sub shipments
+ * (mirrors ShipmentPolicy::printReceipt server-side).
  */
 const printableShipmentGroups = computed(() => {
   if (!order.value) return []
-  const groups = new Map<number, { shipmentId: number; productNames: string[]; courierUserId: number | null }>()
+  const groups = new Map<
+    number,
+    { shipmentId: number; productNames: string[]; courierUserId: number | null; deliveryMode: string | null; selfDeliveredByUserId: number | null }
+  >()
   for (const item of order.value.items ?? []) {
     if (!item.shipment_id || ['diterima', 'dibatalkan'].includes(item.status)) continue
     const existing = groups.get(item.shipment_id)
     if (existing) {
       existing.productNames.push(item.product_name)
     } else {
-      groups.set(item.shipment_id, { shipmentId: item.shipment_id, productNames: [item.product_name], courierUserId: item.courier?.user_id ?? null })
+      groups.set(item.shipment_id, {
+        shipmentId: item.shipment_id,
+        productNames: [item.product_name],
+        courierUserId: item.courier?.user_id ?? null,
+        deliveryMode: item.delivery_mode ?? null,
+        selfDeliveredByUserId: item.self_delivered_by_user_id ?? null,
+      })
     }
   }
-  return Array.from(groups.values()).filter((g) => auth.user?.role !== 'kurir' || shipmentActionableByViewer(g))
+  return Array.from(groups.values()).filter((g) => {
+    if (isSelfSubGroup(g)) {
+      // Mirrors ShipmentPolicy::printReceipt: the owning Sales-Kurir-Sub, super_admin, and the
+      // same-Agent agen/admin may print a self_sub receipt; a normal Kurir may not.
+      if (['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? '')) return true
+      return isSubRole.value && auth.user?.id === g.selfDeliveredByUserId
+    }
+    if (isSubRole.value) return false
+    return auth.user?.role !== 'kurir' || shipmentActionableByViewer(g)
+  })
 })
 
 function openReceipt(shipmentId: number) {
@@ -236,8 +280,76 @@ async function deliverShipment(shipmentId: number) {
   }
 }
 
+/* ---------- Admin: final delivery verification (append-only, R-03) ---------- */
+const canVerifyDelivery = computed(() => ['super_admin', 'admin'].includes(auth.user?.role ?? ''))
+const verificationBusy = ref<number | null>(null)
+const verificationError = ref<string | null>(null)
+const verificationForms = reactive<Record<number, { outcome: DeliveryVerificationOutcome; note: string }>>({})
+/**
+ * The idempotency key for the CURRENT logical verification action per shipment. It is retained
+ * across a failed/unknown-result retry (so the backend replays instead of duplicating history) and
+ * only replaced after a success — a fresh key means a new intentional action.
+ */
+const verificationKeys = reactive<Record<number, string>>({})
+
+function keyFor(shipmentId: number) {
+  if (!verificationKeys[shipmentId]) verificationKeys[shipmentId] = crypto.randomUUID()
+  return verificationKeys[shipmentId]
+}
+
+/** Guarantees a writable default form for a shipment — safe to call from v-model getters. */
+function formFor(shipmentId: number) {
+  if (!verificationForms[shipmentId]) verificationForms[shipmentId] = { outcome: 'received', note: '' }
+  return verificationForms[shipmentId]
+}
+
+/** Shipments whose items have actually been delivered — the only ones eligible for verification. */
+const deliveredShipmentGroups = computed(() => {
+  if (!order.value) return []
+  const groups = new Map<number, { shipmentId: number; productNames: string[] }>()
+  for (const item of order.value.items ?? []) {
+    if (!item.shipment_id || !['terkirim', 'pengembalian', 'kembali'].includes(item.status)) continue
+    const existing = groups.get(item.shipment_id)
+    if (existing) existing.productNames.push(item.product_name)
+    else groups.set(item.shipment_id, { shipmentId: item.shipment_id, productNames: [item.product_name] })
+  }
+  return Array.from(groups.values())
+})
+
+function latestVerification(shipmentId: number) {
+  const rows = (order.value?.delivery_verifications ?? []).filter((v) => v.shipment_id === shipmentId)
+  return rows.length ? rows[rows.length - 1] : null
+}
+
+function verificationOutcomeLabel(outcome: string): string {
+  const map: Record<string, string> = {
+    received: t('orders.verification.received'),
+    not_received: t('orders.verification.notReceived'),
+    return: t('orders.verification.return'),
+  }
+  return map[outcome] ?? outcome
+}
+
+async function submitVerification(shipmentId: number) {
+  const form = verificationForms[shipmentId]
+  if (!form) return
+  verificationBusy.value = shipmentId
+  verificationError.value = null
+  try {
+    await recordDeliveryVerification(shipmentId, form.outcome, form.note || null, keyFor(shipmentId))
+    delete verificationKeys[shipmentId]
+    await load()
+  } catch (e) {
+    verificationError.value = e instanceof ApiError ? e.message : t('orders.errors.verification')
+  } finally {
+    verificationBusy.value = null
+  }
+}
+
 /* ---------- Office: proactively assign/reassign a courier to a shipment (a kurir otherwise self-assigns via pickupShipment) ---------- */
 const isOfficeRole = computed(() => ['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? ''))
+/** R-04: operational roles (gudang/kurir) receive no financial projection — hide money UI for them. */
+const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? ''))
 const activeCouriers = ref<{ id: number; name: string }[]>([])
 const assignTargets = reactive<Record<number, number | null>>({})
 const assigningCourierId = ref<number | null>(null)
@@ -500,7 +612,7 @@ async function submitReturn(item: OrderItem) {
                 <p class="text-xs text-stone-400">SKU: {{ item.sku || '-' }}</p>
                 <p class="text-xs text-stone-400">
                   {{ item.fulfilled_quantity }}<span v-if="item.fulfilled_quantity !== item.original_quantity">/{{ item.original_quantity }}</span>
-                  &times; {{ formatRupiah(item.unit_price) }}
+                  <template v-if="item.unit_price !== undefined">&times; {{ formatRupiah(item.unit_price) }}</template>
                   <span v-if="item.status !== order.status" class="ml-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] dark:bg-stone-800">{{ orderStatusLabel(item.status) }}</span>
                 </p>
                 <!-- This product's own delivery date — items on the same order can differ once rescheduled. -->
@@ -512,7 +624,7 @@ async function submitReturn(item: OrderItem) {
                   {{ t('orders.itemCourier', { name: item.courier.name }) }}
                 </p>
               </div>
-              <span class="font-medium text-stone-700 dark:text-stone-200">{{ formatRupiah(item.subtotal) }}</span>
+              <span v-if="item.subtotal !== undefined" class="font-medium text-stone-700 dark:text-stone-200">{{ formatRupiah(item.subtotal) }}</span>
             </div>
 
             <!-- Admin: adjust fulfilled quantity, only while order is 'diproses' -->
@@ -620,7 +732,7 @@ async function submitReturn(item: OrderItem) {
           </li>
         </ul>
 
-        <div class="mt-3 space-y-1.5 border-t border-stone-100 pt-3 text-sm dark:border-stone-800">
+        <div v-if="seesFinancials" class="mt-3 space-y-1.5 border-t border-stone-100 pt-3 text-sm dark:border-stone-800">
           <div class="flex justify-between text-stone-500 dark:text-stone-400">
             <span>{{ t('orders.subtotal') }}</span><span>{{ formatRupiah(order.subtotal_amount) }}</span>
           </div>
@@ -702,11 +814,12 @@ async function submitReturn(item: OrderItem) {
           <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
 
           <div v-if="group.status === 'diproses'" class="mt-2 space-y-2">
-            <AppButton size="sm" :disabled="shipmentBusy === group.shipmentId" @click="pickupShipment(group.shipmentId)">
+            <AppButton v-if="canOperateShipmentGroup(group)" size="sm" :disabled="shipmentBusy === group.shipmentId" @click="pickupShipment(group.shipmentId)">
               {{ t('orders.pickupAndDeliver') }}
             </AppButton>
 
-            <div v-if="isOfficeRole" class="flex flex-wrap items-center gap-2">
+            <!-- R-03: a self_sub shipment is never handed to a normal Kurir — no Assign Courier. -->
+            <div v-if="isOfficeRole && !isSelfSubGroup(group)" class="flex flex-wrap items-center gap-2">
               <p v-if="assignCourierError" class="w-full text-xs text-red-600">{{ assignCourierError }}</p>
               <label class="text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.assignCourierLabel') }}</label>
               <select v-model.number="assignTargets[group.shipmentId]" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
@@ -724,7 +837,7 @@ async function submitReturn(item: OrderItem) {
             </div>
           </div>
 
-          <div v-else-if="group.status === 'dikirim' && shipmentActionableByViewer(group)" class="mt-2 space-y-2">
+          <div v-else-if="group.status === 'dikirim' && canOperateShipmentGroup(group)" class="mt-2 space-y-2">
             <label class="block text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.deliveryProofRequired') }}</label>
             <input type="file" accept="image/*" class="block w-full text-xs" @change="onDeliveryProofSelected(group.shipmentId, $event)" />
             <AppButton
@@ -736,6 +849,30 @@ async function submitReturn(item: OrderItem) {
             </AppButton>
           </div>
           <p v-else-if="group.status === 'dikirim'" class="mt-2 text-xs text-stone-400">{{ t('orders.shipmentHeldByOtherCourier') }}</p>
+        </div>
+      </div>
+
+      <!-- R-03: Admin final delivery verification — append-only operational outcome, separate from payment verification. -->
+      <div v-if="canVerifyDelivery && deliveredShipmentGroups.length" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+        <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.deliveryVerification') }}</h2>
+        <p v-if="verificationError" class="mb-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-400">{{ verificationError }}</p>
+        <div v-for="group in deliveredShipmentGroups" :key="group.shipmentId" class="mb-2 rounded-lg bg-stone-50 p-3 last:mb-0 dark:bg-stone-800/60">
+          <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
+          <p v-if="latestVerification(group.shipmentId)" class="mt-1 text-xs text-stone-600 dark:text-stone-300">
+            {{ t('orders.verification.current', { outcome: verificationOutcomeLabel(latestVerification(group.shipmentId)?.outcome ?? '') }) }}
+          </p>
+          <div class="mt-2 space-y-2">
+            <div class="flex flex-wrap gap-3">
+              <label v-for="opt in (['received', 'not_received', 'return'] as const)" :key="opt" class="inline-flex items-center gap-1 text-xs text-stone-600 dark:text-stone-300">
+                <input v-model="formFor(group.shipmentId).outcome" type="radio" :value="opt" />
+                {{ verificationOutcomeLabel(opt) }}
+              </label>
+            </div>
+            <input v-model="formFor(group.shipmentId).note" type="text" :placeholder="t('orders.verification.notePlaceholder')" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+            <AppButton size="sm" :disabled="verificationBusy === group.shipmentId" @click="submitVerification(group.shipmentId)">
+              {{ t('orders.verification.submit') }}
+            </AppButton>
+          </div>
         </div>
       </div>
 
@@ -752,8 +889,8 @@ async function submitReturn(item: OrderItem) {
         {{ t('orders.cancelledReason', { reason: order.cancellation_reason }) }}
       </div>
 
-      <!-- Payment -->
-      <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+      <!-- Payment (financial projection — hidden for operational-only roles, e.g. gudang/kurir) -->
+      <div v-if="seesFinancials" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.payment') }}</h2>
           <span class="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">

@@ -48,6 +48,8 @@ const auth = useAuthStore()
 const canManageStock = computed(() => false)
 /** Fee (agen/sales/kurir) configuration — write access is super_admin/agen only (see ProductPolicy::manage). */
 const canManageFees = computed(() => auth.user?.role === 'super_admin' || auth.user?.role === 'agen')
+/** R-04 / §E: Admin has CRU only — variation delete is super_admin/agen only. */
+const canDeleteVariation = computed(() => ['super_admin', 'agen'].includes(auth.user?.role ?? ''))
 
 const productId = computed(() => (route.params.id ? Number(route.params.id) : null))
 const isEditing = computed(() => productId.value !== null)
@@ -654,7 +656,7 @@ async function submit() {
                     <button type="button" class="rounded-lg bg-stone-100 px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200" @click="openEditVariation(variation)">
                       Edit
                     </button>
-                    <button type="button" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:bg-red-950 dark:text-red-300" @click="removeVariation(variation.id)">
+                    <button v-if="canDeleteVariation" type="button" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:bg-red-950 dark:text-red-300" @click="removeVariation(variation.id)">
                       <AppIcon name="trash" :size="13" />
                     </button>
                   </div>

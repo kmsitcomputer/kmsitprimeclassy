@@ -72,7 +72,9 @@ const ROLE_ITEMS: NavItem[] = [
     label: 'Order',
     routeName: 'orders',
     icon: 'box',
-    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub'),
+    // R-04: Gudang executes warehouse work through the stock-request surfaces, not the generic
+    // (financial) order list; the backend order projection is operational-only for them anyway.
+    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub', 'gudang'),
   },
   {
     key: 'commissions',
@@ -239,7 +241,8 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Laporan Sales',
         routeName: 'sales-report',
         icon: 'chart-bar',
-        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'keuangan'),
+        // R-04 / §G: operational sales roster — Keuangan uses the financial reports instead.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal'),
       },
       {
         key: 'courier-report',
@@ -253,7 +256,8 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Laporan Order',
         routeName: 'orders-report',
         icon: 'box',
-        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'keuangan'),
+        // R-04 / §G: operational order report — Keuangan uses the financial reports instead.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal'),
       },
       {
         key: 'sales-customers-report',

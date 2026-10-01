@@ -30,9 +30,15 @@ class ProductPolicy
         return $this->manage($user);
     }
 
+    /**
+     * R-04 / §E: Admin authority is Create + Read + Update only — DELETE is NOT allowed for Admin.
+     * The higher roles (super_admin, agen) keep their existing delete authority. This policy is the
+     * server-side gate for BOTH Product and Product Variation (see ProductVariationController, which
+     * authorizes against the owning Product), so no frontend hiding is relied on.
+     */
     public function delete(User $user, Product $product): bool
     {
-        return $this->manage($user);
+        return $user->isRole('super_admin', 'agen');
     }
 
     /** Fee columns are only ever exposed to these roles — see ProductFeeResource. */

@@ -1,15 +1,19 @@
 <?php
 
 use App\Models\Order;
+use App\Models\OrderAdditionalPayment;
 use App\Models\OrderItem;
+use App\Models\OrderItemAdjustment;
 use App\Models\Product;
 use App\Models\ProductVariation;
+use App\Models\Shipment;
 use App\Models\StockOpname;
 use App\Models\StockRequest;
 use App\Models\StockRequestProposal;
 use App\Models\StockTransfer;
 use App\Models\SubStockRequest;
 use App\Models\User;
+use App\Services\Order\OrderFulfillmentService;
 use App\Services\Order\OrderService;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
@@ -340,6 +344,47 @@ if (str_starts_with($role, 'sr-')) {
             case 'sub-consume':
                 $item = OrderItem::findOrFail($subjectId);
                 $result = DB::transaction(fn () => app(SubStockService::class)->consume($item, $actor));
+                break;
+            case 'sub-increase':
+                // R-03: concurrent pre-shipment Sub reservation increases must serialize on the
+                // Sub stock row so free sellable capacity is never oversold.
+                $item = OrderItem::findOrFail($subjectId);
+                $result = DB::transaction(fn () => app(SubStockService::class)->increase($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test'));
+                break;
+            case 'sub-reduce':
+                // R-03: concurrent pre-shipment Sub reservation reductions must serialize on the
+                // Sub stock row so the reservation can never be reduced below zero.
+                $item = OrderItem::findOrFail($subjectId);
+                $result = DB::transaction(fn () => app(SubStockService::class)->reduce($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test'));
+                break;
+            case 'delivery-verify':
+                // R-03 / MAJOR-4: concurrent exact replays of one delivery verification must yield
+                // exactly one append-only row (unique index + replay match), never a 500/duplicate.
+                $shipment = Shipment::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(\App\Services\Order\DeliveryVerificationService::class)->record(
+                    $shipment, $actor,
+                    (string) ($extra['outcome'] ?? 'received'),
+                    $extra['note'] ?? null,
+                    (string) ($extra['key'] ?? 'race-verify-key'),
+                );
+                break;
+            case 'fulfillment-increase':
+                // R-03 / MAJOR-10: admin quantity adjustment racing a Keuangan financial settlement
+                // must not deadlock. `quantity` is the TARGET fulfilled quantity.
+                $item = OrderItem::findOrFail($subjectId);
+                $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test', (string) ($extra['method'] ?? 'cod'));
+                break;
+            case 'fulfillment-reduce':
+                $item = OrderItem::findOrFail($subjectId);
+                $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test');
+                break;
+            case 'refund-process':
+                $adjustment = OrderItemAdjustment::query()->findOrFail($subjectId);
+                $result = app(OrderFulfillmentService::class)->markAdjustmentRefundStatus($adjustment, $actor, 'processed');
+                break;
+            case 'additional-settle':
+                $payment = OrderAdditionalPayment::query()->findOrFail($subjectId);
+                $result = app(OrderFulfillmentService::class)->markAdditionalPaymentPaid($payment, $actor, (bool) ($extra['paid'] ?? true));
                 break;
             case 'sub-location-assign-owner':
                 // MAJOR-2 remediation: concurrent owner assignment vs. generic transfer approval

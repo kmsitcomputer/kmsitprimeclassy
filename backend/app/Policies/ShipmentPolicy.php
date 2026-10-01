@@ -21,7 +21,15 @@ class ShipmentPolicy
             return true;
         }
 
-        return $user->isRole('agen', 'admin', 'kurir', 'sales-kurir-sub') && $shipment->order?->agent_id === $user->agent_id;
+        // R-03: a self_sub shipment is operated only by its recorded Sales-Kurir-Sub owner
+        // (self_delivered_by_user_id) — never by a normal Kurir, never by another Sales-Kurir-Sub.
+        if ($user->isRole('sales-kurir-sub')) {
+            return $shipment->delivery_mode === Shipment::DELIVERY_MODE_SELF_SUB
+                && (int) $shipment->self_delivered_by_user_id === (int) $user->id
+                && $shipment->order?->agent_id === $user->agent_id;
+        }
+
+        return $user->isRole('agen', 'admin', 'kurir') && $shipment->order?->agent_id === $user->agent_id;
     }
 
     /** Proactively assigning a courier to a shipment is an office decision — a kurir self-assigns instead, via updateStatus. */
@@ -68,6 +76,12 @@ class ShipmentPolicy
         }
 
         if ($user->isRole('kurir', 'sales-kurir-sub')) {
+            // R-03: a self_sub shipment is the Sales-Kurir-Sub owner's own delivery — authority
+            // follows self_delivered_by_user_id, not courier_id (which stays NULL for self_sub).
+            if ($shipment->delivery_mode === Shipment::DELIVERY_MODE_SELF_SUB) {
+                return (int) $shipment->self_delivered_by_user_id === (int) $user->id;
+            }
+
             return $shipment->courier_id !== null && $shipment->courier?->user_id === $user->id;
         }
 

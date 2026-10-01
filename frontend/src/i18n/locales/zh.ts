@@ -216,6 +216,15 @@ export default {
     openInGoogleMaps: '在谷歌地图中打开',
     deliveryLocation: '配送位置',
     shipmentStatus: '配送状态',
+    deliveryVerification: '配送验证（管理员）',
+    verification: {
+      received: '已收到',
+      notReceived: '未收到 / 跟进',
+      return: '退货',
+      current: '当前结果：{outcome}',
+      notePlaceholder: '备注（可选）',
+      submit: '保存验证',
+    },
     pickupAndDeliver: '取件并配送',
     deliveryProofRequired: '配送凭证照片(必填)',
     markDelivered: '标记为已送达',
@@ -272,6 +281,7 @@ export default {
     },
     errors: {
       shipmentStatus: '更新配送状态失败。',
+      verification: '保存配送验证失败。',
       delivered: '标记为已送达失败。',
       codProofUpload: '上传货到付款凭证失败。',
       codConfirm: '处理货到付款确认失败。',

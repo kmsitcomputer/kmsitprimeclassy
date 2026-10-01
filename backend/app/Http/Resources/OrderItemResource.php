@@ -9,6 +9,12 @@ class OrderItemResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $user = $request->user();
+        // R-04 / §D: Gudang and Kurir receive the operational item view only — commercial values
+        // (unit price / line subtotal) belong to the financial projection.
+        $seesFinancials = $user !== null
+            && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal');
+
         return [
             'id' => $this->id,
             'product_id' => $this->product_id,
@@ -18,17 +24,28 @@ class OrderItemResource extends JsonResource
             'product_name' => $this->product_name_snapshot,
             'variation_label' => $this->variation_label_snapshot,
             'sku' => $this->sku_snapshot,
-            'unit_price' => $this->unit_price_snapshot,
+            'unit_price' => $this->when($seesFinancials, $this->unit_price_snapshot),
             'original_quantity' => $this->original_quantity,
             'fulfilled_quantity' => $this->fulfilled_quantity,
             'cancelled_quantity' => $this->cancelled_quantity,
             'returned_quantity' => $this->returned_quantity,
             'refund_quantity' => $this->refund_quantity,
             'additional_quantity' => $this->additional_quantity,
-            'subtotal' => $this->subtotal_snapshot,
+            'subtotal' => $this->when($seesFinancials, $this->subtotal_snapshot),
             'status' => $this->status,
             'requested_delivery_date' => $this->requested_delivery_date,
             'shipment_id' => $this->shipment_id,
+            // R-03: shipment routing state so the UI can gate operational controls (self_sub
+            // shipments are operated only by their self_delivered_by_user_id). UX-only context —
+            // the backend remains authoritative.
+            'delivery_mode' => $this->when(
+                $this->relationLoaded('shipment'),
+                fn () => $this->shipment?->delivery_mode
+            ),
+            'self_delivered_by_user_id' => $this->when(
+                $this->relationLoaded('shipment'),
+                fn () => $this->shipment?->self_delivered_by_user_id
+            ),
             // Only present once THIS item's own shipment has a courier — a
             // rescheduled item can sit on a different shipment (and courier)
             // than its siblings on the same order (Blueprint: "satu order

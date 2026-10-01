@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Courier;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Courier\AssignCourierRequest;
 use App\Http\Requests\Fulfillment\UpdateShipmentStatusRequest;
+use App\Http\Resources\CourierOrderResource;
 use App\Http\Resources\OrderResource;
 use App\Http\Resources\ShipmentReceiptResource;
 use App\Models\ActivityLog;
@@ -46,10 +47,15 @@ class ShipmentController extends Controller
             $shipment, $request->string('status')->toString(), $request->user(), $request->file('proof')
         );
 
-        return $this->ok(
-            new OrderResource($shipment->order->load(['items', 'shipments.courier.user'])),
-            __('messages.order.status_updated')
-        );
+        // R-04 / §C: a Kurir / Sales-Kurir-Sub must receive the courier projection (their own items
+        // only, no recipient/sibling/financial leakage) — never the generic OrderResource.
+        $order = $shipment->order->load(['items.shipment.courier.user', 'items.shipment.proof', 'shipments.courier.user']);
+
+        $payload = $request->user()->isRole('kurir', 'sales-kurir-sub')
+            ? new CourierOrderResource($order)
+            : new OrderResource($order);
+
+        return $this->ok($payload, __('messages.order.status_updated'));
     }
 
     /**
@@ -63,7 +69,7 @@ class ShipmentController extends Controller
     {
         $this->authorize('printReceipt', $shipment);
 
-        $shipment->load(['order.paymentMethod', 'courier', 'orderItems']);
+        $shipment->load(['order.paymentMethod', 'courier', 'selfDeliveredBy', 'orderItems']);
 
         $isReprint = ActivityLog::query()
             ->where('subject_type', Shipment::class)

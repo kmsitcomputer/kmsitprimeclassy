@@ -151,6 +151,11 @@ return [
         'window_closed' => '只有订单处于处理中状态时才能修改商品数量。',
         'adjusted' => '商品履行数量更新成功。',
         'rescheduled' => '商品配送日期更新成功。',
+        'split_stock_request_locked' => '无法拆分：仓库库存申请已部分履行，剩余数量不足。',
+        'cannot_increase_cancelled' => '已完全取消的商品不能再次增加数量。',
+        'pending_refund_blocks_increase' => '当该商品仍存在未处理的退款义务时，不能增加数量。',
+        'pending_additional_payment_blocks_reduction' => '当本次增加对应的附加付款仍未结清时，不能减少数量。',
+        'pending_additional_payment_blocks_increase' => '上一笔附加付款尚未结清时，不能再次增加数量。',
     ],
 
     'courier' => [
@@ -161,10 +166,22 @@ return [
         'assigned' => '骑手分配成功。',
         'return_confirmed' => '退货状态更新成功。',
         'delivery_proof_required' => '骑手必须上传送货凭证才能将此订单标记为已送达。',
+        'sales_kurir_sub_standard_forbidden' => 'Sales-Kurir-Sub 只能自行配送来自其自有 Sub 库存的货件。',
+        'self_delivery_no_courier' => '自行配送的货件不能分配给骑手。',
+    ],
+
+    'delivery_verification' => [
+        'invalid_outcome' => '配送验证结果无效。',
+        'not_delivered' => '货件尚未送达，无法进行验证。',
+        'recorded' => '配送验证已记录。',
+        'idempotency_key_required' => '必须提供 Idempotency-Key 请求头。',
+        'idempotency_key_invalid' => 'Idempotency-Key 请求头无效（最多 100 个字符）。',
+        'idempotency_conflict' => '该 Idempotency-Key 已用于其他验证请求。',
     ],
 
     'return' => [
         'item_not_delivered' => '只有商品状态为已送达后才能申请退货。',
+        'sub_location_unavailable' => '退货的原始 Sub 位置缺失或未启用，无法处理 Sub 库存退货。',
         'invalid_quantity' => '退货数量超过可退货数量。',
         'requested' => '退货申请提交成功。',
         'reviewed' => '退货申请处理成功。',

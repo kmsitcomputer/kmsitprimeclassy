@@ -214,6 +214,15 @@ export default {
     openInGoogleMaps: 'Buka di Google Maps',
     deliveryLocation: 'Lokasi pengiriman',
     shipmentStatus: 'Status Pengiriman',
+    deliveryVerification: 'Verifikasi Pengiriman (Admin)',
+    verification: {
+      received: 'Diterima',
+      notReceived: 'Tidak diterima / tindak lanjut',
+      return: 'Retur',
+      current: 'Status saat ini: {outcome}',
+      notePlaceholder: 'Catatan (opsional)',
+      submit: 'Simpan verifikasi',
+    },
     pickupAndDeliver: 'Ambil & Kirim',
     deliveryProofRequired: 'Foto bukti pengiriman (wajib)',
     markDelivered: 'Tandai Terkirim',
@@ -270,6 +279,7 @@ export default {
     },
     errors: {
       shipmentStatus: 'Gagal memperbarui status pengiriman.',
+      verification: 'Gagal menyimpan verifikasi pengiriman.',
       delivered: 'Gagal menandai pesanan terkirim.',
       codProofUpload: 'Gagal mengunggah bukti pembayaran COD.',
       codConfirm: 'Gagal memproses konfirmasi pembayaran COD.',

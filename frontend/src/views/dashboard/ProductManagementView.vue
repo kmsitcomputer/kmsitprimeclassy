@@ -19,6 +19,8 @@ import { formatApiError } from '@/utils/apiError'
 
 const auth = useAuthStore()
 const canManageStock = computed(() => auth.user?.role === 'agen' || auth.user?.role === 'admin')
+/** R-04 / §E: Admin has Create + Read + Update only — no Delete. Only super_admin/agen may delete. */
+const canDeleteProduct = computed(() => ['super_admin', 'agen'].includes(auth.user?.role ?? ''))
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -227,6 +229,7 @@ onMounted(load)
                   Edit
                 </RouterLink>
                 <button
+                  v-if="canDeleteProduct"
                   type="button"
                   class="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 dark:bg-red-950 dark:text-red-300"
                   @click="remove(product)"

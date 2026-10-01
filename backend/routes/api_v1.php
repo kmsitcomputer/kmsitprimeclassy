@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\V1\Install\InstallController;
 use App\Http\Controllers\Api\V1\Integration\SheetsController;
 use App\Http\Controllers\Api\V1\Language\LanguageController;
 use App\Http\Controllers\Api\V1\Media\MediaController;
+use App\Http\Controllers\Api\V1\Order\DeliveryVerificationController;
 use App\Http\Controllers\Api\V1\Order\OrderController;
 use App\Http\Controllers\Api\V1\Payment\PaymentController;
 use App\Http\Controllers\Api\V1\Referral\ReferralController;
@@ -224,6 +225,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/shipments/{shipment}/courier', [ShipmentController::class, 'assign']);
     });
 
+    // R-03: Admin final delivery verification — append-only operational outcome (received /
+    // not_received / return), separate from payment verification, transaction verification and the
+    // courier's own shipment delivery action. Admin only, same-Agent (DeliveryVerificationPolicy).
+    Route::middleware('role:super_admin,admin')->group(function () {
+        Route::get('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'index']);
+        Route::post('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'store']);
+    });
+
     Route::middleware('role:super_admin,agen,admin')->group(function () {
         // Per-item fulfillment adjustment — only while the order is 'diproses'
         // (OrderFulfillmentService enforces the exact window). Never kurir —
@@ -267,8 +276,13 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Kurir dashboard — "tidak boleh melakukan transaksi/mengubah harga/fee/
     // payment/melihat data agen lain": every action here is read-only or a
     // pure logistics status flip, scoped to the kurir's own agent branch.
+    // R-03: Sales-Kurir-Sub is NOT a normal Kurir. They may use the delivery queue (scoped
+    // server-side to their own self_sub shipments) but NOT the normal-Kurir return pickup/confirm
+    // actions, which require a Courier profile they deliberately do not have.
     Route::middleware('role:kurir,sales-kurir-sub')->group(function () {
         Route::get('/kurir/orders', [CourierDashboardController::class, 'orders']);
+    });
+    Route::middleware('role:kurir')->group(function () {
         Route::get('/kurir/returns', [CourierDashboardController::class, 'returns']);
         Route::patch('/kurir/returns/{item}/pickup', [CourierDashboardController::class, 'pickupReturn']);
         Route::patch('/kurir/returns/{item}/confirm', [CourierDashboardController::class, 'confirmReturn']);
@@ -305,15 +319,21 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:super_admin,agen,admin')->group(function () {
         Route::post('/products', [ProductController::class, 'store']);
         Route::patch('/products/{product}', [ProductController::class, 'update']);
-        Route::delete('/products/{product}', [ProductController::class, 'destroy']);
 
         Route::post('/products/{product}/variations', [ProductVariationController::class, 'store']);
         Route::patch('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update']);
-        Route::delete('/products/{product}/variations/{variation}', [ProductVariationController::class, 'destroy']);
 
         Route::post('/products/{product}/images', [ProductImageController::class, 'store']);
         Route::patch('/products/{product}/images/{image}', [ProductImageController::class, 'update']);
         Route::delete('/products/{product}/images/{image}', [ProductImageController::class, 'destroy']);
+    });
+
+    // R-04 / §E: Admin has Create + Read + Update only — NO Delete. Product and Variation deletion
+    // is therefore NOT in the super_admin,agen,admin group; ProductPolicy::delete enforces the same
+    // boundary server-side (defense in depth) for forged requests.
+    Route::middleware('role:super_admin,agen')->group(function () {
+        Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+        Route::delete('/products/{product}/variations/{variation}', [ProductVariationController::class, 'destroy']);
     });
 
     // Agent stock — read/browse (including cross-agent oversight via
@@ -490,7 +510,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // §Korsal dashboard) — ReportService::scopeToActor narrows both further
     // still to the korsal's own korsal_id, never their agen's whole branch.
     // Every other report below stays super_admin/agen/admin only.
-    Route::middleware('role:super_admin,agen,admin,korsal,keuangan')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,korsal')->group(function () {
         Route::get('/reports/transactions', [ReportController::class, 'transactions']);
         Route::get('/reports/sales', [ReportController::class, 'salesRoster']);
     });
@@ -500,6 +520,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/reports/fees/courier', [ReportController::class, 'courierFees']);
         Route::get('/reports/payment-status', [ReportController::class, 'paymentStatus']);
         Route::get('/reports/finance-summary', [ReportController::class, 'financeSummary']);
+        // R-04 / §G: per-order finance projection (PaymentSummaryService-backed).
+        Route::get('/reports/finance-orders', [ReportController::class, 'financeOrders']);
         Route::get('/reports/couriers-per-agent', [ReportController::class, 'couriersPerAgent']);
         // Roster reports (Blueprint §Agen dashboard) — every korsal/sales/kurir
         // in the branch appears even with zero activity in range, unlike the

@@ -6,6 +6,7 @@ use App\Models\Scopes\BelongsToAgentScope;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
@@ -129,6 +130,12 @@ class Order extends Model
     public function shipments(): HasMany
     {
         return $this->hasMany(Shipment::class);
+    }
+
+    /** R-03: Admin delivery-verification history across every shipment of this order. */
+    public function deliveryVerifications(): HasManyThrough
+    {
+        return $this->hasManyThrough(DeliveryVerification::class, Shipment::class);
     }
 
     public function commissions(): HasMany

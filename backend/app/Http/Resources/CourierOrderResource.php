@@ -17,21 +17,33 @@ class CourierOrderResource extends JsonResource
     {
         $actor = $request->user();
         $viewerIsKurir = $actor?->isRole('kurir') ?? false;
+        $viewerIsSubActor = $actor?->isRole('sales-kurir-sub') ?? false;
         $viewerCourierId = $actor?->courierProfile?->id;
+        $viewerUserId = $actor?->id;
 
-        return [
+        // R-04 / §C: a normal Kurir's queue may show work they have not claimed yet. Minimize the
+        // pre-claim projection (no recipient contact / street address / coordinates) and expose the
+        // full operational detail only once the shipment is assigned to THEM. A Sales-Kurir-Sub's
+        // own self_sub shipments are already theirs, so they always get full detail.
+        $assignedToViewer = false;
+        if ($viewerIsKurir) {
+            $assignedToViewer = $this->relationLoaded('items') && $this->items->contains(
+                fn ($item) => $item->shipment
+                    && $item->shipment->courier_id !== null
+                    && $item->shipment->courier_id === $viewerCourierId
+            );
+        }
+        $minimal = $viewerIsKurir && ! $assignedToViewer;
+
+        $row = [
             'id' => $this->id,
             'order_no' => $this->order_no,
             'status' => $this->status,
-            'recipient_name' => $this->recipient_name_snapshot,
-            'recipient_phone' => $this->recipient_phone_snapshot,
-            'address' => $this->address_snapshot,
+            'detail_available' => ! $minimal,
             'village' => $this->village_snapshot,
             'district' => $this->district_snapshot,
             'regency' => $this->regency_snapshot,
             'province' => $this->province_snapshot,
-            'latitude' => $this->latitude_snapshot,
-            'longitude' => $this->longitude_snapshot,
             // The order-level query only requires ONE item to be eligible (still
             // 'diproses', or 'dikirim'/beyond on THIS kurir's own shipment) for the
             // whole order to appear — an order can otherwise mix several products
@@ -42,7 +54,7 @@ class CourierOrderResource extends JsonResource
             // matching — filtered out here so 'dikirim'/'terkirim' items only ever
             // show to the kurir actually holding that shipment.
             'items' => $this->whenLoaded('items', fn () => $this->items
-                ->filter(fn ($item) => $this->itemVisibleToViewer($item, $viewerIsKurir, $viewerCourierId))
+                ->filter(fn ($item) => $this->itemVisibleToViewer($item, $viewerIsKurir, $viewerIsSubActor, $viewerCourierId, $viewerUserId))
                 ->values()
                 ->map(fn ($item) => [
                     'id' => $item->id,
@@ -58,12 +70,35 @@ class CourierOrderResource extends JsonResource
                 ])),
             'created_at' => $this->created_at,
         ];
+
+        if (! $minimal) {
+            $row += [
+                'recipient_name' => $this->recipient_name_snapshot,
+                'recipient_phone' => $this->recipient_phone_snapshot,
+                'address' => $this->address_snapshot,
+                'latitude' => $this->latitude_snapshot,
+                'longitude' => $this->longitude_snapshot,
+            ];
+        }
+
+        return $row;
     }
 
-    private function itemVisibleToViewer($item, bool $viewerIsKurir, ?int $viewerCourierId): bool
+    private function itemVisibleToViewer($item, bool $viewerIsKurir, bool $viewerIsSubActor, ?int $viewerCourierId, ?int $viewerUserId): bool
     {
+        // R-03: a Sales-Kurir-Sub only ever sees items on their OWN self_sub shipment.
+        if ($viewerIsSubActor) {
+            return $item->shipment?->self_delivered_by_user_id !== null
+                && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId;
+        }
+
         if (! $viewerIsKurir) {
             return true;
+        }
+
+        // A self_sub item belongs to its owning Sales-Kurir-Sub, never a normal Kurir's queue.
+        if ($item->shipment?->delivery_mode === 'self_sub') {
+            return false;
         }
 
         if (in_array($item->status, ['diterima', 'diproses'], true)) {

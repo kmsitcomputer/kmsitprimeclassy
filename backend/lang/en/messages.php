@@ -151,6 +151,11 @@ return [
         'window_closed' => 'Item quantity can only be changed while the order is diproses.',
         'adjusted' => 'Item fulfillment quantity updated successfully.',
         'rescheduled' => 'Item delivery date updated successfully.',
+        'split_stock_request_locked' => 'The split cannot be performed because the warehouse stock request is already partially fulfilled and its remaining quantity is insufficient.',
+        'cannot_increase_cancelled' => 'A fully cancelled item cannot be increased again.',
+        'pending_refund_blocks_increase' => 'Cannot increase the quantity while an unprocessed refund obligation still exists for this item.',
+        'pending_additional_payment_blocks_reduction' => 'Cannot reduce the quantity while the additional payment for this increase is still outstanding.',
+        'pending_additional_payment_blocks_increase' => 'Cannot increase the quantity again while the previous additional payment is still outstanding.',
     ],
 
     'courier' => [
@@ -161,10 +166,22 @@ return [
         'assigned' => 'Courier assigned successfully.',
         'return_confirmed' => 'Return status updated successfully.',
         'delivery_proof_required' => 'The kurir must upload delivery proof to mark this shipment as delivered.',
+        'sales_kurir_sub_standard_forbidden' => 'A Sales-Kurir-Sub may only self-deliver shipments sourced from their own Sub stock.',
+        'self_delivery_no_courier' => 'A self-delivery shipment cannot be assigned to a courier.',
+    ],
+
+    'delivery_verification' => [
+        'invalid_outcome' => 'Invalid delivery verification outcome.',
+        'not_delivered' => 'The shipment has not been delivered yet; it cannot be verified.',
+        'recorded' => 'Delivery verification recorded.',
+        'idempotency_key_required' => 'The Idempotency-Key header is required.',
+        'idempotency_key_invalid' => 'The Idempotency-Key header is invalid (max 100 characters).',
+        'idempotency_conflict' => 'This Idempotency-Key was already used for a different verification request.',
     ],
 
     'return' => [
         'item_not_delivered' => 'A return can only be requested once the item is terkirim.',
+        'sub_location_unavailable' => 'The original Sub Location for this return is missing or inactive; the Sub stock return cannot be processed.',
         'invalid_quantity' => 'Return quantity exceeds what can still be returned.',
         'requested' => 'Return request submitted successfully.',
         'reviewed' => 'Return request processed successfully.',

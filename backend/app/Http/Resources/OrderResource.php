@@ -10,28 +10,31 @@ class OrderResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $user = $request->user();
+        // R-04 / §D: operational Order access does NOT imply the financial projection. Gudang and
+        // Kurir get the operational order view only (no DP/paid/remaining/payment summary/ledger);
+        // financial truth stays canonical in the payment layer for the authorized roles.
+        $seesFinancials = $user !== null
+            && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal');
+
         return [
             'id' => $this->id,
             'order_no' => $this->order_no,
             'status' => $this->status,
-            'payment_status' => $this->payment_status,
-            'subtotal_amount' => $this->subtotal_amount,
-            'shipping_fee_amount' => $this->shipping_fee_amount,
-            'admin_fee_amount' => $this->admin_fee_amount,
-            'total_amount' => $this->total_amount,
-            // DP / partial-payment accounting. Not sensitive — they are the
-            // order's own amounts, and the konsumen needs them to know what is
-            // still owed. remaining_amount > 0 always means NOT lunas.
-            'dp_amount' => $this->dp_amount,
-            'paid_amount' => $this->paid_amount,
-            'remaining_amount' => $this->remaining_amount,
-            // Canonical payment summary (PaymentSummaryService) — the single
-            // formula every payment display (Order Detail, Transaction
-            // Report, Google Sheets) reads instead of each re-deriving its
-            // own. verified_dp is capped at requested_dp even once a
-            // settlement pushes total_paid past it (the DP tranche's own
-            // history never changes once verified).
-            'payment_summary' => PaymentSummaryService::summarize($this->resource),
+            'payment_status' => $this->when($seesFinancials, $this->payment_status),
+            'subtotal_amount' => $this->when($seesFinancials, $this->subtotal_amount),
+            'shipping_fee_amount' => $this->when($seesFinancials, $this->shipping_fee_amount),
+            'admin_fee_amount' => $this->when($seesFinancials, $this->admin_fee_amount),
+            'total_amount' => $this->when($seesFinancials, $this->total_amount),
+            // DP / partial-payment accounting. Not sensitive to the financial roles — they are the
+            // order's own amounts, and the konsumen needs them to know what is still owed.
+            // remaining_amount > 0 always means NOT lunas.
+            'dp_amount' => $this->when($seesFinancials, $this->dp_amount),
+            'paid_amount' => $this->when($seesFinancials, $this->paid_amount),
+            'remaining_amount' => $this->when($seesFinancials, $this->remaining_amount),
+            // Canonical payment summary (PaymentSummaryService) — the single formula every payment
+            // display reads instead of each re-deriving its own.
+            'payment_summary' => $this->when($seesFinancials, fn () => PaymentSummaryService::summarize($this->resource)),
             'recipient_name' => $this->recipient_name_snapshot,
             'recipient_phone' => $this->recipient_phone_snapshot,
             'address' => $this->address_snapshot,
@@ -100,13 +103,38 @@ class OrderResource extends JsonResource
                     ->map(fn ($courier) => ['name' => $courier->name, 'phone' => $courier->user?->phone])
             ),
             'items' => OrderItemResource::collection($this->whenLoaded('items')),
-            'payment_method' => $this->whenLoaded('paymentMethod', fn () => $this->paymentMethod ? [
-                'code' => $this->paymentMethod->code,
-                'name' => $this->paymentMethod->name,
-                'type' => $this->paymentMethod->type,
-            ] : null),
+            // R-03: derived delivery groups — one per (order, requested_delivery_date). There is NO
+            // invoice/delivery-group table: grouping is a pure projection over order items, and the
+            // Order-level payment truth (payment_summary above) is never duplicated per group.
+            'delivery_groups' => $this->whenLoaded('items', fn () => $this->items
+                ->groupBy(fn ($item) => $item->requested_delivery_date?->toDateString() ?? '')
+                ->map(fn ($items, $date) => [
+                    'delivery_date' => $date !== '' ? $date : null,
+                    'item_ids' => $items->pluck('id')->values(),
+                    'item_count' => $items->count(),
+                    'total_quantity' => (int) $items->sum('fulfilled_quantity'),
+                    'shipment_ids' => $items->pluck('shipment_id')->filter()->unique()->values(),
+                ])
+                ->values()),
+            // R-03: append-only Admin delivery-verification history — Admin/Super Admin only.
+            // DeliveryVerificationController enforces the same boundary; exposing it through the
+            // generic Order detail to Konsumen/Sales/Korsal/Kurir would bypass it (verifier
+            // identity + internal notes). Non-Admin UIs use GET /shipments/{shipment}/delivery-verifications.
+            'delivery_verifications' => $this->when(
+                $this->relationLoaded('deliveryVerifications')
+                    && ($request->user()?->isRole('super_admin', 'admin') ?? false),
+                fn () => DeliveryVerificationResource::collection($this->deliveryVerifications)->resolve()
+            ),
+            'payment_method' => $this->when(
+                $seesFinancials && $this->relationLoaded('paymentMethod'),
+                fn () => $this->paymentMethod ? [
+                    'code' => $this->paymentMethod->code,
+                    'name' => $this->paymentMethod->name,
+                    'type' => $this->paymentMethod->type,
+                ] : null
+            ),
             'payment_transaction' => $this->when(
-                $this->relationLoaded('paymentTransactions') && $this->paymentTransactions->isNotEmpty(),
+                $seesFinancials && $this->relationLoaded('paymentTransactions') && $this->paymentTransactions->isNotEmpty(),
                 // The most recent attempt — a DP order has more than one
                 // (the DP itself, then the settlement), and the current one
                 // is what the order-detail page acts on.

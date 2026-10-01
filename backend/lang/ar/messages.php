@@ -151,6 +151,11 @@ return [
         'window_closed' => 'لا يمكن تغيير كمية الصنف إلا أثناء حالة الطلب "قيد المعالجة".',
         'adjusted' => 'تم تحديث كمية تنفيذ الصنف بنجاح.',
         'rescheduled' => 'تم تحديث تاريخ توصيل الصنف بنجاح.',
+        'split_stock_request_locked' => 'لا يمكن تنفيذ التقسيم لأن طلب مخزون المستودع تم تنفيذه جزئيًا والكمية المتبقية غير كافية.',
+        'cannot_increase_cancelled' => 'لا يمكن زيادة كمية صنف تم إلغاؤه بالكامل.',
+        'pending_refund_blocks_increase' => 'لا يمكن زيادة الكمية أثناء وجود التزام استرداد غير معالج لهذا الصنف.',
+        'pending_additional_payment_blocks_reduction' => 'لا يمكن تقليل الكمية أثناء وجود دفعة إضافية غير مسددة لهذه الزيادة.',
+        'pending_additional_payment_blocks_increase' => 'لا يمكن زيادة الكمية مرة أخرى أثناء عدم سداد الدفعة الإضافية السابقة.',
     ],
 
     'courier' => [
@@ -161,10 +166,22 @@ return [
         'assigned' => 'تم تعيين المندوب بنجاح.',
         'return_confirmed' => 'تم تحديث حالة الإرجاع بنجاح.',
         'delivery_proof_required' => 'يجب على السائق تحميل إثبات التسليم لتمييز هذه الشحنة كمسلمة.',
+        'sales_kurir_sub_standard_forbidden' => 'يمكن لـ Sales-Kurir-Sub فقط توصيل الشحنات المصدرة من مخزونه الفرعي الخاص.',
+        'self_delivery_no_courier' => 'لا يمكن تعيين مندوب توصيل لشحنة التوصيل الذاتي.',
+    ],
+
+    'delivery_verification' => [
+        'invalid_outcome' => 'نتيجة التحقق من التسليم غير صالحة.',
+        'not_delivered' => 'لم يتم تسليم الشحنة بعد؛ لا يمكن التحقق منها.',
+        'recorded' => 'تم تسجيل التحقق من التسليم.',
+        'idempotency_key_required' => 'ترويسة Idempotency-Key مطلوبة.',
+        'idempotency_key_invalid' => 'ترويسة Idempotency-Key غير صالحة (بحد أقصى 100 حرف).',
+        'idempotency_conflict' => 'تم استخدام Idempotency-Key هذا لطلب تحقق مختلف.',
     ],
 
     'return' => [
         'item_not_delivered' => 'لا يمكن طلب الإرجاع إلا بعد أن تصبح حالة الصنف "تم التسليم".',
+        'sub_location_unavailable' => 'موقع Sub الأصلي للإرجاع غير موجود أو غير نشط؛ لا يمكن معالجة إرجاع مخزون Sub.',
         'invalid_quantity' => 'كمية الإرجاع تتجاوز الكمية القابلة للإرجاع.',
         'requested' => 'تم إرسال طلب الإرجاع بنجاح.',
         'reviewed' => 'تمت معالجة طلب الإرجاع بنجاح.',
