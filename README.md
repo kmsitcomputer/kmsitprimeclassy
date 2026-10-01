@@ -1,491 +1,84 @@
 # Prime Classy Cake & Cookies
 
-Production e-commerce platform for a multi-branch cake & cookies business, built as a Laravel 11 API backend with a separate Vue 3 (Vite) single-page-application frontend.
+Multi-branch (multi-Agent) cake & cookies ordering platform: a **Laravel 11** JSON API plus a separate **Vue 3 / Vite** single-page app. Each Agent (branch) runs its own storefront presence, staff hierarchy, stock, warehouse and delivery operation; one Super Admin oversees the platform; consumers buy from a shared catalog and are attributed to a branch through a referral chain.
 
-This document reflects the codebase as it actually exists today. It does not describe planned or partially-built features as finished — where something is incomplete, that is stated explicitly (see **Known gaps** at the end of each relevant section, and the project's `backend/SECURITY_AUDIT.md` / `FINAL_AUDIT_REPORT.md` for full detail).
+This README is the entry point only. The system is specified in:
 
----
+| Doc | What it holds |
+|---|---|
+| [docs/MASTER-SYSTEM.md](docs/MASTER-SYSTEM.md) | Canonical description of the whole website (what exists today) |
+| [docs/BUSINESS-RULES.md](docs/BUSINESS-RULES.md) | Locked business invariants, roles and authority matrix |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Services, locking, idempotency, API/frontend structure |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | DEV / TEST / PRODUCTION runbook, deployment and backup |
+| [AGENTS.md](AGENTS.md) | AI / developer governance |
 
-## 1. Project overview
+Historical specs, audits and checkpoints live in Git history only.
 
-Prime Classy Cake & Cookies is a multi-agent (multi-branch) cake and cookies ordering platform. Each **agen** (agent/branch) runs its own storefront presence, stock, staff hierarchy, and delivery operation, while a single **super_admin** oversees the whole platform. Customers (**konsumen**) browse a shared product catalog, are attributed to a branch via a referral chain (agen → korsal → sales → konsumen), and can check out with courier, COD, Down Payment (DP), manual bank transfer, or a payment gateway (Xendit, Tripay, or Stripe).
+## Stack
 
-## 2. Features
+- **Backend:** PHP 8.2+ (DEV runs 8.3), Laravel 11.56, Laravel Sanctum (SPA cookie sessions), MariaDB 10.11 (DEV and production; MySQL-compatible), HTMLPurifier, PhpSpreadsheet, Google API auth (Sheets export).
+- **Frontend:** Vue 3 (Composition API), Vite 8, TypeScript, Pinia, Vue Router, vue-i18n (id / en / ar / zh), Tailwind CSS 4, CKEditor 5, Axios. Node ^22.18 or ≥24.12.
+- **External services:** OpenRouteService (road-route pricing), RajaOngkir / Komerce V2 (expedition rates), Xendit / Tripay / Stripe (payment gateways, webhooks), Google Sheets (one-way report export), optional Google Maps (frontend picker).
 
-Implemented and working today:
+## Major modules
 
-- Session-based (Sanctum SPA cookie) authentication, 8 roles: `super_admin`, `agen`, `korsal`, `sales`, `konsumen`, `admin`, `keuangan`, `kurir`.
-- Role hierarchy with referral-code-based account creation (agen → korsal/sales, korsal → sales, sales/agen/korsal → konsumen).
-- Per-agent branch data isolation, enforced at query, policy, and service layers.
-- Catalog: products with optional variations, per-agent stock, per-product/variation fee configuration (agent fee, sales fee, courier fee).
-- Shop, cart, wishlist, checkout with delivery-date selection and a choice of courier ("kurir online", distance-priced) or expedition ("ekspedisi"/RajaOngkir) shipping.
-- Full order lifecycle: creation, per-item fulfillment adjustment (recalculates the order's authoritative total via `OrderTotalCalculator`), cancellation, per-item return/refund driven by actual overpayment (never just "quantity went down"), additional-payment collection driven by actual outstanding balance (never just "quantity went up"), per-shipment courier delivery tracking with photo proof.
-- Payment: Cash-on-delivery (with photo-proof + admin confirmation), Down Payment / DP (partial payment + separate settlement/pelunasan flow), manual bank transfer (with photo-proof + admin verification), and 3 payment gateways (Xendit, Tripay, Stripe) with signature-verified webhooks. A canonical `PaymentSummaryService` (grand total, DP paid, total paid, remaining balance, payment status, additional-payment/refund amount+status) is the single source every surface (Order Detail, transaction report, Google Sheets) reads — never re-derived independently.
-- Thermal shipping-receipt printing: per-shipment (not per-order) pre-pickup / post-pickup receipt, 58mm/80mm, read-only (printing/reprinting never changes order/item/shipment state), scoped so a courier only ever sees their own assigned shipment's items.
-- Shipping: OpenRouteService Directions V2 for internal road-route delivery (`chargeable_distance_km = max(0, route_distance_km − minimum_distance_km)`, then `× rate_per_km`) and RajaOngkir/Komerce V2 for expedition rates. Credentials and pricing are scoped per agent; the backend recalculates every selected method when creating an order.
-- CMS: homepage content blocks, articles/news, static pages — all edited via a CKEditor 5 rich-text editor and sanitized server-side before storage.
-- Media upload pipeline with real MIME/type verification (not just extension checking).
-- Public website settings and a public "Contact Agent" directory.
-- 4-language backend message catalog (Indonesian, English, Arabic, Chinese).
-- Excel (.xlsx) export for 11 management reports (transactions, sales/korsal fees, cancellations & refunds, courier fees, agent fees, payment status, customers, korsal/sales rosters, sales' own customers).
-- A full backend audit trail (`ActivityLogger` → `activity_log` table) recording who did what, when, from which IP/user agent.
-- 500+ automated backend tests (Feature-level, hitting real routes/policies/services against a real test database; 517 passing on the last full suite run).
-- A real per-role dashboard frontend: a landing dashboard plus dedicated pages for orders/reports/finance/stock/users/CMS/Google Sheets/shipping & payment settings/courier operations — see `frontend/src/views/dashboard/` and `frontend/src/views/admin/`.
+Catalog & SKU registry · Referral hierarchy (10 roles) · Checkout & orders · Payment (COD, DP, manual transfer, gateways) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
 
-**Known gaps** (not implemented — see the checklist in `FINAL_AUDIT_REPORT.md` for the authoritative, up-to-date status of every feature area):
-- No installer wizard is required to run locally, but production deployments typically use the browser-based `/install` wizard described in `BLUEPRINT.md` §3.1; the standard Laravel `.env` + `artisan migrate` flow below is the manual/dev alternative.
-- No way to add a brand-new product line to an *already-placed* order — fulfillment adjustment can only change the quantity of a product that was already on the order at checkout time.
-- No frontend dark-mode toggle and no frontend automated test suite yet.
-- No frontend language-switcher UI (the backend serves all 4 locales; the storefront currently renders in one locale at a time via `Accept-Language`/session state, with no visible switcher control).
-
-## 3. Architecture
-
-```
-┌─────────────────────┐        HTTPS / JSON        ┌──────────────────────┐
-│  Vue 3 SPA (Vite)    │ ─────────────────────────► │  Laravel 11 API      │
-│  frontend/           │ ◄───────────────────────── │  backend/            │
-│  served as static    │      Sanctum session        │  served by PHP-FPM   │
-│  files by Apache/    │      cookie + CSRF          │  behind Apache/Nginx │
-│  Nginx/any static     │                             │                      │
-│  host                │                             └──────────┬───────────┘
-└─────────────────────┘                                         │
-                                                                  ▼
-                                                          ┌───────────────┐
-                                                          │  MySQL 8.0+   │
-                                                          └───────────────┘
-```
-
-The frontend and backend are two independent deployables. The frontend is a static build (`frontend/dist/`) that talks to the backend purely over HTTP JSON — it is never rendered by Laravel/Blade. The backend never serves HTML pages other than its own `public/index.php` front controller.
-
-Authentication is Sanctum's **SPA cookie** mode (not bearer tokens): the frontend and backend must share a registrable domain (or be proxied under one origin) for the session cookie to work, and both CORS (`FRONTEND_URLS`) and Sanctum's own stateful-domain list (`SANCTUM_STATEFUL_DOMAINS`) in `backend/.env` must list the frontend's exact origin — see §10, both are required, and missing either one breaks login differently (see §27).
-
-## 4. Technology stack
-
-**Backend**
-- PHP 8.2+, Laravel 11
-- MySQL 8.0+ (developed/verified against MySQL 8.4)
-- Laravel Sanctum (SPA session auth)
-- HTMLPurifier (`ezyang/htmlpurifier`) for CMS content sanitization
-- PhpSpreadsheet (`phpoffice/phpspreadsheet`) for Excel export
-- PHPUnit (Feature tests)
-
-**Frontend**
-- Vue 3 (Composition API), Vite
-- Vue Router, Pinia
-- Tailwind CSS v4
-- CKEditor 5 (rich-text editor for CMS content)
-- Axios
-
-## 5. System requirements
-
-- PHP **8.2 or newer**, with the extensions Laravel 11 requires (`pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `gd` or `imagick` for image processing).
-- Composer 2.x
-- MySQL **8.0 or newer**
-- Node.js **22.18+ or 24.12+** (see `frontend/package.json` → `engines`), with npm
-- Apache 2.4+ (with `mod_rewrite`) or Nginx — either works; Apache-specific configuration is documented below since that's what this project ships `.htaccess` for.
-
-## 6. Directory structure
+## Repository layout
 
 ```
 primeclassy/
-├── README.md                  # this file
-├── .gitignore                 # root-level safety net (.env patterns, editor cruft)
-├── backend/                   # Laravel 11 API
-│   ├── app/
-│   │   ├── Http/Controllers/Api/V1/   # one namespace per feature area
-│   │   ├── Http/Requests/             # FormRequest validation, one per endpoint
-│   │   ├── Http/Resources/            # JSON response shaping
-│   │   ├── Models/                    # Eloquent models + global scopes
-│   │   ├── Policies/                  # per-model authorization
-│   │   ├── Services/                  # business logic (Order, Payment, Stock, Fee, Shipping, ...)
-│   │   └── Support/                   # ApiResponse envelope, PermissionMap, HierarchyRules
-│   ├── config/                        # Laravel config, incl. media.php (upload policy)
-│   ├── database/
-│   │   ├── migrations/                # schema history (source of truth)
-│   │   ├── factories/                 # test-only data factories
-│   │   └── seeders/                   # roles/languages/settings/payment methods/shipping providers — no demo users or business data
-│   ├── database.sql                   # structure-and-seed-only MySQL dump (see §25)
-│   ├── lang/                          # id / en / ar / zh message catalogs
-│   ├── public/                        # Apache/Nginx document root — index.php front controller + .htaccess
-│   ├── routes/api_v1.php              # the entire API surface
-│   ├── tests/Feature/                 # 500+ automated tests
-│   ├── SECURITY_AUDIT.md              # prior security audit + fixes
-│   ├── FINAL_AUDIT_REPORT.md          # final master audit (this pass)
-│   ├── .env.example                   # documented, secret-free environment template
-│   └── .env                           # real local config — NEVER committed (gitignored)
-└── frontend/                  # Vue 3 SPA
-    ├── src/
-    │   ├── views/              # route-level pages (shop, checkout, order detail, admin/*)
-    │   ├── components/         # shop/, checkout/, ui/ reusable components
-    │   ├── api/                 # one file per backend resource area (orders.ts, payments.ts, ...)
-    │   ├── router/index.ts      # all frontend routes + auth/role guards
-    │   └── stores/               # Pinia stores (auth, cart, wishlist, ...)
-    ├── vite.config.ts
-    ├── .env.example              # VITE_API_URL, VITE_GOOGLE_MAPS_API_KEY
-    └── .env                      # real local config — NEVER committed (gitignored)
+├── README.md  AGENTS.md  docs/        # the authoritative documentation set
+├── backend/                           # Laravel 11 API
+│   ├── app/{Http,Models,Policies,Services,Support,Console}
+│   ├── routes/api_v1.php              # entire API surface
+│   ├── database/{migrations,seeders,factories,data/regions}
+│   ├── lang/{id,en,ar,zh}             # backend message catalogs
+│   ├── tests/{Feature,Unit,Support}   # PHPUnit; real-DB + concurrency harness
+│   └── scripts/run-tests-serialized.php
+├── frontend/                          # Vue 3 SPA
+│   └── src/{api,views,components,layouts,stores,router,dashboard,i18n,utils}
+└── deploy/                            # build.sh, DEV nginx/php-fpm helpers, single-domain public_html files
 ```
 
-## 7. Backend installation
-
-```bash
-cd backend
-composer install
-cp .env.example .env
-php artisan key:generate
-```
-
-Then configure `.env` (see §10) and continue with §9/§24 (MySQL + migrations) before starting the dev server:
-
-```bash
-php artisan serve   # http://localhost:8000
-```
-
-## 8. Frontend installation
-
-```bash
-cd frontend
-npm install
-cp .env.example .env
-```
-
-Set `VITE_API_URL` in `frontend/.env` to wherever the backend is reachable (default `http://localhost:8000`), then:
-
-```bash
-npm run dev   # http://localhost:5173
-```
-
-## 9. MySQL setup
-
-Create an empty database and a dedicated user (do not use `root` in production):
-
-```sql
-CREATE DATABASE primeclassy CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'primeclassy'@'localhost' IDENTIFIED BY 'a-strong-password-here';
-GRANT ALL PRIVILEGES ON primeclassy.* TO 'primeclassy'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-Then point `backend/.env`'s `DB_*` keys at it (see §10). You can either run migrations fresh (§24) or import the provided schema dump (§25) — pick one, not both.
-
-## 10. Environment configuration
-
-All configuration lives in `backend/.env` (copied from `backend/.env.example`) and `frontend/.env` (copied from `frontend/.env.example`). **Neither `.env` file is ever committed** — both are listed in their respective `.gitignore`, and the root `.gitignore` adds a safety net for the same pattern. Only `.env.example` (secret-free, placeholder values only) is committed.
-
-| Concern | Where it lives | Key(s) |
-|---|---|---|
-| App key / crypto | `backend/.env` | `APP_KEY` (generate with `php artisan key:generate`, never share it) |
-| Database | `backend/.env` | `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` |
-| Payment gateway credentials (Xendit / Tripay / Stripe) | **Database**, not `.env` | Set via the Super Admin → Payment Gateways admin screen (`PUT /admin/payment-gateways/{method}/config`); stored encrypted in the `payment_gateway_configs` table, never read back through any API response. There is deliberately no `XENDIT_*`/`TRIPAY_*`/`STRIPE_*` key in `.env` — this keeps credential rotation an in-app admin action instead of a redeploy. |
-| Shipping credentials (RajaOngkir) | **Encrypted database config**, not `.env` | Each agent configures its own API key, official origin destination, and courier codes in Dashboard → Ekspedisi Saya. The key is never returned by the API. |
-| OpenRoute credentials | **Encrypted database config**, not `.env` | Each agent configures its own key, supported routing profile, and rate in Dashboard → Ekspedisi Saya. `OPENROUTE_BASE_URL` remains server-controlled to prevent arbitrary outbound requests. |
-| Google Sheets service account | Secure server filesystem + `backend/.env` | Set `GOOGLE_SHEETS_ENABLED=true` and `GOOGLE_SHEETS_CREDENTIALS_PATH` to an absolute path outside the public web root. Never place the JSON key in Git. |
-| Mail | `backend/.env` | `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` |
-| Storage | `backend/.env` | `FILESYSTEM_DISK` (`local` for the private disk, `public` disk backs `storage/app/public` — must be symlinked, see §16) |
-| Application URL | `backend/.env` | `APP_URL` |
-| Frontend URL (for CORS) | `backend/.env` | `FRONTEND_URLS` — comma-separated list of exact frontend origins allowed to make credentialed requests |
-| Frontend host (for Sanctum sessions) | `backend/.env` | `SANCTUM_STATEFUL_DOMAINS` — comma-separated **host:port, no scheme** (e.g. `yourdomain.com` in production, `localhost:5173` in dev). This is not optional — without it every authenticated request fails with "Session store not set on request." It is a different value shape than `FRONTEND_URLS` (no `https://`) and both must point at the same real frontend. |
-| API URL (frontend → backend) | `frontend/.env` | `VITE_API_URL` |
-| Session cookie security | `backend/.env` | `SESSION_SECURE_COOKIE` — must be `true` in production (HTTPS only) |
-
-No secret ever appears in source code — every credential-shaped value in `config/*.php` is read via `env(...)`, and payment/shipping provider secrets are encrypted-at-rest DB columns populated only through the admin API.
-
-## 11. Installer usage
-
-The first-run wizard is available at `/install`. It checks requirements, tests
-and saves the MySQL connection, writes application settings, runs migrations
-and seeders, creates the first Super Admin, warms caches, and creates the
-permanent installation lock. The backend also treats an existing Super Admin
-as installed if the lock file is missing, so installer write endpoints cannot
-be reused against an initialized database.
-
-## 12. Super Admin creation
-
-There is no seeder or UI that creates a Super Admin account (deliberately — see `database/seeders/DatabaseSeeder.php`, which seeds only roles/languages/settings/payment-methods/shipping-providers, never a user). Create the first Super Admin via `php artisan tinker`:
-
-```php
-php artisan tinker
->>> $role = \App\Models\Role::where('slug', 'super_admin')->first();
->>> \App\Models\User::create([
-...     'role_id' => $role->id,
-...     'name' => 'Your Name',
-...     'email' => 'you@example.com',
-...     'phone' => '08xxxxxxxxxx',
-...     'password' => 'a-strong-password',   // hashed automatically (User::password is cast 'hashed')
-...     'status' => 'active',
-... ]);
-```
-
-Log in at `POST /api/v1/auth/login` (or via the frontend login page) with that email/password.
-
-Super Admin can create Agent accounts. Each Agent creates its own Admin,
-Keuangan, Korsal, Sales, and Kurir accounts. Sales created by an Agent require
-a Korsal from the same Agent network; Sales created by a Korsal are attached
-to that Korsal automatically.
-
-## 13. Payment gateway configuration
-
-Log in as Super Admin and open the Payment Gateways admin screen (`/admin/payment-gateways`). For each of Xendit, Tripay, and Stripe:
-1. Toggle it active.
-2. Choose the environment (sandbox/production).
-3. Fill in that gateway's credentials (API key / private key / webhook secret, per the gateway's own dashboard) — these are submitted once via `PUT /admin/payment-gateways/{method}/config` and stored encrypted; they are never shown again after saving (the API only ever returns `configured: true/false`, never the value).
-4. Point the gateway's own webhook configuration at `POST {APP_URL}/api/v1/webhooks/payment/{method}` (`method` = `xendit`, `tripay`, or `stripe`).
-
-No gateway credential belongs in `.env` — see §10.
-
-## 14. RajaOngkir configuration
-
-RajaOngkir uses the Komerce Shipping Cost API V2 at `rajaongkir.komerce.id`. A super admin controls the global provider switch. Each agent stores an encrypted API key and chooses an official origin through the destination-search endpoint. Checkout resolves the buyer's village to an official RajaOngkir destination, sends total server-derived weight in grams, lists all returned courier services, and recalculates the selected service during order creation. The shipment stores the provider, courier, service, cost, ETD, origin/destination IDs, and weight as an immutable snapshot.
-
-## 15. OpenRoute configuration
-
-OpenRouteService powers "kurir online" (in-house/branch courier) road-route pricing. Each Agent saves an encrypted API key, supported routing profile, and pricing rule from its own dashboard. The server controls `OPENROUTE_BASE_URL` and the default `OPENROUTE_PROFILE`; these values cannot be supplied by an Agent. If ORS cannot verify a route, checkout returns a safe error and does not charge a Haversine-derived fee.
-
-### Google Sheets synchronization
-
-Google Sheets is a one-way reporting integration: MySQL remains the source of
-truth. Install the central service-account JSON outside `backend/public`, share
-each destination spreadsheet with the service-account email, and configure:
-
-```dotenv
-GOOGLE_SHEETS_ENABLED=true
-GOOGLE_SHEETS_CREDENTIALS_PATH=/absolute/private/path/service-account.json
-```
-
-Super Admin registers a spreadsheet and assigns it to global scope or one
-Agent. Agent and Admin can also register destinations for their authenticated
-Agent scope. Super Admin, Agent, and Admin can then configure allowed datasets,
-columns, an optional status filter, and run manual sync from
-`/dashboard/google-sheets`. Agent and Admin can only access their assigned
-Agent scope. Admin cannot export the Agent commission financial summary. A
-valid target tab is created when missing; each sync replaces its cell values.
-The integration exports at most 10,000
-rows per manual run and records a sanitized audit log. It never imports data
-from Google Sheets.
-
-Available datasets are defined in the application registry; the UI cannot
-select arbitrary tables or columns. Column order and custom headers are saved
-per tab. Credentials, passwords, tokens, sessions, and payment secrets are not exportable.
-
-## 16. Storage configuration
-
-Uploaded media (product images, CMS images, payment/delivery/return proof photos) are stored on the `public` disk (`backend/storage/app/public`) and served through the `storage/` symlink. After every fresh deployment, run:
-
-```bash
-php artisan storage:link
-```
-
-This creates `backend/public/storage -> backend/storage/app/public`. Without this symlink, every uploaded file's URL 404s. `FILESYSTEM_DISK` in `.env` controls the *default* disk (used for a few internal writes); uploaded media always explicitly targets the `public` disk regardless of that default (see `app/Services/Media/MediaService.php`).
-
-## 17. Mail configuration
-
-Set `MAIL_MAILER` (e.g. `smtp`), `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` in `backend/.env`. The default `.env.example` value (`MAIL_MAILER=log`) writes mail to the log file instead of sending it — fine for local development, must be changed before production.
-
-## 18. Development mode
-
-Run both halves side by side:
-
-```bash
-# terminal 1
-cd backend && php artisan serve
-
-# terminal 2
-cd frontend && npm run dev
-```
-
-`backend/.env`: `APP_ENV=local`, `APP_DEBUG=true` (safe locally — leaks stack traces on 500s, which is what you want while developing). `frontend/.env`: `VITE_API_URL=http://localhost:8000`.
-
-## 19. Production deployment
-
-1. `backend/.env`: `APP_ENV=production`, `APP_DEBUG=false`, `SESSION_SECURE_COOKIE=true`, a freshly-generated `APP_KEY` (do not reuse a development key), real `DB_*`/`MAIL_*` values, `FRONTEND_URLS` & `SANCTUM_STATEFUL_DOMAINS` set to the real frontend (see §10 for the difference between the two), `APP_URL` set to the real backend URL.
-2. `composer install --no-dev --optimize-autoloader`
-3. `php artisan migrate --force` (or import `database.sql`, see §25 — not both)
-4. `php artisan storage:link`
-5. `php artisan config:cache && php artisan route:cache`
-6. Build the frontend (§26) and deploy the static `frontend/dist/` output to your web server / CDN.
-   - **Never delete `public_html/laravel.php`.** On the single-domain layout the document root contains `laravel.php`, which routes `/api`, `/sanctum`, and `/up` to Laravel. A destructive sync (`rsync --delete`) against that root removes the bridge; the frontend still loads but every API request returns 404 (a real Package B production incident). Always exclude it:
-     ```bash
-     sudo rsync -a --delete \
-       --exclude='laravel.php' \
-       /www/dev/primeclassy/frontend/dist/ \
-       /www/wwwroot/primeccookies.com/primeclassy/public_html/
-     ```
-7. Point the backend's web server document root at `backend/public` (§20), and the frontend's at `frontend/dist` (with SPA fallback routing, §21).
-
-## 20. Apache
-
-**Backend** — the Apache **document root must be `backend/public`**, never the repo root or `backend/` itself (that would expose `.env`, `app/`, `vendor/`, etc. — see §22). Example vhost:
-
-```apache
-<VirtualHost *:443>
-    ServerName api.yourdomain.com
-    DocumentRoot "/var/www/primeclassy/backend/public"
-
-    <Directory "/var/www/primeclassy/backend/public">
-        AllowOverride All
-        Require all granted
-    </Directory>
-
-    SSLEngine on
-    SSLCertificateFile      /path/to/cert.pem
-    SSLCertificateKeyFile   /path/to/key.pem
-</VirtualHost>
-```
-
-`mod_rewrite` must be enabled (`a2enmod rewrite`) — `backend/public/.htaccess` (shipped, unmodified Laravel default) depends on it to route every request through `index.php`.
-
-**Frontend** — served as a separate static vhost pointed at `frontend/dist` (after `npm run build`, §26):
-
-```apache
-<VirtualHost *:443>
-    ServerName yourdomain.com
-    DocumentRoot "/var/www/primeclassy/frontend/dist"
-
-    <Directory "/var/www/primeclassy/frontend/dist">
-        AllowOverride All
-        Require all granted
-    </Directory>
-
-    SSLEngine on
-    SSLCertificateFile      /path/to/cert.pem
-    SSLCertificateKeyFile   /path/to/key.pem
-</VirtualHost>
-```
-
-## 21. .htaccess
-
-**Backend** (`backend/public/.htaccess`, already present, unmodified Laravel default): rewrites every request that isn't an existing file/directory to `index.php`, and forwards the `Authorization`/`X-XSRF-Token` headers through to PHP. Do not remove or hand-edit this file.
-
-**Frontend SPA fallback** — Vue Router uses client-side history-mode routing, so the web server must serve `index.html` for any path it doesn't recognize as a real static file (otherwise refreshing on `/products/some-slug` 404s at the server instead of reaching the Vue app). If serving `frontend/dist` via Apache, add an `.htaccess` there:
-
-```apache
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteBase /
-    RewriteRule ^index\.html$ - [L]
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule . /index.html [L]
-</IfModule>
-```
-
-(This file does not currently exist in the repo — add it alongside `frontend/dist/index.html` at deploy time, or configure the equivalent fallback in Nginx/your static host: `try_files $uri $uri/ /index.html;`.)
-
-## 22. Security
-
-See `backend/SECURITY_AUDIT.md` for the full audit (authentication, RBAC, IDOR, injection, XSS, CSRF, file upload, webhook/payment security, and every fix applied) and `backend/FINAL_AUDIT_REPORT.md` for the final master-audit pass. Deployment-specific rules:
-
-- **Never expose**: the backend source tree (`app/`, `routes/`, `database/`), `.env`, `backend/storage/` (internal — only `backend/storage/app/public` is meant to be reachable, and only via the `public/storage` symlink), `node_modules/`, `vendor/`, or any `.git` directory. Setting the Apache document root to `backend/public` (§20) is what makes this true — everything else in `backend/` sits outside the web server's reachable tree entirely.
-- `.env` is gitignored in `backend/`, `frontend/`, and the repo root — only `.env.example` (secret-free) is ever committed.
-- Payment/shipping gateway credentials live encrypted in the database, entered only through the authenticated admin API — never in `.env`, never in source.
-- Rate limiting is applied to login, registration, checkout, and the payment webhook endpoint.
-- Every file upload is validated by real MIME-type/decode checks (not just file extension) and stored under a generated (never client-supplied) filename.
-
-## 23. Testing
-
-Backend tests run against an isolated MySQL test database. The test bootstrap
-refuses databases whose name does not contain `_test` or `_testing`, protecting
-development and production data:
-
-```bash
-cd backend
-php artisan test
-```
-
-Before enforcing SKU on existing data, audit and preview the deterministic
-backfill. The preview is read-only; apply it only after reviewing the output:
-
-```bash
-php artisan system:audit-catalog-hierarchy
-php artisan products:backfill-sku
-php artisan products:backfill-sku --apply
-```
-
-Frontend: **no automated test suite exists yet** (no test runner is configured in `frontend/package.json`, no `*.spec.ts`/`*.test.ts` files exist). Manual verification (dev server + browser) is the current practice for frontend changes.
-
-## 24. Database migration
-
-```bash
-cd backend
-php artisan migrate          # apply on top of an existing schema
-php artisan migrate:fresh    # DESTRUCTIVE — drops every table first; local/dev only
-php artisan migrate:fresh --seed   # fresh schema + roles/languages/settings/payment-methods/shipping-providers, no demo users
-```
-
-`backend/database/migrations/` (87 files as of this writing — check `ls backend/database/migrations | wc -l` for the current count) is the authoritative schema source; `database.sql` (§25) is a generated export of it, not a hand-maintained alternative — don't edit `database.sql` directly and expect it to affect the app.
-
-### Transaction-only reset
-
-Use the dedicated command when the application must return to a state with no
-orders or transaction-derived reports while preserving all master data. Always
-review the dry run and create a recovery backup first:
-
-```bash
-cd backend
-php artisan transactions:reset --dry-run
-php artisan transactions:reset --force
-```
-
-The command deletes transaction dependencies child-to-parent, restores stock
-from recognized transaction movements, clears reserved stock and targeted
-cache entries, removes transaction-only evidence files, and verifies both zero
-transaction counts and unchanged master row counts. Production execution
-requires `--force`; it never drops tables or disables foreign keys. See
-`docs/TRANSACTION-RESET-REPORT.md` for the latest executed reset audit.
-
-## 25. database.sql import
-
-`backend/database.sql` is a structure-and-seed-only MySQL dump generated from the real migrations (`mysqldump` after `migrate:fresh --seed`). It contains the 8 fixed roles, the 4 languages, and Laravel's own `migrations` bookkeeping table — no user accounts, no products, no orders, no payment configuration. Use it as a faster alternative to running every migration one-by-one — but regenerate it (`migrate:fresh --seed` + `mysqldump`) before relying on it if migrations have been added since it was last exported:
-
-```bash
-mysql -u primeclassy -p primeclassy < backend/database.sql
-```
-
-Afterwards, `php artisan migrate` will correctly report "Nothing to migrate" (the bookkeeping table is already populated) rather than trying to re-create existing tables.
-
-## 26. Build frontend
-
-```bash
-cd frontend
-npm run build
-```
-
-Outputs to `frontend/dist/` (per `vite.config.ts`'s default). Deploy that directory's contents to your static host / Apache document root (§20/§21). `npm run build` also type-checks the project (`vue-tsc`) as part of the build.
-
-## 27. Troubleshooting
-
-- **Uploaded images 404**: you forgot `php artisan storage:link` (§16), or the web server's document root isn't `backend/public` (§20).
-- **Login works but every subsequent request is 401/419**: CORS/Sanctum stateful-domain mismatch — check BOTH `FRONTEND_URLS` (with scheme, for CORS) AND `SANCTUM_STATEFUL_DOMAINS` (host:port, no scheme, for sessions) in `backend/.env` match the frontend's real origin; missing `SANCTUM_STATEFUL_DOMAINS` specifically causes a 500 "Session store not set on request" rather than a 401/419. The frontend must also send requests with `withCredentials`/cookies enabled.
-- **Refreshing a frontend route like `/products/foo` 404s**: the web server isn't falling back to `index.html` for unknown paths — see §21.
-- **500 error with no detail in production**: expected — `APP_DEBUG=false` hides exception detail from API responses by design (§22). Check `backend/storage/logs/laravel.log` instead.
-- **Webhook returns 401 `invalid_signature`**: the gateway's webhook secret/callback token configured in the admin screen (§13) doesn't match what the gateway is actually signing with — re-check both sides.
-- **RajaOngkir courier options return 422**: verify the agent's API key, official origin, courier codes, product weight, and the buyer's complete village hierarchy. Check the structured `shipping.rajaongkir_quote` log; it never contains the API key. A courier/service explicitly selected by the buyer is rejected if it is no longer available.
-
-## 28. Backup
-
-There is no built-in backup command in this codebase. At minimum, back up on a schedule:
-- The MySQL database (`mysqldump primeclassy > backup.sql`, or your MySQL host's native backup/snapshot tooling).
-- `backend/storage/app/public` (all uploaded media — product images, CMS images, payment/delivery/return proof photos; this is **not** reproducible from the database alone).
-- `backend/.env` and `frontend/.env` (configuration only — store securely, never alongside a public backup, since they contain `APP_KEY`/`DB_PASSWORD`).
-
-Payment/shipping gateway credentials live in the database (`payment_gateway_configs`/`shipping_providers` tables), so a database backup already covers them — there is nothing gateway-related to separately export from `.env`.
-
-## 29. Update procedure
+## Local setup
 
 ```bash
 # backend
 cd backend
-composer install --no-dev --optimize-autoloader
-php artisan migrate --force
-php artisan config:clear && php artisan config:cache
-php artisan route:clear && php artisan route:cache
+composer install
+cp .env.example .env && php artisan key:generate
+# create an empty database + user, set DB_* in .env, then:
+php artisan migrate --seed          # roles, languages, settings, payment methods, shipping providers (no demo users)
+php artisan serve                   # http://localhost:8000
 
 # frontend
 cd frontend
 npm install
-npm run build
-# redeploy the new frontend/dist/ output
+cp .env.example .env                # VITE_API_URL (empty = same origin)
+npm run dev                         # http://localhost:5173
 ```
 
-Always take a database backup (§28) before running `php artisan migrate --force` against production. Check `backend/database/migrations/` for any new migration file introduced since your last deploy to understand what's changing before it runs.
-# kmsitprimeclassy
-# kmsitprimeclassy
+A first Super Admin is created by the browser installer (`/install`) on a fresh install, or via `php artisan tinker` — see [docs/OPERATIONS.md](docs/OPERATIONS.md). Sanctum needs both `FRONTEND_URLS` (with scheme) and `SANCTUM_STATEFUL_DOMAINS` (host:port, no scheme) in `backend/.env`.
+
+## DEV / test commands
+
+```bash
+cd backend
+php artisan test                                  # full suite (isolated DB primeclassy_testing)
+php artisan test --filter=SomeTest                # focused
+php scripts/run-tests-serialized.php tests/Feature/PermissionMapTest.php   # serialized, lock-protected runner
+cd ../frontend
+npm run type-check                                # vue-tsc
+npm run build-only                                # vite build (npm run build = type-check + build)
+```
+
+No automated frontend test suite exists; frontend verification is type-check, build and manual browser checks. Tests refuse any database whose name does not contain `_test` / `_testing`.
+
+## Build
+
+`npm run build-only` outputs `frontend/dist/`. `deploy/build.sh` assembles the single-domain production package (SPA + `laravel.php` bridge + `.htaccess` + `config.js` + backend). Production deployment rules, including the `laravel.php` invariant, are in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Status
+
+Package A (Sales-Kurir-Sub + Sub stock) and Package B (fulfilment/delivery lifecycle + authority/reporting) are **production closed**. Package C (SC-03, Admin-only add-line to an existing order) is implemented and independently reviewed on branch `feat/package-c-sc03`; DEV UAT, Human Stage Gate and production deployment have not been recorded. See [docs/MASTER-SYSTEM.md §41](docs/MASTER-SYSTEM.md#41-current-roadmap-state).
