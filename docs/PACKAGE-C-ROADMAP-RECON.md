@@ -1,6 +1,6 @@
 # Package C — Roadmap Recon (post-Package B)
 
-**Status: RECON + DOCUMENTATION ONLY — NOT AUTHORIZED. No implementation may start from this document.**
+**Status: CLOSED (2026-10-01) — Human decisions recorded; scope frozen to Package C = SC-03. This document is the historical recon; the active spec is `docs/PACKAGE-C-SC03.md`.**
 **Date:** 2026-10-01
 **Branch / baseline:** `main` @ `7d1c481` ("merge: close Package B R-03 and R-04"); `origin/main` = `7d1c481`; working tree clean at recon start.
 **Repository protocol:** `AGENTS.md`
@@ -218,16 +218,20 @@ If the Human declines SC-03, the smallest worthwhile package is hardening/qualit
 
 ---
 
-## 9. Human decisions required before implementation
+## 9. Human decisions — RECORDED (2026-10-01)
 
-1. RC-1 / SC-03: authorize the line-addition feature, and its constraints (statuses, payment states, Sub source, delivery date, commissions).
-2. RC-2: Laravel 11 advisories — upgrade to Laravel 12, or formally accept and document the risk.
-3. RC-3: schedule the Google Sheets share and RajaOngkir key rotation (ops).
-4. RC-4: confirm live-name resolution is the intended permanent rule for warehouse documents (no snapshot column).
-5. Choose Package C option: C-A (feature) or C-B (hardening), or neither.
+1. **RC-1 — APPROVED.** SC-03 (add a new product/variation line to an existing order) is an authorized business requirement, distinct from quantity adjustment. Option **C-A** is selected.
+2. **RC-2 — NO CHANGE / OUT OF SCOPE.** No Laravel 11 → 12 upgrade; no framework-upgrade remediation in Package C.
+3. **RC-3 — NO CHANGE / OUT OF SCOPE.** Google Sheets and RajaOngkir operate satisfactorily; no redesign, credential rotation, sharing change, or behavior change. Revisit only via an explicit future Human request or a concrete operational defect.
+4. **RC-4 — APPROVED CURRENT BEHAVIOR / NO CHANGE.** Stable IDs with current/latest-name resolution for warehouse/report actors; no historical name snapshots.
+5. **Package selection — C-A (feature).** Option C-B (hardening) is not selected.
+
+**Roadmap freeze:** WH-08, DP-03, DP-04, dead code, documentation drift, framework upgrade, and operational housekeeping remain documented backlog only and do **not** authorize implementation. After Package C production closure, the current approved Prime Classy feature roadmap is complete; a future Package D or equivalent requires either an explicit Human change request or a concrete production/application defect.
+
+**Closure:** roadmap recon is CLOSED. The active Package C specification is `docs/PACKAGE-C-SC03.md`, with `docs/PACKAGE-C-SC03-CHECKPOINT.md`.
 
 ---
 
 ## EXACT NEXT ACTION
 
-**Human reviews Package C roadmap recon and explicitly approves/modifies the proposed scope before any implementation.**
+**Human reviews and authorizes Package C SC-03 implementation. No other feature implementation is authorized.**
