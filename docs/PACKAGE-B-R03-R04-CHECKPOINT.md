@@ -579,6 +579,44 @@ Neither is a Package B blocker.
 
 There is no remaining Package B implementation or remediation action.
 
-## EXACT NEXT ACTION
+## EXACT NEXT ACTION (Package B — historical)
 
 **Package B is production-closed. Determine and authorize the next roadmap package before any new implementation.** Do not pre-authorize a new package.
+
+---
+
+## POST-PACKAGE-B ROADMAP RECON (2026-10-01)
+
+**Full deliverable:** `docs/PACKAGE-C-ROADMAP-RECON.md` (traceability matrix, superseded docs, REVIEW/CONFLICT items, proposal). RECON + DOCUMENTATION ONLY — no implementation authorized.
+
+### Baseline
+
+- `main` @ **`7d1c481`** ("merge: close Package B R-03 and R-04"); `origin/main` = `7d1c481`; working tree clean at recon start.
+- Package A = PRODUCTION CLOSED · R-03 = PRODUCTION CLOSED · R-04 = PRODUCTION CLOSED · Package B = PRODUCTION CLOSED.
+
+### Recon findings (source-verified)
+
+- The vast majority of REQ-01…REQ-25 (warehouse), the 57-item audit list, and the PBR-001/002/003 findings are now **implemented** in source (warehouse buckets/transfers/opname/stock-requests/fulfillment, Sub stock, self-delivery, delivery verification, split lineage, R-04 authority/reporting, installer, dark mode, language switcher, courier dashboard, role dashboard shell, XLSX export).
+- **One genuine feature gap (MISSING):** SC-03 — adding a brand-new product line to an already-placed order (only quantity adjust / reschedule of existing items exist). Only source is README "Known gaps"; requires a Human Business Decision.
+- **Partial/quality gaps:** WH-08 warehouse `variation.label` not serialized on transfer/opname list endpoints; ML-01 language switcher absent from the dashboard header; DP-03 no frontend automated test suite; DP-04 no performance audit; WH-10 `StockService::deduct*` dead code; CV-04 `ProductTranslation.description` unreachable dead write path.
+- **Operational (non-code):** Google Sheets destination 403 (share with service account); RajaOngkir key rotation; non-blocking CLI OPcache/mbstring warnings.
+- **Documentation drift (superseded):** `README.md` §2 still says "8 roles" and lists dark mode / language switcher as missing; `BLUEPRINT.md` §5 pre-dates `gudang`/`sales-kurir-sub`; `backend/FINAL_AUDIT_REPORT.md` checklist largely superseded; `PBR_RECON_REPORT.md` superseded; `docs/WAREHOUSE-AND-SALES-COURIER-SPECIFICATION.md` header still "NOT IMPLEMENTED"; `AGENTS.md` §13 roadmap still names Package B as active.
+
+### Proposed next package (NOT AUTHORIZED)
+
+- **Option C-A (feature):** "Existing-Order Line Addition" — SC-03 only, with Package A/B invariants; exclusions and required Human decisions listed in the recon doc.
+- **Option C-B (hardening, if SC-03 is declined):** WH-08 warehouse presentation fix, DP-03 frontend test foundation, DP-04 performance audit, §5 documentation reconciliation.
+
+Neither option is authorized. No new package is pre-authorized.
+
+### Unresolved Human decisions
+
+1. RC-1 — authorize/modify SC-03 (line addition) and its constraints (allowed statuses, payment states, Sub source, delivery date, commissions).
+2. RC-2 — Laravel 11 framework advisories: upgrade to Laravel 12 or formally accept/document the risk.
+3. RC-3 — schedule Google Sheets share + RajaOngkir key rotation (ops).
+4. RC-4 — confirm live-name resolution as the permanent rule for warehouse documents (no snapshot column).
+5. Choose Package C option C-A, C-B, or neither.
+
+### EXACT NEXT ACTION
+
+**Human reviews Package C roadmap recon and explicitly approves/modifies the proposed scope before any implementation.**
