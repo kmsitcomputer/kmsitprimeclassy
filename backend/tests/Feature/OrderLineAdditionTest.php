@@ -16,12 +16,16 @@ use App\Models\ProductVariation;
 use App\Models\ProductVariationStock;
 use App\Models\Shipment;
 use App\Models\StockMovement;
+use App\Models\StockRequest;
 use App\Models\StockRequestItem;
+use App\Models\WarehouseSetting;
+use App\Models\WarehouseStock;
 use App\Models\User;
 use App\Models\WarehouseSubLocation;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
 use Tests\TestCase;
@@ -548,5 +552,187 @@ class OrderLineAdditionTest extends TestCase
         $this->actingAs($superAdmin)
             ->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 2, 'reason' => 'naik'])
             ->assertOk();
+    }
+
+    // ----- review remediation (C-SC03-REV-001 .. 004, 007) -----------------------------------
+
+    /** Warehouse-authoritative rows so Gudang can propose/approve against the target. */
+    private function stockWarehouse(User $agen, Product $product, int $transit = 20): void
+    {
+        WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => $transit]);
+        WarehouseSetting::firstOrCreate(['agent_id' => $agen->id], ['factory_plan_enabled' => false]);
+    }
+
+    public function test_rev001_changed_delivery_date_or_payment_method_conflicts_and_identical_replays(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+        $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+
+        $date = now()->addDays(3)->toDateString();
+        $key = (string) Str::uuid();
+        $payload = ['product_id' => $productB->id, 'quantity' => 2, 'reason' => 'x', 'requested_delivery_date' => $date, 'additional_payment_method' => 'cod'];
+        $this->addLine($order, $admin, $payload, $key)->assertCreated();
+
+        $this->addLine($order, $admin, array_replace($payload, ['requested_delivery_date' => now()->addDays(4)->toDateString()]), $key)->assertStatus(409);
+        $this->addLine($order, $admin, array_replace($payload, ['additional_payment_method' => 'transfer']), $key)->assertStatus(409);
+        $this->addLine($order, $admin, array_replace($payload, ['quantity' => 3]), $key)->assertStatus(409);
+        // `reason` is an audit annotation, not part of the logical request identity (documented decision).
+        $this->addLine($order, $admin, array_replace($payload, ['reason' => 'reworded']), $key)->assertOk();
+        $this->addLine($order, $admin, $payload, $key)->assertOk();
+
+        $this->assertSame(1, OrderItem::where('order_id', $order->id)->where('idempotency_key', $key)->count());
+        $this->assertSame(2, (int) ProductStock::withoutGlobalScopes()->where('product_id', $productB->id)->value('quantity_reserved'));
+        $this->assertSame(1, StockMovement::where('product_id', $productB->id)->where('type', 'reserve')->count());
+    }
+
+    public function test_rev001_replay_survives_item_mutation_status_change_and_elapsed_date(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+        $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+
+        $key = (string) Str::uuid();
+        $payload = ['product_id' => $productB->id, 'quantity' => 3, 'reason' => 'x', 'requested_delivery_date' => now()->addDay()->toDateString()];
+        $this->addLine($order, $admin, $payload, $key)->assertCreated();
+
+        // Legitimate post-creation mutation (quantity adjustment / reschedule) of the added line.
+        OrderItem::where('idempotency_key', $key)->update(['original_quantity' => 2, 'fulfilled_quantity' => 2, 'requested_delivery_date' => now()->addDays(9)->toDateString()]);
+        $this->addLine($order, $admin, $payload, $key)->assertOk();
+
+        // Order moved on: the creation-only status window must not break a replay.
+        Order::withoutGlobalScopes()->whereKey($order->id)->update(['status' => 'dikirim']);
+        $this->addLine($order, $admin, $payload, $key)->assertOk();
+
+        // The requested date has since become historical: replay still resolves (no 422), but a NEW
+        // request with a past date is still rejected.
+        $this->travel(5)->days();
+        $this->addLine($order, $admin, $payload, $key)->assertOk();
+        Order::withoutGlobalScopes()->whereKey($order->id)->update(['status' => 'diproses']);
+        $this->addLine($order, $admin, array_replace($payload, ['requested_delivery_date' => now()->subDay()->toDateString()]), (string) Str::uuid())
+            ->assertStatus(422)->assertJsonPath('errors.requested_delivery_date', __('messages.order.line_addition_date_in_past'));
+
+        $this->assertSame(1, OrderItem::where('idempotency_key', $key)->count());
+        $this->assertSame(3, (int) ProductStock::withoutGlobalScopes()->where('product_id', $productB->id)->value('quantity_reserved'));
+    }
+
+    public function test_rev001_fingerprint_is_persisted_once_on_the_added_line_only(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+        $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+        $key = (string) Str::uuid();
+        $this->addLine($order, $admin, ['product_id' => $productB->id, 'quantity' => 1, 'reason' => 'x'], $key)->assertCreated();
+
+        $this->assertNull(OrderItem::where('order_id', $order->id)->whereNull('idempotency_key')->value('request_fingerprint'));
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', (string) OrderItem::where('idempotency_key', $key)->value('request_fingerprint'));
+    }
+
+    public function test_rev002_fulfilled_stock_request_reopens_for_new_demand_and_new_demand_can_be_approved(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+        $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 2]]);
+        $this->stockWarehouse($agen, $productA);
+        $this->stockWarehouse($agen, $productB);
+
+        $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
+        $firstItem = $request->items()->firstOrFail();
+        $proposal = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $firstItem->id, 'quantity' => 2]]])->assertCreated()->json('data');
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
+        $this->assertSame('fulfilled', $request->fresh()->status);
+        $this->assertNotNull($request->fresh()->fulfilled_at);
+
+        $key = (string) Str::uuid();
+        $this->addLine($order, $admin, ['product_id' => $productB->id, 'quantity' => 3, 'reason' => 'x'], $key)->assertCreated();
+
+        $request = $request->fresh();
+        $this->assertSame('partial', $request->status, 'history is preserved (fulfilled_qty > 0), new demand is outstanding');
+        $this->assertNull($request->fulfilled_at);
+        $this->assertSame(2, StockRequest::withoutGlobalScopes()->findOrFail($request->id)->items()->count());
+        $this->assertSame(1, StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->count());
+        $this->assertSame(2, $firstItem->fresh()->fulfilled_qty);
+        $this->assertSame(0, $firstItem->fresh()->remaining_qty);
+
+        $newItem = $request->items()->where('product_id', $productB->id)->firstOrFail();
+        $this->assertSame([3, 0, 3], [$newItem->requested_qty, $newItem->fulfilled_qty, $newItem->remaining_qty]);
+
+        $second = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $newItem->id, 'quantity' => 3]]])->assertCreated()->json('data');
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
+
+        $this->assertSame('fulfilled', $request->fresh()->status);
+        $this->assertSame(3, $newItem->fresh()->fulfilled_qty);
+        $this->assertSame(2, $firstItem->fresh()->fulfilled_qty, 'previously fulfilled quantity stays truthful');
+        $this->assertSame(0, (int) ProductStock::withoutGlobalScopes()->where('product_id', $productB->id)->value('quantity_reserved'));
+    }
+
+    public function test_rev003_addition_locks_stock_request_before_inventory_like_warehouse_approval(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+        $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+        $this->stockWarehouse($agen, $productB);
+
+        $locks = [];
+        DB::listen(function ($query) use (&$locks) {
+            if (preg_match('/\bfor update\b/i', $query->sql) && preg_match('/from [`"]?(\w+)[`"]?/i', $query->sql, $m)) {
+                $locks[] = $m[1];
+            }
+        });
+        $this->addLine($order, $admin, ['product_id' => $productB->id, 'quantity' => 1, 'reason' => 'x'])->assertCreated();
+
+        $firstRequest = array_search('stock_requests', $locks, true);
+        $firstInventory = min(array_filter([array_search('product_stocks', $locks, true), array_search('warehouse_stocks', $locks, true)], fn ($i) => $i !== false));
+        $this->assertNotFalse($firstRequest);
+        $this->assertLessThan($firstInventory, $firstRequest, 'Stock Request must be locked before any inventory row (matches StockRequestProposalService::approve).');
+        $this->assertLessThan($firstRequest, array_search('orders', $locks, true), 'Order row stays the first lock.');
+    }
+
+    public function test_rev004_post_response_carries_persisted_financial_truth(): void
+    {
+        foreach (['unpaid' => 0.0, 'partial' => 4000.0, 'paid' => null] as $case => $paid) {
+            ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+            $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+            $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+            $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+            $order = $this->setPaid($order, $paid ?? (float) $order->total_amount);
+            $oldTotal = (float) $order->total_amount;
+
+            $key = (string) Str::uuid();
+            $response = $this->addLine($order, $admin, ['product_id' => $productB->id, 'quantity' => 2, 'reason' => 'x'], $key)->assertCreated();
+            $persisted = Order::withoutGlobalScopes()->findOrFail($order->id);
+            $newItem = OrderItem::where('order_id', $order->id)->where('idempotency_key', $key)->firstOrFail();
+
+            $this->assertGreaterThan($oldTotal, (float) $persisted->total_amount, $case);
+            $this->assertSame((float) $persisted->total_amount, (float) $response->json('data.total_amount'), "$case total");
+            $this->assertSame((float) $persisted->paid_amount, (float) $response->json('data.paid_amount'), "$case paid");
+            $this->assertSame((float) $persisted->remaining_amount, (float) $response->json('data.remaining_amount'), "$case remaining");
+            $this->assertSame($persisted->payment_status, $response->json('data.payment_status'), "$case status");
+            $this->assertSame((float) $persisted->remaining_amount, (float) $response->json('data.payment_summary.remaining_balance'), "$case summary remaining");
+            $this->assertContains($newItem->id, collect($response->json('data.items'))->pluck('id')->all(), "$case item");
+        }
+    }
+
+    public function test_rev007_idempotency_key_length_is_validated_before_mutation(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
+        $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+        $payload = ['product_id' => $productB->id, 'quantity' => 1, 'reason' => 'x'];
+
+        $this->addLine($order, $admin, $payload, '   ')->assertStatus(422);
+        $this->addLine($order, $admin, $payload, str_repeat('k', 101))->assertStatus(422)->assertJsonPath('success', false)->assertJsonStructure(['errors' => ['idempotency_key']]);
+        $this->assertSame(1, OrderItem::where('order_id', $order->id)->count());
+        $this->assertSame(0, (int) ProductStock::withoutGlobalScopes()->where('product_id', $productB->id)->value('quantity_reserved'));
+
+        $this->addLine($order, $admin, $payload, str_repeat('k', 100))->assertCreated();
+        $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
     }
 }

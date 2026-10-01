@@ -51,6 +51,8 @@ return [
         'line_addition_sub_not_supported' => 'Produk tidak dapat ditambahkan ke pesanan yang bersumber dari stok Sub.',
         'line_addition_stock_request_unavailable' => 'Pesanan tidak memiliki permintaan stok aktif untuk direkonsiliasi dengan produk yang ditambahkan.',
         'line_idempotency_conflict' => 'Kunci idempotency ini sudah dipakai untuk penambahan produk yang berbeda.',
+        'idempotency_key_too_long' => 'Header Idempotency-Key tidak boleh lebih dari 100 karakter.',
+        'line_addition_date_in_past' => 'Tanggal pengiriman yang diminta tidak boleh di masa lalu.',
     ],
 
     'product' => [

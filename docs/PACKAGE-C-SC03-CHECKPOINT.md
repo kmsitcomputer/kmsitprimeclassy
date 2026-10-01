@@ -1,6 +1,6 @@
 # Package C (SC-03) — Checkpoint
 
-**Status:** IMPLEMENTED — backend + frontend validation green. Awaiting independent review before DEV UAT. NOT production closed.
+**Status:** IMPLEMENTED + REVIEW REMEDIATION APPLIED (C-SC03-REV-001..008) — awaiting Codex independent final verification before DEV UAT. DEV UAT NOT done · Human Stage Gate NOT approved · NOT production closed.
 **Created:** 2026-10-01
 **Implementation baseline:** branch `feat/package-c-sc03`, spec HEAD `418bbdd` (unchanged as the parent of the implementation commit).
 **Active spec:** `docs/PACKAGE-C-SC03.md`
@@ -157,6 +157,43 @@ Frontend modified: `src/api/orderAdjustments.ts`, `src/views/OrderDetailView.vue
 
 None. Recorded scope boundary (not a blocker): Sub-sourced/mixed-source order addition is excluded (separate Human decision required).
 
+## INDEPENDENT REVIEW REMEDIATION — 2026-10-01
+
+**Objective:** remediate the 8 evidence-backed independent-review findings (0 BLOCKER / 5 MAJOR / 3 MINOR) in ONE pass. Remediation only — no new features, no Package A/B redesign, no deploy, no production access, no `main` merge.
+**Baseline:** `871a14d` (implementation) · spec authority `418bbdd`. Branch `feat/package-c-sc03`.
+**Locked constraints (unchanged):** SC-03 = ADMIN ONLY + same-Agent; `OrderPolicy::manageFulfillment` untouched; Sub-sourced orders rejected.
+
+| ID | Sev | Status | Remediation |
+|---|---|---|---|
+| REV-001 | MAJOR | ADDRESSED | Immutable request identity: additive `order_items.request_fingerprint` (SHA-256 of the ORIGINAL normalized request: product, nullable variation, quantity, requested date or null=order default, payment method), written once with the line in the same transaction. Replay resolves BEFORE status/date/stock validation, so it survives item mutation/split, order status change and an elapsed date. Same key + different request → 409 (also on the unique-index race path). `reason` is excluded (audit annotation; does not change stock/money/schedule). "Requested date not in the past" moved from FormRequest into the service (new creations only). |
+| REV-002 | MAJOR | ADDRESSED | `StockRequestService::appendItemForOrderItem` reconciles lifecycle with the canonical formula (pending/partial/fulfilled from item sums; `fulfilled_at` cleared when demand is outstanding). History (`fulfilled_qty`) untouched; no duplicate request/item. |
+| REV-003 | MAJOR | ADDRESSED | Lock order is now Order → **Stock Request** → inventory targets (canonical) → items/shipment. Matches `StockRequestProposalService::approve` (Proposal → Stock Request → Transit/Shipping/Agent rows). New `StockRequestService::lockActiveRequestForOrder`. No Package A/B service changed; no sleeps; no deadlock-catching. |
+| REV-004 | MAJOR | ADDRESSED | Controller `refresh()`es the route-bound Order and reloads the same relations as `OrderController::show` before `OrderResource`. |
+| REV-005 | MAJOR | ADDRESSED | New `frontend/src/utils/addLineSubmission.ts` (pure helpers + per-order `sessionStorage` pending record) + `OrderDetailView.vue` lifecycle: NEW → mint key at first submit and persist before sending; in-flight/ambiguous (status 0/408/5xx) → keep key+payload; dismiss+reopen → restore locked pending (Retry / Start new); success → clear; definitive 4xx → clear; explicit discard → clear. Backend 409 remains final guard. |
+| REV-006 | MINOR | ADDRESSED | Product change resets the variation; submit only sends a variation that belongs to the selected variation-product. |
+| REV-007 | MINOR | ADDRESSED | Controller validates Idempotency-Key before mutation: blank → 422, > 100 chars → 422 (error envelope, `errors.idempotency_key`); exactly 100 accepted. |
+| REV-008 | MINOR | ADDRESSED | Picker uses existing `/products` `search` + `page` (`per_page=30`) with debounced search and "load more"; selected product stays selectable across searches. |
+
+### Schema/migration delta
+- `2026_10_02_110000_add_request_fingerprint_to_order_items_table.php` — additive, nullable `string(64)`; no data rewrite; historical + checkout rows NULL; rollback drops the column. `MigrationVerificationTest` rollback step 4 → 5 with column assertions.
+
+### Files modified (remediation)
+Backend: `app/Http/Controllers/Api/V1/Fulfillment/OrderFulfillmentController.php`, `app/Http/Requests/Fulfillment/AddOrderItemRequest.php`, `app/Models/OrderItem.php`, `app/Services/Order/OrderLineAdditionService.php`, `app/Services/Stock/StockRequestService.php`, `app/Services/Stock/StockRequestProposalService.php` (status sums → locking read only), `lang/{id,en,ar,zh}/messages.php`, `.phpunit-concurrency-actor.php` (`proposal-approve` op), new migration above, `tests/Feature/{OrderLineAdditionTest,OrderLineAdditionConcurrencyTest,MigrationVerificationTest}.php`.
+Frontend: `src/utils/addLineSubmission.ts` (new), `src/views/OrderDetailView.vue`, `src/i18n/locales/{id,en,ar,zh}.ts`.
+Docs: this checkpoint.
+
+### Tests added
+REV-001 ×3, REV-002 ×1, REV-003 ×2 (deterministic SQL lock-order assertion + real two-connection race vs `StockRequestProposalService::approve`; the race was confirmed to fail with the old order), REV-004 ×1 (unpaid/partial/fully-paid), REV-007 ×1, migration test extended. All original SC-03 tests retained unchanged.
+
+### Validation
+- Focused: `OrderLineAdditionTest` (35) + `OrderLineAdditionConcurrencyTest` (4) + `MigrationVerificationTest` (2) PASS. The REV-003 race passed 14 consecutive runs after the fix; with the early Stock Request lock removed it failed (old deadlock/ordering reproduced).
+- Extra finding during validation (in REV-003 scope, "both states truthful"): under REPEATABLE READ, plain `sum()` status reconciliation used a pre-lock-wait snapshot and could miss a concurrently committed warehouse approval (SC-03 side → status `pending`) or a concurrently appended SC-03 line (approval side → `fulfilled` with demand outstanding). Fixed with locking reads of the request items in `StockRequestService::appendItemForOrderItem` and — minimal, behavior-preserving change — in `StockRequestProposalService::approve` (status computation only).
+- Package A/B regression: covered by the full suite (proposal/approval, Sub reservation/ownership, Sales-Kurir-Sub, self-delivery, split/reschedule, cancellation/return, additional obligation, payment reconciliation, role authority, concurrency suites).
+- Full backend: `php artisan test` → **851 passed / 6024 assertions / 0 failures** (previous 843 / 5918).
+- Frontend: `npm run type-check` PASS; `npm run build-only` PASS (only the pre-existing >500 kB chunk warning). Submission-lifecycle helpers sanity-checked at runtime (restore same key, normalization, ambiguous vs definitive classification, clear).
+- `git diff --check` clean.
+- Not done / not claimed: DEV UAT, Human Stage Gate, production closure.
+
 ## EXACT NEXT ACTION
 
-**Independent review of Package C SC-03 implementation before DEV UAT. No additional feature work is authorized.**
+**Codex performs independent final verification of remediation C-SC03-REV-001 through C-SC03-REV-008 before DEV UAT authorization.**

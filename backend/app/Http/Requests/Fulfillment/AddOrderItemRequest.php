@@ -27,7 +27,10 @@ class AddOrderItemRequest extends BaseFormRequest
             'product_id' => ['required', 'integer', 'exists:products,id'],
             'product_variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
             'quantity' => ['required', 'integer', 'min:1', 'max:1000'],
-            'requested_delivery_date' => ['nullable', 'date', 'after_or_equal:today'],
+            // "Not in the past" is enforced by OrderLineAdditionService for a NEW addition only: an
+            // idempotent replay of an already-committed request must still resolve after its
+            // requested date has elapsed, so the check cannot live in shape validation.
+            'requested_delivery_date' => ['nullable', 'date'],
             'reason' => ['required', 'string', 'max:255'],
             'additional_payment_method' => ['sometimes', 'string', 'in:transfer,cod'],
 

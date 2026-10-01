@@ -12,6 +12,16 @@ import { getCourierReport } from '@/api/reports'
 import { recordDeliveryVerification } from '@/api/deliveries'
 import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem } from '@/api/orderAdjustments'
 import { listProducts } from '@/api/catalog'
+import {
+  clearPendingAddLine,
+  isAmbiguousAddLineFailure,
+  loadPendingAddLine,
+  newAddLineSubmission,
+  normalizeAddLinePayload,
+  savePendingAddLine,
+  type PendingAddLine,
+} from '@/utils/addLineSubmission'
+import type { AddOrderItemPayload } from '@/api/orderAdjustments'
 import { requestReturn } from '@/api/returns'
 import { useAuthStore } from '@/stores/auth'
 import type { DeliveryVerificationOutcome, Order, OrderItem, Product } from '@/api/types'
@@ -536,7 +546,14 @@ async function submitReschedule(item: OrderItem) {
 // the shared fulfillment capability. Server remains authoritative; this only shows the control.
 const canAddLine = computed(() => auth.user?.role === 'admin' && order.value?.status === 'diproses')
 const showingAddForm = ref(false)
+const ADD_PAGE_SIZE = 30
 const addProducts = ref<Product[]>([])
+const addSearch = ref('')
+const addPage = ref(1)
+const addLastPage = ref(1)
+const addLoading = ref(false)
+const addSelected = ref<Product | null>(null)
+let addSearchTimer: ReturnType<typeof setTimeout> | null = null
 const addForm = reactive({
   product_id: '' as number | '',
   product_variation_id: '' as number | '',
@@ -547,54 +564,123 @@ const addForm = reactive({
 })
 const addSubmitting = ref(false)
 const addError = ref<string | null>(null)
-const addIdempotencyKey = ref<string | null>(null)
+// REV-005: unresolved submission (key + payload) that survives dismiss/reopen; null = next submit is NEW.
+const addPending = ref<PendingAddLine | null>(null)
 
-const addSelectedProduct = computed(() => addProducts.value.find((p) => p.id === Number(addForm.product_id)) ?? null)
+const addSelectedProduct = computed(() => addSelected.value)
+// The picked product stays selectable even after a new search no longer lists it.
+const addOptions = computed(() =>
+  addSelected.value && !addProducts.value.some((p) => p.id === addSelected.value!.id)
+    ? [addSelected.value, ...addProducts.value]
+    : addProducts.value,
+)
 
-async function openAddForm() {
-  showingAddForm.value = true
+// REV-008: server-side search + pagination (existing /products `search`, `page`, `per_page`) so every
+// active product is reachable, not just the first page.
+async function loadAddProducts(reset: boolean) {
+  addLoading.value = true
   addError.value = null
+  try {
+    const page = reset ? 1 : addPage.value + 1
+    const { products, meta } = await listProducts({
+      per_page: ADD_PAGE_SIZE,
+      page,
+      ...(addSearch.value.trim() ? { search: addSearch.value.trim() } : {}),
+    })
+    addProducts.value = reset ? products : [...addProducts.value, ...products.filter((p) => !addProducts.value.some((x) => x.id === p.id))]
+    addPage.value = meta?.current_page ?? page
+    addLastPage.value = meta?.last_page ?? page
+  } catch (e) {
+    addError.value = e instanceof ApiError ? e.message : t('orders.errors.addProductLoad')
+  } finally {
+    addLoading.value = false
+  }
+}
+
+function onAddSearchInput() {
+  if (addSearchTimer) clearTimeout(addSearchTimer)
+  addSearchTimer = setTimeout(() => loadAddProducts(true), 300)
+}
+
+// REV-006: a product change always invalidates the variation choice (never a hidden stale id).
+function onAddProductChange() {
+  addForm.product_variation_id = ''
+  addSelected.value = addOptions.value.find((p) => p.id === Number(addForm.product_id)) ?? null
+}
+
+function resetAddForm() {
   addForm.product_id = ''
   addForm.product_variation_id = ''
   addForm.quantity = 1
   addForm.requested_delivery_date = order.value?.delivery_date_estimate ?? ''
   addForm.reason = ''
   addForm.additional_payment_method = 'transfer'
-  // One key per logical submission — retained across retries until it succeeds.
-  addIdempotencyKey.value = crypto.randomUUID()
-  if (addProducts.value.length === 0) {
-    try {
-      const { products } = await listProducts({ per_page: 100 })
-      addProducts.value = products
-    } catch (e) {
-      addError.value = e instanceof ApiError ? e.message : t('orders.errors.addProductLoad')
-    }
-  }
+  addSelected.value = null
+}
+
+async function openAddForm() {
+  showingAddForm.value = true
+  addError.value = null
+  // REV-005: reopening restores an unresolved submission (same key + payload) instead of minting a new key.
+  addPending.value = loadPendingAddLine(props.id)
+  if (addPending.value) return
+  resetAddForm()
+  if (addProducts.value.length === 0) await loadAddProducts(true)
+}
+
+function dismissAddForm() {
+  showingAddForm.value = false // the unresolved record (if any) is intentionally kept
+}
+
+function discardPendingAdd() {
+  clearPendingAddLine(props.id)
+  addPending.value = null
+  addError.value = null
+  resetAddForm()
+  if (addProducts.value.length === 0) void loadAddProducts(true)
+}
+
+function buildAddPayload(): AddOrderItemPayload {
+  const product = addSelectedProduct.value
+  // Only a variation that belongs to the selected variation-product is ever submitted.
+  const variation = product?.has_variations ? (product.variations ?? []).find((v) => v.id === Number(addForm.product_variation_id)) : undefined
+  return normalizeAddLinePayload({
+    product_id: Number(addForm.product_id),
+    product_variation_id: variation?.id ?? null,
+    quantity: addForm.quantity,
+    requested_delivery_date: addForm.requested_delivery_date || null,
+    reason: addForm.reason,
+    additional_payment_method: addForm.additional_payment_method,
+  })
 }
 
 async function submitAddProduct() {
-  if (!order.value || !addIdempotencyKey.value) return
+  if (!order.value) return
+  // NEW logical submission mints a key; an unresolved one re-sends its stored key + stored payload.
+  if (!addPending.value) {
+    const variation = addSelectedProduct.value?.variations?.find((v) => v.id === Number(addForm.product_variation_id))
+    const label = [addSelectedProduct.value?.name, variation ? variation.label || variation.sku : null, `x${addForm.quantity}`].filter(Boolean).join(' · ')
+    addPending.value = newAddLineSubmission(buildAddPayload(), label)
+  }
+  savePendingAddLine(props.id, addPending.value)
+  const submission = addPending.value
   addSubmitting.value = true
   addError.value = null
   try {
-    await addOrderItem(
-      props.id,
-      {
-        product_id: Number(addForm.product_id),
-        product_variation_id: addForm.product_variation_id ? Number(addForm.product_variation_id) : null,
-        quantity: addForm.quantity,
-        requested_delivery_date: addForm.requested_delivery_date || null,
-        reason: addForm.reason,
-        additional_payment_method: addForm.additional_payment_method,
-      },
-      addIdempotencyKey.value,
-    )
+    await addOrderItem(props.id, submission.payload, submission.key)
+    clearPendingAddLine(props.id)
+    addPending.value = null
     showingAddForm.value = false
-    addIdempotencyKey.value = null
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : t('orders.errors.addProduct')
-    // Keep the same idempotency key so a retry of THIS submission cannot duplicate the line.
+    const status = e instanceof ApiError ? e.status : 0
+    if (!isAmbiguousAddLineFailure(status)) {
+      // Definitive rejection: nothing was applied, so the next submit is a NEW logical submission.
+      clearPendingAddLine(props.id)
+      addPending.value = null
+    }
+    // Ambiguous failure: keep the same key + payload so a retry/reopen cannot duplicate the line.
   } finally {
     addSubmitting.value = false
   }
@@ -684,12 +770,32 @@ async function submitReturn(item: OrderItem) {
           >
             + {{ t('orders.addProduct') }}
           </button>
+          <div v-else-if="addPending" class="space-y-2">
+            <p class="text-xs text-amber-700 dark:text-amber-400">{{ t('orders.addProductPending') }}</p>
+            <p class="text-xs font-medium text-stone-700 dark:text-stone-200">{{ addPending.label }}</p>
+            <p v-if="addError" class="text-xs text-red-600 dark:text-red-400">{{ addError }}</p>
+            <div class="flex gap-2">
+              <AppButton size="sm" :disabled="addSubmitting" @click="submitAddProduct">{{ t('orders.addProductRetry') }}</AppButton>
+              <AppButton size="sm" variant="ghost" :disabled="addSubmitting" @click="discardPendingAdd">{{ t('orders.addProductStartNew') }}</AppButton>
+              <AppButton size="sm" variant="ghost" @click="dismissAddForm">{{ t('orders.cancel') }}</AppButton>
+            </div>
+          </div>
           <div v-else class="space-y-2">
             <p v-if="addError" class="text-xs text-red-600 dark:text-red-400">{{ addError }}</p>
-            <select v-model="addForm.product_id" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
+            <input
+              v-model="addSearch"
+              type="search"
+              :placeholder="t('orders.addProductSearch')"
+              class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950"
+              @input="onAddSearchInput"
+            />
+            <select v-model="addForm.product_id" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" @change="onAddProductChange">
               <option value="">{{ t('orders.selectProduct') }}</option>
-              <option v-for="p in addProducts" :key="p.id" :value="p.id">{{ p.name }}</option>
+              <option v-for="p in addOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
             </select>
+            <button v-if="addPage < addLastPage" type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" :disabled="addLoading" @click="loadAddProducts(false)">
+              {{ t('orders.addProductLoadMore') }}
+            </button>
             <select
               v-if="addSelectedProduct?.has_variations"
               v-model="addForm.product_variation_id"
@@ -715,7 +821,7 @@ async function submitReturn(item: OrderItem) {
               >
                 {{ t('orders.save') }}
               </AppButton>
-              <AppButton size="sm" variant="ghost" @click="showingAddForm = false">{{ t('orders.cancel') }}</AppButton>
+              <AppButton size="sm" variant="ghost" @click="dismissAddForm">{{ t('orders.cancel') }}</AppButton>
             </div>
           </div>
         </div>

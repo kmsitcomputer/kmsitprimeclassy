@@ -40,6 +40,8 @@ return [
         'line_addition_sub_not_supported' => 'A product line cannot be added to a Sub-sourced order.',
         'line_addition_stock_request_unavailable' => 'The order has no active stock request to reconcile with the added line.',
         'line_idempotency_conflict' => 'This idempotency key was already used for a different line addition.',
+        'idempotency_key_too_long' => 'The Idempotency-Key header must not exceed 100 characters.',
+        'line_addition_date_in_past' => 'The requested delivery date must not be in the past.',
     ],
 
     'product' => [

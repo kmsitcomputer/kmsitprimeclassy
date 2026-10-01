@@ -392,6 +392,10 @@ if (str_starts_with($role, 'sr-')) {
                 $payload['order_item_id'] = $createdItem->id;
                 $result = $createdItem;
                 break;
+            case 'proposal-approve':
+                // Package C / SC-03 (REV-003): the REAL warehouse approval path, raced against add-line.
+                $result = app(StockRequestProposalService::class)->approve($actor, StockRequestProposal::withoutGlobalScopes()->findOrFail($subjectId));
+                break;
             case 'fulfillment-reduce':
                 $item = OrderItem::findOrFail($subjectId);
                 $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test');

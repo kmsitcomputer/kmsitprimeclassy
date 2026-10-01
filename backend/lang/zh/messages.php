@@ -40,6 +40,8 @@ return [
         'line_addition_sub_not_supported' => '无法向来源为 Sub 库存的订单添加商品。',
         'line_addition_stock_request_unavailable' => '该订单没有可与此添加行核对的有效库存申请。',
         'line_idempotency_conflict' => '此幂等键已用于不同的添加商品请求。',
+        'idempotency_key_too_long' => 'Idempotency-Key 请求头不得超过 100 个字符。',
+        'line_addition_date_in_past' => '请求的送达日期不能是过去的日期。',
     ],
 
     'product' => [

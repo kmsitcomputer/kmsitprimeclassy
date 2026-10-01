@@ -55,11 +55,19 @@ class OrderFulfillmentController extends Controller
     {
         $this->authorize('addLine', $order);
 
-        $idempotencyKey = $request->header('Idempotency-Key');
+        // Validated before any mutation: a blank key is rejected and an oversized one must never
+        // reach the order_items.idempotency_key (string 100) insert as a 500.
+        $idempotencyKey = trim((string) $request->header('Idempotency-Key'));
 
-        if (! $idempotencyKey) {
+        if ($idempotencyKey === '') {
             throw new ApiException(
                 __('messages.payment.idempotency_key_required'), 422, ['idempotency_key' => __('messages.system.field_required')]
+            );
+        }
+
+        if (mb_strlen($idempotencyKey) > 100) {
+            throw new ApiException(
+                __('messages.order.idempotency_key_too_long'), 422, ['idempotency_key' => __('messages.order.idempotency_key_too_long')]
             );
         }
 
@@ -77,7 +85,10 @@ class OrderFulfillmentController extends Controller
             $idempotencyKey,
         );
 
-        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof']);
+        // The service mutated/recalculated its own locked Order instance, so this route-bound one is
+        // stale: reload the persisted truth (attributes + the same relations OrderController::show
+        // serializes) so the response itself carries the new total/paid/remaining/payment status.
+        $order->refresh()->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'shipments.selfDeliveredBy', 'shipments.deliveryVerifications.verifiedBy', 'deliveryVerifications.verifiedBy', 'returnRequests.items']);
 
         return $wasReplay
             ? $this->ok(new OrderResource($order), __('messages.order.line_added'))

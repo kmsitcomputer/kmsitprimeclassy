@@ -40,6 +40,8 @@ return [
         'line_addition_sub_not_supported' => 'لا يمكن إضافة منتج إلى طلب مصدره مخزون Sub.',
         'line_addition_stock_request_unavailable' => 'لا يوجد طلب مخزون نشط في الطلب لمطابقته مع المنتج المضاف.',
         'line_idempotency_conflict' => 'تم استخدام مفتاح الـ idempotency هذا مسبقًا لإضافة سطر مختلف.',
+        'idempotency_key_too_long' => 'يجب ألا يتجاوز رأس Idempotency-Key 100 حرف.',
+        'line_addition_date_in_past' => 'يجب ألا يكون تاريخ التسليم المطلوب في الماضي.',
     ],
 
     'product' => [

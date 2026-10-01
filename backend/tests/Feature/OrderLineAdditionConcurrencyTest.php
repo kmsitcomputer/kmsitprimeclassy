@@ -8,6 +8,10 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Shipment;
+use App\Models\StockRequest;
+use App\Models\WarehouseSetting;
+use App\Models\WarehouseStock;
+use App\Services\Stock\StockRequestProposalService;
 use App\Models\User;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
@@ -128,5 +132,47 @@ class OrderLineAdditionConcurrencyTest extends TestCase
         $successful = collect([$report['a'], $report['b']])->where('outcome', 'success')->count();
         $this->assertSame(1, $successful, 'Exactly one of the concurrent mutations must win the single unit.');
         $this->assertSame(1, $this->reserved($agen->id, $scarce->id));
+    }
+
+    /**
+     * REV-003: SC-03 addition vs Gudang proposal approval over the SAME inventory target used to
+     * deadlock (MariaDB 1213): addition held inventory then waited on the Stock Request, approval held
+     * the Stock Request then waited on inventory. Both now take Stock Request first.
+     */
+    public function test_addition_and_warehouse_approval_over_same_target_do_not_deadlock(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'productA' => $productA, 'order' => $order] = $this->fixture();
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $productA->id, 'stock_type' => 'transit', 'quantity' => 20]);
+        WarehouseSetting::create(['agent_id' => $agen->id, 'factory_plan_enabled' => false]);
+
+        $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
+        $firstItem = $request->items()->firstOrFail();
+        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $firstItem->id, 'quantity' => 1]]);
+
+        $report = (new ConcurrencyHarness)->runServiceRace(
+            ['op' => 'add-line', 'actor_id' => $admin->id, 'subject_id' => $order->id, 'extra' => ['line' => ['product_id' => $productA->id, 'quantity' => 2], 'key' => (string) Str::uuid()]],
+            ['op' => 'proposal-approve', 'actor_id' => $admin->id, 'subject_id' => $proposal->id, 'extra' => []],
+        );
+
+        $this->assertTrue($report['true_overlap']);
+        foreach (['a', 'b'] as $side) {
+            $this->assertNotSame(1213, $report[$side]['error_code'] ?? null, 'no unhandled deadlock');
+            $this->assertSame('success', $report[$side]['outcome'], json_encode($report[$side]));
+        }
+
+        $request = $request->fresh();
+        $added = $request->items()->where('order_item_id', '!=', $firstItem->id)->get();
+        $this->assertCount(1, $added, 'new demand is tracked exactly once');
+        $this->assertSame([2, 0, 2], [$added->first()->requested_qty, $added->first()->fulfilled_qty, $added->first()->remaining_qty]);
+        $this->assertSame([1, 1, 0], [$firstItem->fresh()->requested_qty, $firstItem->fresh()->fulfilled_qty, $firstItem->fresh()->remaining_qty]);
+        $this->assertSame('partial', $request->status);
+        $this->assertNull($request->fulfilled_at);
+        // reserved: 1 (order) + 2 (added) - 1 (approved fulfillment) ; physical moved exactly once.
+        $this->assertSame(2, $this->reserved($agen->id, $productA->id));
+        $this->assertSame(19, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $agen->id)->where('product_id', $productA->id)->where('stock_type', 'transit')->sum('quantity'));
+        $this->assertSame(1, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $agen->id)->where('product_id', $productA->id)->where('stock_type', 'shipping')->sum('quantity'));
+        $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
+        $this->assertSame(1, \App\Models\StockRequestFulfillment::withoutGlobalScopes()->where('stock_request_id', $request->id)->count());
     }
 }
