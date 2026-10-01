@@ -17,8 +17,12 @@ use Tests\Support\RestoresIsolatedTestDatabase;
 use Tests\TestCase;
 
 /**
- * R-03 / migration verification: the three additive migrations apply cleanly, enforce the intended
- * invariants on MariaDB, and roll back to a clean pre-R-03 schema.
+ * R-03 / Package C migration verification: the additive migrations apply cleanly, enforce the
+ * intended invariants on MariaDB, and roll back to a clean pre-R-03/pre-Package-C schema.
+ *
+ * The rollback step count covers the tail migrations from BOTH packages:
+ * Package B (add_self_delivery_to_shipments, create_delivery_verifications, add_split_lineage_to_order_items)
+ * and Package C (add_idempotency_key_to_order_items, add_request_fingerprint_to_order_items).
  */
 class MigrationVerificationTest extends TestCase
 {
@@ -37,6 +41,8 @@ class MigrationVerificationTest extends TestCase
         $this->assertTrue(Schema::hasColumn('shipments', 'delivery_mode'));
         $this->assertTrue(Schema::hasColumn('shipments', 'self_delivered_by_user_id'));
         $this->assertTrue(Schema::hasColumn('order_items', 'split_from_order_item_id'));
+        $this->assertTrue(Schema::hasColumn('order_items', 'idempotency_key'));
+        $this->assertTrue(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertNotEmpty($this->selfSubTriggers());
 
         [$order, $user, $courier] = $this->context();
@@ -56,12 +62,14 @@ class MigrationVerificationTest extends TestCase
 
     public function test_rollback_removes_everything_and_migrate_restores_it(): void
     {
-        Artisan::call('migrate:rollback', ['--step' => 3, '--force' => true]);
+        Artisan::call('migrate:rollback', ['--step' => 5, '--force' => true]);
 
         $this->assertFalse(Schema::hasTable('delivery_verifications'));
         $this->assertFalse(Schema::hasColumn('shipments', 'delivery_mode'));
         $this->assertFalse(Schema::hasColumn('shipments', 'self_delivered_by_user_id'));
         $this->assertFalse(Schema::hasColumn('order_items', 'split_from_order_item_id'));
+        $this->assertFalse(Schema::hasColumn('order_items', 'idempotency_key'));
+        $this->assertFalse(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertEmpty($this->selfSubTriggers(), 'rollback must drop the self_sub courier triggers');
 
         Artisan::call('migrate', ['--force' => true]);
@@ -69,6 +77,8 @@ class MigrationVerificationTest extends TestCase
         $this->assertTrue(Schema::hasTable('delivery_verifications'));
         $this->assertTrue(Schema::hasColumn('shipments', 'delivery_mode'));
         $this->assertTrue(Schema::hasColumn('order_items', 'split_from_order_item_id'));
+        $this->assertTrue(Schema::hasColumn('order_items', 'idempotency_key'));
+        $this->assertTrue(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertNotEmpty($this->selfSubTriggers(), 're-migrate must recreate the triggers');
     }
 

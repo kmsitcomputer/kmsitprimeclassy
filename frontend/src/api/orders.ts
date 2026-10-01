@@ -31,7 +31,7 @@ export interface CreateOrderPayload {
   /** The specific courier+service picked under "Ekspedisi" (e.g. JNE REG) — only meaningful with shippingMethod: 'rajaongkir'. */
   courier?: CourierSelection | null
   konsumenId?: number | null
-  /** Client-generated key (e.g. crypto.randomUUID()) — a retried submission with the
+  /** Client-generated key (e.g. secureUuid() from @/utils/uuid) — a retried submission with the
    *  same key returns the original order instead of creating a duplicate. */
   idempotencyKey: string
 }

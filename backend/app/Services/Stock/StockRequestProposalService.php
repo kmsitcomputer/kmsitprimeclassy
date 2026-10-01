@@ -123,8 +123,12 @@ class StockRequestProposalService
                 $qty = $proposalItem->quantity;
                 $item->update(['fulfilled_qty' => $item->fulfilled_qty + $qty, 'remaining_qty' => $item->remaining_qty - $qty]);
             }
-            $remaining = $request->items()->sum('remaining_qty');
-            $fulfilled = $request->items()->sum('fulfilled_qty');
+            // Locking read: a plain sum() would use the REPEATABLE READ snapshot taken before this
+            // transaction waited on the Stock Request lock and could miss a line SC-03 appended and
+            // committed meanwhile (marking the request fulfilled while demand is still outstanding).
+            $lockedItems = $request->items()->lockForUpdate()->get();
+            $remaining = (int) $lockedItems->sum('remaining_qty');
+            $fulfilled = (int) $lockedItems->sum('fulfilled_qty');
             $request->update(['status' => $remaining === 0 ? 'fulfilled' : ($fulfilled > 0 ? 'partial' : 'pending'), 'fulfilled_at' => $remaining === 0 ? now() : null]);
             $locked->update(['status' => 'approved', 'approved_by' => $actor->id, 'approved_at' => now()]);
 

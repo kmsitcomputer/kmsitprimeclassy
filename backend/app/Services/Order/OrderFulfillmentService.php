@@ -218,6 +218,21 @@ class OrderFulfillmentService
         ]);
 
         $order = $this->orderTotalCalculator->recalculate($order);
+        $this->reconcileAdditionalObligation($order, $item, $previousRemaining, $additionalPaymentMethod, $reason, $actor);
+    }
+
+    /**
+     * Canonical rule (shared by a fulfillment INCREASE and a Package C added line): when the order
+     * was NOT carrying an outstanding balance before the total change (previousRemaining <= 0) and
+     * the new total now owes more than what has already been paid, create exactly ONE pending
+     * OrderAdditionalPayment for the delta and link it to the affected line. Otherwise the added
+     * value simply folds into the order's own remaining balance (unpaid / partially-paid). Never
+     * marks anything paid — real money movement stays owned by PaymentService. Re-derives the
+     * order's canonical remaining/payment_status via PaymentService::reconcileTotals.
+     */
+    public function reconcileAdditionalObligation(Order $order, OrderItem $item, float $previousRemaining, string $additionalPaymentMethod, string $reason, User $actor): void
+    {
+        $totalValidPaid = (float) $order->paid_amount;
         $newRemaining = max(0.0, (float) $order->total_amount - $totalValidPaid);
 
         if ($previousRemaining <= 0.0 && $newRemaining > 0.0) {
@@ -460,7 +475,7 @@ class OrderFulfillmentService
     }
 
     /** Always gives $item its own brand new pending Shipment, cloning the order's destination/provider snapshot — used for a newly split-off item, which never shares a shipment with anything yet. */
-    private function assignFreshShipment(OrderItem $item, Order $order, User $actor): void
+    public function assignFreshShipment(OrderItem $item, Order $order, User $actor, string $event = 'shipment.split_for_reschedule'): void
     {
         $reference = Shipment::query()->where('order_id', $order->id)->latest('id')->first();
 
@@ -492,7 +507,7 @@ class OrderFulfillmentService
 
         $item->update(['shipment_id' => $shipment->id]);
 
-        ActivityLogger::log($actor->id, $shipment, 'shipment.split_for_reschedule', null, [
+        ActivityLogger::log($actor->id, $shipment, $event, null, [
             'order_id' => $order->id, 'order_item_id' => $item->id,
         ]);
     }

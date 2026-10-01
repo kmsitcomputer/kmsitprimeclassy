@@ -15,6 +15,7 @@ import { listProvinces, listRegencies, listDistricts, listVillages } from '@/api
 import { ApiError } from '@/api/client'
 import { formatRupiah } from '@/utils/format'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
+import { secureUuid } from '@/utils/uuid'
 import AddressMapPicker from '@/components/checkout/AddressMapPicker.vue'
 import GoogleMapView from '@/components/maps/GoogleMapView.vue'
 import type {
@@ -402,7 +403,7 @@ watch(currentStep, (step) => {
 })
 
 /* ---------- Order creation ---------- */
-const idempotencyKey = crypto.randomUUID()
+const idempotencyKey = secureUuid()
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const createdOrder = ref<Order | null>(null)

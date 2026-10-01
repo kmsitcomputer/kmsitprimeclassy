@@ -247,6 +247,15 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/admin/returns/{return}', [ReturnController::class, 'show']);
         Route::patch('/admin/returns/{return}/review', [ReturnController::class, 'review']);
     });
+
+    // Package C / SC-03: add a NEW product/variation line to an existing order. ADMIN ONLY
+    // (OrderPolicy::addLine) — deliberately NARROWER than the fulfillment routes above, which keep
+    // their existing super_admin/agen/admin authority unchanged. Same-Agent is enforced by the
+    // policy plus the global Agent scope. Requires an Idempotency-Key header.
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/orders/{order}/items', [OrderFulfillmentController::class, 'addItem']);
+    });
+
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/returns/{item}/inspect', [ReturnController::class, 'inspect']);
     });
