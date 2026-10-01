@@ -155,6 +155,7 @@ return [
         'cannot_increase_cancelled' => 'A fully cancelled item cannot be increased again.',
         'pending_refund_blocks_increase' => 'Cannot increase the quantity while an unprocessed refund obligation still exists for this item.',
         'pending_additional_payment_blocks_reduction' => 'Cannot reduce the quantity while the additional payment for this increase is still outstanding.',
+        'pending_additional_payment_blocks_increase' => 'Cannot increase the quantity again while the previous additional payment is still outstanding.',
     ],
 
     'courier' => [

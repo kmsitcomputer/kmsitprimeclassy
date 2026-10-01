@@ -155,6 +155,7 @@ return [
         'cannot_increase_cancelled' => '已完全取消的商品不能再次增加数量。',
         'pending_refund_blocks_increase' => '当该商品仍存在未处理的退款义务时，不能增加数量。',
         'pending_additional_payment_blocks_reduction' => '当本次增加对应的附加付款仍未结清时，不能减少数量。',
+        'pending_additional_payment_blocks_increase' => '上一笔附加付款尚未结清时，不能再次增加数量。',
     ],
 
     'courier' => [

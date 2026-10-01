@@ -89,11 +89,13 @@ class OrderFulfillmentService
      */
     private function reduceFulfillment(Order $order, OrderItem $item, int $quantityReduced, User $actor, string $reason): void
     {
-        // R-03 / MAJOR-7: never reverse a quantity increase while its additional-payment obligation
-        // is still outstanding — that would leave a stale financial obligation. The financial row is
-        // locked deterministically BEFORE any inventory mutation.
+        // R-03 / MAJOR-7 + MAJOR-10: never reverse a quantity increase while its additional-payment
+        // obligation is still outstanding. Normal read — NOT FOR UPDATE: OrderItem is already locked
+        // (concurrent adjustments on this item serialise), and a stale pending read only produces a
+        // conservative 422. Taking a financial-row lock here would create an
+        // Order -> financial-row cycle against Keuangan settlement (deadlock).
         if ($item->additional_payment_id) {
-            $additional = OrderAdditionalPayment::query()->whereKey($item->additional_payment_id)->lockForUpdate()->first();
+            $additional = OrderAdditionalPayment::query()->whereKey($item->additional_payment_id)->first();
             if ($additional && $additional->status === 'pending') {
                 throw new ApiException(__('messages.fulfillment.pending_additional_payment_blocks_reduction'), 422);
             }
@@ -156,17 +158,26 @@ class OrderFulfillmentService
      */
     private function increaseFulfillment(Order $order, OrderItem $item, int $quantityAdded, User $actor, string $reason, string $additionalPaymentMethod): void
     {
-        // R-03 / MAJOR-7: an increase must not run while an unresolved fulfillment-refund obligation
-        // still exists for this item — restoring the reduced quantity would conflict with a refund
-        // Keuangan could still process. The financial row is locked deterministically BEFORE any
-        // inventory mutation.
+        // R-03 / MAJOR-7 + MAJOR-10: an increase must not run while an unresolved fulfillment-refund
+        // obligation still exists for this item. Normal read — NOT FOR UPDATE (see the reduction guard
+        // below): OrderItem is already locked, and a financial-row lock here would invert against
+        // Keuangan settlement and deadlock.
         $pendingRefund = OrderItemAdjustment::query()
             ->where('order_item_id', $item->id)
             ->where('refund_status', 'pending')
-            ->lockForUpdate()
             ->exists();
         if ($pendingRefund) {
             throw new ApiException(__('messages.fulfillment.pending_refund_blocks_increase'), 422);
+        }
+
+        // R-03 / MAJOR-11: a second increase while the linked additional-payment obligation is still
+        // pending would push Order.remaining_amount past its pending financial obligation. Normal
+        // read, no FOR UPDATE (same MAJOR-10 reasoning).
+        if ($item->additional_payment_id) {
+            $pendingAdditional = OrderAdditionalPayment::query()->whereKey($item->additional_payment_id)->first();
+            if ($pendingAdditional && $pendingAdditional->status === 'pending') {
+                throw new ApiException(__('messages.fulfillment.pending_additional_payment_blocks_increase'), 422);
+            }
         }
 
         // R-03: a fully cancelled line (reduced to zero / cancelled) is TERMINAL — do not silently

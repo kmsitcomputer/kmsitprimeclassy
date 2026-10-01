@@ -166,6 +166,7 @@ return [
         'cannot_increase_cancelled' => 'Item yang sudah dibatalkan sepenuhnya tidak dapat ditambah kembali.',
         'pending_refund_blocks_increase' => 'Tidak dapat menambah jumlah selama masih ada refund yang belum diproses untuk item ini.',
         'pending_additional_payment_blocks_reduction' => 'Tidak dapat mengurangi jumlah selama pembayaran tambahan untuk penambahan ini masih belum lunas.',
+        'pending_additional_payment_blocks_increase' => 'Tidak dapat menambah jumlah lagi selama pembayaran tambahan sebelumnya masih belum lunas.',
     ],
 
     'courier' => [

@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderAdditionalPayment;
 use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
+use App\Models\PaymentTransaction;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\ShippingConfiguration;
@@ -182,5 +183,69 @@ class FinancialObligationReconciliationTest extends TestCase
         $this->assertSame(2, (int) SubStockReservation::query()->where('order_item_id', $item->id)->value('quantity'));
         $this->assertSame(2, $reservedAfterReduce);
         $this->assertSame(20, app(SubStockService::class)->physical($this->b['location']->id, $this->b['product']->id, null));
+    }
+
+    /* ---------------- MAJOR-11: second increase while additional payment pending ---------------- */
+
+    public function test_agent_second_increase_is_blocked_while_additional_payment_is_pending(): void
+    {
+        $item = $this->placeAgentItem(3);
+        $this->payInFull($item);
+
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 4, $this->b['admin'], 'lebih', 'cod');
+
+        $payment = OrderAdditionalPayment::query()->latest('id')->firstOrFail();
+        $this->assertSame('pending', $payment->status);
+        $this->assertEquals(10000, (float) $payment->amount, 'additional obligation equals the one-unit delta');
+
+        $item->refresh();
+        $order = Order::withoutGlobalScopes()->findOrFail($item->order_id);
+        $totalBefore = (float) $order->total_amount;
+        $remainingBefore = (float) $order->remaining_amount;
+        $reservedBefore = (int) ProductStock::withoutGlobalScopes()->where('agent_id', $this->b['agen']->id)->value('quantity_reserved');
+        $txBefore = PaymentTransaction::query()->count();
+
+        $this->assertRejected(fn () => app(OrderFulfillmentService::class)->adjustItemQuantity($item, 5, $this->b['admin'], 'lagi', 'cod'));
+
+        $item->refresh();
+        $order = Order::withoutGlobalScopes()->findOrFail($item->order_id);
+        $this->assertSame(4, $item->fulfilled_quantity);
+        $this->assertSame($totalBefore, (float) $order->total_amount);
+        $this->assertSame($remainingBefore, (float) $order->remaining_amount);
+        $this->assertSame($reservedBefore, (int) ProductStock::withoutGlobalScopes()->where('agent_id', $this->b['agen']->id)->value('quantity_reserved'));
+        $this->assertSame(1, OrderAdditionalPayment::query()->where('order_id', $order->id)->count(), 'exactly one pending obligation');
+        $this->assertSame('pending', $payment->fresh()->status);
+        $this->assertSame($txBefore, PaymentTransaction::query()->count(), 'no second payment transaction');
+
+        // Once settled (paid), the next increase proceeds and creates the next obligation.
+        app(OrderFulfillmentService::class)->markAdditionalPaymentPaid($payment->fresh(), $this->b['admin'], true);
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 5, $this->b['admin'], 'lagi', 'cod');
+        $this->assertSame(5, $item->fresh()->fulfilled_quantity);
+    }
+
+    public function test_sub_second_increase_is_blocked_while_additional_payment_is_pending(): void
+    {
+        $item = $this->placeSubItem(3);
+        $this->payInFull($item);
+
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 4, $this->b['admin'], 'lebih', 'cod');
+        $payment = OrderAdditionalPayment::query()->latest('id')->firstOrFail();
+        $this->assertSame('pending', $payment->status);
+
+        $item->refresh();
+        $reservedBefore = (int) SubStockReservation::query()->where('order_item_id', $item->id)->value('quantity');
+        $totalBefore = (float) Order::withoutGlobalScopes()->findOrFail($item->order_id)->total_amount;
+
+        $this->assertRejected(fn () => app(OrderFulfillmentService::class)->adjustItemQuantity($item, 5, $this->b['admin'], 'lagi', 'cod'));
+
+        $item->refresh();
+        $this->assertSame(4, $item->fulfilled_quantity);
+        $this->assertSame($totalBefore, (float) Order::withoutGlobalScopes()->findOrFail($item->order_id)->total_amount);
+        $this->assertSame($reservedBefore, (int) SubStockReservation::query()->where('order_item_id', $item->id)->value('quantity'));
+        $this->assertSame(20, app(SubStockService::class)->physical($this->b['location']->id, $this->b['product']->id, null));
+
+        app(OrderFulfillmentService::class)->markAdditionalPaymentPaid($payment->fresh(), $this->b['admin'], true);
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 5, $this->b['admin'], 'lagi', 'cod');
+        $this->assertSame(5, $item->fresh()->fulfilled_quantity);
     }
 }

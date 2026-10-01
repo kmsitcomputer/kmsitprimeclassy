@@ -61,6 +61,23 @@ Migrations: **unchanged** (no new migration).
 
 Exact results after final remediation: `php artisan test` → **795 passed / 5442 assertions / 0 failures** (598.23s). `npm run type-check` → PASS. `npm run build-only` → PASS.
 
+## R-03 FINAL CONCURRENCY REMEDIATION (MAJOR-10, MAJOR-11)
+
+Reviewed HEAD before this pass: `16e56f8e54060ef2888fc84d0942f28ed9fbbf31`.
+
+- **MAJOR-10 — financial lock-order deadlock:** the adjustment-side financial guards no longer take a FOR UPDATE lock. `increaseFulfillment()`'s pending-refund check and `reduceFulfillment()`'s pending-additional-payment check are now plain reads. `OrderItem` is already locked (concurrent adjustments on the same item serialise), and a stale pending read only yields a conservative 422. This removes the `Order -> financial row` lock cycle against Keuangan settlement (`markAdditionalPaymentPaid` / `markAdjustmentRefundStatus`, which lock the financial row first — those lock orders were **not** changed).
+  - Coverage (`FinancialConcurrencyTest`, real MySQL harness, 5 iterations each): admin quantity INCREASE vs Keuangan processing a pending refund; admin quantity REDUCTION vs Keuangan settling a pending additional payment. Asserts no deadlock (no 1213/1205, no lock-wait timeout), no 500, one serialized valid outcome, inventory/reservation conserved, and payment state consistent.
+- **MAJOR-11 — second increase while additional payment pending:** before ANY quantity increase (after `OrderItem`/`Order` are locked, before inventory/reservation mutation), if the item's linked `OrderAdditionalPayment` is still `pending` → explicit 422 (normal read, no FOR UPDATE per MAJOR-10). A pending obligation now freezes both further increase and reduction until it reaches a terminal state (`paid`/`failed`), after which existing payment rules resume. A pending refund continues to block increases.
+  - Tests (Agent + Sub, `FinancialObligationReconciliationTest`): fully paid 3 → 4 creates a pending obligation equal to the one-unit delta; 4 → 5 rejected 422 with fulfilled quantity / order total / remaining_amount / reservation unchanged, exactly one pending obligation, and no second `PaymentTransaction`; after settling it `paid`, 4 → 5 succeeds and creates the next obligation.
+
+Regression preserved (all green): courier-fee scaling (3→2 = 20, 2→3 = 30, 3→4 = 40), split parent+child exact conservation, multi-courier commission, self_sub commission. The three R-03 migrations are **unchanged**.
+
+Files changed: `app/Services/Order/OrderFulfillmentService.php`; `lang/{id,en,ar,zh}/messages.php`; `.phpunit-concurrency-actor.php` (ops `fulfillment-increase`/`fulfillment-reduce`/`refund-process`/`additional-settle`); extended `tests/Feature/FinancialObligationReconciliationTest.php`; new `tests/Feature/FinancialConcurrencyTest.php`.
+
+Migrations: **unchanged** (no new migration).
+
+Exact results after this pass: `php artisan test` → **799 passed / 5599 assertions / 0 failures** (623.47s). Frontend not touched this pass.
+
 ### Push status (BLOCKER, environment)
 
 `git push origin feat/package-b-r03-r04` fails: the configured deploy key `~/.ssh/github_primeclassy` is passphrase-encrypted (OpenSSH bcrypt/aes256-ctr), there is no ssh-agent (`SSH_AUTH_SOCK` unset) and no TTY for the passphrase prompt, and no credential helper/token is configured. Push must be performed by a human or after the key is added to an agent. Local commits are unaffected.
@@ -296,6 +313,8 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Post-remediation full regression passes (787/5384/0); frontend PASS.
 - [x] Final remediation (MAJOR-7/8, MINOR-9) — closed.
 - [x] Post-final full regression passes (795/5442/0); frontend PASS.
+- [x] Final concurrency remediation (MAJOR-10/11) — closed.
+- [x] Post-concurrency full regression passes (799/5599/0).
 - [ ] **R-03 DEV MANUAL UAT.**
 - [ ] Human Stage Gate approval.
 - [ ] R-04 (NOT authorized).
@@ -309,7 +328,7 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - **R03-3 (by design):** an Agent partial split whose StockRequest remainder cannot cover the moved quantity is rejected 422 (never rewrites fulfilled warehouse history).
 - **R03-4 (deferred):** Admin verification outcome `return` records the operational outcome only; it does not itself create a `ReturnRequest` (per decision B). Return remains its own workflow.
 
-**Review findings:** BLOCKER-1, BLOCKER-2, MAJOR-3, MAJOR-4, MAJOR-5, MAJOR-6, MAJOR-7, MAJOR-8, MINOR-9, audit continuity, and migration verification are all CLOSED with regression coverage (see §R-03 Remediation and §R-03 Final Remediation).
+**Review findings:** BLOCKER-1, BLOCKER-2, MAJOR-3, MAJOR-4, MAJOR-5, MAJOR-6, MAJOR-7, MAJOR-8, MINOR-9, MAJOR-10, MAJOR-11, audit continuity, and migration verification are all CLOSED with regression coverage (see §R-03 Remediation, §R-03 Final Remediation, and §R-03 Final Concurrency Remediation).
 
 Pre-existing technical debt (NOT Package B regressions): Package A role migration `down()` imperfect inverse; checkout global unique TEMP `order_no`; CLI duplicate OPcache/mbstring warnings; historical "MAC is invalid" log entries.
 

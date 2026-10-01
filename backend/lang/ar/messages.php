@@ -155,6 +155,7 @@ return [
         'cannot_increase_cancelled' => 'لا يمكن زيادة كمية صنف تم إلغاؤه بالكامل.',
         'pending_refund_blocks_increase' => 'لا يمكن زيادة الكمية أثناء وجود التزام استرداد غير معالج لهذا الصنف.',
         'pending_additional_payment_blocks_reduction' => 'لا يمكن تقليل الكمية أثناء وجود دفعة إضافية غير مسددة لهذه الزيادة.',
+        'pending_additional_payment_blocks_increase' => 'لا يمكن زيادة الكمية مرة أخرى أثناء عدم سداد الدفعة الإضافية السابقة.',
     ],
 
     'courier' => [
