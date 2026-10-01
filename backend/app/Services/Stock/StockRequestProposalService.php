@@ -3,6 +3,7 @@
 namespace App\Services\Stock;
 
 use App\Exceptions\ApiException;
+use App\Models\Order;
 use App\Models\ProductStock;
 use App\Models\ProductVariationStock;
 use App\Models\StockMovement;
@@ -81,6 +82,14 @@ class StockRequestProposalService
         }
 
         return DB::transaction(function () use ($actor, $proposal, $itemIds) {
+            // F01/F05 canonical Order-first lock discipline: lock the Order row BEFORE the proposal and
+            // the Stock Request, exactly like quantity adjustment and SC-03. A concurrent demand change
+            // (quantity adjustment) therefore fully serialises against this approval.
+            $orderId = StockRequest::withoutGlobalScopes()->whereKey($proposal->stock_request_id)->value('order_id');
+            if ($orderId !== null) {
+                Order::withoutGlobalScopes()->whereKey($orderId)->lockForUpdate()->first();
+            }
+
             $locked = StockRequestProposal::withoutGlobalScopes()->with(['items.requestItem'])->whereKey($proposal->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
 
             $selected = $this->selectItems($locked, $itemIds);
@@ -102,14 +111,19 @@ class StockRequestProposalService
                 }
             }
 
-            $request = StockRequest::withoutGlobalScopes()->with('items')->whereKey($locked->stock_request_id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            $request = StockRequest::withoutGlobalScopes()->whereKey($locked->stock_request_id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
             if ($request->status === 'cancelled' || $request->status === 'fulfilled') {
                 throw new ApiException('Stock Request tidak dapat dipenuhi lagi.', 422);
             }
 
+            // F01: read the CURRENT demand under lock. NEVER compute from an eager-loaded (REPEATABLE READ
+            // snapshot) StockRequestItem — a concurrent quantity adjustment could already have changed
+            // requested/remaining, and a stale base would corrupt requested_qty/fulfilled_qty/remaining_qty.
+            $requestItems = $request->items()->lockForUpdate()->get()->keyBy('id');
+
             $lines = [];
             foreach ($selected as $proposalItem) {
-                $item = $request->items->firstWhere('id', $proposalItem->stock_request_item_id);
+                $item = $requestItems->get($proposalItem->stock_request_item_id);
                 if (! $item || $item->stock_request_id !== $request->id || $proposalItem->quantity <= 0 || $proposalItem->quantity > $item->remaining_qty) {
                     throw new ApiException('Jumlah proposal melebihi sisa request.', 422);
                 }
@@ -208,6 +222,12 @@ class StockRequestProposalService
         }
 
         return DB::transaction(function () use ($actor, $proposal, $itemIds, $reason) {
+            // F05 canonical Order-first discipline (same vocabulary as approval / quantity adjustment).
+            $orderId = StockRequest::withoutGlobalScopes()->whereKey($proposal->stock_request_id)->value('order_id');
+            if ($orderId !== null) {
+                Order::withoutGlobalScopes()->whereKey($orderId)->lockForUpdate()->first();
+            }
+
             $locked = StockRequestProposal::withoutGlobalScopes()->with('items')->whereKey($proposal->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
 
             $selected = $this->selectItems($locked, $itemIds);
@@ -246,10 +266,14 @@ class StockRequestProposalService
      */
     private function selectItems(StockRequestProposal $locked, ?array $itemIds)
     {
+        // Locking re-read: under REPEATABLE READ a plain read would use this transaction's snapshot, which
+        // (with the Order-first lock discipline) may predate a concurrently committed per-item decision.
+        $items = $locked->items()->lockForUpdate()->get();
+
         if ($itemIds === null) {
-            return $locked->items->where('decision_status', 'pending')->values();
+            return $items->where('decision_status', 'pending')->values();
         }
-        $rows = $locked->items->whereIn('id', $itemIds)->values();
+        $rows = $items->whereIn('id', $itemIds)->values();
         if ($rows->count() !== count(array_unique($itemIds))) {
             throw new ApiException('Item proposal tidak ditemukan.', 404);
         }
@@ -260,8 +284,8 @@ class StockRequestProposalService
     /** Header status is DERIVED from the item decisions — never an independent truth. */
     private function syncHeader(StockRequestProposal $locked, User $actor, ?string $reason = null): void
     {
-        $locked->load('items');
-        $states = $locked->items->pluck('decision_status')->unique();
+        // Locking re-read (REPEATABLE READ safety) — never derive the header from a stale snapshot.
+        $states = $locked->items()->lockForUpdate()->get()->pluck('decision_status')->unique();
         $status = $states->count() === 1 ? (string) $states->first() : 'partial';
 
         $changes = ['status' => $status];

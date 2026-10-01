@@ -1,5 +1,45 @@
 # Package C — Production UAT Remediation (checkpoint)
 
+## Round 2 — independent Codex review of `a583b51` = BLOCKED
+
+**Codex verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `a583b51`. **Baseline:** `main @ 938100c`.
+
+**Findings being remediated (F01–F06):**
+- **F01 (BLOCKER)** — `StockRequestProposalService::approveItems()` reads the StockRequestItem demand from a stale (eager/non-locking) snapshot; a concurrent quantity adjustment can corrupt `requested/fulfilled/remaining`.
+- **F02 (BLOCKER)** — `ShipmentGroupingService::carryFeeSnapshot()` only carries when target `=== null`, but the column is `NOT NULL DEFAULT 0`, so a nonzero `shipping_fee_snapshot` (25,000) is lost on regroup/reschedule.
+- **F03 (MAJOR)** — `ShipmentGroupingService::isMutable()` does not treat an assigned tracking/resi identity as operational commitment → a pending shipment with `tracking_number` can be deleted/rewritten by regroup.
+- **F04 (MAJOR)** — `OrderFulfillmentService::rescheduleItemDeliveryDate()` silently redates a committed (courier-assigned) single-item shipment.
+- **F05 (MAJOR)** — lock inversion / real 1213 deadlock: `reconcileOrder()` = Order → Shipment → OrderItem vs `rescheduleItemDeliveryDate()` = OrderItem → Order.
+- **F06 (MINOR)** — `RegroupShipments::handle()` prints per-order errors but always returns SUCCESS.
+
+**Locked domain decisions (do not change):** order demand ≠ fulfillment proposal (rejecting a proposal item never cancels order demand); shipment grouping = ORDER + `requested_delivery_date`; `requested_delivery_date` remains the only scheduling truth; payment stays Order-level; no new authority.
+
+**Remediation plan / exact order:**
+1. **F05 foundation** — one canonical **Order-first** lock discipline for every order-scoped shipment/fulfilment writer: quantity adjustment, reschedule, split, regroup (`reconcileOrder`), Package C add-line/checkout grouping, courier lifecycle (`updateShipmentStatus`, `assignCourier`), delivery verification. Child rows then locked deterministically.
+2. **F01** — `approveItems()` (and `rejectItems()`) acquire the Order lock first, then Proposal → StockRequest → **locking re-read** of the StockRequestItems before any validation/calculation/mutation; `remaining = requested − fulfilled` holds after every transaction.
+3. **F03** — `isMutable()` also requires an empty `tracking_number` (assigned resi = committed).
+4. **F04** — rescheduling an item whose current shipment is committed and carries only that item is rejected atomically with a clear domain 422; committed-with-siblings still moves the item to its own mutable shipment without touching the committed one.
+5. **F02** — explicit shipping-fee conservation: carry a nonzero snapshot to the surviving shipment on merge/delete (never overwrite an already-nonzero target → no double count, never lose a nonzero source); regroup target = the fee carrier.
+6. **F06** — track processed/changed/skipped/failed, print a summary, return nonzero when any order failed.
+
+**Locked invariants:** F01–F06 must not weaken Package A/B/C invariants; migration `2026_10_03_100000` stays as-is; the "cannot reduce below warehouse-fulfilled" 422 stays.
+
+**Round-2 implementation result (awaiting independent re-review):**
+- **F05** — one canonical Order-first lock discipline: quantity adjustment + reschedule (`OrderFulfillmentService`), regroup/`assignItemToDateGroup` (`ShipmentGroupingService`), courier lifecycle (`CourierService::updateShipmentStatus`, `assignCourier`), delivery verification (`DeliveryVerificationService`), and proposal approve/reject now take the **Order row lock first**, then children. Deterministic query-log assertion: the first locking read of each writer is `orders`.
+- **F01** — `StockRequestProposalService::approveItems()`/`rejectItems()` lock Order → Proposal → Stock Request and **re-read the demand items and proposal-item decisions with locking reads**; `remaining = requested − fulfilled` holds after every transaction. Deterministic held-lock test reproduces Codex's interleaving and fails on `a583b51` (`remaining` 4 vs 6).
+- **F03** — `ShipmentGroupingService::isMutable()` also requires an empty `tracking_number` (assigned resi = committed).
+- **F04** — rescheduling an item alone on a committed shipment is rejected 422 atomically; committed-with-siblings still moves the item onto its own new mutable shipment untouched.
+- **F02** — nonzero shipping-fee snapshot conservation (`carryFeeSnapshot` transfers only a nonzero source to a zero target; regroup target = the fee carrier). Numeric tests assert exact totals (25,000), one carrier, no loss/double count.
+- **F06** — `shipments:regroup` tracks processed/changed/skipped/failed, prints a summary and returns non-zero when any order failed (per-order rollback preserved); tested with a stubbed failing order.
+- **Tests:** new `PackageCProductionUatRemediationTest` (11) and `PackageCShipmentConcurrencyTest` (9, incl. 3 deterministic forced-interleaving + 6 real two-connection races); new harness `runServiceActorAgainstHeldLocks` + actor ops `shipment-regroup`/`reschedule`/`courier-ship`. Full backend **891 passed / 6474 assertions / 0 failures**; `npm run type-check` PASS; clean temporary-outDir build PASS (the normal `dist/` build still hits the pre-existing `.well-known/acme-challenge` EACCES infrastructure condition — not a product failure).
+- **Docs updated:** ARCHITECTURE §7 lock table, BUSINESS-RULES §11/§16/§21, OPERATIONS §4/§8, MASTER-SYSTEM §2/§40/§41.
+
+**Exact next action:** independent Codex re-review of branch `fix/package-c-production-uat` (HEAD = remediation commit). No deployment; PRODUCTION TOUCHED: NO; DEPLOYED: NO; Package C remains NOT production closed.
+
+---
+
+# Package C — Production UAT Remediation (checkpoint — round 1, historical)
+
 **Status:** IN PROGRESS. Package C is NOT production closed. DEV only; no production access, deploy or migration.
 **Branch:** `fix/package-c-production-uat` (from `main` @ `938100c`). **Baseline backend suite:** 855 passed / 6075 assertions / 0 failures; frontend type-check + build PASS.
 

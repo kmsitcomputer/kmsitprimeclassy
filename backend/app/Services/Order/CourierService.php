@@ -58,6 +58,8 @@ class CourierService
         }
 
         return DB::transaction(function () use ($shipment, $courier, $actor) {
+            // F05 canonical Order-first lock discipline (assignment flips the shipment from mutable to committed).
+            Order::withoutGlobalScopes()->whereKey($shipment->order_id)->lockForUpdate()->first();
             $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
             $previousCourierId = $shipment->courier_id;
             $shipment->update(['courier_id' => $courier->id]);
@@ -175,19 +177,24 @@ class CourierService
             throw new ApiException(__('messages.order.status_endpoint_required', ['status' => $newStatus]), 422);
         }
 
-        if ($newStatus === 'dikirim') {
-            // Applies regardless of actor role — an office actor (agen/admin/super_admin)
-            // reaches this same per-shipment endpoint (see ShipmentPolicy::updateStatus) and
-            // must be blocked from consuming another user's Sub stock exactly like a foreign
-            // kurir/Sales-Kurir-Sub is.
-            $this->assertMayShipSubStock($shipment, $actor);
-        }
-
-        $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
-
         return DB::transaction(function () use ($shipment, $newStatus, $actor, $proof) {
+            // F05 canonical Order-first lock discipline: lock the Order row BEFORE the Shipment/items, so a
+            // courier lifecycle action can never invert against regroup/reschedule (Order -> Shipment) and
+            // deadlock (MariaDB 1213).
+            Order::withoutGlobalScopes()->whereKey($shipment->order_id)->lockForUpdate()->first();
             $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
             $items = OrderItem::query()->where('shipment_id', $shipment->id)->lockForUpdate()->get();
+
+            if ($newStatus === 'dikirim') {
+                // Applies regardless of actor role — an office actor (agen/admin/super_admin)
+                // reaches this same per-shipment endpoint (see ShipmentPolicy::updateStatus) and
+                // must be blocked from consuming another user's Sub stock exactly like a foreign
+                // kurir/Sales-Kurir-Sub is.
+                $this->assertMayShipSubStock($shipment, $actor);
+            }
+
+            // Authorization is decided under the same locks (never a stale pre-lock read).
+            $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
 
             $anyTransitioned = false;
             foreach ($items as $item) {

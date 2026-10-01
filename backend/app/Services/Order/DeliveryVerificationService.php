@@ -4,6 +4,7 @@ namespace App\Services\Order;
 
 use App\Exceptions\ApiException;
 use App\Models\DeliveryVerification;
+use App\Models\Order;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
@@ -41,6 +42,8 @@ class DeliveryVerificationService
 
         try {
             return DB::transaction(function () use ($shipment, $actor, $outcome, $normalizedNote, $idempotencyKey) {
+                // F05 canonical Order-first lock discipline (verification makes a shipment non-mutable).
+                Order::withoutGlobalScopes()->whereKey($shipment->order_id)->lockForUpdate()->first();
                 $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
 
                 // A verification is only meaningful once the shipment has actually been delivered;

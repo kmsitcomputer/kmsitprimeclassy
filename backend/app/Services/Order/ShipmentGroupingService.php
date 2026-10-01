@@ -38,6 +38,10 @@ class ShipmentGroupingService
             && $shipment->shipped_at === null
             && $shipment->delivered_at === null
             && $shipment->proof_media_id === null
+            // F03: an assigned tracking/resi number is operational commitment — the shipment already has a
+            // real-world identity. It must never be merged, reused as a mutable shell or deleted by
+            // regroup/reschedule cleanup, even while still `pending` and unassigned to a courier.
+            && blank($shipment->tracking_number)
             && ! $shipment->deliveryVerifications()->exists();
     }
 
@@ -92,6 +96,10 @@ class ShipmentGroupingService
      */
     public function assignItemToDateGroup(OrderItem $item, Order $order, User $actor, string $event = 'shipment.item_grouped'): Shipment
     {
+        // Canonical Order-first lock discipline (F05): guarantee the Order row is held before ANY child
+        // shipment row is locked, regardless of whether the caller already took it (idempotent re-lock).
+        Order::withoutGlobalScopes()->whereKey($order->id)->lockForUpdate()->first();
+
         $old = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
         if ($old) {
             $item->update(['shipment_id' => null]); // detach so the item does not count towards its old group
@@ -161,7 +169,10 @@ class ShipmentGroupingService
                 if (count($shipments) < 2) {
                     continue;
                 }
-                $target = collect($shipments)->first(fn ($s) => $s->shipping_fee_snapshot !== null) ?? $shipments[0];
+                // F02: keep the shipment that actually carries the nonzero shipping-fee snapshot as the survivor,
+                // so the order's fee can never be merged away. (The column is NOT NULL DEFAULT 0, so "not null"
+                // is meaningless — the carrier is the nonzero one.)
+                $target = collect($shipments)->first(fn (Shipment $s) => (float) $s->shipping_fee_snapshot > 0) ?? $shipments[0];
                 foreach ($shipments as $source) {
                     if ($source->id === $target->id) {
                         continue;
@@ -200,11 +211,28 @@ class ShipmentGroupingService
         return $date ?? '';
     }
 
+    /**
+     * F02 conservation invariant: when a mutable shipment shell is merged/moved/deleted, a NONZERO
+     * shipping-fee snapshot must survive on the surviving shipment — never lost, never double-counted.
+     *
+     * The column is `NOT NULL DEFAULT 0`, so the meaningful "carrier" is a nonzero fee, not a non-null one.
+     *  - source has no nonzero fee  -> nothing to conserve;
+     *  - target already carries a nonzero fee -> keep it (a second nonzero would double count);
+     *  - otherwise transfer the source's fee (+ its rate metadata) to the target before the source is deleted.
+     */
     private function carryFeeSnapshot(Shipment $from, Shipment $to): void
     {
-        if ($from->shipping_fee_snapshot !== null && $to->shipping_fee_snapshot === null) {
-            $to->update(['shipping_fee_snapshot' => $from->shipping_fee_snapshot, 'rate_per_km' => $from->rate_per_km]);
+        if ((float) $from->shipping_fee_snapshot <= 0.0) {
+            return;
         }
+        if ((float) $to->shipping_fee_snapshot > 0.0) {
+            return;
+        }
+
+        $to->update([
+            'shipping_fee_snapshot' => $from->shipping_fee_snapshot,
+            'rate_per_km' => $to->rate_per_km ?? $from->rate_per_km,
+        ]);
     }
 
     /** Destination/provider snapshot for a NEW group shipment, cloned from the order's original shipment. */

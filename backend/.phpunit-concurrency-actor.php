@@ -13,8 +13,10 @@ use App\Models\StockRequestProposal;
 use App\Models\StockTransfer;
 use App\Models\SubStockRequest;
 use App\Models\User;
+use App\Services\Order\CourierService;
 use App\Services\Order\OrderFulfillmentService;
 use App\Services\Order\OrderService;
+use App\Services\Order\ShipmentGroupingService;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
 use App\Services\Stock\StockRequestProposalService;
@@ -400,6 +402,31 @@ if (str_starts_with($role, 'sr-')) {
                 // Production UAT: per-product approval raced against another decision on the same proposal.
                 $proposalModel = StockRequestProposal::withoutGlobalScopes()->findOrFail($subjectId);
                 $result = app(StockRequestProposalService::class)->approveItem($actor, $proposalModel, \App\Models\StockRequestProposalItem::findOrFail((int) $extra['item_id']));
+                break;
+            case 'shipment-regroup':
+                // F05: the REAL regroup/merge writer (Order -> Shipment -> OrderItem).
+                $groupOrder = Order::withoutGlobalScopes()->findOrFail($subjectId);
+                $groupResult = app(ShipmentGroupingService::class)->reconcileOrder($groupOrder, $actor);
+                $payload['merged'] = $groupResult['merged'];
+                $payload['skipped_mixed'] = $groupResult['skipped_mixed'];
+                $result = null;
+                break;
+            case 'reschedule':
+                // F04/F05: the REAL reschedule writer (Order -> OrderItem -> Shipment). `date` is required;
+                // `quantity` (optional) drives the partial-split branch.
+                $rescheduleItem = OrderItem::findOrFail($subjectId);
+                $result = app(OrderFulfillmentService::class)->rescheduleItemDeliveryDate(
+                    $rescheduleItem,
+                    (string) $extra['date'],
+                    $actor,
+                    (string) ($extra['reason'] ?? 'concurrency-test'),
+                    isset($extra['quantity']) ? (int) $extra['quantity'] : null,
+                );
+                break;
+            case 'courier-ship':
+                // F05: the REAL courier lifecycle writer (Order -> Shipment -> OrderItem).
+                $shipmentModel = Shipment::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(CourierService::class)->updateShipmentStatus($shipmentModel, (string) ($extra['status'] ?? 'dikirim'), $actor);
                 break;
             case 'fulfillment-reduce':
                 $item = OrderItem::findOrFail($subjectId);

@@ -34,33 +34,51 @@ class RegroupShipments extends Command
             ->when($this->option('order'), fn ($q) => $q->where('order_id', (int) $this->option('order')))
             ->groupBy('order_id')->havingRaw('COUNT(*) > 1')->pluck('order_id');
 
-        $totals = ['orders' => 0, 'merged' => 0, 'skipped_mixed' => 0];
+        $totals = ['processed' => 0, 'changed' => 0, 'merged' => 0, 'skipped' => 0, 'failed' => 0];
+        $failures = [];
         foreach ($orderIds as $orderId) {
             $order = Order::withoutGlobalScopes()->find($orderId);
             if (! $order) {
                 continue;
             }
 
+            $totals['processed']++;
             DB::beginTransaction();
             try {
                 $result = $grouping->reconcileOrder($order);
                 $apply ? DB::commit() : DB::rollBack();
             } catch (\Throwable $e) {
+                // Per-order rollback/isolation is preserved: a failing order never drags a successful one down.
                 DB::rollBack();
+                $totals['failed']++;
+                $failures[] = (int) $orderId;
                 $this->error("Order {$orderId}: ".$e->getMessage());
 
                 continue;
             }
 
+            $totals['merged'] += $result['merged'];
+            $totals['skipped'] += $result['skipped_mixed'];
+            if ($result['merged'] > 0) {
+                $totals['changed']++;
+            }
             if ($result['merged'] > 0 || $result['skipped_mixed'] > 0) {
-                $totals['orders']++;
-                $totals['merged'] += $result['merged'];
-                $totals['skipped_mixed'] += $result['skipped_mixed'];
                 $this->line(sprintf('Order %s (#%d): merged %d shipment(s)%s', $order->order_no, $order->id, $result['merged'], $result['skipped_mixed'] ? ", {$result['skipped_mixed']} mixed-date shipment(s) left untouched" : ''));
             }
         }
 
-        $this->info(($apply ? 'APPLIED' : 'DRY RUN (nothing changed)').": {$totals['merged']} shipment(s) merged across {$totals['orders']} order(s).");
+        $this->info(sprintf(
+            '%s: processed %d, changed %d, merged %d shipment(s), skipped %d, failed %d.',
+            $apply ? 'APPLIED' : 'DRY RUN (nothing changed)',
+            $totals['processed'], $totals['changed'], $totals['merged'], $totals['skipped'], $totals['failed'],
+        ));
+
+        if ($totals['failed'] > 0) {
+            // A global SUCCESS after a per-order failure would hide real errors and break safe automation.
+            $this->error(sprintf('%d order(s) failed (ids: %s); those orders were rolled back unchanged.', $totals['failed'], implode(', ', $failures)));
+
+            return self::FAILURE;
+        }
 
         return self::SUCCESS;
     }

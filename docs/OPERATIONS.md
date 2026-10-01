@@ -62,7 +62,7 @@ php artisan primeclassy:reset-dev-transactions --confirm="RESET DEV TRANSACTIONS
 - Database `primeclassy_testing` only. `phpunit.xml` forces `APP_ENV=testing` and the DB name; `Tests\TestCase` throws if the database name does not match `_test`/`_testing`, protecting DEV and production data.
 - Commands: `php artisan test`, `php artisan test --filter=Name`, and the serialized runner `php scripts/run-tests-serialized.php tests/Feature/Name.php` (lock-protected; refuses non-testing databases) for destructive refresh/migration suites.
 - Race suites spawn real second PHP processes (`.phpunit-concurrency-actor.php`); they need the same isolated DB and take ~10–20 s each. A full run takes roughly 12–15 minutes.
-- Last recorded full run: 855 passed / 6075 assertions / 0 failures (includes the 4 DEV reset-command tests; frontend type-check and build also pass). Always re-run for current numbers.
+- Last recorded full run: 891 passed / 6474 assertions / 0 failures (includes the 4 DEV reset-command tests; frontend type-check and build also pass). Always re-run for current numbers.
 - Frontend: `npm run type-check` and `npm run build-only`; there is no frontend test runner.
 
 ## 5. First install and first Super Admin
@@ -156,7 +156,7 @@ Never copy DEV `.env`/credentials to production · preserve production `.env`, u
 | `php artisan regions:import [--reset] [--force]` | Load province/regency/district/village data from `backend/database/data/regions` (source and licence in `SOURCE.md` there). `--reset` deletes region rows first |
 | `php artisan products:backfill-sku [--apply]` | Deterministic SKU backfill; dry-run by default; run `system:audit-catalog-hierarchy` first |
 | `php artisan system:audit-catalog-hierarchy` | Read-only SKU/hierarchy audit (JSON) |
-| `php artisan shipments:regroup [--apply] [--order=ID]` | Merges **mutable** same-date shipments of existing orders (Order + delivery date rule); assigned/in-flight/delivered/verified shipments are never touched; dry-run by default (rolls back). Production use needs a verified backup and explicit Human authorization; preserves the shipping-fee snapshot; idempotent |
+| `php artisan shipments:regroup [--apply] [--order=ID]` | Merges **mutable** same-date shipments of existing orders (Order + delivery date rule); assigned/in-flight/delivered/**tracked**/verified shipments are never touched; dry-run by default (rolls back). Production use needs a verified backup and explicit Human authorization; preserves the shipping-fee snapshot (nonzero conservation); idempotent. Reports processed/changed/skipped/failed and exits **non-zero** when any order failed (each failed order is rolled back individually) |
 | `php artisan warehouse:reconcile [--agent_id=]` | Read-only diagnostics of warehouse buckets, reservations, movements, requests, opnames |
 | `php artisan warehouse:migrate-legacy-stock --dry-run …` | Historical legacy-stock → Transit backfill tooling (the production cutover is already done). Any non-dry run needs verified backup + explicit Human authorization |
 | `php artisan transactions:reset [--dry-run] [--force]` | **Legacy tool — do not use.** It predates the warehouse/Sub tables and does not know `stock_requests`, `stock_transfers`, `sub_stock_*`, `delivery_verifications`, `inventory_cancellation_reversals`, etc. Their FKs are `RESTRICT`, so on a database with such rows it fails and rolls back, and it can never be a safe production reset. For DEV use §3.1; there is no authorized production reset procedure |

@@ -52,8 +52,12 @@ class OrderFulfillmentService
         }
 
         return DB::transaction(function () use ($item, $newFulfilledQuantity, $actor, $reason, $additionalPaymentMethod) {
-            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            // Canonical Order-first lock discipline (production UAT F05): the Order row is the FIRST lock
+            // any order-scoped writer takes — then the OrderItem, then Stock Request -> inventory. This is
+            // the same vocabulary regroup/reschedule/SC-03/approval use, so no inverse (OrderItem -> Order)
+            // path exists to deadlock against (MariaDB 1213).
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
 
             if ($order->status !== 'diproses') {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
@@ -323,6 +327,8 @@ class OrderFulfillmentService
     public function rescheduleItemDeliveryDate(OrderItem $item, string $newDate, User $actor, string $reason, ?int $quantity = null): OrderItem
     {
         return DB::transaction(function () use ($item, $newDate, $actor, $reason, $quantity) {
+            // Canonical Order-first lock discipline (production UAT F05).
+            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
             $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
 
             if (! in_array($item->status, ['diterima', 'diproses'], true)) {
@@ -340,21 +346,37 @@ class OrderFulfillmentService
             }
 
             $previousDate = $item->requested_delivery_date?->toDateString();
+            $dateChanged = $previousDate !== $newDate;
 
-            // Shipment grouping is ORDER + REQUESTED DELIVERY DATE (locked rule). Lock order OrderItem -> Order
-            // (same as quantity adjustment); the item's new date is the scheduling truth, the shipment follows it.
-            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            if ($dateChanged) {
+                $current = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+
+                // F04: a committed shipment's operational identity must never be silently redated. When it
+                // carries ONLY this item, moving the item's date would rewrite that shipment — reject the
+                // unsafe operation atomically (before any mutation) with a clear domain 422. When it has
+                // other active items the item simply moves onto its own mutable shipment and the committed
+                // shipment keeps its identity, courier, proof and verification untouched.
+                if ($current && ! ShipmentGroupingService::isMutable($current)) {
+                    $hasActiveSiblings = OrderItem::query()
+                        ->where('shipment_id', $current->id)
+                        ->whereKeyNot($item->id)
+                        ->where('status', '!=', 'dibatalkan')
+                        ->exists();
+
+                    if (! $hasActiveSiblings) {
+                        throw new ApiException(__('messages.fulfillment.committed_shipment_cannot_reschedule'), 422);
+                    }
+                }
+            }
+
             $item->update(['requested_delivery_date' => $newDate]);
 
-            if ($previousDate !== $newDate) {
-                $current = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
-                $hasSiblings = $current && OrderItem::query()->where('shipment_id', $current->id)->whereKeyNot($item->id)->where('status', '!=', 'dibatalkan')->exists();
-
-                // A committed (assigned / in-flight) shipment that carries only this item simply keeps it (its date
-                // follows the item); everything else is regrouped onto the order's mutable shipment for the new date.
-                if (! $current || ShipmentGroupingService::isMutable($current) || $hasSiblings) {
-                    $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.regrouped_by_delivery_date');
-                }
+            if ($dateChanged) {
+                // Shipment grouping is ORDER + REQUESTED DELIVERY DATE (locked rule); scheduling truth stays
+                // order_items.requested_delivery_date. All remaining cases (no shipment / mutable shipment /
+                // committed shipment with siblings) move the item onto the order's mutable shipment for its
+                // new date.
+                $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.regrouped_by_delivery_date');
             }
 
             ActivityLogger::log($actor->id, $item, 'order_item.delivery_rescheduled', $reason, [

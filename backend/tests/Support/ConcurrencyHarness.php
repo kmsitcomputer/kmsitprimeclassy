@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 
 class ConcurrencyHarness
@@ -369,6 +370,65 @@ class ConcurrencyHarness
             $this->cleanupFiles($paths);
             $this->cleanupBarrierDir();
         }
+    }
+
+    /**
+     * Deterministic stale-snapshot race. The CALLER holds the row locks on its own connection (inside an
+     * open transaction); we start ONE real service actor, wait until that actor is provably blocked on a
+     * row lock, then invoke $release (the caller commits its held transaction). This forces exactly the
+     * "a writer commits between a reader's snapshot read and its mutation" interleaving deterministically —
+     * never by timing luck.
+     *
+     * @param  array{op:string, actor_id:int, subject_id?:int, extra?:array}  $side
+     * @param  callable():void  $release  commits the caller's held transaction
+     * @return array{actor: array, blocked: bool}
+     */
+    public function runServiceActorAgainstHeldLocks(array $side, callable $release): array
+    {
+        $this->ensureRuntimeDir();
+        $readyA = $this->runtimeDir.'/hl-a.ready';
+        $readyB = $this->runtimeDir.'/hl-b.ready';
+        $releaseFile = $this->runtimeDir.'/hl.release';
+        $resultA = $this->runtimeDir.'/hl-a.result.json';
+        $resultB = $this->runtimeDir.'/hl-b.result.json';
+        $paths = [$readyA, $readyB, $releaseFile, $resultA, $resultB];
+        $this->cleanupFiles($paths);
+
+        $process = $this->spawnServiceRaceActor('a', $side, $readyA, $readyB, $releaseFile, $resultA, $resultB);
+
+        try {
+            $this->waitForSignal($readyA, 15);
+            $this->writeFile($releaseFile, 'go');
+            $blocked = $this->waitForLockWait(15);
+            $release();
+            $process->wait();
+
+            return ['actor' => $this->readJson($resultA), 'blocked' => $blocked];
+        } finally {
+            $this->cleanupProcess($process);
+            $this->cleanupFiles($paths);
+            $this->cleanupBarrierDir();
+        }
+    }
+
+    /**
+     * Poll until some session is currently waiting on a row lock — the actor is provably blocked.
+     * Uses the global InnoDB status counter (readable without PROCESS privilege, unlike
+     * information_schema.innodb_trx).
+     */
+    protected function waitForLockWait(int $seconds): bool
+    {
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            $row = DB::selectOne("SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_current_waits'");
+            $value = is_object($row) ? ($row->Value ?? null) : (is_array($row) ? ($row['Value'] ?? null) : null);
+            if ((int) $value > 0) {
+                return true;
+            }
+            usleep(50000);
+        }
+
+        return false;
     }
 
     public function runOrderLockedStateRace(array $configuration, string $operation): array

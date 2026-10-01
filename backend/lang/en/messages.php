@@ -158,6 +158,7 @@ return [
         'adjusted' => 'Item fulfillment quantity updated successfully.',
         'rescheduled' => 'Item delivery date updated successfully.',
         'split_stock_request_locked' => 'The split cannot be performed because the warehouse stock request is already partially fulfilled and its remaining quantity is insufficient.',
+        'committed_shipment_cannot_reschedule' => 'This item is already part of a committed shipment (courier assigned / resi issued); its delivery date cannot be changed.',
         'stock_request_fulfilled_blocks_reduction' => 'The order line already has goods fulfilled by the warehouse; it cannot be reduced below the quantity already fulfilled.',
         'cannot_increase_cancelled' => 'A fully cancelled item cannot be increased again.',
         'pending_refund_blocks_increase' => 'Cannot increase the quantity while an unprocessed refund obligation still exists for this item.',
