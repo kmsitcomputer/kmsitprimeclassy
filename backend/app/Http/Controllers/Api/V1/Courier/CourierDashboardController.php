@@ -36,17 +36,27 @@ class CourierDashboardController extends Controller
     {
         $actor = $request->user();
         $courierId = $actor->courierProfile?->id;
+        $isSubActor = $actor->isRole('sales-kurir-sub');
 
         $orders = Order::query()
             ->where('agent_id', $actor->agent_id)
-            ->whereHas('items', function ($q) use ($courierId) {
+            ->whereHas('items', function ($q) use ($courierId, $actor, $isSubActor) {
                 // Grouped in its own closure — an ungrouped top-level orWhere()
                 // here would escape whereHas's own order_id correlation constraint.
-                $q->where(function ($sq) use ($courierId) {
+                $q->where(function ($sq) use ($courierId, $actor, $isSubActor) {
                     $sq->where('status', 'diproses')
-                        ->orWhere(function ($dq) use ($courierId) {
+                        ->orWhere(function ($dq) use ($courierId, $actor, $isSubActor) {
                             $dq->where('status', 'dikirim')
-                                ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
+                                // R-03: a Sales-Kurir-Sub's own self_sub shipment is theirs via
+                                // self_delivered_by_user_id (courier_id is NULL on it); a normal Kurir
+                                // keeps the existing courier_id ownership.
+                                ->whereHas('shipment', function ($ssq) use ($courierId, $actor, $isSubActor) {
+                                    if ($isSubActor) {
+                                        $ssq->where('self_delivered_by_user_id', $actor->id);
+                                    } else {
+                                        $ssq->where('courier_id', $courierId);
+                                    }
+                                });
                         });
                 });
             })

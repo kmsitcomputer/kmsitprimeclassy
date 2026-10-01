@@ -151,6 +151,7 @@ return [
         'window_closed' => 'Item quantity can only be changed while the order is diproses.',
         'adjusted' => 'Item fulfillment quantity updated successfully.',
         'rescheduled' => 'Item delivery date updated successfully.',
+        'split_stock_request_locked' => 'The split cannot be performed because the warehouse stock request is already partially fulfilled and its remaining quantity is insufficient.',
     ],
 
     'courier' => [
@@ -161,10 +162,19 @@ return [
         'assigned' => 'Courier assigned successfully.',
         'return_confirmed' => 'Return status updated successfully.',
         'delivery_proof_required' => 'The kurir must upload delivery proof to mark this shipment as delivered.',
+        'sales_kurir_sub_standard_forbidden' => 'A Sales-Kurir-Sub may only self-deliver shipments sourced from their own Sub stock.',
+        'self_delivery_no_courier' => 'A self-delivery shipment cannot be assigned to a courier.',
+    ],
+
+    'delivery_verification' => [
+        'invalid_outcome' => 'Invalid delivery verification outcome.',
+        'not_delivered' => 'The shipment has not been delivered yet; it cannot be verified.',
+        'recorded' => 'Delivery verification recorded.',
     ],
 
     'return' => [
         'item_not_delivered' => 'A return can only be requested once the item is terkirim.',
+        'sub_location_unavailable' => 'The original Sub Location for this return is missing or inactive; the Sub stock return cannot be processed.',
         'invalid_quantity' => 'Return quantity exceeds what can still be returned.',
         'requested' => 'Return request submitted successfully.',
         'reviewed' => 'Return request processed successfully.',

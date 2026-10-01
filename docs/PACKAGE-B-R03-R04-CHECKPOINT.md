@@ -1,6 +1,6 @@
 # Package B (R-03 + R-04) — Checkpoint
 
-**Status:** R-03 AUTHORIZED — IMPLEMENTATION IN PROGRESS. R-04 **NOT** authorized.
+**Status:** R-03 IMPLEMENTED & GREEN — AWAITING HUMAN REVIEW / DEV UAT. R-04 **NOT** authorized.
 **Created:** 2026-10-01
 **Active spec:** `docs/PACKAGE-B-R03-R04.md`
 **Repository protocol:** `AGENTS.md`
@@ -18,6 +18,12 @@
 - Recon commit: `c9ede8a160e204419cc15bd95371b6857433b696` ("docs: lock R-03 recon and baseline").
 - Backend baseline (`php artisan test`): **738 passed / 5055 assertions / 0 failures** (678.86s).
 - Frontend baseline: `npm run type-check` **PASS**; `npm run build-only` **PASS**; only the pre-existing chunk-size (>500 kB) warning.
+
+### R-03 result (this pass)
+
+- Backend after R-03 (`php artisan test`): **768 passed / 5238 assertions / 0 failures** (693.19s) — baseline 738 + 30 new tests.
+- Frontend after R-03: `npm run type-check` **PASS**; `npm run build-only` **PASS**; same pre-existing chunk-size warning only.
+- Target migrations were applied only to the isolated test database (`primeclassy_testing`). Production untouched; no production migration run.
 
 ### Push status (BLOCKER, environment)
 
@@ -197,29 +203,71 @@ Explicitly NOT proposed: invoice/delivery-group table; payment columns; new colu
 16. Update checkpoint (files, migrations, tests/results, open findings, HEAD, EXACT NEXT ACTION).
 17. STOP after R-03 is fully green. Do NOT start R-04, deploy, or run production migrations.
 
+## R-03 IMPLEMENTATION RESULT (COMPLETE)
+
+### Migrations added (3, additive; applied to `primeclassy_testing` only)
+
+- `2026_10_01_100000_add_self_delivery_to_shipments_table.php` — adds `shipments.delivery_mode` (`enum('standard','self_sub')` NOT NULL DEFAULT `'standard'`) + `shipments.self_delivered_by_user_id` (nullable FK → `users`, RESTRICT, indexed).
+  - **MariaDB 10.11 limitation (documented):** error 1901 forbids referencing a FK column whose action is SET NULL (`courier_id` is `nullOnDelete`) inside a CHECK. The two-way mode/actor half is a real CHECK (`shipments_delivery_mode_consistent`); the "self_sub never carries a courier" half is enforced by BEFORE INSERT / BEFORE UPDATE triggers (`shipments_self_sub_no_courier_insert|update`, SIGNAL SQLSTATE 45000). No existing FK was altered.
+- `2026_10_01_100001_create_delivery_verifications_table.php` — append-only table: `shipment_id` (FK restrict), `outcome` enum(`received`,`not_received`,`return`), `note`, `verified_by` (FK restrict), `verified_at`, `idempotency_key` varchar(100) nullable, timestamps; indexes `(shipment_id,id)` + `outcome`; unique `(verified_by, idempotency_key)`. No `order_id`, no `return_request_id` (per decision B).
+- `2026_10_01_100002_add_split_lineage_to_order_items_table.php` — `order_items.split_from_order_item_id` (nullable self-FK restrict, indexed).
+
+### Backend files changed
+
+- Modified: `Models/{Order,OrderItem,Shipment}.php`; `Services/Order/{OrderService,OrderFulfillmentService,CourierService,ReturnService}.php`; `Services/Stock/SubStockService.php`; `Policies/ShipmentPolicy.php`; `Http/Controllers/Api/V1/{Courier/CourierDashboardController,Courier/ShipmentController,Order/OrderController}.php`; `Http/Resources/{OrderResource,ShipmentReceiptResource}.php`; `routes/api_v1.php`; `lang/{id,en,ar,zh}/messages.php`; `.phpunit-concurrency-actor.php` (new `sub-increase`/`sub-reduce` race ops).
+- New: `Models/DeliveryVerification.php`; `Services/Order/DeliveryVerificationService.php`; `Policies/DeliveryVerificationPolicy.php`; `Http/Controllers/Api/V1/Order/DeliveryVerificationController.php`; `Http/Resources/DeliveryVerificationResource.php`; `Http/Requests/Delivery/StoreDeliveryVerificationRequest.php`.
+
+### Frontend files changed
+
+- Modified: `api/types.ts` (Order `delivery_groups` + `delivery_verifications`, new `DeliveryGroup`/`DeliveryVerification` types); `views/OrderDetailView.vue` (Admin delivery-verification card); `i18n/locales/{id,en,ar,zh}.ts`.
+- New: `api/deliveries.ts`.
+
+### Tests
+
+- New (7): `SalesKurirSubSelfDeliveryTest`, `DeliveryVerificationTest`, `DeliveryDateGroupingTest`, `SubQuantityAdjustmentTest`, `SubReturnDomainTest`, `StockRequestSplitTest`, `SubReservationConcurrencyTest` (deterministic `runServiceRace` proving concurrent Sub increases never oversell).
+- Updated (3): `SubStockSourceTest` (obsolete R-02 Sub-guard test → positive reduction assertion); `SalesCourierDualFeeTest` + `PbrRemediationTest` (dual-fee re-based onto Sub-sourced **self-delivery**).
+
+### Intentional behavior change (must be reviewed)
+
+R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate an **Agent-sourced (standard) shipment** — that now throws an explicit business-rule error ("may only self-deliver shipments sourced from their own Sub stock"). The Package A dual-fee outcome (sales + courier fee to the same Sales-Kurir-Sub) is **preserved**, now via Sub-sourced self-delivery: `CourierService::recordCommissionsForItems` accepts a `?User $beneficiary` and credits the courier fee to `self_delivered_by_user_id` for `self_sub` shipments (no Courier profile needed). This is the one place Package A behavior changed by design; it is covered by the updated dual-fee/PBR tests.
+
+### Verification commands / exact results
+
+- `php artisan migrate --env=testing --force` → 3 migrations DONE.
+- `php artisan test` (full) → **768 passed, 5238 assertions, 0 failures** (693.19s).
+- `npm run type-check` → PASS (exit 0).
+- `npm run build-only` → PASS (exit 0, ~4.5s); only pre-existing chunk-size warning.
+
 ## Progress
 
 - [x] Package A closed; Package B scope documented.
 - [x] RECON ONCE + baselines recorded.
 - [x] Final R-03 architecture locked (A–H).
-- [ ] M1–M3 migrations + model changes.
-- [ ] Focused migration/model tests.
-- [ ] Self-sub shipment behavior.
-- [ ] Append-only delivery verification.
-- [ ] Derived delivery grouping.
-- [ ] Sub reduction/increase/split reconciliation.
-- [ ] StockRequest split reconciliation.
-- [ ] Sub customer-return restock.
-- [ ] Frontend R-03 surfaces.
-- [ ] Focused backend tests pass.
-- [ ] Full backend regression passes.
-- [ ] Frontend type-check/build passes.
-- [ ] Checkpoint updated with results.
+- [x] M1–M3 migrations + model changes.
+- [x] Focused migration/model tests.
+- [x] Self-sub shipment behavior.
+- [x] Append-only delivery verification.
+- [x] Derived delivery grouping.
+- [x] Sub reduction/increase/split reconciliation.
+- [x] StockRequest split reconciliation.
+- [x] Sub customer-return restock.
+- [x] Frontend R-03 surfaces.
+- [x] Focused backend tests pass.
+- [x] Full backend regression passes (768/5238/0).
+- [x] Frontend type-check/build passes.
+- [x] Checkpoint updated with results.
+- [ ] Human review + DEV manual UAT.
+- [ ] Human Stage Gate approval.
+- [ ] R-04 (NOT authorized).
 
 ## Open findings
 
 - **PUSH-1 (blocker, environment):** cannot push — encrypted deploy key with no passphrase/agent/TTY. Needs human action.
 - **DESIGN-1/2/3:** resolved by the locked A–H architecture.
+- **R03-1 (documented, by design):** MariaDB 10.11 cannot CHECK a SET NULL FK column, so the "self_sub ⇒ courier_id IS NULL" half is enforced by triggers rather than the single CHECK the architecture sketched. Behaviourally equivalent; no existing FK altered.
+- **R03-2 (behavior change — NEEDS HUMAN REVIEW):** a Sales-Kurir-Sub can no longer operate an Agent-sourced (standard) shipment (decision A). Package A dual-fee is preserved via Sub-sourced self-delivery. If the human intended Sales-Kurir-Sub to keep delivering Agent orders, this must be revisited before R-04.
+- **R03-3 (by design):** an Agent partial split whose StockRequest remainder cannot cover the moved quantity is rejected 422 (never rewrites fulfilled warehouse history).
+- **R03-4 (deferred):** Admin verification outcome `return` records the operational outcome only; it does not itself create a `ReturnRequest` (per decision B). Return remains its own workflow.
 
 Pre-existing technical debt (NOT Package B regressions): Package A role migration `down()` imperfect inverse; checkout global unique TEMP `order_no`; CLI duplicate OPcache/mbstring warnings; historical "MAC is invalid" log entries.
 
@@ -229,4 +277,11 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-R-03 implementation is authorized and proceeding. Next concrete step: create the three additive migrations (M1–M3) and the accompanying model cast/relation updates, then run them on the isolated test/DEV database only and confirm the 738/5055 baseline still holds.
+R-03 is implemented and fully green. **STOP here — do NOT start R-04, deploy, or run any production migration.**
+
+Next actions are human-owned:
+
+1. Review the R-03 diff (and the R03-2 behavior change in §Open findings).
+2. Run DEV manual UAT for: self_sub self-delivery, Admin delivery verification (received / not_received / return), delivery-date grouping, Sub adjust/split/return, and the dual-fee path.
+3. Only after explicit Human Stage Gate authorization: begin R-04 on this same branch.
+4. Push remains blocked (PUSH-1) until the deploy key is usable.

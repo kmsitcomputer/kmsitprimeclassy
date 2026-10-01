@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\V1\Install\InstallController;
 use App\Http\Controllers\Api\V1\Integration\SheetsController;
 use App\Http\Controllers\Api\V1\Language\LanguageController;
 use App\Http\Controllers\Api\V1\Media\MediaController;
+use App\Http\Controllers\Api\V1\Order\DeliveryVerificationController;
 use App\Http\Controllers\Api\V1\Order\OrderController;
 use App\Http\Controllers\Api\V1\Payment\PaymentController;
 use App\Http\Controllers\Api\V1\Referral\ReferralController;
@@ -222,6 +223,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     });
     Route::middleware('role:super_admin,agen,admin')->group(function () {
         Route::patch('/shipments/{shipment}/courier', [ShipmentController::class, 'assign']);
+    });
+
+    // R-03: Admin final delivery verification — append-only operational outcome (received /
+    // not_received / return), separate from payment verification, transaction verification and the
+    // courier's own shipment delivery action. Admin only, same-Agent (DeliveryVerificationPolicy).
+    Route::middleware('role:super_admin,admin')->group(function () {
+        Route::get('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'index']);
+        Route::post('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'store']);
     });
 
     Route::middleware('role:super_admin,agen,admin')->group(function () {

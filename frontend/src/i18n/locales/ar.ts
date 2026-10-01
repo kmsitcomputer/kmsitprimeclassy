@@ -216,6 +216,15 @@ export default {
     openInGoogleMaps: 'فتح في خرائط جوجل',
     deliveryLocation: 'موقع التسليم',
     shipmentStatus: 'حالة الشحنة',
+    deliveryVerification: 'التحقق من التسليم (المشرف)',
+    verification: {
+      received: 'تم الاستلام',
+      notReceived: 'لم يتم الاستلام / متابعة',
+      return: 'إرجاع',
+      current: 'النتيجة الحالية: {outcome}',
+      notePlaceholder: 'ملاحظة (اختياري)',
+      submit: 'حفظ التحقق',
+    },
     pickupAndDeliver: 'استلام وتوصيل',
     deliveryProofRequired: 'صورة إثبات التسليم (مطلوبة)',
     markDelivered: 'تحديد كمُسلَّم',
@@ -272,6 +281,7 @@ export default {
     },
     errors: {
       shipmentStatus: 'فشل تحديث حالة الشحنة.',
+      verification: 'فشل حفظ التحقق من التسليم.',
       delivered: 'فشل تحديد الطلب كمُسلَّم.',
       codProofUpload: 'فشل رفع إثبات الدفع عند الاستلام.',
       codConfirm: 'فشل معالجة تأكيد الدفع عند الاستلام.',

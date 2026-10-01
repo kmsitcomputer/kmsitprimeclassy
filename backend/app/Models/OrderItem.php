@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class OrderItem extends Model
 {
     protected $fillable = [
-        'order_id', 'shipment_id', 'product_id', 'product_variation_id', 'stock_source', 'sub_location_id', 'additional_payment_id',
+        'order_id', 'shipment_id', 'split_from_order_item_id', 'product_id', 'product_variation_id', 'stock_source', 'sub_location_id', 'additional_payment_id',
         'product_name_snapshot', 'variation_label_snapshot', 'sku_snapshot',
         'unit_price_snapshot', 'agent_fee_amount', 'sales_fee_amount', 'courier_fee_amount', 'subtotal_snapshot',
         'original_quantity', 'fulfilled_quantity',
@@ -48,6 +48,7 @@ class OrderItem extends Model
             // PDO/MySQL driver builds and silently fail the match.
             'order_id' => 'integer',
             'shipment_id' => 'integer',
+            'split_from_order_item_id' => 'integer',
             'unit_price_snapshot' => 'decimal:2',
             'agent_fee_amount' => 'decimal:2',
             'sales_fee_amount' => 'decimal:2',
@@ -70,6 +71,18 @@ class OrderItem extends Model
     public function shipment(): BelongsTo
     {
         return $this->belongsTo(Shipment::class);
+    }
+
+    /** The parent line this item was split off from (R-03 canonical structural lineage). */
+    public function splitFrom(): BelongsTo
+    {
+        return $this->belongsTo(OrderItem::class, 'split_from_order_item_id');
+    }
+
+    /** Child lines split off this item. */
+    public function splits(): HasMany
+    {
+        return $this->hasMany(OrderItem::class, 'split_from_order_item_id');
     }
 
     public function product(): BelongsTo

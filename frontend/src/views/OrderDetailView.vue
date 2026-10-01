@@ -9,10 +9,11 @@ import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } fro
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { getCourierReport } from '@/api/reports'
+import { recordDeliveryVerification } from '@/api/deliveries'
 import { adjustItemFulfillment, rescheduleOrderItem } from '@/api/orderAdjustments'
 import { requestReturn } from '@/api/returns'
 import { useAuthStore } from '@/stores/auth'
-import type { Order, OrderItem } from '@/api/types'
+import type { DeliveryVerificationOutcome, Order, OrderItem } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
 import { ApiError } from '@/api/client'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
@@ -233,6 +234,60 @@ async function deliverShipment(shipmentId: number) {
     shipmentError.value = e instanceof ApiError ? e.message : t('orders.errors.delivered')
   } finally {
     shipmentBusy.value = null
+  }
+}
+
+/* ---------- Admin: final delivery verification (append-only, R-03) ---------- */
+const canVerifyDelivery = computed(() => ['super_admin', 'admin'].includes(auth.user?.role ?? ''))
+const verificationBusy = ref<number | null>(null)
+const verificationError = ref<string | null>(null)
+const verificationForms = reactive<Record<number, { outcome: DeliveryVerificationOutcome; note: string }>>({})
+
+/** Guarantees a writable default form for a shipment — safe to call from v-model getters. */
+function formFor(shipmentId: number) {
+  if (!verificationForms[shipmentId]) verificationForms[shipmentId] = { outcome: 'received', note: '' }
+  return verificationForms[shipmentId]
+}
+
+/** Shipments whose items have actually been delivered — the only ones eligible for verification. */
+const deliveredShipmentGroups = computed(() => {
+  if (!order.value) return []
+  const groups = new Map<number, { shipmentId: number; productNames: string[] }>()
+  for (const item of order.value.items ?? []) {
+    if (!item.shipment_id || !['terkirim', 'pengembalian', 'kembali'].includes(item.status)) continue
+    const existing = groups.get(item.shipment_id)
+    if (existing) existing.productNames.push(item.product_name)
+    else groups.set(item.shipment_id, { shipmentId: item.shipment_id, productNames: [item.product_name] })
+  }
+  return Array.from(groups.values())
+})
+
+function latestVerification(shipmentId: number) {
+  const rows = (order.value?.delivery_verifications ?? []).filter((v) => v.shipment_id === shipmentId)
+  return rows.length ? rows[rows.length - 1] : null
+}
+
+function verificationOutcomeLabel(outcome: string): string {
+  const map: Record<string, string> = {
+    received: t('orders.verification.received'),
+    not_received: t('orders.verification.notReceived'),
+    return: t('orders.verification.return'),
+  }
+  return map[outcome] ?? outcome
+}
+
+async function submitVerification(shipmentId: number) {
+  const form = verificationForms[shipmentId]
+  if (!form) return
+  verificationBusy.value = shipmentId
+  verificationError.value = null
+  try {
+    await recordDeliveryVerification(shipmentId, form.outcome, form.note || null, crypto.randomUUID())
+    await load()
+  } catch (e) {
+    verificationError.value = e instanceof ApiError ? e.message : t('orders.errors.verification')
+  } finally {
+    verificationBusy.value = null
   }
 }
 
@@ -736,6 +791,30 @@ async function submitReturn(item: OrderItem) {
             </AppButton>
           </div>
           <p v-else-if="group.status === 'dikirim'" class="mt-2 text-xs text-stone-400">{{ t('orders.shipmentHeldByOtherCourier') }}</p>
+        </div>
+      </div>
+
+      <!-- R-03: Admin final delivery verification — append-only operational outcome, separate from payment verification. -->
+      <div v-if="canVerifyDelivery && deliveredShipmentGroups.length" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+        <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.deliveryVerification') }}</h2>
+        <p v-if="verificationError" class="mb-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-400">{{ verificationError }}</p>
+        <div v-for="group in deliveredShipmentGroups" :key="group.shipmentId" class="mb-2 rounded-lg bg-stone-50 p-3 last:mb-0 dark:bg-stone-800/60">
+          <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
+          <p v-if="latestVerification(group.shipmentId)" class="mt-1 text-xs text-stone-600 dark:text-stone-300">
+            {{ t('orders.verification.current', { outcome: verificationOutcomeLabel(latestVerification(group.shipmentId)?.outcome ?? '') }) }}
+          </p>
+          <div class="mt-2 space-y-2">
+            <div class="flex flex-wrap gap-3">
+              <label v-for="opt in (['received', 'not_received', 'return'] as const)" :key="opt" class="inline-flex items-center gap-1 text-xs text-stone-600 dark:text-stone-300">
+                <input v-model="formFor(group.shipmentId).outcome" type="radio" :value="opt" />
+                {{ verificationOutcomeLabel(opt) }}
+              </label>
+            </div>
+            <input v-model="formFor(group.shipmentId).note" type="text" :placeholder="t('orders.verification.notePlaceholder')" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+            <AppButton size="sm" :disabled="verificationBusy === group.shipmentId" @click="submitVerification(group.shipmentId)">
+              {{ t('orders.verification.submit') }}
+            </AppButton>
+          </div>
         </div>
       </div>
 

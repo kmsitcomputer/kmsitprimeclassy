@@ -10,6 +10,8 @@ use App\Models\ProductFee;
 use App\Models\ProductStock;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Models\WarehouseStock;
+use App\Models\WarehouseSubLocation;
 use App\Services\Order\CourierService;
 use App\Services\User\UserManagementService;
 use Database\Seeders\PaymentMethodSeeder;
@@ -43,9 +45,15 @@ class SalesCourierDualFeeTest extends TestCase
         $this->assertSame('sales-kurir-sub', $salesKurir->role->slug);
         $this->assertStringStartsWith('SS-', $salesKurir->referral_code);
 
-        $order = $this->placeOrder($fixture['buyer'], $fixture['product']);
+        // R-03 / decision A: the Sales-Kurir-Sub self-delivers a SUB-sourced order (first-class
+        // path, no Courier assignment) and earns BOTH the sales fee and the courier fee.
+        $order = $this->placeOrder($salesKurir, $fixture['buyer'], $fixture['product']);
         $item = $order->items()->firstOrFail();
         $shipment = $order->shipments()->firstOrFail();
+
+        $this->assertSame('self_sub', $shipment->delivery_mode);
+        $this->assertSame($salesKurir->id, $shipment->self_delivered_by_user_id);
+        $this->assertNull($shipment->courier_id);
 
         $this->assertSame($salesKurir->id, $order->sales_id);
         $this->assertDatabaseHas('commissions', [
@@ -68,9 +76,6 @@ class SalesCourierDualFeeTest extends TestCase
             'beneficiary_role' => 'courier',
         ]);
 
-        app(CourierService::class)->assignCourier($shipment->fresh(), $fixture['courier'], $fixture['admin']);
-        $this->assertSame($fixture['courier']->id, Shipment::findOrFail($shipment->id)->courier_id);
-
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $salesKurir);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $salesKurir, UploadedFile::fake()->image('sales-kurir-sub-proof.jpg'));
 
@@ -91,11 +96,10 @@ class SalesCourierDualFeeTest extends TestCase
     public function test_same_sales_kurir_fee_generation_is_idempotent(): void
     {
         $fixture = $this->createFixture();
-        $order = $this->placeOrder($fixture['buyer'], $fixture['product']);
+        $order = $this->placeOrder($fixture['sales_kurir'], $fixture['buyer'], $fixture['product']);
         $shipment = $order->shipments()->firstOrFail();
         $item = $order->items()->firstOrFail();
 
-        app(CourierService::class)->assignCourier($shipment->fresh(), $fixture['courier'], $fixture['admin']);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $fixture['sales_kurir']);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $fixture['sales_kurir'], UploadedFile::fake()->image('proof.jpg'));
 
@@ -142,6 +146,10 @@ class SalesCourierDualFeeTest extends TestCase
             'status' => 'active',
         ]);
         ProductStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
+        // R-03: the order is SUB-sourced, so the Sales-Kurir-Sub self-delivers it from their own Sub Location.
+        $location = WarehouseSubLocation::create(['agent_id' => $agent->id, 'code' => 'SK1', 'name' => 'SK1', 'created_by' => $agent->id]);
+        $location->forceFill(['owner_user_id' => $salesKurir->id])->save();
+        WarehouseStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $location->id, 'quantity' => 10]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'agent', 'amount' => 1000, 'is_active' => true]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'sales', 'amount' => 500, 'is_active' => true]);
         ProductFee::create(['product_id' => $product->id, 'beneficiary_role' => 'courier', 'amount' => 250, 'is_active' => true]);
@@ -157,10 +165,12 @@ class SalesCourierDualFeeTest extends TestCase
         ];
     }
 
-    private function placeOrder(User $buyer, Product $product): Order
+    private function placeOrder(User $actor, User $buyer, Product $product): Order
     {
-        $response = $this->actingAs($buyer)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($actor)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
             'payment_method_code' => 'cod',
+            'konsumen_id' => $buyer->id,
+            'stock_source' => 'sub',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Dual Fee Buyer',
             'recipient_phone' => '0812111111',

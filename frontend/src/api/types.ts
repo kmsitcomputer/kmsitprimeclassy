@@ -141,10 +141,36 @@ export interface Order {
   couriers: { name: string; phone: string | null }[]
   returns: OrderReturnRequest[]
   items: OrderItem[]
+  /** R-03 derived delivery groups (Order + requested_delivery_date). No invoice table exists — this is a projection, never a payment document. */
+  delivery_groups?: DeliveryGroup[]
+  /** R-03 append-only Admin delivery-verification history across this order's shipments. */
+  delivery_verifications?: DeliveryVerification[]
   payment_method: PaymentMethod | null
   payment_transaction: PaymentTransaction | null
   /** Canonical payment figures (PaymentSummaryService) — the single source for Grand Total / DP / Total Dibayar / Sisa Pembayaran everywhere they're displayed. */
   payment_summary: PaymentSummary
+  created_at: string
+}
+
+/** R-03: items sharing the same order + requested_delivery_date form one delivery group. */
+export interface DeliveryGroup {
+  delivery_date: string | null
+  item_ids: number[]
+  item_count: number
+  total_quantity: number
+  shipment_ids: number[]
+}
+
+export type DeliveryVerificationOutcome = 'received' | 'not_received' | 'return'
+
+/** R-03: one append-only Admin final delivery-verification record (operational, never a payment state). */
+export interface DeliveryVerification {
+  id: number
+  shipment_id: number
+  outcome: DeliveryVerificationOutcome
+  note: string | null
+  verified_at: string
+  verified_by: { id: number; name: string } | null
   created_at: string
 }
 

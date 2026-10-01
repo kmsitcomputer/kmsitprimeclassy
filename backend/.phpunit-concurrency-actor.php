@@ -341,6 +341,18 @@ if (str_starts_with($role, 'sr-')) {
                 $item = OrderItem::findOrFail($subjectId);
                 $result = DB::transaction(fn () => app(SubStockService::class)->consume($item, $actor));
                 break;
+            case 'sub-increase':
+                // R-03: concurrent pre-shipment Sub reservation increases must serialize on the
+                // Sub stock row so free sellable capacity is never oversold.
+                $item = OrderItem::findOrFail($subjectId);
+                $result = DB::transaction(fn () => app(SubStockService::class)->increase($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test'));
+                break;
+            case 'sub-reduce':
+                // R-03: concurrent pre-shipment Sub reservation reductions must serialize on the
+                // Sub stock row so the reservation can never be reduced below zero.
+                $item = OrderItem::findOrFail($subjectId);
+                $result = DB::transaction(fn () => app(SubStockService::class)->reduce($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test'));
+                break;
             case 'sub-location-assign-owner':
                 // MAJOR-2 remediation: concurrent owner assignment vs. generic transfer approval
                 // must serialize on the same WarehouseSubLocation row lock (see

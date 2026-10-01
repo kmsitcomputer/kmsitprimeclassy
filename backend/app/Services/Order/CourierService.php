@@ -42,6 +42,12 @@ class CourierService
      */
     public function assignCourier(Shipment $shipment, Courier $courier, User $actor): Shipment
     {
+        // R-03: a self_sub shipment is delivered by its owning Sales-Kurir-Sub — it must never be
+        // handed to a normal Kurir (and the DB trigger refuses a courier_id on it anyway).
+        if ($shipment->isSelfDelivery()) {
+            throw new ApiException(__('messages.courier.self_delivery_no_courier'), 422);
+        }
+
         // Raw query-builder value bypasses Order's own integer cast, so force
         // it here — otherwise $courier->agent_id (cast) !== string fails and a
         // valid office assignment is wrongly rejected on some driver builds.
@@ -88,6 +94,59 @@ class CourierService
     }
 
     /**
+     * R-03 / decision A: the shipment's delivery mode decides who may progress it.
+     *
+     *  - self_sub: ONLY the recorded Sales-Kurir-Sub owner (`self_delivered_by_user_id`) — a normal
+     *    Kurir is never involved and a Courier profile is never required. Delivery proof stays
+     *    mandatory to reach 'terkirim'.
+     *  - standard: the normal Kurir workflow. A Sales-Kurir-Sub must NEVER operate it — they may
+     *    only self-deliver Sub-sourced shipments — so this is rejected explicitly instead of
+     *    relying on an accidental "missing courier profile" failure.
+     */
+    private function assertMayOperateShipment(Shipment $shipment, User $actor, string $newStatus, ?UploadedFile $proof): void
+    {
+        $shipment = $shipment->fresh();
+
+        if ($shipment->isSelfDelivery()) {
+            $isOwner = $actor->isRole('sales-kurir-sub')
+                && $shipment->self_delivered_by_user_id !== null
+                && (int) $shipment->self_delivered_by_user_id === (int) $actor->id;
+
+            if (! $isOwner) {
+                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
+            }
+
+            // "Kurir harus memasukan bukti pengiriman jika ingin merubah status kirim dari dikirim
+            // jadi terkirim" — a business rule, not just a frontend prompt.
+            if ($newStatus === 'terkirim' && ! $proof) {
+                throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
+            }
+
+            return;
+        }
+
+        if ($actor->isRole('sales-kurir-sub')) {
+            throw new ApiException(__('messages.courier.sales_kurir_sub_standard_forbidden'), 403);
+        }
+
+        if ($newStatus === 'dikirim' && $actor->isRole('kurir')) {
+            $this->selfAssignIfUnassigned($shipment, $actor);
+        }
+
+        if ($newStatus === 'terkirim' && $actor->isRole('kurir')) {
+            $assignedCourierUserId = $shipment->fresh()->courier?->user_id;
+
+            if ($assignedCourierUserId !== null && $assignedCourierUserId !== $actor->id) {
+                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
+            }
+
+            if (! $proof) {
+                throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
+            }
+        }
+    }
+
+    /**
      * R-02: Sub-sourced goods sit in ONE Sales-Kurir-Sub's Sub Location, so only that owner may
      * mark them shipped — checked for every actor reaching this endpoint, office (agen/admin/
      * super_admin) included, since ShipmentPolicy::updateStatus lets them here too. The full
@@ -124,25 +183,7 @@ class CourierService
             $this->assertMayShipSubStock($shipment, $actor);
         }
 
-        if ($newStatus === 'dikirim' && $actor->isRole('kurir', 'sales-kurir-sub')) {
-            $this->selfAssignIfUnassigned($shipment, $actor);
-        }
-
-        if ($newStatus === 'terkirim' && $actor->isRole('kurir', 'sales-kurir-sub')) {
-            $assignedCourierUserId = $shipment->fresh()->courier?->user_id;
-
-            if ($assignedCourierUserId !== null && $assignedCourierUserId !== $actor->id) {
-                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
-            }
-
-            // "Kurir harus memasukan bukti pengiriman jika ingin merubah
-            // status kirim dari dikirim jadi terkirim" — a business rule, not
-            // just a frontend prompt: no photo, no transition, regardless of
-            // what the request claims.
-            if (! $proof) {
-                throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
-            }
-        }
+        $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
 
         return DB::transaction(function () use ($shipment, $newStatus, $actor, $proof) {
             $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
@@ -176,7 +217,10 @@ class CourierService
             ]);
 
             if ($newStatus === 'terkirim') {
-                $this->recordCommissionsForItems($items->fresh(), $shipment->courier);
+                // R-03: a self_sub shipment has no Courier — its courier fee (if any) is earned by
+                // the Sales-Kurir-Sub who actually delivered it (self_delivered_by_user_id).
+                $selfDeliverer = $shipment->isSelfDelivery() ? $shipment->selfDeliveredBy : null;
+                $this->recordCommissionsForItems($items->fresh(), $shipment->courier, $selfDeliverer);
             }
 
             $this->recomputeOrderStatus($shipment->order_id);
@@ -245,14 +289,22 @@ class CourierService
             ->groupBy('shipment_id');
 
         foreach ($itemsByShipment as $items) {
-            $this->recordCommissionsForItems($items, $items->first()->shipment?->courier);
+            $shipment = $items->first()->shipment;
+            $this->recordCommissionsForItems($items, $shipment?->courier, $shipment?->selfDeliveredBy);
         }
     }
 
-    /** @param  iterable<OrderItem>  $items */
-    public function recordCommissionsForItems(iterable $items, ?Courier $courier): void
+    /**
+     * @param  iterable<OrderItem>  $items
+     * @param  ?User  $beneficiary  R-03 self-delivery: when present (a Sales-Kurir-Sub who
+     *                              self-delivered a self_sub shipment), the courier fee is credited
+     *                              to them instead of the (nonexistent) Courier profile owner.
+     */
+    public function recordCommissionsForItems(iterable $items, ?Courier $courier, ?User $beneficiary = null): void
     {
-        if (! $courier?->user_id) {
+        $beneficiaryUserId = $beneficiary?->id ?? $courier?->user_id;
+
+        if (! $beneficiaryUserId) {
             return;
         }
 
@@ -268,7 +320,7 @@ class CourierService
             Commission::create([
                 'order_id' => $item->order_id,
                 'order_item_id' => $item->id,
-                'beneficiary_user_id' => $courier->user_id,
+                'beneficiary_user_id' => $beneficiaryUserId,
                 'beneficiary_role' => 'courier',
                 'amount' => $item->courier_fee_amount,
                 'status' => 'pending',

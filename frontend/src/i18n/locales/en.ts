@@ -216,6 +216,15 @@ export default {
     openInGoogleMaps: 'Open in Google Maps',
     deliveryLocation: 'Delivery location',
     shipmentStatus: 'Shipment Status',
+    deliveryVerification: 'Delivery Verification (Admin)',
+    verification: {
+      received: 'Received',
+      notReceived: 'Not received / follow-up',
+      return: 'Return',
+      current: 'Current outcome: {outcome}',
+      notePlaceholder: 'Note (optional)',
+      submit: 'Save verification',
+    },
     pickupAndDeliver: 'Pick Up & Deliver',
     deliveryProofRequired: 'Delivery proof photo (required)',
     markDelivered: 'Mark as Delivered',
@@ -272,6 +281,7 @@ export default {
     },
     errors: {
       shipmentStatus: 'Failed to update shipment status.',
+      verification: 'Failed to save the delivery verification.',
       delivered: 'Failed to mark the order as delivered.',
       codProofUpload: 'Failed to upload COD payment proof.',
       codConfirm: 'Failed to process COD payment confirmation.',

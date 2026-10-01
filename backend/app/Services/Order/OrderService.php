@@ -279,6 +279,11 @@ class OrderService
                         'distance_km' => $quote->distanceKm,
                         'provider_meta' => $quote->meta,
                         'status' => 'pending',
+                        // R-03: a Sub-sourced order is delivered by its owning Sales-Kurir-Sub, never a
+                        // Kurir — the shipment is created as self_sub with that stable user reference
+                        // (courier_id stays NULL). Agent-sourced orders keep the standard Kurir path.
+                        'delivery_mode' => $subLocation ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD,
+                        'self_delivered_by_user_id' => $subLocation?->owner_user_id,
                         ...($index === 0 ? ['rate_per_km' => $quote->ratePerKm, 'shipping_fee_snapshot' => $shippingFee] : []),
                     ]);
 

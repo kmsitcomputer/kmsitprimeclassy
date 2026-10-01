@@ -63,7 +63,7 @@ class ShipmentController extends Controller
     {
         $this->authorize('printReceipt', $shipment);
 
-        $shipment->load(['order.paymentMethod', 'courier', 'orderItems']);
+        $shipment->load(['order.paymentMethod', 'courier', 'selfDeliveredBy', 'orderItems']);
 
         $isReprint = ActivityLog::query()
             ->where('subject_type', Shipment::class)

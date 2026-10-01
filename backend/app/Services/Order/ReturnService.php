@@ -10,6 +10,7 @@ use App\Models\ReturnRequest;
 use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\WarehouseStock;
+use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Stock\StockService;
 use Illuminate\Http\UploadedFile;
@@ -63,11 +64,6 @@ class ReturnService
 
                 if ($item->status !== 'terkirim') {
                     throw new ApiException(__('messages.return.item_not_delivered'), 422);
-                }
-
-                // R-02 boundary: returned Sub goods must not restock into Agent Transit; Sub returns are R-03.
-                if ($item->isSubSourced()) {
-                    throw new ApiException('Item bersumber dari stok Sub; penyesuaian jumlah, pemecahan, dan retur item Sub akan ditangani pada tahap R-03.', 422);
                 }
 
                 $quantity = (int) $line['quantity'];
@@ -200,16 +196,77 @@ class ReturnService
             }
             $good = (int) $returnItem->good_quantity;
             if ($good > 0) {
-                $query = WarehouseStock::withoutGlobalScopes()->where('agent_id', $order->agent_id)->where('stock_type', 'transit')->whereNull('sub_location_id')->when($orderItem->product_id, fn ($q) => $q->where('product_id', $orderItem->product_id)->whereNull('product_variation_id'))->when($orderItem->product_variation_id, fn ($q) => $q->where('product_variation_id', $orderItem->product_variation_id)->whereNull('product_id'))->lockForUpdate();
-                $stock = $query->first() ?? WarehouseStock::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'stock_type' => 'transit', 'quantity' => 0]);
-                $before = $stock->quantity;
-                $stock->increment('quantity', $good);
-                StockMovement::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_variation_id ? null : $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'type' => 'return_restock', 'stock_type' => 'transit', 'quantity' => $good, 'reference_type' => ReturnItem::class, 'reference_id' => $returnItem->id, 'created_by' => $actor->id, 'note' => "before={$before};after=".($before + $good)]);
+                if ($orderItem->isSubSourced()) {
+                    // R-03 / decision F: a Sub-sourced customer return restocks the ORIGINAL Sub
+                    // Location / Sub domain — never Agent Transit. Damaged quantity is excluded by
+                    // construction ($good only).
+                    $this->restockSubStock($order, $orderItem, $returnItem, $good, $actor);
+                } else {
+                    $query = WarehouseStock::withoutGlobalScopes()->where('agent_id', $order->agent_id)->where('stock_type', 'transit')->whereNull('sub_location_id')->when($orderItem->product_id, fn ($q) => $q->where('product_id', $orderItem->product_id)->whereNull('product_variation_id'))->when($orderItem->product_variation_id, fn ($q) => $q->where('product_variation_id', $orderItem->product_variation_id)->whereNull('product_id'))->lockForUpdate();
+                    $stock = $query->first() ?? WarehouseStock::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'stock_type' => 'transit', 'quantity' => 0]);
+                    $before = $stock->quantity;
+                    $stock->increment('quantity', $good);
+                    StockMovement::create(['agent_id' => $order->agent_id, 'product_id' => $orderItem->product_variation_id ? null : $orderItem->product_id, 'product_variation_id' => $orderItem->product_variation_id, 'type' => 'return_restock', 'stock_type' => 'transit', 'quantity' => $good, 'reference_type' => ReturnItem::class, 'reference_id' => $returnItem->id, 'created_by' => $actor->id, 'note' => "before={$before};after=".($before + $good)]);
+                }
             }
             $returnItem->update(['disposition_status' => $good > 0 ? 'restocked' : 'damaged_confirmed', 'restock_processed_at' => $good > 0 ? now() : null]);
 
             return $returnItem->fresh();
         });
+    }
+
+    /**
+     * R-03 / decision F: restock good returned Sub-sourced units back into the ORIGINAL Sub Location
+     * (`order_item.sub_location_id`) / Sub stock domain with a movement-backed, audited write.
+     * If that location is missing or no longer active, the return is rejected explicitly — the goods
+     * are NEVER silently redirected to Agent Transit.
+     */
+    private function restockSubStock(Order $order, OrderItem $orderItem, ReturnItem $returnItem, int $good, User $actor): void
+    {
+        if (! $orderItem->sub_location_id) {
+            throw new ApiException(__('messages.return.sub_location_unavailable'), 422);
+        }
+
+        $location = WarehouseSubLocation::withoutGlobalScopes()
+            ->whereKey($orderItem->sub_location_id)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $location || ! $location->is_active) {
+            throw new ApiException(__('messages.return.sub_location_unavailable'), 422);
+        }
+
+        $query = WarehouseStock::withoutGlobalScopes()
+            ->where('stock_type', 'sub')
+            ->where('sub_location_id', $location->id)
+            ->when($orderItem->product_variation_id, fn ($q) => $q->where('product_variation_id', $orderItem->product_variation_id)->whereNull('product_id'), fn ($q) => $q->where('product_id', $orderItem->product_id)->whereNull('product_variation_id'))
+            ->lockForUpdate();
+
+        $stock = $query->first() ?? WarehouseStock::create([
+            'agent_id' => $order->agent_id,
+            'product_id' => $orderItem->product_variation_id ? null : $orderItem->product_id,
+            'product_variation_id' => $orderItem->product_variation_id,
+            'stock_type' => 'sub',
+            'sub_location_id' => $location->id,
+            'quantity' => 0,
+        ]);
+
+        $before = $stock->quantity;
+        $stock->increment('quantity', $good);
+
+        StockMovement::create([
+            'agent_id' => $order->agent_id,
+            'product_id' => $orderItem->product_variation_id ? null : $orderItem->product_id,
+            'product_variation_id' => $orderItem->product_variation_id,
+            'type' => 'return_restock',
+            'stock_type' => 'sub',
+            'sub_location_id' => $location->id,
+            'quantity' => $good,
+            'reference_type' => ReturnItem::class,
+            'reference_id' => $returnItem->id,
+            'created_by' => $actor->id,
+            'note' => "before={$before};after=".($before + $good),
+        ]);
     }
 
     /** Admin confirms the refund for one return line was actually sent — "sudah dikembalikan dana". */

@@ -100,6 +100,24 @@ class OrderResource extends JsonResource
                     ->map(fn ($courier) => ['name' => $courier->name, 'phone' => $courier->user?->phone])
             ),
             'items' => OrderItemResource::collection($this->whenLoaded('items')),
+            // R-03: derived delivery groups — one per (order, requested_delivery_date). There is NO
+            // invoice/delivery-group table: grouping is a pure projection over order items, and the
+            // Order-level payment truth (payment_summary above) is never duplicated per group.
+            'delivery_groups' => $this->whenLoaded('items', fn () => $this->items
+                ->groupBy(fn ($item) => $item->requested_delivery_date?->toDateString() ?? '')
+                ->map(fn ($items, $date) => [
+                    'delivery_date' => $date !== '' ? $date : null,
+                    'item_ids' => $items->pluck('id')->values(),
+                    'item_count' => $items->count(),
+                    'total_quantity' => (int) $items->sum('fulfilled_quantity'),
+                    'shipment_ids' => $items->pluck('shipment_id')->filter()->unique()->values(),
+                ])
+                ->values()),
+            // R-03: append-only Admin delivery-verification history across this order's shipments.
+            'delivery_verifications' => $this->whenLoaded(
+                'deliveryVerifications',
+                fn () => DeliveryVerificationResource::collection($this->deliveryVerifications)->resolve()
+            ),
             'payment_method' => $this->whenLoaded('paymentMethod', fn () => $this->paymentMethod ? [
                 'code' => $this->paymentMethod->code,
                 'name' => $this->paymentMethod->name,
