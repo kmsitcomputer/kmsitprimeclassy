@@ -1,351 +1,227 @@
 # Package B (R-03 + R-04) — Checkpoint
 
-**Status:** RECON COMPLETE + R-03 ARCHITECTURE LOCKED — AWAITING HUMAN AUTHORIZATION. No R-03/R-04 code written.
+**Status:** R-03 AUTHORIZED — IMPLEMENTATION IN PROGRESS. R-04 **NOT** authorized.
 **Created:** 2026-10-01
 **Active spec:** `docs/PACKAGE-B-R03-R04.md`
 **Repository protocol:** `AGENTS.md`
 
 ## Objective
 
-Implement Package B in one branch, in strict sequence:
-
-1. R-03 — fulfillment/delivery lifecycle, Sales-Kurir-Sub self-delivery, final Admin delivery verification, delivery-date invoice grouping, safe Sub-order adjustment/split/return.
+1. R-03 — fulfillment/delivery lifecycle, Sales-Kurir-Sub self-delivery, final Admin delivery verification, delivery-date grouping, safe Sub adjustment/split/return, order-generated stock request reconciliation for splits.
 2. R-04 — role authority/security, operational-vs-financial projections, Admin Product/Variation CRU-no-Delete, operational and finance reports, current/latest actor names.
 
-**Active phase: R-03 ONLY.** Do NOT implement R-04. Do NOT create migrations yet.
+**Active phase: R-03 ONLY.** R-04 stays untouched.
 
-## 1. Branch
+## Branch / baseline
 
-- Package B branch: `feat/package-b-r03-r04` (verified).
-- Branch base (documentation): `8b53f78a9368dfd551e12f4c15a84ad9ed821ff3` (base `main`).
+- Branch: `feat/package-b-r03-r04`; base (documentation): `8b53f78a9368dfd551e12f4c15a84ad9ed821ff3`.
+- Recon commit: `c9ede8a160e204419cc15bd95371b6857433b696` ("docs: lock R-03 recon and baseline").
+- Backend baseline (`php artisan test`): **738 passed / 5055 assertions / 0 failures** (678.86s).
+- Frontend baseline: `npm run type-check` **PASS**; `npm run build-only` **PASS**; only the pre-existing chunk-size (>500 kB) warning.
 
-## 2. Starting HEAD
+### Push status (BLOCKER, environment)
 
-- `e72177d8350638d2aeb42900152ea3f9a16cd4b8` (`e72177d`, "docs: record Package B branch baseline").
-- Descends from the branch base above.
-- `git status` at RECON: clean, nothing to commit; up to date with `origin/feat/package-b-r03-r04`.
+`git push origin feat/package-b-r03-r04` fails: the configured deploy key `~/.ssh/github_primeclassy` is passphrase-encrypted (OpenSSH bcrypt/aes256-ctr), there is no ssh-agent (`SSH_AUTH_SOCK` unset) and no TTY for the passphrase prompt, and no credential helper/token is configured. Push must be performed by a human or after the key is added to an agent. Local commits are unaffected.
 
-## 3. Backend baseline (VERIFIED — ENV-1 resolved)
+## Package A starting state
 
-Command: `php artisan test`
+Package A R-01/R-02 CLOSED and deployed to production (code baseline `b9ed09b60b1d2cb3d739031c40bd87e79b0f95ed`; migrations `2026_09_29_090000`–`2026_09_29_120000` Ran in batch 7). Production reconciliation: 10 roles; `sales-kurir-sub` canonical; Nida id 21 = role_id 10 / agent_id 11 owning active Sub Location id 3; historical OrderItems remain `stock_source=agent`/`sub_location_id=NULL`; warehouse stocks/movements preserved. Legacy Sub Locations id 1 (`TUTI`) and id 2 (`tina`) remain unowned — never silently map/delete/deactivate.
 
-- **Tests: 738 passed**
-- **Assertions: 5055**
-- **Failures: 0**
-- Duration: 678.86s
+## FINAL R-03 ARCHITECTURE (LOCKED)
 
-Test DB `primeclassy_testing` / user `primeclassy_test` is now provisioned; `ENV-1` is closed.
+### A. Self delivery
 
-## 4. Frontend baseline (VERIFIED)
+Keep explicit Shipment fields:
 
-- `npm run type-check` (`vue-tsc --build`): **PASS** (exit 0).
-- `npm run build-only` (`vite build`): **PASS** (exit 0, ~4.9s).
-- Only pre-existing non-blocking warning: chunks > 500 kB (RichTextEditor). Not a new failure.
+- `shipments.delivery_mode` — `enum('standard','self_sub')`, NOT NULL, DEFAULT `'standard'`.
+- `shipments.self_delivered_by_user_id` — nullable foreignId → `users(id)`, **RESTRICT ON DELETE**, indexed. (Users use SoftDeletes, so audit identity must NOT be erasable via nullOnDelete.)
 
-## 5. Starting state (from Package A close)
+MariaDB/MySQL CHECK:
 
-- Package A R-01/R-02: CLOSED; production deployment PASS.
-- Package A code baseline before this documentation package: `b9ed09b60b1d2cb3d739031c40bd87e79b0f95ed`.
-- Production migrations `2026_09_29_090000` through `2026_09_29_120000`: Ran in batch 7.
-- Production reconciliation after Package A:
-  - roles = 10; canonical `sales-kurir-sub` present, legacy `sales-kurir` absent;
-  - Nida user id 21 remains role_id 10 / agent_id 11;
-  - historical referral code remains `SA-4QHJDQ`;
-  - historical OrderItems remain `stock_source=agent`, `sub_location_id=NULL`;
-  - new Sub reservation/request tables empty; warehouse stocks/movements/transfers preserved;
-  - Nida owns active Sub Location id 3 (`Cibar`, "Sub Cibarengkok");
-  - Admin and Gudang production UAT passed; unauthenticated Package A endpoint returns 401 (not 404).
+```
+(
+  delivery_mode = 'standard' AND self_delivered_by_user_id IS NULL
+)
+OR
+(
+  delivery_mode = 'self_sub' AND self_delivered_by_user_id IS NOT NULL AND courier_id IS NULL
+)
+```
 
-Legacy production Sub Locations id 1 (`TUTI`) and id 2 (`tina`) remain unowned. Never silently map/delete/deactivate them in Package B.
+Historical shipments: `delivery_mode='standard'`, `self_delivered_by_user_id=NULL`.
 
-## Locked Package B decisions
+- Sub-sourced Order: each Shipment is created as `self_sub`, `self_delivered_by_user_id` = owning Sales-Kurir-Sub, `courier_id = NULL`.
+- Agent-sourced Order: `delivery_mode=standard`; existing Kurir workflow unchanged.
+- A Sales-Kurir-Sub MUST NOT require a Courier profile; do NOT create fake Courier records.
+- Sales-Kurir-Sub may self-deliver ONLY Sub-sourced shipments. An attempt on an Agent-sourced `standard` shipment must be rejected explicitly with an authorization/business-rule error (not via a "missing courier profile" accident).
+- Preserve `assertMayShipSubStock()` semantics and `SubStockService::consume()` rules.
+- Do NOT create a separate `SelfDeliveryController`; use the existing `ShipmentController` / shipment lifecycle and refactor the service cleanly.
+- Update `ShipmentPolicy` (incl. receipt/proof access) so `self_sub` authority derives from `self_delivered_by_user_id` / Sub ownership, not `courier_id`.
 
-Read `docs/PACKAGE-B-R03-R04.md`. Key invariants: R-03 first; payment truth Order-level; delivery grouping = Order + delivery date; Sales-Kurir-Sub self-delivers Sub items; Admin final delivery verification separate from payment verification; Gudang/Kurir no unnecessary financial data; Admin Product/Variation CRU-no-Delete; reports show current/latest actor names; preserve Package A stock-source and lock-order invariants; do not remove current 422 Sub guards until an inventory-safe replacement exists.
+### B. Delivery verification
 
-## 6. LOCKED R-03 ARCHITECTURE DECISIONS
+Create `delivery_verifications`:
 
-These are locked by the human and must not be re-litigated during implementation.
+- `id`
+- `shipment_id` — FK `shipments`, NOT NULL, restrictOnDelete
+- `outcome` — `enum('received','not_received','return')`, NOT NULL
+- `note` — text nullable
+- `verified_by` — FK `users`, NOT NULL, restrictOnDelete
+- `verified_at` — timestamp NOT NULL
+- `idempotency_key` — varchar(100) nullable
+- timestamps
 
-**A. Sales-Kurir-Sub self-delivery MUST NOT require a Courier profile.**
-- Do NOT create a fake `Courier` profile to satisfy the existing code path.
-- `shipments.courier_id` remains reserved for normal Kurir.
-- R-03 represents the actual self-delivery actor explicitly with a stable user reference (`users.id`) — not a Kurir identity.
+Indexes: `(shipment_id, id)`, `outcome`. Unique: `(verified_by, idempotency_key)`.
 
-**B. Preserve Package A Sub authorization and lock ordering.**
-- Do NOT weaken `CourierService::assertMayShipSubStock()`.
-- Do NOT weaken Sub reservation consumption rules (reserve -> consume on physical shipment; release pre-shipment).
-- Preserve canonical lock order: `WarehouseSubLocation parent -> Sub WarehouseStock targets -> Sub reservation rows`.
+- Do NOT add `order_id` (order derived through Shipment).
+- Do NOT add `return_request_id` in this migration (Admin `return` outcome does not yet identify exact returned items/quantities; ReturnRequest remains its own workflow).
+- History is APPEND-ONLY: never update/delete a previous verification to replace an outcome; latest row = current operational outcome (e.g. `not_received` → `received` is valid history).
+- Every record preserves: actor, timestamp, outcome, note, shipment ref, and delivery proof indirectly via `shipment.proof_media_id`.
+- Controller accepts `Idempotency-Key`; retries must not create duplicate history.
+- Admin only, same-Agent authority. Super Admin follows existing explicit application policy — do not invent broader transition privileges.
+- Verification is separate from payment verification, transaction verification, and the shipment delivery action.
 
-**C. Distinguish return domains.**
-- `SubStockRequest` direction=return: Sub -> Agent Transit. Existing behavior stays unchanged.
-- Customer/order return where `order_item.stock_source=sub`: good returned physical stock must return to the **original `order_item.sub_location_id` / Sub stock domain** — it must NOT silently restock Agent Transit.
-- If safe restoration to the original Sub Location is not possible, **reject / require explicit handling**. Never silently remap inventory.
+### C. Split lineage
 
-**D. Payment remains Order-level. Do NOT create invoice-level payment truth.**
-- `OrderItem.requested_delivery_date` is the canonical delivery grouping key.
-- Do NOT create a new invoice/delivery-group table merely because grouping exists.
-- A persistent entity is justified only if a stable document number, document lifecycle, immutable issuance/audit identity, or other independent business lifecycle actually requires one. (None of these is required for R-03 grouping → grouping stays derived.)
+- `order_items.split_from_order_item_id` — nullable foreignId, self FK → `order_items(id)`, **restrictOnDelete**, indexed. Historical rows = NULL.
+- ActivityLog remains supplemental audit; the FK is the canonical structural lineage.
 
-**E. Admin final delivery verification must be historical/auditable.**
-- Required outcomes: `received`, `not_received` / `follow_up`, `return`.
-- Do NOT model as a single mutable boolean/status if later actions could erase a previous verification outcome.
-- Preserve: actor, timestamp, outcome, history, and relevant delivery/proof reference.
+### D. Delivery grouping
 
-**F. Partial Sub quantity handling.**
-- PRE-SHIPMENT SPLIT: preserve `stock_source=sub`; preserve original `sub_location_id`; physical Sub stock unchanged; reservation quantity correctly divided/reconciled; deterministic locks; audit lineage preserved.
-- PRE-SHIPMENT REDUCTION: reduce/release reservation only; physical stock unchanged.
-- POST-SHIPMENT: never rewrite shipped history as if it had not shipped; use return / additional-item workflow as appropriate.
-- Do NOT simply remove the existing R-02 422 guards.
+- NO invoice table, NO delivery-group table, NO payment columns.
+- Canonical grouping: `Order ID + OrderItem.requested_delivery_date`.
+- Expose a **derived** `delivery_groups` structure through the appropriate resource/API. Items with the same `order_id + requested_delivery_date` form one group.
+- `PaymentSummaryService` remains the ONLY Order-level financial truth. Splitting delivery groups must never duplicate payment state.
 
-**G. Shipment / self-delivery.**
-- Normal Kurir continues to use `Courier` / `Courier` profile.
-- Sales-Kurir-Sub self-delivery is a separate first-class path.
-- Do NOT make Sales-Kurir-Sub appear as an ordinary Kurir merely to satisfy existing code.
+### E. Sub quantity adjustment
 
-## 7. Files inspected (RECON ONCE)
+Do NOT just remove the R-02 422 guards; implement safe Sub reservation reconciliation.
 
-Protocol + docs: `AGENTS.md`; `docs/PACKAGE-B-R03-R04.md`; this checkpoint.
+- PRE-SHIPMENT REDUCTION: lock deterministically; reduce the active Sub reservation by the same delta; physical stock unchanged; fulfilled/cancelled quantities stay financially consistent; reuse existing Order total/payment reconciliation semantics; record audit.
+- PRE-SHIPMENT INCREASE: lock Sub Location/target/reservation consistently; verify Sub sellable capacity; increase the existing reservation quantity; physical unchanged; preserve existing additional-payment semantics; reject insufficient Sub stock; no Agent reservation touched.
+- PRE-SHIPMENT PARTIAL SPLIT: preserve `stock_source='sub'`; preserve original `sub_location_id`; set `split_from_order_item_id`; source reservation decreases by moved qty; new OrderItem gets its own ACTIVE reservation for moved qty; source + child reservation totals equal the pre-split total; physical Sub qty unchanged; new child gets its own Shipment; `self_sub` delivery_mode and self-delivered actor preserved; financial totals not duplicated; audit lineage recorded.
+- FULL date reschedule without row split: no reservation quantity change.
+- POST-SHIPMENT: never rewrite shipped inventory/history; use return/additional-item workflows.
+- Add deterministic concurrency tests for Sub reservation adjust/split races. Preserve Package A canonical Sub lock invariants (`WarehouseSubLocation parent -> Sub WarehouseStock targets -> Sub reservation rows`).
 
-Models: `Order`, `OrderItem`, `OrderItemAdjustment`, `Shipment`, `ReturnRequest`, `ReturnItem`, `SubStockReservation` (`app/Models/`).
+### F. Sub customer return
 
-Order services: `OrderService`, `OrderFulfillmentService`, `CourierService`, `ReturnService`, `InventoryCancellationService`, `OrderTotalCalculator` (`app/Services/Order/`).
+Do not confuse:
 
-Payment boundary: `PaymentSummaryService` (`app/Services/Payment/`).
+- `SubStockRequest direction=return` → Sub → Agent Transit. **EXISTING BEHAVIOR REMAINS.**
 
-Stock services: `SubStockService`, `StockSourceResolver`, `SubLocationOwnershipService`, `SubStockRequestService`, `StockRequestService`, `StockRequestFulfillmentService` (`app/Services/Stock/`).
+with:
 
-HTTP: `OrderController`, `Fulfillment/OrderFulfillmentController`, `Courier/ShipmentController`, `Courier/CourierDashboardController`, `Return/ReturnController`, `Admin/OrderAdjustmentController`; `routes/api_v1.php`.
+- customer/order `ReturnItem` whose `OrderItem.stock_source='sub'`.
 
-Policies: `OrderPolicy`, `ShipmentPolicy`.
+For a Sub-sourced customer return:
 
-Resources: `OrderResource`, `OrderItemResource`, `ShipmentReceiptResource`, `CourierOrderResource`.
+- Good returned quantity → original `order_item.sub_location_id` → `WarehouseStock stock_type='sub'`. NOT Agent Transit.
+- Create the corresponding `StockMovement`: `stock_type=sub`, original `sub_location_id`, `ReturnItem` reference, positive returned quantity, actor/audit metadata.
+- Damaged quantity must NOT become sellable Sub stock.
+- If the original Sub Location cannot safely accept the return (invalid/missing/incompatible state): reject with an explicit business error. Never silently redirect inventory to Agent Transit.
+- Operation must remain idempotent with existing return inspection/finalization semantics.
 
-Migrations (schema context): `2026_09_05_090046_create_order_items_table`; `2026_09_09_090000_add_fulfillment_tracking_to_order_items_table`; `2026_09_10_090001_add_courier_fee_and_delivery_date_to_order_items_table`; `2026_09_11_090000_add_shipment_id_to_order_items_and_allow_multiple_shipments`; `2026_09_05_090052_create_shipments_table`; `2026_09_08_090003_add_shipping_snapshot_to_shipments_table`; `2026_09_05_090048_create_returns_table`; `2026_09_29_110000_create_sub_stock_reservations_table`; `2026_09_29_110001_add_stock_source_to_order_items_table`; Phase-3 Sub migrations.
+### G. Agent StockRequest + OrderItem split (IN SCOPE)
 
-Tests: layout of `tests/Feature/` (87 files) + `tests/TestCase.php`, `tests/Support/{ConcurrencyHarness,RestoresIsolatedTestDatabase}.php`, `phpunit.xml`; relevant suites identified: `SubStockSourceTest`, `OrderFulfillmentTest`, `OrderStatusTransitionTest`, `ReturnSystemTest`, `CourierSystemTest`, `WarehouseReturnDispositionTest`, `InventoryCancellationReturnTest`, `SubStockRequestFlowTest`, `FulfillmentConcurrencyTest`, `ShipmentReceiptPrintTest`.
+`stock_request_items.order_item_id` is UNIQUE. A split must not leave the StockRequest pointing only at the parent while a new operational OrderItem exists with stale demand.
 
-Frontend: `src/api/{orders,shipments,returns,courier,orderAdjustments}.ts`; `src/views/OrderDetailView.vue`; `src/views/dashboard/{KurirDashboardView,OrderReportView,WarehouseReturnsView}.vue`; `src/views/admin/{AdminReturnsView,AdminRefundsView,AdminAdditionalPaymentsView}.vue`; `src/views/print/ShipmentReceiptView.vue`; `src/dashboard/navConfig.ts`; `src/router/index.ts`; `package.json`.
+During an Agent-sourced partial split:
 
-## 8. R-03 current-state findings
+- lock the related `StockRequestItem` if it exists;
+- keep total requested/fulfilled/remaining quantities conserved;
+- create/reassign the corresponding `StockRequestItem` for the split child when safe;
+- preserve the unique `order_item_id` invariant.
 
-**Order / OrderItem**
-- Shared 7-state lifecycle `diterima -> diproses -> dikirim -> terkirim -> pengembalian -> kembali` (+`dibatalkan`), forward-only via `canTransitionTo()`, enforced in services.
-- `OrderItem.requested_delivery_date` (date) is the per-item delivery schedule; `Order.delivery_date_estimate` is the default.
-- Quantities: `original_quantity`, `fulfilled_quantity`, `cancelled_quantity`, `returned_quantity`, `refund_quantity`, `additional_quantity`.
-- Payment truth is Order-level (`dp_amount/paid_amount/remaining_amount/total_amount` + `PaymentSummaryService`). No `Invoice`/delivery-group model exists anywhere (grep confirmed).
+If the StockRequest has progressed to a state where quantities cannot be split deterministically without rewriting physical fulfillment history: reject that partial split with an explicit 422. Do NOT silently create inconsistent `StockRequestItem` state.
 
-**Shipment / courier**
-- `Shipment`: `status` (`pending/picked_up/in_transit/delivered/failed`), `shipped_at`, `delivered_at`, `proof_media_id`, per-shipment `courier_id`. One shipment per order item from creation; reschedule can split onto a fresh shipment.
-- `CourierService::updateShipmentStatus`: `diproses->dikirim` and `dikirim->terkirim` (proof mandatory for `terkirim`); consumes Sub reservation on Sub-sourced `dikirim`.
-- `CourierService::assertMayShipSubStock` restricts Sub shipping to the owning Sub Location — preserve.
-- `recordCommissionsOnDelivery` fires courier commissions only on `terkirim`.
-- No Admin "final delivery verification" step exists today; `terkirim` is set by the courier, and returns are a separate consumer-initiated flow.
-- `selfAssignIfUnassigned` currently requires a `courierProfile` for both `kurir` and `sales-kurir-sub` — this is exactly what decision A forbids for Sub self-delivery.
-
-**Current Sub 422 guards (do NOT remove until replaced)**
-1. `OrderFulfillmentService::adjustItemQuantity` — Sub adjust blocked 422.
-2. `OrderFulfillmentService::rescheduleItemDeliveryDate` — Sub partial split blocked 422.
-3. `ReturnService::requestReturn` — Sub return blocked 422.
-4. `OrderService::updateStatus` — Sub items excluded from office bulk `dikirim` (`sub_item_requires_owner_shipment`).
-5. `StockRequestService::createForOrderWhenProcessing` — Sub items excluded from Agent stock request (correct: Gudang must not fulfill Sub).
-
-**Inventory invariants**
-- Sub: `Sub Sellable = Sub Physical - active Sub Reserved`; reserve -> consume -> release; one `sub_stock_reservations` row per `order_item_id` (UNIQUE); `quantity` mutable.
-- Canonical Sub lock order as in decision B.
-- `InventoryCancellationService` prelocks Agent capacity targets before per-item reversal; Sub items release in the Sub ledger only.
-
-**Order-generated Gudang request (§3.6, largely present)**
-- `StockRequestService::createForOrderWhenProcessing` creates an order-scoped `StockRequest` when the order enters `diproses` (COD immediately; non-COD on admin status change); Sub items excluded.
-- Gudang direct `fulfill()` is disabled (422); Gudang proposes via `StockRequestProposalService`, Admin approves/rejects.
-
-## 9. EXACT proposed additive R-03 schema / migration plan
-
-No application code and no migrations are created yet. Three additive migrations are proposed. Nothing here duplicates payment totals; no invoice/delivery-group table is created (decision D).
-
-### Migration 1 — `2026_10_01_100000_add_self_delivery_to_shipments_table.php`
-
-Table `shipments`:
-
-- **`delivery_mode`**
-  - Type: `enum('standard','self_sub')`, `NOT NULL`, `DEFAULT 'standard'`, placed after `status`.
-  - FK/index: none (low-cardinality flag; always filtered together with `status`/`courier_id`). No dedicated index.
-  - Historical-row behavior: every existing shipment becomes `'standard'` via the column default — correct, since historical shipments used the normal courier/office flow. No data rewrite.
-  - Why existing schema is insufficient: decision G requires self-delivery to be a first-class path distinct from normal Kurir; deriving it only from `order_items.stock_source` couples shipment authorization to a join and cannot express shipment-level routing.
-  - Rollback limitation: `down()` drops the column; no other table references it, so rollback loses only this flag (an implementation could re-derive historical values as all `'standard'`).
-
-- **`self_delivered_by_user_id`**
-  - Type: `foreignId('self_delivered_by_user_id')->nullable()`, FK -> `users(id)` `nullOnDelete`, plus a plain index.
-  - Historical-row behavior: `NULL` for every existing shipment.
-  - Why existing schema is insufficient: `courier_id` references `couriers` (a Kurir profile) and must stay reserved for normal Kurir (decision A). The self-delivering Sales-Kurir-Sub has no Courier profile, so a stable `users` reference is required to record the actual actor.
-  - Rollback limitation: `down()` drops the FK + index + column; the actor record is lost. `nullOnDelete` matches the codebase's actor-reference convention (`User` is soft-deleted, so the FK effectively never fires on normal deletes).
-
-- **Optional CHECK constraint (MySQL/MariaDB only):** `CHECK (delivery_mode = 'standard' OR courier_id IS NULL)` — a self-delivery shipment must never carry a Kurir. Historical rows all pass (`'standard'`). Rollback: drop constraint. (Flagged as a design question in §14.)
-
-### Migration 2 — `2026_10_01_100001_create_delivery_verifications_table.php`
-
-New table `delivery_verifications` (append-only verification history — decision E):
-
-- **`id`** — `bigIncrements` PK.
-- **`order_id`** — `foreignId` `NOT NULL`, FK -> `orders(id)` `restrictOnDelete`, index.
-  - Historical: n/a (new table). Why: aggregate root + branch authorization scoping.
-- **`shipment_id`** — `foreignId` `nullable`, FK -> `shipments(id)` `restrictOnDelete`, index.
-  - Historical: n/a. Why: an order can have multiple deliveries; verification is per-delivery, and this references the delivery proof (`shipments.proof_media_id`). Nullable allows order-level verification and keeps legacy shipments referenceable.
-- **`outcome`** — `enum('received','not_received','return')` `NOT NULL`.
-  - Why: decision E's exact three outcomes.
-- **`note`** — `text` `nullable`.
-  - Why: follow-up reason / handling detail for `not_received` and `return`.
-- **`verified_by`** — `foreignId` `NOT NULL`, FK -> `users(id)` `nullOnDelete`, index.
-  - Why: decision E actor requirement; soft-deleted users keep the row.
-- **`verified_at`** — `timestamp` `NOT NULL`.
-  - Why: decision E timestamp, distinct from `created_at` so true verification time is preserved.
-- **`return_request_id`** — `foreignId` `nullable`, FK -> `returns(id)` `nullOnDelete`, index.
-  - Why: decision E / spec §3.3 — "return" transitions into the existing return process; links the verification to the actual return for audit.
-- **`created_at`, `updated_at`** — `timestamps`.
-
-Composite indexes: `(order_id, id)`, `(order_id, shipment_id)`, `(outcome)`.
-
-- Historical-row behavior: table starts empty; existing delivered orders are simply "not yet verified" (read as absence, never as an outcome). No historical rows touched.
-- Append-only semantics: each verification inserts a new row; the latest row per `(order_id, shipment_id)` is current; earlier rows are retained → a later action cannot erase a previous outcome (decision E).
-- Rollback limitation: `down()` drops the table; all verification history is lost, but no existing table is affected.
-
-### Migration 3 — `2026_10_01_100002_add_split_lineage_to_order_items_table.php`
-
-Table `order_items`:
-
-- **`split_from_order_item_id`** — `foreignId` `nullable`, self-FK -> `order_items(id)` `nullOnDelete`, index.
-  - Historical-row behavior: `NULL` for every existing row (no historical splits recorded).
-  - Why existing schema is insufficient: spec §3.5 requires split operations to preserve audit lineage. Today `OrderFulfillmentService::splitItemForReschedule` creates a new item and only `ActivityLog` links it; a self-FK makes lineage queryable and reconcilable for both Agent and Sub splits, and survives log pruning.
-  - Rollback limitation: `down()` drops FK + index + column; lineage recorded after deployment is lost.
-
-### Explicitly NOT proposed
-
-- No invoice / delivery-group table or columns (decision D) — grouping is derived from `order_id + OrderItem.requested_delivery_date`.
-- No payment-truth columns anywhere (decision D).
-- No new columns on `returns` / `return_items` — Sub return restock target is derived from `order_item.sub_location_id` (decision C).
-- No fake `Courier` row or `couriers` change (decision A).
-
-## 10. EXACT R-03 implementation file map
-
-**Existing backend files to modify**
-- `app/Models/Shipment.php` — casts/fillable for `delivery_mode`, `self_delivered_by_user_id`; `selfDeliveredBy()` relation.
-- `app/Models/OrderItem.php` — casts/fillable + `splitFrom()`/`splits()` for `split_from_order_item_id`.
-- `app/Models/Order.php` — `deliveryVerifications()` relation.
-- `app/Services/Order/OrderFulfillmentService.php` — inventory-safe Sub pre-shipment split + reduction (replace 2 of the 3 Sub 422 guards), lineage, deterministic locks.
-- `app/Services/Order/ReturnService.php` — Sub post-shipment return to the Sub domain (replace the Sub return 422 guard); keep the Agent path.
-- `app/Services/Order/CourierService.php` — keep `assertMayShipSubStock`; route Sub-sourced shipping to the first-class self-delivery path; keep consume rules.
-- `app/Services/Order/OrderService.php` — replace the office bulk-`dikirim` Sub guard with explicit guidance to the self-delivery path.
-- `app/Services/Order/InventoryCancellationService.php` — Sub pre-shipment partial withdrawal reconciliation.
-- `app/Services/Stock/SubStockService.php` — lock-ordered helpers to divide/shrink/release a reservation for split/reduction.
-- `app/Services/Stock/StockRequestService.php` — reconcile the order-generated request on Agent split/reduction; confirm Sub exclusion.
-- `app/Policies/ShipmentPolicy.php` — authorize the Sales-Kurir-Sub self-delivery path (own Sub shipment) without a Courier profile; keep the courier path.
-- `app/Policies/OrderPolicy.php` — only if Sub adjust/split needs an owner-scoped variant of `manageFulfillment`.
-- `app/Http/Controllers/Api/V1/Courier/ShipmentController.php` — split normal Kurir vs self-delivery routing.
-- `app/Http/Controllers/Api/V1/Fulfillment/OrderFulfillmentController.php` — expose Sub adjust/split.
-- `app/Http/Controllers/Api/V1/Return/ReturnController.php` — Sub return inspect/finalize disposition.
-- `app/Http/Controllers/Api/V1/Order/OrderController.php` — eager-load verification/relations for detail.
-- `app/Http/Resources/OrderItemResource.php` — split lineage + stock-source/delivery-date fields as needed.
-- `app/Http/Resources/OrderResource.php` — delivery groups (Order + `requested_delivery_date`) + verification summary.
-- `app/Http/Resources/ReturnRequestResource.php` — Sub return-domain flag if displayed.
-- `routes/api_v1.php` — admin verification endpoints; self-delivery endpoint; Sub adjust/split.
-- `lang/{id,en,ar,zh}/messages.php` — new messages.
-
-**New backend files**
-- `app/Models/DeliveryVerification.php`
-- `app/Services/Order/DeliveryVerificationService.php`
-- `app/Policies/DeliveryVerificationPolicy.php`
-- `app/Http/Controllers/Api/V1/Order/DeliveryVerificationController.php` (admin)
-- `app/Http/Controllers/Api/V1/Courier/SelfDeliveryController.php` (Sales-Kurir-Sub self-delivery; may instead extend `ShipmentController` — design question §14)
-- `app/Http/Resources/DeliveryVerificationResource.php`
-- `app/Http/Requests/Delivery/StoreDeliveryVerificationRequest.php`
-
-**Migrations (new)**
-- `backend/database/migrations/2026_10_01_100000_add_self_delivery_to_shipments_table.php`
-- `backend/database/migrations/2026_10_01_100001_create_delivery_verifications_table.php`
-- `backend/database/migrations/2026_10_01_100002_add_split_lineage_to_order_items_table.php`
-
-**Backend tests (new)**
-- `tests/Feature/SalesKurirSubSelfDeliveryTest.php` — self-delivery without Courier profile; ownership/foreign-location rejection; proof; `courier_id` stays NULL.
-- `tests/Feature/DeliveryVerificationTest.php` — received / not_received / return; audit actor+timestamp+history; duplicate/idempotent actions.
-- `tests/Feature/DeliveryDateGroupingTest.php` — grouping = Order + delivery date; Order-level payment remaining invariant across groups.
-- `tests/Feature/SubQuantityAdjustmentTest.php` — pre-shipment split/reduction; physical unchanged; reservation reconciled; post-shipment rejection.
-- `tests/Feature/SubReturnDomainTest.php` — Sub return restocks the original Sub Location, never Agent Transit; unsafe-restore rejection.
-- `tests/Feature/DeliveryVerificationConcurrencyTest.php` — deterministic duplicate-verification/self-delivery race coverage.
-
-**Backend tests (extend)**
-- `OrderFulfillmentTest`, `ReturnSystemTest`, `CourierSystemTest`, `SubStockSourceTest`, `FulfillmentConcurrencyTest`, `SubStockConcurrencyTest`, `MultiTargetInventoryLockOrderTest`.
-
-**Frontend files (modify)**
-- `src/api/orders.ts`, `src/api/shipments.ts`, `src/api/returns.ts`, `src/api/orderAdjustments.ts`, `src/api/types.ts`
-- `src/views/OrderDetailView.vue` (admin verification + Sub split/adjust/return + delivery-date grouping)
-- `src/views/dashboard/KurirDashboardView.vue` (Sales-Kurir-Sub self-delivery path)
-- `src/views/dashboard/OrderReportView.vue` (delivery-date grouping)
-- `src/views/admin/AdminReturnsView.vue` (Sub return handling)
-- `src/router/index.ts`, `src/dashboard/navConfig.ts`
-- `src/i18n/locales/{id,en,ar,zh}.ts`
-
-**Frontend files (new)**
-- `src/api/deliveries.ts` (admin verification endpoints)
-- `src/views/print/ShipmentReceiptView.vue` extension or a self-delivery receipt view (design question §14)
-
-## 11. Implementation sequence (DO NOT EXECUTE)
-
-1. Write the three additive migrations (§9) + model cast/relation updates; run `php artisan migrate` on DEV; run baseline suite to confirm no regression.
-2. Implement `DeliveryVerification` (model, service, policy, controller, request, resource, routes) with append-only history (decisions E).
-3. Implement Sales-Kurir-Sub self-delivery as a first-class path (decision A/G), preserving `assertMayShipSubStock` and consume rules (decision B).
-4. Implement delivery-date grouping by Order + `requested_delivery_date` — derived only, no new table (decision D); expose in `OrderResource` + frontend.
-5. Replace Sub 422 guard #1 (adjust) and #2 (split) with inventory-safe, lock-ordered, idempotent pre-shipment logic (decision F); keep lineage (`split_from_order_item_id`).
-6. Replace Sub 422 guard #3 (return) with the Sub-domain return path (decision C); keep SubStockRequest return unchanged.
-7. Reconcile Sub pre-shipment partial reduction (reservation release/shrink only, physical unchanged).
-8. Confirm order-generated Gudang stock request semantics (§3.6) incl. Sub exclusion and Agent-split reconciliation.
-9. Frontend surfaces (OrderDetailView, KurirDashboardView, OrderReportView, AdminReturnsView, api modules, router/nav, i18n).
-10. Focused R-03 tests incl. deterministic concurrency, then full backend regression + frontend type-check/build.
-11. Update this checkpoint with exact commands/results; migration reconciliation criteria.
-12. STOP before R-04.
-
-## 12. Progress
-
-- [x] Package A production deployment closed.
-- [x] Package B business scope documented.
-- [x] AI workflow / compaction / production safety documented in `AGENTS.md`.
-- [x] Package B branch baseline recorded.
-- [x] RECON ONCE performed; file map + R-03 findings recorded.
-- [x] Backend baseline recorded: 738 passed / 5055 assertions / 0 failures.
-- [x] Frontend baseline recorded: type-check PASS, build PASS (chunk-size warning only).
-- [x] R-03 architecture decisions A–G locked.
-- [x] R-03 additive schema/migration plan produced.
-- [x] R-03 implementation file map + sequence produced.
-- [ ] R-03 implemented.
-- [ ] R-03 focused tests pass.
-- [ ] R-04 implemented.
-- [ ] R-04 focused tests pass.
+Tests required: pending request split; partially fulfilled request split; fulfilled request boundary; conservation of `requested_qty`/`fulfilled_qty`/`remaining_qty`; no duplicate `StockRequestItem` for one OrderItem.
+
+### H. Scope correction
+
+- `OrderReportView.vue` is REMOVED from the R-03 implementation map unless a direct R-03 contract dependency is proven. Reporting redesign is R-04.
+- NOT implemented in R-03: Gudang financial projection redesign; Kurir queue security redesign beyond R-03 requirements; Admin Product/Variation CRU changes; operational/finance reports; current-name reporting work.
+
+## Schema / migration plan (final)
+
+Three additive migrations. No app code for them yet.
+
+**M1 — `add_self_delivery_to_shipments_table`**
+- `shipments.delivery_mode` enum('standard','self_sub') NOT NULL DEFAULT 'standard' (after `status`).
+- `shipments.self_delivered_by_user_id` nullable foreignId → users(id) restrictOnDelete + index.
+- CHECK constraint (A). Historical rows satisfy it (all `standard`, self NULL).
+- Rollback: drop constraint + FK/index + column.
+
+**M2 — `create_delivery_verifications_table`**
+- Columns/indexes/unique exactly as decision B.
+- History append-only; new table empty at deploy (existing delivered orders are simply unverified).
+- Rollback: drop table; no other table references it.
+
+**M3 — `add_split_lineage_to_order_items_table`**
+- `order_items.split_from_order_item_id` nullable self-FK restrictOnDelete + index; historical NULL.
+- Rollback: drop FK/index/column.
+
+Explicitly NOT proposed: invoice/delivery-group table; payment columns; new columns on `returns`/`return_items`.
+
+## Implementation file map (final)
+
+**Modify (backend):** `Models/{Shipment,OrderItem,Order}`; `Services/Order/{OrderFulfillmentService,ReturnService,CourierService,OrderService,InventoryCancellationService}`; `Services/Stock/{SubStockService,StockRequestService}`; `Policies/{ShipmentPolicy,OrderPolicy}`; `Http/Controllers/Api/V1/{Courier/ShipmentController,Fulfillment/OrderFulfillmentController,Return/ReturnController,Order/OrderController}`; `Http/Resources/{OrderItemResource,OrderResource,ReturnRequestResource}`; `routes/api_v1.php`; `lang/{id,en,ar,zh}/messages.php`.
+
+**New (backend):** `Models/DeliveryVerification.php`; `Services/Order/DeliveryVerificationService.php`; `Policies/DeliveryVerificationPolicy.php`; `Http/Controllers/Api/V1/Order/DeliveryVerificationController.php`; `Http/Resources/DeliveryVerificationResource.php`; `Http/Requests/Delivery/StoreDeliveryVerificationRequest.php`; the three migrations.
+
+**New backend tests:** `SalesKurirSubSelfDeliveryTest`, `DeliveryVerificationTest`, `DeliveryDateGroupingTest`, `SubQuantityAdjustmentTest`, `SubReturnDomainTest`, `StockRequestSplitTest`, `DeliveryVerificationConcurrencyTest`, `SubReservationAdjustConcurrencyTest`.
+
+**Extend backend tests:** `OrderFulfillmentTest`, `ReturnSystemTest`, `CourierSystemTest`, `SubStockSourceTest`, `FulfillmentConcurrencyTest`, `SubStockConcurrencyTest`, `MultiTargetInventoryLockOrderTest`.
+
+**Frontend modify:** `api/{orders,shipments,returns,orderAdjustments,types}.ts`; `views/OrderDetailView.vue`; `views/dashboard/KurirDashboardView.vue`; `views/admin/AdminReturnsView.vue`; `router/index.ts`; `dashboard/navConfig.ts`; `i18n/locales/{id,en,ar,zh}.ts`.
+**Frontend new:** `api/deliveries.ts`.
+(`views/dashboard/OrderReportView.vue` deliberately excluded per decision H.)
+
+## Implementation sequence
+
+1. Final architecture checkpoint commit.
+2. Add the 3 additive migrations + model relations/casts.
+3. Run migrations only on `primeclassy_testing` / DEV, never production.
+4. Add focused migration/model tests.
+5. Implement first-class `self_sub` shipment behavior.
+6. Implement append-only Admin delivery verification + idempotency.
+7. Implement derived Order+delivery-date grouping.
+8. Implement Sub reduction/increase/split reservation reconciliation.
+9. Implement Agent StockRequest reconciliation for splits.
+10. Implement Sub customer-return restock to original Sub domain.
+11. Confirm order-generated Gudang StockRequest behavior.
+12. Implement required frontend R-03 surfaces.
+13. Run focused backend tests.
+14. Run full `php artisan test`.
+15. Run frontend `npm run type-check` + `npm run build-only`.
+16. Update checkpoint (files, migrations, tests/results, open findings, HEAD, EXACT NEXT ACTION).
+17. STOP after R-03 is fully green. Do NOT start R-04, deploy, or run production migrations.
+
+## Progress
+
+- [x] Package A closed; Package B scope documented.
+- [x] RECON ONCE + baselines recorded.
+- [x] Final R-03 architecture locked (A–H).
+- [ ] M1–M3 migrations + model changes.
+- [ ] Focused migration/model tests.
+- [ ] Self-sub shipment behavior.
+- [ ] Append-only delivery verification.
+- [ ] Derived delivery grouping.
+- [ ] Sub reduction/increase/split reconciliation.
+- [ ] StockRequest split reconciliation.
+- [ ] Sub customer-return restock.
+- [ ] Frontend R-03 surfaces.
+- [ ] Focused backend tests pass.
 - [ ] Full backend regression passes.
 - [ ] Frontend type-check/build passes.
-- [ ] Claude independent final review complete.
-- [ ] DEV manual UAT complete.
-- [ ] Human Stage Gate approved.
+- [ ] Checkpoint updated with results.
 
-## 13. Open findings
+## Open findings
 
-- **ENV-1 — CLOSED:** backend test environment provisioned; baseline 738 passed / 5055 assertions / 0 failures.
-- **DESIGN-1 (resolved by plan):** no delivery-verification entity existed → new additive `delivery_verifications` table.
-- **DESIGN-2 (resolved by plan):** `sub_stock_reservations` is one full-quantity row per order item → split/reduction reconcile `quantity`, keep UNIQUE per item, deterministic locks.
-- **DESIGN-3 (resolved by plan):** Sub customer return restocks the original Sub Location, never Agent Transit.
+- **PUSH-1 (blocker, environment):** cannot push — encrypted deploy key with no passphrase/agent/TTY. Needs human action.
+- **DESIGN-1/2/3:** resolved by the locked A–H architecture.
 
-Known pre-existing technical debt (NOT Package B regressions):
-
-- Package A role migration `down()` is not a perfect inverse after the rare dual-row fold path.
-- Checkout's global unique temporary `orders.order_no='TEMP'` behavior (Package A concurrency review); do not change opportunistically.
-- CLI duplicate OPcache/mbstring warnings are environmental and non-blocking.
-- Historical production "MAC is invalid" log entries pre-date Package B.
-
-## 14. Unresolved R-03 design questions
-
-1. `shipments.delivery_mode` vs deriving purely from `stock_source=sub` + `self_delivered_by_user_id` — proposed to keep the explicit flag; confirm.
-2. `order_items.split_from_order_item_id` vs ActivityLog-only lineage — proposed to add the self-FK for queryable audit; confirm.
-3. `delivery_verifications` granularity — proposed per-shipment (nullable `shipment_id`); confirm whether per-item verification is ever required.
-4. Self-delivery endpoint shape — dedicated `SelfDeliveryController` vs a method on `ShipmentController`.
-5. Does a Sales-Kurir-Sub ever self-deliver Agent-sourced items? Locked rule says Sub-sourced only — confirm Agent path unchanged.
-6. Agent-sourced split's effect on an existing order-generated `StockRequest` (stale request items) — in-scope fix or documented technical debt?
+Pre-existing technical debt (NOT Package B regressions): Package A role migration `down()` imperfect inverse; checkout global unique TEMP `order_no`; CLI duplicate OPcache/mbstring warnings; historical "MAC is invalid" log entries.
 
 ## Production state
 
@@ -353,9 +229,4 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-**Do NOT implement R-03 and do NOT create migrations yet.** Await explicit human authorization of this locked plan (and answers to §14 design questions).
-
-When authorized, the exact first action is:
-
-1. Create the three additive migrations from §9 and the accompanying model cast/relation updates.
-2. Run `php artisan migrate` on DEV only, then `php artisan test` to confirm the 738/5055 baseline still holds before any behavioral change.
+R-03 implementation is authorized and proceeding. Next concrete step: create the three additive migrations (M1–M3) and the accompanying model cast/relation updates, then run them on the isolated test/DEV database only and confirm the 738/5055 baseline still holds.
