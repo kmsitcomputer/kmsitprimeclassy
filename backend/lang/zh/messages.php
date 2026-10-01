@@ -153,6 +153,8 @@ return [
         'rescheduled' => '商品配送日期更新成功。',
         'split_stock_request_locked' => '无法拆分：仓库库存申请已部分履行，剩余数量不足。',
         'cannot_increase_cancelled' => '已完全取消的商品不能再次增加数量。',
+        'pending_refund_blocks_increase' => '当该商品仍存在未处理的退款义务时，不能增加数量。',
+        'pending_additional_payment_blocks_reduction' => '当本次增加对应的附加付款仍未结清时，不能减少数量。',
     ],
 
     'courier' => [

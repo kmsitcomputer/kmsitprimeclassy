@@ -281,4 +281,18 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         $this->assertSame('standard', $agentItem['delivery_mode']);
         $this->assertNull($agentItem['self_delivered_by_user_id']);
     }
+
+    public function test_self_sub_receipt_print_permissions_mirror_backend_policy(): void
+    {
+        $order = $this->placeSubOrder($this->b['sub'], 1);
+        $shipment = $order->items()->firstOrFail()->shipment;
+
+        // ShipmentPolicy::printReceipt: owner, super_admin, same-Agent agen/admin may print.
+        foreach (['sub', 'admin', 'agen', 'superAdmin'] as $who) {
+            $this->actingAs($this->b[$who])->getJson("/api/v1/shipments/{$shipment->id}/receipt")->assertOk();
+        }
+
+        // A normal Kurir is never the self_sub deliverer.
+        $this->actingAs($this->b['kurir'])->getJson("/api/v1/shipments/{$shipment->id}/receipt")->assertForbidden();
+    }
 }

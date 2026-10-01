@@ -47,6 +47,20 @@ Migrations: **unchanged** (the three R-03 migrations were not modified; no new m
 
 Exact results after remediation: `php artisan test` → **787 passed / 5384 assertions / 0 failures** (704.97s). `npm run type-check` → PASS. `npm run build-only` → PASS.
 
+## R-03 FINAL REMEDIATION (MAJOR-7/8, MINOR-9)
+
+Reviewed HEAD before this pass: `1b4e465148df66431d1a90b680f4f3f0e086c80e`.
+
+- **MAJOR-7 — stale financial obligation:** `OrderFulfillmentService` locks the financial row deterministically (before any inventory mutation). An INCREASE is rejected 422 while the item has a pending `OrderItemAdjustment` (`refund_status=pending`); a REDUCTION is rejected 422 while the item's linked `OrderAdditionalPayment` is `pending`. Once the obligation reaches a terminal state (processed / paid / failed), existing payment rules apply again. No ledger rows deleted or silently invalidated; `PaymentSummaryService` remains canonical.
+- **MAJOR-8 — courier fee follows active quantity:** `courier_fee_amount` now tracks the current active fulfilled quantity — scaled on reduce/increase and allocated proportionally on a partial split (parent + child exactly conserved; rounding remainder kept on the parent), always derived from the historical snapshot, never today's catalog config. Agent/Sales fee snapshots and already-created commission rows are untouched. Courier commission is still earned per item on delivery (covers multi-courier and Sales-Kurir-Sub self-delivery).
+- **MINOR-9 — self_sub receipt visibility:** frontend `printableShipmentGroups()` now mirrors `ShipmentPolicy::printReceipt` for `self_sub` (owning Sales-Kurir-Sub, super_admin, and same-Agent agen/admin may print; a normal Kurir may not). Office roles still get NO pickup/deliver/assign controls on a `self_sub` shipment.
+
+Files changed: `app/Services/Order/OrderFulfillmentService.php`; `lang/{id,en,ar,zh}/messages.php`; `frontend/src/views/OrderDetailView.vue`; extended `tests/Feature/SalesKurirSubSelfDeliveryTest.php`. New tests: `FinancialObligationReconciliationTest`, `CourierFeeSplitTest`.
+
+Migrations: **unchanged** (no new migration).
+
+Exact results after final remediation: `php artisan test` → **795 passed / 5442 assertions / 0 failures** (598.23s). `npm run type-check` → PASS. `npm run build-only` → PASS.
+
 ### Push status (BLOCKER, environment)
 
 `git push origin feat/package-b-r03-r04` fails: the configured deploy key `~/.ssh/github_primeclassy` is passphrase-encrypted (OpenSSH bcrypt/aes256-ctr), there is no ssh-agent (`SSH_AUTH_SOCK` unset) and no TTY for the passphrase prompt, and no credential helper/token is configured. Push must be performed by a human or after the key is added to an agent. Local commits are unaffected.
@@ -280,7 +294,9 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Checkpoint updated with results.
 - [x] Review remediation (BLOCKER-1/2, MAJOR-3/4/5/6, audit continuity, migration verification) — closed.
 - [x] Post-remediation full regression passes (787/5384/0); frontend PASS.
-- [ ] Human re-review + DEV manual UAT.
+- [x] Final remediation (MAJOR-7/8, MINOR-9) — closed.
+- [x] Post-final full regression passes (795/5442/0); frontend PASS.
+- [ ] **R-03 DEV MANUAL UAT.**
 - [ ] Human Stage Gate approval.
 - [ ] R-04 (NOT authorized).
 
@@ -293,7 +309,7 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - **R03-3 (by design):** an Agent partial split whose StockRequest remainder cannot cover the moved quantity is rejected 422 (never rewrites fulfilled warehouse history).
 - **R03-4 (deferred):** Admin verification outcome `return` records the operational outcome only; it does not itself create a `ReturnRequest` (per decision B). Return remains its own workflow.
 
-**Review findings:** BLOCKER-1, BLOCKER-2, MAJOR-3, MAJOR-4, MAJOR-5, MAJOR-6, audit continuity, and migration verification are all CLOSED with regression coverage (see §R-03 Remediation).
+**Review findings:** BLOCKER-1, BLOCKER-2, MAJOR-3, MAJOR-4, MAJOR-5, MAJOR-6, MAJOR-7, MAJOR-8, MINOR-9, audit continuity, and migration verification are all CLOSED with regression coverage (see §R-03 Remediation and §R-03 Final Remediation).
 
 Pre-existing technical debt (NOT Package B regressions): Package A role migration `down()` imperfect inverse; checkout global unique TEMP `order_no`; CLI duplicate OPcache/mbstring warnings; historical "MAC is invalid" log entries.
 
@@ -303,11 +319,10 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-R-03 review remediation is complete and fully green. **STOP here — do NOT start R-04, deploy, or run any production migration.**
+**R-03 DEV MANUAL UAT.** The R-03 implementation and all review remediation are complete and fully green. **STOP here — do NOT start R-04, deploy, or run any production migration.**
 
 Next actions are human-owned:
 
-1. Re-review the remediation diff (`fix(r03): close delivery and quantity review findings`).
-2. Run DEV manual UAT for: self_sub self-delivery, generic-status rejection, Admin delivery verification (received / not_received / return) + idempotency, delivery-date grouping, Sub adjust/split/return, quantity counter reconciliation, and the dual-fee path.
-3. Only after explicit Human Stage Gate authorization: begin R-04 on this same branch.
-4. Push remains blocked (PUSH-1) until the deploy key is usable.
+1. Run R-03 DEV manual UAT: self_sub self-delivery, generic-status rejection (dikirim + terkirim), Admin delivery verification (received / not_received / return) + idempotency conflicts, delivery-date grouping, Sub adjust/split/return, quantity counter + financial-obligation reconciliation, courier-fee split/follow-active-quantity (multi-courier and self_sub), and the dual-fee path.
+2. Only after explicit Human Stage Gate authorization: begin R-04 on this same branch.
+3. Push remains blocked (PUSH-1) until the deploy key is usable.

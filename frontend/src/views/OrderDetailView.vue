@@ -234,7 +234,12 @@ const printableShipmentGroups = computed(() => {
     }
   }
   return Array.from(groups.values()).filter((g) => {
-    if (isSelfSubGroup(g)) return isSubRole.value && auth.user?.id === g.selfDeliveredByUserId
+    if (isSelfSubGroup(g)) {
+      // Mirrors ShipmentPolicy::printReceipt: the owning Sales-Kurir-Sub, super_admin, and the
+      // same-Agent agen/admin may print a self_sub receipt; a normal Kurir may not.
+      if (['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? '')) return true
+      return isSubRole.value && auth.user?.id === g.selfDeliveredByUserId
+    }
     if (isSubRole.value) return false
     return auth.user?.role !== 'kurir' || shipmentActionableByViewer(g)
   })
