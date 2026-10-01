@@ -46,7 +46,8 @@ class R04ReportTest extends TestCase
         $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id]);
         $kurir = User::factory()->kurir()->create(['agent_id' => $agen->id]);
         $sales = User::factory()->sales()->create(['agent_id' => $agen->id]);
-        $konsumen = User::factory()->konsumen()->create(['agent_id' => $agen->id, 'sales_id' => $sales->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agen->id]);
+        $konsumen = User::factory()->konsumen()->create(['agent_id' => $agen->id, 'sales_id' => $sales->id, 'korsal_id' => $korsal->id]);
         $sub = User::factory()->salesKurirSub()->create(['agent_id' => $agen->id]);
         ShippingConfiguration::create(['agent_id' => null, 'price_per_km' => 2000, 'minimum_distance_km' => 0, 'minimum_charge' => 5000, 'free_shipping_enabled' => false, 'is_active' => true]);
 
@@ -59,7 +60,7 @@ class R04ReportTest extends TestCase
         $location->forceFill(['owner_user_id' => $sub->id])->save();
         WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $productA->id, 'stock_type' => 'sub', 'sub_location_id' => $location->id, 'quantity' => 20]);
 
-        $this->b = compact('agen', 'admin', 'keuangan', 'gudang', 'kurir', 'sales', 'konsumen', 'sub', 'productA', 'productB', 'location');
+        $this->b = compact('agen', 'admin', 'keuangan', 'gudang', 'kurir', 'sales', 'korsal', 'konsumen', 'sub', 'productA', 'productB', 'location');
     }
 
     private function placeAgentOrderTwoItems(): Order
@@ -119,6 +120,7 @@ class R04ReportTest extends TestCase
         $this->assertNotNull($agentRow);
         $this->assertNotNull($subRow);
         $this->assertSame($this->b['sales']->name, $agentRow['sales']);
+        $this->assertSame($this->b['korsal']->name, $agentRow['korsal']);
 
         $subShipment = $subOrder->items()->firstOrFail()->shipment;
         $this->assertSame('self_sub', $subShipment->delivery_mode);
@@ -127,11 +129,27 @@ class R04ReportTest extends TestCase
 
         // Current/latest names: renaming the actors is reflected on the next render.
         $this->b['sales']->update(['name' => 'Sales Renamed']);
+        $this->b['korsal']->update(['name' => 'Korsal Renamed']);
         $this->b['sub']->update(['name' => 'Sub Renamed']);
 
         $rows = collect($this->actingAs($this->b['admin'])->getJson('/api/v1/reports/transactions?per_page=200')->assertOk()->json('data'));
-        $this->assertSame('Sales Renamed', $rows->firstWhere('order_id', $agentOrder->id)['sales']);
+        $agentRow = $rows->firstWhere('order_id', $agentOrder->id);
+        $this->assertSame('Sales Renamed', $agentRow['sales']);
+        $this->assertSame('Korsal Renamed', $agentRow['korsal']);
         $this->assertSame('Sub Renamed', $rows->firstWhere('order_id', $subOrder->id)['courier']);
+    }
+
+    public function test_keuangan_is_excluded_from_operational_reports_but_keeps_financial_reports(): void
+    {
+        $this->actingAs($this->b['keuangan'])->getJson('/api/v1/reports/transactions')->assertForbidden();
+        $this->actingAs($this->b['keuangan'])->getJson('/api/v1/reports/sales')->assertForbidden();
+
+        $this->actingAs($this->b['keuangan'])->getJson('/api/v1/reports/finance-orders')->assertOk();
+        $this->actingAs($this->b['keuangan'])->getJson('/api/v1/reports/finance-summary')->assertOk();
+
+        foreach (['gudang', 'kurir', 'sub'] as $role) {
+            $this->actingAs($this->b[$role])->getJson('/api/v1/reports/finance-orders')->assertForbidden();
+        }
     }
 
     public function test_finance_report_is_one_row_per_order_using_payment_summary(): void

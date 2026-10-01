@@ -275,7 +275,7 @@ const router = createRouter({
       component: () => import('@/views/dashboard/SalesReportView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal'],
       },
     },
     {
@@ -290,7 +290,7 @@ const router = createRouter({
       component: () => import('@/views/dashboard/OrderReportView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal'],
       },
     },
     {

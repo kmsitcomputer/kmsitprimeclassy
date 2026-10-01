@@ -510,7 +510,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // §Korsal dashboard) — ReportService::scopeToActor narrows both further
     // still to the korsal's own korsal_id, never their agen's whole branch.
     // Every other report below stays super_admin/agen/admin only.
-    Route::middleware('role:super_admin,agen,admin,korsal,keuangan')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,korsal')->group(function () {
         Route::get('/reports/transactions', [ReportController::class, 'transactions']);
         Route::get('/reports/sales', [ReportController::class, 'salesRoster']);
     });

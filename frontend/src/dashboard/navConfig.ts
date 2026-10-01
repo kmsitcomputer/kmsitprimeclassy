@@ -241,7 +241,8 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Laporan Sales',
         routeName: 'sales-report',
         icon: 'chart-bar',
-        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'keuangan'),
+        // R-04 / §G: operational sales roster — Keuangan uses the financial reports instead.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal'),
       },
       {
         key: 'courier-report',
@@ -255,7 +256,8 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Laporan Order',
         routeName: 'orders-report',
         icon: 'box',
-        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'keuangan'),
+        // R-04 / §G: operational order report — Keuangan uses the financial reports instead.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal'),
       },
       {
         key: 'sales-customers-report',

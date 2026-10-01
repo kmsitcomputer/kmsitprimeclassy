@@ -46,14 +46,10 @@ class OrderPolicy
             return $order->konsumen_id === $user->id;
         }
 
-        // "Kurir dapat melihat order sesuai network agen" — not limited to
-        // deliveries already assigned to them (they need to see what's
-        // available to pick up too); WHICH fields/actions they get from
-        // there (no price/fee/payment) is controlled elsewhere, never here.
-        if ($user->isRole('kurir')) {
-            return $order->agent_id === $user->agent_id;
-        }
-
+        // R-04 / §C: a normal Kurir must NOT use the generic order list/detail — the generic
+        // OrderResource exposes recipient/contact/address and sibling items, bypassing the
+        // pre-claim minimization in the Courier dashboard. Kurir order discovery + assigned
+        // delivery work go exclusively through /kurir/orders (CourierOrderResource).
         return false;
     }
 

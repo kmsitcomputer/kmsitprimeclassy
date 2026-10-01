@@ -134,6 +134,21 @@ Migrations: **none**.
 
 Exact results: `php artisan test` → **809 passed / 5751 assertions / 0 failures** (651.68s; 801 baseline + 8 R-04). `npm run type-check` → PASS. `npm run build-only` → PASS.
 
+## R-04 REVIEW REMEDIATION (MAJOR-12, MAJOR-13, D-011)
+
+Baseline HEAD before remediation: `e74f2b9b6fd0e8861fbc9a522da4cbe3ee2f31ce` (809/5751/0). No migration.
+
+- **MAJOR-12 — Kurir generic-order bypass:** `OrderPolicy::view` now returns `false` for a normal `kurir` (the agent-match branch is removed) and `OrderController::index` rejects `kurir` with 403, so a Kurir can no longer obtain generic `OrderResource` through `GET /orders` or `GET /orders/{order}`. Kurir discovery + assigned delivery work stay on `/kurir/orders`. `ShipmentController::updateStatus` now returns `CourierOrderResource` for `kurir`/`sales-kurir-sub` (their own items only — no `sales`/`korsal`, no recipient/sibling/financial leakage); office roles keep `OrderResource`. A mixed-shipment order never exposes a sibling courier's item. Sales-Kurir-Sub R-03 self_sub behavior unchanged.
+- **MAJOR-13 — Keuangan operational-report routes:** `GET /reports/transactions` and `GET /reports/sales` moved from `role:super_admin,agen,admin,korsal,keuangan` to `role:super_admin,agen,admin,korsal`. Keuangan keeps the financial surface (`finance-orders`, `finance-summary`, `payment-status`). Frontend nav + router meta updated so Keuangan no longer sees the operational reports.
+- **D-011 test gap:** the operational report now has a real stable `korsal_id` fixture; the test asserts the current Korsal name and that renaming the Korsal is reflected on the next render — alongside the existing Sales and self-delivery-actor coverage. No snapshot column, no migration.
+
+Files changed (remediation): `Policies/OrderPolicy.php`; `Http/Controllers/Api/V1/Order/OrderController.php`; `Http/Controllers/Api/V1/Courier/ShipmentController.php`; `routes/api_v1.php`; `tests/Feature/{R04OrderProjectionTest,R04ReportTest}.php`; frontend `dashboard/navConfig.ts`, `router/index.ts`.
+
+Migrations: **none**.
+
+Exact results after remediation: `php artisan test` → **813 passed / 5758 assertions / 0 failures** (639.31s; 801 baseline + 12 R-04). `npm run type-check` → PASS. `npm run build-only` → PASS.
+
+
 
 ## Package A starting state
 
@@ -372,6 +387,8 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] R-04 authorized + implemented (authority/projection, product CRU-no-Delete, reports).
 - [x] R-04 focused tests pass.
 - [x] Full backend regression passes (809/5751/0); frontend type-check + build PASS.
+- [x] R-04 review remediation (MAJOR-12/13 + D-011 test gap) — closed.
+- [x] Post-remediation regression passes (813/5758/0); frontend PASS.
 - [ ] Full Package B regression (cross-domain).
 - [ ] Claude independent final review / direct fixes.
 - [ ] Package B DEV/UAT.
@@ -397,11 +414,11 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-**R-04 complete — run the full Package B regression next.** R-03 (closed) + R-04 are implemented and green (809/5751/0; frontend PASS). **STOP here — do NOT deploy or start production work.**
+**R-04 complete (review remediation closed) — run the full Package B regression next.** R-03 (closed) + R-04 are implemented and green (813/5758/0; frontend PASS). **STOP here — do NOT deploy, merge to main, or start production work.**
 
 Corrected package sequence (no Human Stage Gate between R-03 and R-04):
 
-R-03 DEV UAT → authorize R-04 → R-04 implementation → **full Package B regression** → Claude final review / direct fixes → Package B DEV/UAT → Human Stage Gate → production.
+R-03 DEV UAT → authorize R-04 → R-04 implementation → **full Package B regression / independent Claude review** → Claude final review / direct fixes → Package B DEV/UAT → Human Stage Gate → production.
 
 Next actions are human-owned:
 

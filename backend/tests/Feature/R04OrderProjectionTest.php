@@ -21,7 +21,8 @@ use Tests\TestCase;
 
 /**
  * R-04 — order authority/projection, Kurir queue minimization, and Admin Product/Variation
- * CRU-no-Delete. The backend is the authority; every assertion is a forged direct API call.
+ * CRU-no-Delete (plus the MAJOR-12 Kurir generic-order boundary). Every assertion is a forged
+ * direct API call; the backend is the authority.
  */
 class R04OrderProjectionTest extends TestCase
 {
@@ -44,21 +45,34 @@ class R04OrderProjectionTest extends TestCase
         $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id]);
         $kurir = User::factory()->kurir()->create(['agent_id' => $agen->id]);
         $courier = Courier::create(['type' => 'internal', 'user_id' => $kurir->id, 'agent_id' => $agen->id, 'name' => 'Kurir A', 'is_active' => true]);
+        $kurirB = User::factory()->kurir()->create(['agent_id' => $agen->id]);
+        $courierB = Courier::create(['type' => 'internal', 'user_id' => $kurirB->id, 'agent_id' => $agen->id, 'name' => 'Kurir B', 'is_active' => true]);
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $agen->id]);
         ShippingConfiguration::create(['agent_id' => null, 'price_per_km' => 2000, 'minimum_distance_km' => 0, 'minimum_charge' => 5000, 'free_shipping_enabled' => false, 'is_active' => true]);
-        $product = Product::create(['sku' => 'R04-'.Str::uuid(), 'name' => 'R04 Cake', 'slug' => 'r04-'.uniqid(), 'has_variations' => false, 'base_price' => 10000, 'weight_grams' => 500, 'status' => 'active']);
-        ProductStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 20, 'quantity_reserved' => 0]);
-        WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 30]);
 
-        $this->b = compact('agen', 'admin', 'keuangan', 'gudang', 'kurir', 'courier', 'konsumen', 'product');
+        $productA = Product::create(['sku' => 'R04A-'.Str::uuid(), 'name' => 'R04 A', 'slug' => 'r04a-'.uniqid(), 'has_variations' => false, 'base_price' => 10000, 'weight_grams' => 500, 'status' => 'active']);
+        $productB = Product::create(['sku' => 'R04B-'.Str::uuid(), 'name' => 'R04 B', 'slug' => 'r04b-'.uniqid(), 'has_variations' => false, 'base_price' => 20000, 'weight_grams' => 500, 'status' => 'active']);
+        ProductStock::create(['agent_id' => $agen->id, 'product_id' => $productA->id, 'quantity_on_hand' => 20, 'quantity_reserved' => 0]);
+        ProductStock::create(['agent_id' => $agen->id, 'product_id' => $productB->id, 'quantity_on_hand' => 20, 'quantity_reserved' => 0]);
+        WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $productA->id, 'stock_type' => 'transit', 'quantity' => 30]);
+
+        $this->b = compact('agen', 'admin', 'keuangan', 'gudang', 'kurir', 'courier', 'kurirB', 'courierB', 'konsumen', 'productA', 'productB');
     }
 
     private function placeAgentOrder(int $qty = 2): Order
     {
+        return $this->placeTwoItemOrder();
+    }
+
+    private function placeTwoItemOrder(): Order
+    {
         $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
                 'payment_method_code' => 'cod',
-                'items' => [['product_id' => $this->b['product']->id, 'quantity' => $qty]],
+                'items' => [
+                    ['product_id' => $this->b['productA']->id, 'quantity' => 1],
+                    ['product_id' => $this->b['productB']->id, 'quantity' => 1],
+                ],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
                 'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
             ])->assertCreated()->json('data.id');
@@ -87,26 +101,106 @@ class R04OrderProjectionTest extends TestCase
         $this->assertArrayHasKey('order_no', $row);
         $this->assertNoFinancialFields($row);
 
-        // Gudang has no per-record order-detail authority (OrderPolicy::view).
         $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
     }
 
-    public function test_kurir_order_access_is_operational_only_including_shipment_status_response(): void
+    /* ---------------- MAJOR-12: normal Kurir generic-order boundary ---------------- */
+
+    public function test_normal_kurir_is_denied_the_generic_order_list_and_detail(): void
     {
         $order = $this->placeAgentOrder();
 
-        $list = $this->actingAs($this->b['kurir'])->getJson('/api/v1/orders')->assertOk();
-        $row = collect($list->json('data'))->firstWhere('id', $order->id);
-        $this->assertNotNull($row);
-        $this->assertNoFinancialFields($row);
+        // Generic list/detail must not be available to a normal Kurir at all — /kurir/orders is the
+        // only authorized (minimized) discovery surface.
+        $this->actingAs($this->b['kurir'])->getJson('/api/v1/orders')->assertForbidden();
+        $this->actingAs($this->b['kurir'])->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
+    }
 
-        $detail = $this->actingAs($this->b['kurir'])->getJson("/api/v1/orders/{$order->id}")->assertOk();
-        $this->assertNoFinancialFields($detail->json('data'));
-
-        // A logistics status flip must not hand the kurir the monetary OrderResource either.
+    public function test_kurir_shipment_status_response_uses_the_courier_projection_not_generic_order(): void
+    {
+        $order = $this->placeAgentOrder();
         $shipment = $order->items()->firstOrFail()->shipment;
+
         $flip = $this->actingAs($this->b['kurir'])->patchJson("/api/v1/shipments/{$shipment->id}/status", ['status' => 'dikirim'])->assertOk();
-        $this->assertNoFinancialFields($flip->json('data'));
+        $data = $flip->json('data');
+
+        $this->assertArrayHasKey('detail_available', $data, 'courier projection, not the generic OrderResource');
+        $this->assertArrayNotHasKey('sales', $data);
+        $this->assertArrayNotHasKey('korsal', $data);
+        $this->assertNoFinancialFields($data);
+    }
+
+    public function test_kurir_queue_is_minimal_before_claim_and_full_after_assignment(): void
+    {
+        $order = $this->placeAgentOrder();
+
+        $before = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
+            ->firstWhere('id', $order->id);
+        $this->assertNotNull($before);
+        $this->assertFalse($before['detail_available']);
+        foreach (['recipient_name', 'recipient_phone', 'address', 'latitude'] as $key) {
+            $this->assertArrayNotHasKey($key, $before);
+        }
+
+        $shipment = $order->items()->firstOrFail()->shipment;
+        app(CourierService::class)->assignCourier($shipment->fresh(), $this->b['courier'], $this->b['admin']);
+
+        $after = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
+            ->firstWhere('id', $order->id);
+        $this->assertNotNull($after);
+        $this->assertTrue($after['detail_available']);
+        $this->assertArrayHasKey('recipient_name', $after);
+        $this->assertArrayHasKey('address', $after);
+
+        // Another Kurir never obtains the assigned detail.
+        $sibling = collect($this->actingAs($this->b['kurirB'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
+            ->firstWhere('id', $order->id);
+        $this->assertTrue($sibling === null || $sibling['detail_available'] === false);
+    }
+
+    public function test_mixed_shipment_order_does_not_leak_sibling_couriers_item_detail(): void
+    {
+        $order = $this->placeTwoItemOrder();
+        $items = $order->items()->get();
+        [$itemA, $itemB] = [$items[0], $items[1]];
+
+        app(CourierService::class)->assignCourier($itemA->shipment()->first(), $this->b['courier'], $this->b['admin']);
+        app(CourierService::class)->assignCourier($itemB->shipment()->first(), $this->b['courierB'], $this->b['admin']);
+
+        // Each Kurir picks up their own shipment.
+        $this->actingAs($this->b['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+        $this->actingAs($this->b['kurirB'])->patchJson("/api/v1/shipments/{$itemB->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+
+        $viewA = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=dikirim')->assertOk()->json('data'))
+            ->firstWhere('id', $order->id);
+        $this->assertNotNull($viewA);
+        $itemIdsA = collect($viewA['items'])->pluck('id')->all();
+        $this->assertContains($itemA->id, $itemIdsA);
+        $this->assertNotContains($itemB->id, $itemIdsA, "Kurir A must not see Kurir B's sibling item");
+
+        $viewB = collect($this->actingAs($this->b['kurirB'])->getJson('/api/v1/kurir/orders?status=dikirim')->assertOk()->json('data'))
+            ->firstWhere('id', $order->id);
+        $this->assertNotNull($viewB);
+        $itemIdsB = collect($viewB['items'])->pluck('id')->all();
+        $this->assertContains($itemB->id, $itemIdsB);
+        $this->assertNotContains($itemA->id, $itemIdsB);
+    }
+
+    public function test_another_agent_kurir_cannot_access_this_branch_order(): void
+    {
+        $order = $this->placeAgentOrder();
+
+        $agen2 = User::factory()->agen()->create();
+        $agen2->update(['agent_id' => $agen2->id]);
+        $kurir2 = User::factory()->kurir()->create(['agent_id' => $agen2->id]);
+        Courier::create(['type' => 'internal', 'user_id' => $kurir2->id, 'agent_id' => $agen2->id, 'name' => 'Foreign', 'is_active' => true]);
+
+        $ids = collect($this->actingAs($kurir2)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->pluck('id');
+        $this->assertFalse($ids->contains($order->id));
+
+        // Cross-branch access is refused (403 policy, or 404 agent-scoped binding) — never data.
+        $response = $this->actingAs($kurir2)->getJson("/api/v1/orders/{$order->id}");
+        $this->assertContains($response->status(), [403, 404]);
     }
 
     public function test_financial_roles_and_konsumen_still_see_the_financial_projection(): void
@@ -121,30 +215,6 @@ class R04OrderProjectionTest extends TestCase
 
         $konsumen = $this->actingAs($this->b['konsumen'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
         $this->assertArrayHasKey('payment_summary', $konsumen);
-    }
-
-    public function test_kurir_queue_is_minimal_before_claim_and_full_after_assignment(): void
-    {
-        $order = $this->placeAgentOrder();
-
-        $before = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
-            ->firstWhere('id', $order->id);
-        $this->assertNotNull($before);
-        $this->assertFalse($before['detail_available']);
-        $this->assertArrayNotHasKey('recipient_name', $before);
-        $this->assertArrayNotHasKey('recipient_phone', $before);
-        $this->assertArrayNotHasKey('address', $before);
-        $this->assertArrayNotHasKey('latitude', $before);
-
-        $shipment = $order->items()->firstOrFail()->shipment;
-        app(CourierService::class)->assignCourier($shipment->fresh(), $this->b['courier'], $this->b['admin']);
-
-        $after = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
-            ->firstWhere('id', $order->id);
-        $this->assertNotNull($after);
-        $this->assertTrue($after['detail_available']);
-        $this->assertArrayHasKey('recipient_name', $after);
-        $this->assertArrayHasKey('address', $after);
     }
 
     public function test_admin_product_and_variation_delete_denied_but_cru_allowed(): void
