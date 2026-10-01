@@ -220,7 +220,7 @@ If the Human declines SC-03, the smallest worthwhile package is hardening/qualit
 
 ## 9. Human decisions — RECORDED (2026-10-01)
 
-1. **RC-1 — APPROVED.** SC-03 (add a new product/variation line to an existing order) is an authorized business requirement, distinct from quantity adjustment. Option **C-A** is selected.
+1. **RC-1 — APPROVED.** SC-03 (add a new product/variation line to an existing order) is an authorized business requirement, distinct from quantity adjustment. Option **C-A** is selected. **Authority is ADMIN ONLY** — effective role exactly `admin`, restricted to the existing same-Agent/branch scope; `super_admin`, `agen`, and every other role are denied. `OrderPolicy::manageFulfillment` must not be modified; SC-03 uses a dedicated narrow rule (`OrderPolicy::addLine`).
 2. **RC-2 — NO CHANGE / OUT OF SCOPE.** No Laravel 11 → 12 upgrade; no framework-upgrade remediation in Package C.
 3. **RC-3 — NO CHANGE / OUT OF SCOPE.** Google Sheets and RajaOngkir operate satisfactorily; no redesign, credential rotation, sharing change, or behavior change. Revisit only via an explicit future Human request or a concrete operational defect.
 4. **RC-4 — APPROVED CURRENT BEHAVIOR / NO CHANGE.** Stable IDs with current/latest-name resolution for warehouse/report actors; no historical name snapshots.

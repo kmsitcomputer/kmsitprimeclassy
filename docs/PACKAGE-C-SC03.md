@@ -25,7 +25,7 @@
 
 ## 1. Objective
 
-Allow an authorized Admin (`super_admin` / same-Agent `agen` / same-Agent `admin`) to add a new product/variation line to an existing eligible order, preserving every closed Package A and Package B business, stock, fulfillment, delivery, financial, authorization, audit, idempotency, and concurrency invariant.
+Allow an **Admin** (effective role exactly `admin`, restricted to the existing same-Agent/branch scope) to add a new product/variation line to an existing eligible order, preserving every closed Package A and Package B business, stock, fulfillment, delivery, financial, authorization, audit, idempotency, and concurrency invariant.
 
 **Do not redesign existing order architecture.** Package C extends the existing order/fulfillment/stock/payment services; it does not replace them.
 
@@ -55,7 +55,7 @@ Source:
 - **Quantity adjustment** (`OrderFulfillmentService::adjustItemQuantity`) only changes an existing line's `fulfilled_quantity`, only while `order.status === 'diproses'`, and reconciles totals + refund/additional-payment ledgers canonically.
 - **Date split** (`splitItemForReschedule`) already creates a **new `OrderItem`** for the same product on a new date, with its own fresh Shipment, Stock Request split, and (for Sub) reservation split. SC-03 reuses this machinery rather than inventing a parallel one.
 - **Payment truth is order-level**: `OrderTotalCalculator::recalculate` is the only place `subtotal_amount`/`total_amount` are recomputed after creation; `PaymentService::recalculatePaymentStatus` (via `applyPaymentToOrder`/`reverseAppliedPayment`/`reconcileTotals`) is the only writer of `paid_amount`/`remaining_amount`/`payment_status`; `PaymentSummaryService` is the canonical summary.
-- **Authority**: `OrderPolicy::manageFulfillment` = `super_admin` or same-Agent `agen`/`admin`; fulfillment routes live in the `role:super_admin,agen,admin` group.
+- **Authority (existing code — NOT reused by SC-03):** `OrderPolicy::manageFulfillment` = `super_admin` or same-Agent `agen`/`admin`, and the fulfillment routes live in the `role:super_admin,agen,admin` group. SC-03 deliberately does **not** modify or reuse this; it uses a dedicated Admin-only rule (§3.1).
 - **Stock Request**: exactly one per order, created when the order first enters `diproses`; `StockRequestService::createForOrderWhenProcessing` is idempotent and rejects a second request; Sub items are excluded.
 - **Idempotency**: order creation uses an `Idempotency-Key` header + unique `(konsumen_id, idempotency_key)`; fulfillment adjust is naturally idempotent because it sets an absolute quantity. There is **no** per-item idempotency store today.
 - **Lock order**: Order-level operations lock the `Order` row (`OrderService::cancel`, `OrderFulfillmentService` mutators); inventory locks use `StockService::canonicalReservationTargets` (`p:{id}` / `v:{id}`, `ksort`ed).
@@ -66,10 +66,10 @@ Source:
 
 ### 3.1 Authority
 
-- Allowed actors: `super_admin` (any branch, existing override) and same-Agent `agen` / `admin`.
-- Enforced by reuse of `OrderPolicy::manageFulfillment` (no new policy ability, no authority expansion). Route sits inside the existing `role:super_admin,agen,admin` middleware group.
-- Branch isolation preserved: the global `BelongsToAgentScope` on `Order` plus the policy's `order->agent_id === actor->agent_id` re-check.
-- Kurir, keuangan, korsal, sales, sales-kurir-sub, konsumen cannot add lines (403). Adding a line is operational, not financial.
+- **Allowed actor: effective role exactly `admin`.** No other role may add a line — explicitly including `super_admin`, `agen`, `keuangan`, `gudang`, `korsal`, `sales`, `sales-kurir-sub`, `kurir`, and `konsumen` (403).
+- **Dedicated narrow authorization rule (LOCKED):** a new `OrderPolicy::addLine(User $user, Order $order)` ability = `$user->isRole('admin') && $order->agent_id === $user->agent_id`. Enforced server-side through the policy, gated by a dedicated `role:admin` route group (defence in depth), plus the global `BelongsToAgentScope` on `Order`.
+- **`OrderPolicy::manageFulfillment` is neither modified nor reused.** Package A/B features continue to depend on its current `super_admin` / same-Agent `agen` / `admin` authority unchanged; SC-03 does not narrow or widen it, and does not sit in the `role:super_admin,agen,admin` group.
+- **Same-Agent/branch scope preserved:** the Admin must own the order's branch (`order->agent_id === actor->agent_id`); a cross-Agent `admin` is denied (403/404 per existing API security conventions, indistinguishable from not-found).
 - **Locked scope boundary:** a Sub-sourced order (`order` containing `stock_source='sub'` items) cannot accept an added line. Because the authorized actor is never a Sales-Kurir-Sub, Sub source can never be resolved for this action; a Sub-sourced order is rejected with a clear 422. This preserves the Sales-Kurir-Sub/Sub-owner restriction by construction. (Mixed-source orders are out of scope for Package C.)
 
 ### 3.2 Product / variation resolution
@@ -88,7 +88,7 @@ Source:
 
 ### 3.4 Stock source
 
-- **Agent stock only.** The action is office-only; `StockSourceResolver` is not asked to authorise Sub (an Admin is never an eligible Sub actor). A client-supplied `stock_source`/`sub_location_id` is rejected outright (422) — never silently ignored.
+- **Agent stock only.** The action is Admin-only; `StockSourceResolver` is not asked to authorise Sub (an Admin is never an eligible Sub actor). A client-supplied `stock_source`/`sub_location_id` is rejected outright (422) — never silently ignored.
 - Reservation uses `StockService::reserveForProduct` / `reserveForVariation` (Agent commitment row first, then Warehouse Transit/Plan) under the transaction, exactly as checkout, with `InsufficientStockException` → 422 on shortfall.
 - No alternate stock truth; no Sub reservation is created; `sub_stock_reservations` is untouched.
 
@@ -105,7 +105,7 @@ Source:
 ### 3.7 Fulfillment / shipment
 
 - The new line receives its **own fresh Shipment** created by the existing shipment-creation helper (`OrderFulfillmentService::assignFreshShipment` logic, extracted/reused), cloning the order's destination/provider snapshot: `delivery_mode = standard`, `self_delivered_by_user_id = null`, `status = pending`, `courier_id = null`. The new line is then discoverable through the existing courier/office workflow.
-- **Eligible order status: `diproses` only** — the same window as quantity adjustment (`manageFulfillment`). This guarantees the order is already in the Stock-Request-backed fulfillment flow and avoids inventing a new pre-processing state. An addition on any other status (`diterima`, `dikirim`, `terkirim`, `pengembalian`, `kembali`, `dibatalkan`) is rejected 422 (`messages.fulfillment.window_closed` / a dedicated key). No parallel fulfillment implementation.
+- **Eligible order status: `diproses` only** — the same *status* window as quantity adjustment. This guarantees the order is already in the Stock-Request-backed fulfillment flow and avoids inventing a new pre-processing state. An addition on any other status (`diterima`, `dikirim`, `terkirim`, `pengembalian`, `kembali`, `dibatalkan`) is rejected 422 (`messages.fulfillment.window_closed` / a dedicated key). No parallel fulfillment implementation.
 
 ### 3.8 Financial reconciliation
 
@@ -178,18 +178,18 @@ Canonical sequence inside the transaction, after the item is created and reserve
 
 Smallest change; no unrelated endpoint redesign.
 
-- **Route:** `POST /orders/{order}/items` added to the existing `role:super_admin,agen,admin` group (adjacent to the fulfillment routes in `routes/api_v1.php`). Controller: `OrderFulfillmentController::addItem` (reuse the existing controller).
+- **Route:** `POST /orders/{order}/items` in a **dedicated `role:admin`** group in `routes/api_v1.php` (NOT the `role:super_admin,agen,admin` fulfillment group). Controller: `OrderFulfillmentController::addItem` (reuse the existing controller), which authorizes via `OrderPolicy::addLine`.
 - **Headers:** `Idempotency-Key` (required).
 - **Body:** `product_id` (required, int), `product_variation_id` (nullable, int), `quantity` (required, int ≥ 1), `requested_delivery_date` (nullable, date ≥ today), `reason` (required, string ≤ 255), `additional_payment_method` (optional, `in:transfer,cod`, default `transfer`; only meaningful in the fully-paid → obligation case).
 - **Validation:** new `AddOrderItemRequest` following the existing `BaseFormRequest` convention. No price/fee/SKU/subtotal/agent_id/sales_id/status fields exist.
 - **Responses:** `201 Created` with the canonical `OrderResource` (full order + items + payment summary) so the frontend refreshes authoritative state; idempotent replay → `200 OK` with the same `OrderResource`; conflicting key reuse → `409`; validation/authority/state errors → existing `ApiException` 422/403 conventions with 404 for out-of-branch resources.
-- Authority failure → 403 (`manageFulfillment`); status not `diproses` → 422; insufficient stock → 422.
+- Authority failure → 403 (`OrderPolicy::addLine` — any non-`admin` role, including `super_admin` and `agen`, and a cross-Agent `admin`); status not `diproses` → 422; insufficient stock → 422.
 
 ---
 
 ## 6. Frontend
 
-- `views/OrderDetailView.vue`: a bounded **"Tambah Produk"** flow, visible only to `super_admin`/`agen`/`admin` while `order.status === 'diproses'`:
+- `views/OrderDetailView.vue`: a bounded **"Tambah Produk"** flow, visible only to `admin` while `order.status === 'diproses'`:
   - select product/variation (reuse the existing catalog product/variation picker components),
   - enter quantity,
   - confirm/choose the requested delivery date (default the order's `delivery_date_estimate`),
@@ -206,9 +206,9 @@ Smallest change; no unrelated endpoint redesign.
 
 New/extended Feature coverage (real DB; deterministic concurrency via the existing `.phpunit-concurrency-actor.php` harness where races are involved):
 
-1. Authorized `super_admin` / same-Agent `agen` / same-Agent `admin` success; canonical `OrderResource` returned.
-2. Unauthorized roles denied: kurir, keuangan, korsal, sales, sales-kurir-sub, konsumen → 403 (no side effects).
-3. Cross-Agent denied: agen/admin of another branch → 403/404, no item/reservation created.
+1. Authorized same-Agent `admin` success; canonical `OrderResource` returned.
+2. Unauthorized roles denied: `super_admin`, `agen`, `keuangan`, `gudang`, `korsal`, `sales`, `sales-kurir-sub`, `kurir`, `konsumen` → 403 (no side effects).
+3. Cross-Agent denied: `admin` of another branch → 403/404, no item/reservation created.
 4. Invalid product/variation: inactive/soft-deleted product; missing/foreign/inactive variation; variation id on a simple product; missing variation on a variation product → 422/404, nothing created.
 5. Invalid quantity: missing, `0`, negative, non-integer → 422.
 6. Insufficient Agent stock → 422 (`InsufficientStockException`), no reservation and no item persisted.
@@ -236,7 +236,7 @@ Focused tests first; then the full `php artisan test` suite must be green (0 fai
 
 - No Laravel 12 upgrade (RC-2); no Google Sheets / RajaOngkir change (RC-3); no historical name snapshots (RC-4).
 - No change to Package A/B closed behavior (R-01/R-02/R-03/R-04).
-- No new role, no authority expansion, no change to `OrderPolicy` beyond reuse.
+- No new role; `OrderPolicy::manageFulfillment` is unchanged; SC-03 adds only a dedicated `OrderPolicy::addLine` ability (Admin-only, same-Agent).
 - No Sub-sourced or mixed-source order line addition; no Sub reservation from this path.
 - No addition outside `diproses`; no addition of a brand-new *order* (that is checkout).
 - No product-based invoice/delivery grouping; no new payment calculation; no new financial model.

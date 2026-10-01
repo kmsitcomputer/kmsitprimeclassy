@@ -8,7 +8,7 @@
 
 ## Objective
 
-Allow an authorized Admin (`super_admin` / same-Agent `agen` / same-Agent `admin`) to add a **new** product/variation line to an existing eligible order, preserving every Package A and Package B business, stock, fulfillment, delivery, financial, authorization, audit, idempotency, and concurrency invariant. No redesign of existing order architecture.
+Allow an **Admin** (effective role exactly `admin`, restricted to the existing same-Agent/branch scope) to add a **new** product/variation line to an existing eligible order, preserving every Package A and Package B business, stock, fulfillment, delivery, financial, authorization, audit, idempotency, and concurrency invariant. No redesign of existing order architecture.
 
 ## Baseline
 
@@ -24,6 +24,7 @@ Allow an authorized Admin (`super_admin` / same-Agent `agen` / same-Agent `admin
 - **RC-2 NO CHANGE / OUT OF SCOPE** — no Laravel 11 → 12 upgrade; no framework-upgrade remediation.
 - **RC-3 NO CHANGE / OUT OF SCOPE** — Google Sheets and RajaOngkir unchanged (no redesign, rotation, sharing, or behavior change).
 - **RC-4 APPROVED CURRENT BEHAVIOR** — stable IDs with current/latest-name resolution; no historical name snapshots.
+- **SC-03 AUTHORITY = ADMIN ONLY (FINAL, LOCKED)** — only effective role exactly `admin`, restricted to the existing same-Agent/branch scope. All other roles are denied, explicitly including `super_admin` and `agen`. `OrderPolicy::manageFulfillment` must NOT be modified; SC-03 uses a dedicated narrow rule (`OrderPolicy::addLine`).
 
 ## Source files inspected (bounded SC-03 recon)
 
@@ -39,7 +40,7 @@ Allow an authorized Admin (`super_admin` / same-Agent `agen` / same-Agent `admin
 
 ## Locked architecture summary
 
-- **Authority:** reuse `OrderPolicy::manageFulfillment` (`super_admin` or same-Agent `agen`/`admin`); route in the existing `role:super_admin,agen,admin` group. No authority expansion.
+- **Authority:** Admin only — a dedicated `OrderPolicy::addLine` ability (`$user->isRole('admin') && $order->agent_id === $user->agent_id`), gated by a dedicated `role:admin` route group. `OrderPolicy::manageFulfillment` is **not** modified or reused (Package A/B keeps its `super_admin`/same-Agent `agen`/`admin` authority). All other roles, including `super_admin` and `agen`, are denied; cross-Agent `admin` is denied.
 - **Product/variation:** reuse `OrderService::resolveLine` (active product; variation-required / variation-not-allowed); server-authoritative price/fees/SKU/snapshots.
 - **Snapshot:** new line created with the canonical checkout snapshot fields; existing lines never mutated. Snapshot construction extracted to ONE shared helper used by checkout and addition.
 - **Stock source:** Agent stock only; `stock_source`/`sub_location_id` rejected if supplied; Sub-sourced orders rejected 422 (scope boundary).
@@ -61,7 +62,7 @@ Allow an authorized Admin (`super_admin` / same-Agent `agen` / same-Agent `admin
 - `app/Services/Stock/StockRequestService.php` — add `appendItemForOrderItem(Order, OrderItem)`.
 - `app/Http/Controllers/Api/V1/Fulfillment/OrderFulfillmentController.php` — add `addItem`.
 - `app/Models/OrderItem.php` — add `idempotency_key` to `$fillable`.
-- `routes/api_v1.php` — add `POST /orders/{order}/items` in the `role:super_admin,agen,admin` group.
+- `routes/api_v1.php` — add `POST /orders/{order}/items` in a dedicated `role:admin` group.
 - `lang/{id,en,ar,zh}/messages.php` — new messages.
 
 **Backend — new**
@@ -86,7 +87,7 @@ Allow an authorized Admin (`super_admin` / same-Agent `agen` / same-Agent `admin
 
 ## API impact
 
-- New `POST /orders/{order}/items` (existing `role:super_admin,agen,admin` group), `Idempotency-Key` required.
+- New `POST /orders/{order}/items` (dedicated `role:admin` group), `Idempotency-Key` required.
 - Body: `product_id`, `product_variation_id?`, `quantity`, `requested_delivery_date?`, `reason`, `additional_payment_method?`.
 - `201` canonical `OrderResource`; idempotent replay `200`; conflicting key reuse `409`; 422 validation/state; 403 authority; 404 out-of-branch.
 - No unrelated endpoint changes.
@@ -103,7 +104,7 @@ See `docs/PACKAGE-C-SC03.md` §7 (21 enumerated areas): authorized/unauthorized/
 
 ## Explicit exclusions
 
-No Laravel 12 upgrade; no Google Sheets / RajaOngkir change; no historical name snapshots; no change to Package A/B closed behavior; no new role or authority expansion; no Sub-sourced or mixed-source addition; no addition outside `diproses`; no product-based grouping; no new payment calculation or financial model; no parallel fulfillment implementation; no schema change beyond the single idempotency-key migration; no WH-08 / DP-03 / DP-04 / dead-code / docs-drift work; no production migration or deployment; no frontend test framework.
+No Laravel 12 upgrade; no Google Sheets / RajaOngkir change; no historical name snapshots; no change to Package A/B closed behavior; no new role; `OrderPolicy::manageFulfillment` unchanged (only a dedicated Admin-only `OrderPolicy::addLine` ability added); no Sub-sourced or mixed-source addition; no addition outside `diproses`; no product-based grouping; no new payment calculation or financial model; no parallel fulfillment implementation; no schema change beyond the single idempotency-key migration; no WH-08 / DP-03 / DP-04 / dead-code / docs-drift work; no production migration or deployment; no frontend test framework.
 
 ## Package A / Package B invariants preserved
 
