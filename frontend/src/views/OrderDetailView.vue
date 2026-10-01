@@ -349,7 +349,7 @@ async function submitVerification(shipmentId: number) {
 /* ---------- Office: proactively assign/reassign a courier to a shipment (a kurir otherwise self-assigns via pickupShipment) ---------- */
 const isOfficeRole = computed(() => ['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? ''))
 /** R-04: operational roles (gudang/kurir) receive no financial projection — hide money UI for them. */
-const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'korsal'].includes(auth.user?.role ?? ''))
+const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? ''))
 const activeCouriers = ref<{ id: number; name: string }[]>([])
 const assignTargets = reactive<Record<number, number | null>>({})
 const assigningCourierId = ref<number | null>(null)

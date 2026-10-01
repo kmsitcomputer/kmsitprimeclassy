@@ -13,7 +13,7 @@ class OrderItemResource extends JsonResource
         // R-04 / §D: Gudang and Kurir receive the operational item view only — commercial values
         // (unit price / line subtotal) belong to the financial projection.
         $seesFinancials = $user !== null
-            && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'korsal');
+            && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal');
 
         return [
             'id' => $this->id,

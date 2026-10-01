@@ -104,6 +104,26 @@ class R04OrderProjectionTest extends TestCase
         $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
     }
 
+    public function test_sales_kurir_sub_keeps_the_financial_projection_of_its_own_orders(): void
+    {
+        // Package A regression guard: a Sales-Kurir-Sub is Sales + Kurir, not an operational-only
+        // role — it buys for itself and for its referral consumers and must see what is owed.
+        $sub = User::factory()->salesKurirSub()->create(['agent_id' => $this->b['agen']->id, 'parent_id' => $this->b['agen']->id]);
+        $id = $this->actingAs($sub)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', [
+                'payment_method_code' => 'cod',
+                'items' => [['product_id' => $this->b['productA']->id, 'quantity' => 1]],
+                'recipient_name' => 'Sub Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sub',
+                'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
+            ])->assertCreated()->json('data.id');
+
+        $row = collect($this->actingAs($sub)->getJson('/api/v1/orders')->assertOk()->json('data'))->firstWhere('id', $id);
+        foreach (['payment_status', 'payment_summary', 'total_amount', 'remaining_amount', 'payment_method'] as $key) {
+            $this->assertArrayHasKey($key, $row, "[{$key}] must stay visible to the Sales-Kurir-Sub");
+        }
+        $this->assertArrayHasKey('unit_price', $row['items'][0]);
+    }
+
     /* ---------------- MAJOR-12: normal Kurir generic-order boundary ---------------- */
 
     public function test_normal_kurir_is_denied_the_generic_order_list_and_detail(): void

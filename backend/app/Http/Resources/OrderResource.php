@@ -15,7 +15,7 @@ class OrderResource extends JsonResource
         // Kurir get the operational order view only (no DP/paid/remaining/payment summary/ledger);
         // financial truth stays canonical in the payment layer for the authorized roles.
         $seesFinancials = $user !== null
-            && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'korsal');
+            && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal');
 
         return [
             'id' => $this->id,

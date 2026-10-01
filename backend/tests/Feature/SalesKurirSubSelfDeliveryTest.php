@@ -260,6 +260,19 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         $this->assertFalse($ids($this->b['otherSub'])->contains($own->id));
     }
 
+    public function test_normal_kurir_queue_never_lists_a_self_sub_shipment(): void
+    {
+        $subOrder = $this->placeSubOrder($this->b['sub'], 1);
+        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+
+        foreach (['/api/v1/kurir/orders', '/api/v1/kurir/orders?status=diproses'] as $url) {
+            $ids = collect($this->actingAs($this->b['kurir'])->getJson($url)->assertOk()->json('data'))->pluck('id');
+            $this->assertTrue($ids->contains($agentOrderId), 'the standard Agent-sourced order stays claimable');
+            $this->assertFalse($ids->contains($subOrder->id), 'a self_sub order is never in a normal Kurir queue');
+        }
+    }
+
     public function test_sales_kurir_sub_cannot_use_normal_kurir_return_routes(): void
     {
         $this->actingAs($this->b['sub'])->getJson('/api/v1/kurir/returns')->assertForbidden();

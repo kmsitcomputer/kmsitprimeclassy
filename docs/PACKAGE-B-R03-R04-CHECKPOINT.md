@@ -1,6 +1,6 @@
 # Package B (R-03 + R-04) — Checkpoint
 
-**Status:** R-03 IMPLEMENTED & GREEN — AWAITING HUMAN REVIEW / DEV UAT. R-04 **NOT** authorized.
+**Status:** R-03 + R-04 IMPLEMENTED, REVIEWED AND GREEN — independent final review complete; next: Package B DEV manual UAT.
 **Created:** 2026-10-01
 **Active spec:** `docs/PACKAGE-B-R03-R04.md`
 **Repository protocol:** `AGENTS.md`
@@ -389,8 +389,8 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Full backend regression passes (809/5751/0); frontend type-check + build PASS.
 - [x] R-04 review remediation (MAJOR-12/13 + D-011 test gap) — closed.
 - [x] Post-remediation regression passes (813/5758/0); frontend PASS.
-- [ ] Full Package B regression (cross-domain).
-- [ ] Claude independent final review / direct fixes.
+- [x] Full Package B regression (cross-domain).
+- [x] Claude independent final review / direct fixes (815/5771/0).
 - [ ] Package B DEV/UAT.
 - [ ] Human Stage Gate.
 - [ ] Production deployment.
@@ -412,17 +412,42 @@ Pre-existing technical debt (NOT Package B regressions): Package A role migratio
 
 Production is LIVE after Package A. Package B development must not mutate production. No Package B production deployment/migration is authorized until after implementation, review, DEV/UAT, and Human Stage Gate.
 
+## INDEPENDENT FINAL REVIEW (Claude) — Package B
+
+Reviewer: Claude (independent). Reviewed diff: `8b53f78..ecf9713` (72 files, full diff, not only the last commit). Reviewed HEAD: `ecf97133495e469ca12eb395da5f44a012a2b0f6`.
+
+Reviewed: self-delivery authority/ownership, generic status bypass, delivery verification (append-only, idempotency), Sub reservation reduce/increase/split, Agent StockRequest split, counter/courier-fee/financial-obligation reconciliation, lock ordering (adjust vs Keuangan settlement vs Package A parent->stock->reservation order), Sub customer-return restock, R-04 projections (Gudang/Kurir/list+detail), Kurir queue, Product/Variation delete, operational/finance reports, three R-03 migrations (additive, CHECK + triggers, rollback order), Package A regression. Concurrency/lock code was NOT changed by this review, so no new real-MySQL race coverage was required (existing harness tests remain green).
+
+### Confirmed findings (both fixed directly)
+
+1. **MAJOR — Package A regression: Sales-Kurir-Sub lost the financial projection of its own orders.** Invariant: Sales-Kurir-Sub is Sales + self-delivery (own purchase / referral orders), not an operational-only role; R-04 only restricts Gudang and Kurir. Path: `OrderResource` / `OrderItemResource` `$seesFinancials` role list (and the frontend `OrderDetailView` `seesFinancials`) omitted `sales-kurir-sub`, so on `GET /orders` / `/orders/{id}` a Sub (scoped to `sales_id=self OR konsumen_id=self`) lost `payment_status`, totals, DP/paid/remaining, `payment_summary`, `payment_method`, item `unit_price`/`subtotal` — it could no longer see or settle what it owes on its own purchase. Fix: add `sales-kurir-sub` to the list in both resources and `OrderDetailView.vue`. Test: `R04OrderProjectionTest::test_sales_kurir_sub_keeps_the_financial_projection_of_its_own_orders` (fails without the fix).
+2. **MINOR — normal Kurir queue listed Sales-Kurir-Sub self-delivery orders.** Invariant: `self_sub` shipments are never part of the normal Kurir path. Path: `CourierDashboardController::orders` (normal-Kurir branch) matched every `diproses` item in the branch and `CourierOrderResource::itemVisibleToViewer` showed it, so every Kurir saw other Subs' self_sub orders (minimal pre-claim data: order no, region, product, qty) with a claim action that always 403s. No mutation was possible. Fix: normal-Kurir query excludes `delivery_mode=self_sub` shipments (AND-ed with both queue alternatives) and the resource filter hides self_sub items. Test: `SalesKurirSubSelfDeliveryTest::test_normal_kurir_queue_never_lists_a_self_sub_shipment` (fails without the fix).
+
+### Non-findings / verified
+- Gudang: list is operational-only, detail 403; Kurir: generic list/detail 403, courier projection money-free, pre-claim minimal vs assigned detail, no sibling-item leakage; Sub dashboard scope unchanged (Order + Selesai via `?status=terkirim`, no `/kurir/returns*`, `/kurir/reports/delivered`).
+- Admin Product/Variation CRU-no-Delete enforced by route group AND policy; super_admin/agen delete preserved.
+- Operational report: one row per OrderItem, exactly 14 columns, `Tgl Kirim` = `requested_delivery_date`, live names (self_sub actor, Sales, Korsal). Finance report: one row per Order via `PaymentSummaryService`; Keuangan removed from operational report routes.
+- Delivery verification: append-only, mandatory Idempotency-Key, conflicting reuse = 409, Admin-only same-Agent.
+- Counters/fees: increase restores cancelled before additional; terminal lines not resurrected; courier fee conserved on split; commission not duplicated on retry.
+- `OrderFulfillmentService` adjust path is gated by order status `diproses` (any shipped item moves the order to `dikirim`), so Sub `increase()` cannot reactivate a consumed reservation.
+
+### Documentation inconsistency
+- The checkpoint header said "R-03 ... AWAITING DEV UAT, R-04 NOT authorized" and the old EXACT NEXT ACTION described a pending regression; both were stale (R-04 is implemented and reviewed). Corrected here.
+
+### Deployment note (not a code defect)
+- Migration M1 creates two BEFORE INSERT/UPDATE triggers on `shipments`. On a MySQL/MariaDB server with binary logging enabled the migrating DB user needs the `SUPER`/`SET_USER_ID` privilege or `log_bin_trust_function_creators=1`. It already applied on DEV; confirm the production DB user/config before the production stage.
+
+### Files changed (this review)
+`backend/app/Http/Resources/{OrderResource,OrderItemResource,CourierOrderResource}.php`; `backend/app/Http/Controllers/Api/V1/Courier/CourierDashboardController.php`; `frontend/src/views/OrderDetailView.vue`; tests `R04OrderProjectionTest`, `SalesKurirSubSelfDeliveryTest`; this checkpoint.
+
+Migrations: **none changed or added.** Production untouched.
+
+### Results
+Focused: `R04OrderProjectionTest`, `SalesKurirSubSelfDeliveryTest`, `CourierSystemTest`, `R04ReportTest` → 63 passed. Full `php artisan test` → **815 passed / 5771 assertions / 0 failures** (671.65s; 813 + 2 regressions). `npm run type-check` PASS; `npm run build-only` PASS (pre-existing chunk-size warning only).
+
+### Remaining risks / open findings
+None open. Documented by design: R03-1 (triggers instead of single CHECK), R03-3, R03-4 (verification outcome `return` does not itself create a ReturnRequest). Pre-existing debt unchanged.
+
 ## EXACT NEXT ACTION
 
-**R-04 complete (review remediation closed) — run the full Package B regression next.** R-03 (closed) + R-04 are implemented and green (813/5758/0; frontend PASS). **STOP here — do NOT deploy, merge to main, or start production work.**
-
-Corrected package sequence (no Human Stage Gate between R-03 and R-04):
-
-R-03 DEV UAT → authorize R-04 → R-04 implementation → **full Package B regression / independent Claude review** → Claude final review / direct fixes → Package B DEV/UAT → Human Stage Gate → production.
-
-Next actions are human-owned:
-
-1. Run the full Package B cross-domain regression.
-2. Claude independent diff-first final review; any real in-scope finding fixed directly.
-3. Package B DEV/UAT, then Human Stage Gate.
-4. Push `git push origin feat/package-b-r03-r04` (PUSH-1 resolved).
+**PACKAGE B DEV MANUAL UAT.** Do not merge to main, deploy, or touch production.

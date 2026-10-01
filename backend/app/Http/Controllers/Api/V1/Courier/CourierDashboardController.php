@@ -63,6 +63,10 @@ class CourierDashboardController extends Controller
                         return;
                     }
 
+                    // Normal Kurir never sees (or can claim) a Sales-Kurir-Sub self-delivery shipment —
+                    // that goods sit in the Sub's own Sub Location and ship only through its owner.
+                    $sq->whereDoesntHave('shipment', fn ($ssq) => $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB));
+
                     // Normal Kurir — a requested status narrows the queue; ownership stays the same.
                     if (in_array($status, $validStatuses, true)) {
                         $sq->where('status', $status);
@@ -73,11 +77,14 @@ class CourierDashboardController extends Controller
                         return;
                     }
 
-                    $sq->where('status', 'diproses')
-                        ->orWhere(function ($dq) use ($courierId) {
-                            $dq->where('status', 'dikirim')
-                                ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
-                        });
+                    // Nested so the self_sub exclusion above stays AND-ed with both alternatives.
+                    $sq->where(function ($qq) use ($courierId) {
+                        $qq->where('status', 'diproses')
+                            ->orWhere(function ($dq) use ($courierId) {
+                                $dq->where('status', 'dikirim')
+                                    ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
+                            });
+                    });
                 });
             })
             ->with('items.shipment.courier')

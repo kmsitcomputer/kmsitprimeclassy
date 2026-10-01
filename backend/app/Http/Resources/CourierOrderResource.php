@@ -96,6 +96,11 @@ class CourierOrderResource extends JsonResource
             return true;
         }
 
+        // A self_sub item belongs to its owning Sales-Kurir-Sub, never a normal Kurir's queue.
+        if ($item->shipment?->delivery_mode === 'self_sub') {
+            return false;
+        }
+
         if (in_array($item->status, ['diterima', 'diproses'], true)) {
             return true;
         }
