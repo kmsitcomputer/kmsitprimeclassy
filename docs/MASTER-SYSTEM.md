@@ -16,7 +16,7 @@ Prime Classy Cake & Cookies is a **multi-branch cake and cookies ordering platfo
 | Warehouse layer (buckets, transfers, handovers, opname, stock requests, fulfilment proposals, cancellation/return reversal) | Implemented, in production |
 | **Package A** — Sales-Kurir-Sub role, 1:1 Sub Location ownership, real Sub stock, Sub replenishment/return | **Production closed** |
 | **Package B** — R-03 fulfilment/delivery lifecycle (self-delivery, delivery verification, split/reschedule, delivery grouping) + R-04 authority, operational-vs-financial projections, Admin Product CRU-no-Delete, reports | **Production closed** |
-| **Package C** — SC-03: Admin-only add of a new product line to an existing order | Implemented and independently reviewed on branch `feat/package-c-sc03`; DEV UAT, Human Stage Gate and production deployment **not recorded** |
+| **Package C** — SC-03: Admin-only add of a new product line to an existing order | Implemented, independently reviewed, remediated and finally audited on branch `feat/package-c-sc03`; DEV UAT = Human PASS; DEV Stage Gate = CLOSED/APPROVED; production deployment and production migrations **PENDING** (not production closed) |
 
 ## 3. Technology stack
 
@@ -208,12 +208,12 @@ Production is single-domain on Nginx/PHP-FPM with the `public_html/laravel.php` 
 
 ## 40. Testing
 
-PHPUnit (`tests/Feature`, `tests/Unit`) with real DB, policy, migration, and concurrency tests; `RefreshDatabase` or the committed-fixture `RestoresIsolatedTestDatabase` trait for races. Last recorded full backend run (Package C remediation): **851 passed / 6024 assertions / 0 failures** (before the 4-test DEV reset-command suite was added). Frontend: `vue-tsc` type-check and Vite build; no frontend test runner.
+PHPUnit (`tests/Feature`, `tests/Unit`) with real DB, policy, migration, and concurrency tests; `RefreshDatabase` or the committed-fixture `RestoresIsolatedTestDatabase` trait for races. Last recorded full backend run (Package C remediation): **855 passed / 6075 assertions / 0 failures** (includes the 4 DEV reset-command tests). Frontend type-check and production build also pass. Frontend: `vue-tsc` type-check and Vite build; no frontend test runner.
 
 ## 41. Current roadmap state
 
 - Package A: **closed and deployed** (production batch with migrations `2026_09_29_*`).
 - Package B (R-03 + R-04): **closed and deployed** (migrations `2026_10_01_100000–100002`; frontend deploy incident led to the `laravel.php` invariant).
-- Package C (SC-03): **implemented**, reviewed and remediated (immutable request fingerprint, StockRequest lock order, fresh financial response, frontend idempotency lifecycle, secure UUID fallback); adds migrations `2026_10_02_100000` and `2026_10_02_110000`. **Not yet:** DEV UAT sign-off, Human Stage Gate, production deployment.
+- Package C (SC-03): **implemented**, reviewed and remediated (immutable request fingerprint, StockRequest lock order, fresh financial response, frontend idempotency lifecycle, secure UUID fallback); adds migrations `2026_10_02_100000_add_idempotency_key_to_order_items_table` and `2026_10_02_110000_add_request_fingerprint_to_order_items_table`, both **pending on production**. DEV UAT = Human PASS and the DEV Stage Gate is CLOSED/APPROVED; **production deployment is pending** and Package C is not production closed.
 - After Package C is production closed, the approved feature roadmap is **complete**. No further package is authorized or planned in this repository; a new package needs an explicit Human change request.
 - Documented, **unauthorized** backlog (implement only on Human request or a concrete defect): warehouse transfer/opname list `variation.label` serialization; language switcher in the dashboard header; frontend automated tests; performance audit; dead `StockService::deduct*`; unreachable `ProductTranslation.description` write path; Laravel 11 framework advisories (upgrade decision); Google Sheets destination sharing and RajaOngkir key rotation (operational).

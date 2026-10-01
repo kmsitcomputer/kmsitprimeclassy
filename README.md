@@ -81,4 +81,4 @@ No automated frontend test suite exists; frontend verification is type-check, bu
 
 ## Status
 
-Package A (Sales-Kurir-Sub + Sub stock) and Package B (fulfilment/delivery lifecycle + authority/reporting) are **production closed**. Package C (SC-03, Admin-only add-line to an existing order) is implemented and independently reviewed on branch `feat/package-c-sc03`; DEV UAT, Human Stage Gate and production deployment have not been recorded. See [docs/MASTER-SYSTEM.md §41](docs/MASTER-SYSTEM.md#41-current-roadmap-state).
+Package A (Sales-Kurir-Sub + Sub stock) and Package B (fulfilment/delivery lifecycle + authority/reporting) are **production closed**. Package C (SC-03, Admin-only add-line to an existing order) is implemented, independently reviewed, remediated and finally audited on branch `feat/package-c-sc03`; DEV UAT is a Human PASS and the DEV Stage Gate is CLOSED/APPROVED. **Production deployment and production migrations are PENDING.** See [docs/MASTER-SYSTEM.md §41](docs/MASTER-SYSTEM.md#41-current-roadmap-state).
