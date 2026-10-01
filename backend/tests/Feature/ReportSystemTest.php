@@ -470,6 +470,11 @@ class ReportSystemTest extends TestCase
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
+        // Same date => one shared shipment; B gets its own delivery date so two independent shipments exist.
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", ['requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Tanggal berbeda'])->assertOk();
+        $itemA->refresh();
+        $itemB->refresh();
+
         // Item A picked up by Budi, item B by Andi — two independent shipments.
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$itemB->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
@@ -519,6 +524,11 @@ class ReportSystemTest extends TestCase
         $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        // Same date => one shared shipment; B gets its own delivery date so each item has its own courier leg.
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", ['requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Tanggal berbeda'])->assertOk();
+        $itemA->refresh();
+        $itemB->refresh();
 
         foreach ([['kurir' => $branch['kurir'], 'item' => $itemA], ['kurir' => $secondKurir, 'item' => $itemB]] as $leg) {
             $this->actingAs($leg['kurir'])->patchJson("/api/v1/shipments/{$leg['item']->shipment_id}/status", ['status' => 'dikirim'])->assertOk();

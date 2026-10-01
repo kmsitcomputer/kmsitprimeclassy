@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Payment\PaymentService;
+use App\Services\Stock\StockRequestService;
 use App\Services\Stock\StockService;
 use App\Services\Stock\SubStockService;
 use Illuminate\Support\Facades\DB;
@@ -40,6 +41,8 @@ class OrderFulfillmentService
         private readonly SubStockService $subStockService,
         private readonly PaymentService $paymentService,
         private readonly OrderTotalCalculator $orderTotalCalculator,
+        private readonly StockRequestService $stockRequestService,
+        private readonly ShipmentGroupingService $shipmentGrouping,
     ) {}
 
     public function adjustItemQuantity(OrderItem $item, int $newFulfilledQuantity, User $actor, string $reason, string $additionalPaymentMethod = 'transfer'): OrderItem
@@ -62,10 +65,18 @@ class OrderFulfillmentService
                 return $item;
             }
 
+            // Production UAT (root cause C): lock + validate the order-generated Stock Request line BEFORE any
+            // inventory/financial mutation (Order -> Stock Request -> inventory), then mirror the delta on it.
+            $requestItem = $this->stockRequestService->lockItemForQuantityChange($order, $item, $delta);
+
             if ($delta < 0) {
                 $this->reduceFulfillment($order, $item, abs($delta), $actor, $reason);
             } else {
                 $this->increaseFulfillment($order, $item, $delta, $actor, $reason, $additionalPaymentMethod);
+            }
+
+            if ($requestItem) {
+                $this->stockRequestService->applyQuantityChange($requestItem, $delta);
             }
 
             ActivityLogger::log($actor->id, $item, 'order_item.fulfillment_adjusted', $reason, [
@@ -328,10 +339,23 @@ class OrderFulfillmentService
                 }
             }
 
-            $this->splitShipmentIfShared($item, $actor);
-
             $previousDate = $item->requested_delivery_date?->toDateString();
+
+            // Shipment grouping is ORDER + REQUESTED DELIVERY DATE (locked rule). Lock order OrderItem -> Order
+            // (same as quantity adjustment); the item's new date is the scheduling truth, the shipment follows it.
+            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
             $item->update(['requested_delivery_date' => $newDate]);
+
+            if ($previousDate !== $newDate) {
+                $current = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+                $hasSiblings = $current && OrderItem::query()->where('shipment_id', $current->id)->whereKeyNot($item->id)->where('status', '!=', 'dibatalkan')->exists();
+
+                // A committed (assigned / in-flight) shipment that carries only this item simply keeps it (its date
+                // follows the item); everything else is regrouped onto the order's mutable shipment for the new date.
+                if (! $current || ShipmentGroupingService::isMutable($current) || $hasSiblings) {
+                    $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.regrouped_by_delivery_date');
+                }
+            }
 
             ActivityLogger::log($actor->id, $item, 'order_item.delivery_rescheduled', $reason, [
                 'order_id' => $item->order_id, 'from' => $previousDate, 'to' => $newDate, 'actor_role' => $actor->role?->slug,
@@ -399,7 +423,7 @@ class OrderFulfillmentService
             $this->applyStockRequestSplit($requestItem, $newItem, $quantityMoved);
         }
 
-        $this->assignFreshShipment($newItem, $order, $actor);
+        $this->shipmentGrouping->assignItemToDateGroup($newItem, $order, $actor, 'shipment.split_for_reschedule');
 
         // R-03 / decision E: Sub inventory reconciliation — the source reservation is reduced by the
         // moved quantity, then the child receives its own ACTIVE reservation for it. Physical Sub
@@ -471,84 +495,6 @@ class OrderFulfillmentService
             'requested_qty' => $quantityMoved,
             'fulfilled_qty' => 0,
             'remaining_qty' => $quantityMoved,
-        ]);
-    }
-
-    /** Always gives $item its own brand new pending Shipment, cloning the order's destination/provider snapshot — used for a newly split-off item, which never shares a shipment with anything yet. */
-    public function assignFreshShipment(OrderItem $item, Order $order, User $actor, string $event = 'shipment.split_for_reschedule'): void
-    {
-        $reference = Shipment::query()->where('order_id', $order->id)->latest('id')->first();
-
-        // R-03: a Sub-sourced child stays on the self-delivery path — self_sub + the owning
-        // Sales-Kurir-Sub actor, never a Kurir (courier_id stays NULL).
-        $isSub = $item->isSubSourced();
-        $selfDeliveredBy = null;
-        if ($isSub) {
-            $selfDeliveredBy = $reference?->self_delivered_by_user_id
-                ?? ($item->sub_location_id
-                    ? WarehouseSubLocation::withoutGlobalScopes()->whereKey($item->sub_location_id)->value('owner_user_id')
-                    : null);
-        }
-
-        $shipment = Shipment::create([
-            'order_id' => $order->id,
-            'shipping_provider_id' => $reference?->shipping_provider_id,
-            'shipping_provider_code' => $reference?->shipping_provider_code,
-            'origin_latitude' => $reference?->origin_latitude,
-            'origin_longitude' => $reference?->origin_longitude,
-            'destination_latitude' => $reference?->destination_latitude,
-            'destination_longitude' => $reference?->destination_longitude,
-            'distance_km' => $reference?->distance_km,
-            'provider_meta' => $reference?->provider_meta,
-            'status' => 'pending',
-            'delivery_mode' => $isSub ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD,
-            'self_delivered_by_user_id' => $selfDeliveredBy,
-        ]);
-
-        $item->update(['shipment_id' => $shipment->id]);
-
-        ActivityLogger::log($actor->id, $shipment, $event, null, [
-            'order_id' => $order->id, 'order_item_id' => $item->id,
-        ]);
-    }
-
-    private function splitShipmentIfShared(OrderItem $item, User $actor): void
-    {
-        if (! $item->shipment_id) {
-            return;
-        }
-
-        $stillShared = OrderItem::query()
-            ->where('shipment_id', $item->shipment_id)
-            ->whereKeyNot($item->id)
-            ->exists();
-
-        if (! $stillShared) {
-            return;
-        }
-
-        $original = Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->firstOrFail();
-
-        $split = Shipment::create([
-            'order_id' => $original->order_id,
-            'shipping_provider_id' => $original->shipping_provider_id,
-            'shipping_provider_code' => $original->shipping_provider_code,
-            'origin_latitude' => $original->origin_latitude,
-            'origin_longitude' => $original->origin_longitude,
-            'destination_latitude' => $original->destination_latitude,
-            'destination_longitude' => $original->destination_longitude,
-            'distance_km' => $original->distance_km,
-            'provider_meta' => $original->provider_meta,
-            'status' => 'pending',
-            // R-03: preserve the delivery path (self_sub + owning actor) across the shipment split.
-            'delivery_mode' => $original->delivery_mode,
-            'self_delivered_by_user_id' => $original->self_delivered_by_user_id,
-        ]);
-
-        $item->update(['shipment_id' => $split->id]);
-
-        ActivityLogger::log($actor->id, $split, 'shipment.split_for_reschedule', null, [
-            'order_id' => $original->order_id, 'from_shipment_id' => $original->id, 'order_item_id' => $item->id,
         ]);
     }
 

@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\DB;
  * This is NOT a quantity adjustment (that only ever changes an existing line's fulfilled_quantity).
  * It composes the EXISTING canonical services rather than re-implementing them:
  *  - OrderService::resolveLine + addReservedLine  -> snapshot + Agent reservation + commission
- *  - OrderFulfillmentService::assignFreshShipment  -> one fresh standard pending Shipment
+ *  - ShipmentGroupingService::assignItemToDateGroup -> the order's mutable shipment for the line's date
  *  - StockRequestService::appendItemForOrderItem   -> reconcile the one-per-order request
  *  - OrderTotalCalculator + PaymentService          -> canonical order-level totals/payment truth
  *
@@ -38,6 +38,7 @@ class OrderLineAdditionService
         private readonly OrderTotalCalculator $orderTotalCalculator,
         private readonly StockService $stockService,
         private readonly StockRequestService $stockRequestService,
+        private readonly ShipmentGroupingService $shipmentGrouping,
     ) {}
 
     /**
@@ -117,8 +118,9 @@ class OrderLineAdditionService
                 // Immutable original-request identity, written once with the line and never updated.
                 $item->forceFill(['request_fingerprint' => $fingerprint])->save();
 
-                // One fresh standard pending Shipment for the new line (reuses the canonical helper).
-                $this->fulfillmentService->assignFreshShipment($item, $order, $actor, 'shipment.added_for_line');
+                // The line joins the order's mutable shipment for ITS delivery date (ORDER + DATE grouping), or
+                // gets a new one when that date has none.
+                $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.added_for_line');
 
                 // Reconcile the order's existing Stock Request with the new demand.
                 $this->stockRequestService->appendItemForOrderItem($order, $item);

@@ -25,7 +25,8 @@ class ShipmentReceiptResource extends JsonResource
     {
         /** @var \App\Models\Shipment $this */
         $order = $this->order;
-        $items = $this->orderItems;
+        // One resi per Order + delivery date: every ACTIVE line of this shipment's group (cancelled/zero lines are not printed).
+        $items = $this->orderItems->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)->values();
 
         $mode = $this->shipped_at !== null ? 'post_pickup' : 'pre_pickup';
 

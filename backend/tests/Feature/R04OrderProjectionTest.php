@@ -184,6 +184,11 @@ class R04OrderProjectionTest extends TestCase
         $items = $order->items()->get();
         [$itemA, $itemB] = [$items[0], $items[1]];
 
+        // Same date => one shared shipment; B gets its own delivery date so each Kurir can hold a separate shipment.
+        $this->actingAs($this->b['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", ['requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Tanggal berbeda'])->assertOk();
+        $itemA->refresh();
+        $itemB->refresh();
+
         app(CourierService::class)->assignCourier($itemA->shipment()->first(), $this->b['courier'], $this->b['admin']);
         app(CourierService::class)->assignCourier($itemB->shipment()->first(), $this->b['courierB'], $this->b['admin']);
 

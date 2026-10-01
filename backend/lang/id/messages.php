@@ -169,6 +169,7 @@ return [
         'adjusted' => 'Jumlah pemenuhan item berhasil diperbarui.',
         'rescheduled' => 'Tanggal pengiriman item berhasil diubah.',
         'split_stock_request_locked' => 'Pemecahan tidak dapat dilakukan karena permintaan stok gudang sudah dipenuhi sebagian dan sisa tidak mencukupi.',
+        'stock_request_fulfilled_blocks_reduction' => 'Barang pada item ini sudah dipenuhi gudang; jumlah tidak dapat dikurangi di bawah jumlah yang sudah dipenuhi.',
         'cannot_increase_cancelled' => 'Item yang sudah dibatalkan sepenuhnya tidak dapat ditambah kembali.',
         'pending_refund_blocks_increase' => 'Tidak dapat menambah jumlah selama masih ada refund yang belum diproses untuk item ini.',
         'pending_additional_payment_blocks_reduction' => 'Tidak dapat mengurangi jumlah selama pembayaran tambahan untuk penambahan ini masih belum lunas.',

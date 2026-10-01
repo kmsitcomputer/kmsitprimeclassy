@@ -54,6 +54,7 @@ class OrderService
         private readonly AvailablePaymentMethodService $availablePaymentMethodService,
         private readonly SubStockService $subStockService,
         private readonly StockSourceResolver $stockSourceResolver,
+        private readonly ShipmentGroupingService $shipmentGrouping,
     ) {}
 
     /**
@@ -254,22 +255,15 @@ class OrderService
                     ? ShippingProvider::query()->where('code', $quote->providerCode)->first()
                     : null;
 
-                // Every item gets its OWN Shipment from the start — never a
-                // shared one — so a kurir's pickup/deliver action on one
-                // product never touches its siblings (Blueprint: "satu order
-                // bisa beberapa kurir"; this is the same split this order
-                // would otherwise only reach via a later reschedule, see
-                // OrderFulfillmentService::rescheduleItemDeliveryDate).
-                // The real shipping_fee_snapshot/rate_per_km live on exactly
-                // one (the first) shipment — Order.shipping_fee_amount is
-                // already the authoritative order-level total; duplicating
-                // the fee onto every per-item shipment would only make it
-                // look like the order was charged shipping N times.
+                // LOCKED rule: shipment / delivery / resi = ORDER + REQUESTED DELIVERY DATE (not per product).
+                // Every item is placed through the canonical ShipmentGroupingService, so items sharing a date
+                // share ONE shipment. The real shipping_fee_snapshot/rate_per_km live on exactly one (the first)
+                // shipment — Order.shipping_fee_amount is already the authoritative order-level total.
                 $orderItems = OrderItem::query()->where('order_id', $order->id)->get();
 
-                foreach ($orderItems as $index => $item) {
-                    $shipment = Shipment::create([
-                        'order_id' => $order->id,
+                foreach ($orderItems as $item) {
+                    $firstShipment = ! Shipment::query()->where('order_id', $order->id)->exists();
+                    $shipment = $this->shipmentGrouping->resolveMutableShipmentFor($order, $item->requested_delivery_date?->toDateString(), [
                         'shipping_provider_id' => $providerRow?->id,
                         'shipping_provider_code' => $quote->providerCode,
                         'origin_latitude' => $agentProfile->latitude,
@@ -284,7 +278,7 @@ class OrderService
                         // (courier_id stays NULL). Agent-sourced orders keep the standard Kurir path.
                         'delivery_mode' => $subLocation ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD,
                         'self_delivered_by_user_id' => $subLocation?->owner_user_id,
-                        ...($index === 0 ? ['rate_per_km' => $quote->ratePerKm, 'shipping_fee_snapshot' => $shippingFee] : []),
+                        ...($firstShipment ? ['rate_per_km' => $quote->ratePerKm, 'shipping_fee_snapshot' => $shippingFee] : []),
                     ]);
 
                     $item->update(['shipment_id' => $shipment->id]);

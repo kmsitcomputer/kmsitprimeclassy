@@ -9,6 +9,7 @@ use App\Models\StockMovement;
 use App\Models\StockRequest;
 use App\Models\StockRequestFulfillment;
 use App\Models\StockRequestProposal;
+use App\Models\StockRequestProposalItem;
 use App\Models\User;
 use App\Models\WarehouseStock;
 use Illuminate\Support\Facades\DB;
@@ -48,37 +49,80 @@ class StockRequestProposalService
                 $proposal->items()->create(['stock_request_item_id' => $item->id, 'quantity' => $qty]);
             }
 
-            return $proposal->fresh()->load(['items.requestItem.product', 'items.requestItem.variation', 'requester']);
+            return $proposal->fresh()->load(['items.requestItem.product', 'items.requestItem.variation', 'items.requestItem.orderItem', 'requester']);
         });
     }
 
+    /** Whole-proposal approval (legacy entry point): approves every item that is still pending. */
     public function approve(User $actor, StockRequestProposal $proposal): StockRequestProposal
+    {
+        return $this->approveItems($actor, $proposal, null);
+    }
+
+    /** Admin approves ONE product line of a proposal; the other lines are untouched. */
+    public function approveItem(User $actor, StockRequestProposal $proposal, StockRequestProposalItem $item): StockRequestProposal
+    {
+        return $this->approveItems($actor, $proposal, [$item->id]);
+    }
+
+    /**
+     * Approves the selected proposal items (null = every still-pending item) in ONE transaction.
+     * Per-item decision (production UAT): only the selected items execute; approval moves
+     * Transit -> Shipping and releases the reservation exactly as before. Idempotent per item.
+     *
+     * Lock order (unchanged): Proposal -> Stock Request -> per sorted target (Transit -> Shipping -> Agent row).
+     *
+     * @param  list<int>|null  $itemIds
+     */
+    private function approveItems(User $actor, StockRequestProposal $proposal, ?array $itemIds): StockRequestProposal
     {
         if (! $actor->isRole('admin')) {
             throw new ApiException('Hanya Admin yang dapat menyetujui proposal.', 403);
         }
 
-        return DB::transaction(function () use ($actor, $proposal) {
-            $locked = StockRequestProposal::withoutGlobalScopes()->with(['items.requestItem', 'request.items'])->whereKey($proposal->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
-            if ($locked->status === 'approved') {
-                return $locked->load(['items.requestItem.product', 'items.requestItem.variation', 'requester']);
-            }
-            if ($locked->status !== 'pending') {
+        return DB::transaction(function () use ($actor, $proposal, $itemIds) {
+            $locked = StockRequestProposal::withoutGlobalScopes()->with(['items.requestItem'])->whereKey($proposal->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+
+            $selected = $this->selectItems($locked, $itemIds);
+            if ($itemIds === null && $selected->isEmpty()) {
+                if ($locked->status === 'approved') {
+                    return $this->loaded($locked);
+                }
                 throw new ApiException('Proposal sudah diproses.', 422);
             }
+            if ($itemIds !== null) {
+                foreach ($selected as $row) {
+                    if ($row->decision_status === 'rejected') {
+                        throw new ApiException('Item proposal sudah ditolak.', 422);
+                    }
+                }
+                $selected = $selected->where('decision_status', 'pending')->values();
+                if ($selected->isEmpty()) {
+                    return $this->loaded($locked); // already approved: nothing moves twice
+                }
+            }
+
             $request = StockRequest::withoutGlobalScopes()->with('items')->whereKey($locked->stock_request_id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
             if ($request->status === 'cancelled' || $request->status === 'fulfilled') {
                 throw new ApiException('Stock Request tidak dapat dipenuhi lagi.', 422);
             }
 
             $lines = [];
-            foreach ($locked->items as $proposalItem) {
+            foreach ($selected as $proposalItem) {
                 $item = $request->items->firstWhere('id', $proposalItem->stock_request_item_id);
                 if (! $item || $item->stock_request_id !== $request->id || $proposalItem->quantity <= 0 || $proposalItem->quantity > $item->remaining_qty) {
                     throw new ApiException('Jumlah proposal melebihi sisa request.', 422);
                 }
                 $key = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
                 $lines[] = [$proposalItem, $item, $key];
+            }
+            // Two selected lines for the same request item must not jointly exceed what is left.
+            $perItem = [];
+            foreach ($lines as [$proposalItem, $item]) {
+                $perItem[$item->id] = ($perItem[$item->id] ?? 0) + $proposalItem->quantity;
+                if ($perItem[$item->id] > $item->remaining_qty) {
+                    throw new ApiException('Jumlah proposal melebihi sisa request.', 422);
+                }
             }
             $targetKeys = array_values(array_unique(array_map(fn ($line) => $line[2], $lines)));
             sort($targetKeys);
@@ -107,7 +151,8 @@ class StockRequestProposalService
                 }
             }
 
-            $operation = StockRequestFulfillment::create(['stock_request_id' => $request->id, 'idempotency_key' => 'proposal-'.$locked->id, 'fulfilled_by' => $actor->id]);
+            $operationKey = $itemIds === null ? 'proposal-'.$locked->id : 'proposal-item-'.implode('-', $itemIds);
+            $operation = StockRequestFulfillment::create(['stock_request_id' => $request->id, 'idempotency_key' => $operationKey, 'fulfilled_by' => $actor->id]);
             foreach ($totals as $key => $total) {
                 [$source, $destination, $reservation] = $lockedBuckets[$key];
                 [, $item] = current(array_filter($lines, fn ($line) => $line[2] === $key));
@@ -123,37 +168,114 @@ class StockRequestProposalService
                 $qty = $proposalItem->quantity;
                 $item->update(['fulfilled_qty' => $item->fulfilled_qty + $qty, 'remaining_qty' => $item->remaining_qty - $qty]);
             }
-            // Locking read: a plain sum() would use the REPEATABLE READ snapshot taken before this
-            // transaction waited on the Stock Request lock and could miss a line SC-03 appended and
-            // committed meanwhile (marking the request fulfilled while demand is still outstanding).
+            // Same locking-read reconciliation as StockRequestService (REPEATABLE READ snapshot safety).
             $lockedItems = $request->items()->lockForUpdate()->get();
             $remaining = (int) $lockedItems->sum('remaining_qty');
             $fulfilled = (int) $lockedItems->sum('fulfilled_qty');
             $request->update(['status' => $remaining === 0 ? 'fulfilled' : ($fulfilled > 0 ? 'partial' : 'pending'), 'fulfilled_at' => $remaining === 0 ? now() : null]);
-            $locked->update(['status' => 'approved', 'approved_by' => $actor->id, 'approved_at' => now()]);
 
-            return $locked->fresh()->load(['items.requestItem.product', 'items.requestItem.variation', 'requester']);
+            foreach ($selected as $proposalItem) {
+                $proposalItem->update(['decision_status' => 'approved', 'decided_by' => $actor->id, 'decided_at' => now()]);
+            }
+            $this->syncHeader($locked, $actor);
+
+            return $this->loaded($locked);
         });
     }
 
+    /** Whole-proposal rejection (legacy entry point): rejects every item that is still pending. */
     public function reject(User $actor, StockRequestProposal $proposal, string $reason): StockRequestProposal
+    {
+        return $this->rejectItems($actor, $proposal, null, $reason);
+    }
+
+    /** Admin rejects ONE proposed fulfilment line. The order demand (requested/fulfilled/remaining) is untouched. */
+    public function rejectItem(User $actor, StockRequestProposal $proposal, StockRequestProposalItem $item, string $reason): StockRequestProposal
+    {
+        return $this->rejectItems($actor, $proposal, [$item->id], $reason);
+    }
+
+    /**
+     * Rejecting a PROPOSED FULFILMENT is not cancelling ORDER DEMAND: no StockRequestItem quantity
+     * changes, so Gudang can make a new valid proposal for the same remaining demand.
+     *
+     * @param  list<int>|null  $itemIds
+     */
+    private function rejectItems(User $actor, StockRequestProposal $proposal, ?array $itemIds, string $reason): StockRequestProposal
     {
         if (! $actor->isRole('admin')) {
             throw new ApiException('Hanya Admin yang dapat menolak proposal.', 403);
         }
 
-        return DB::transaction(function () use ($actor, $proposal, $reason) {
-            $locked = StockRequestProposal::withoutGlobalScopes()->whereKey($proposal->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
-            if ($locked->status === 'rejected') {
-                return $locked->load(['items.requestItem.product', 'items.requestItem.variation', 'requester']);
-            }
-            if ($locked->status !== 'pending') {
+        return DB::transaction(function () use ($actor, $proposal, $itemIds, $reason) {
+            $locked = StockRequestProposal::withoutGlobalScopes()->with('items')->whereKey($proposal->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+
+            $selected = $this->selectItems($locked, $itemIds);
+            if ($itemIds === null && $selected->isEmpty()) {
+                if ($locked->status === 'rejected') {
+                    return $this->loaded($locked);
+                }
                 throw new ApiException('Proposal sudah diproses.', 422);
             }
-            $locked->update(['status' => 'rejected', 'rejected_by' => $actor->id, 'rejected_at' => now(), 'rejection_reason' => $reason]);
+            if ($itemIds !== null) {
+                foreach ($selected as $row) {
+                    if ($row->decision_status === 'approved') {
+                        throw new ApiException('Item proposal sudah disetujui.', 422);
+                    }
+                }
+                $selected = $selected->where('decision_status', 'pending')->values();
+                if ($selected->isEmpty()) {
+                    return $this->loaded($locked); // already rejected
+                }
+            }
 
-            return $locked->fresh()->load(['items.requestItem.product', 'items.requestItem.variation', 'requester']);
+            foreach ($selected as $proposalItem) {
+                $proposalItem->update(['decision_status' => 'rejected', 'decided_by' => $actor->id, 'decided_at' => now(), 'decision_reason' => $reason]);
+            }
+            $this->syncHeader($locked, $actor, $reason);
+
+            return $this->loaded($locked);
         });
+    }
+
+    /**
+     * Items to act on: every still-pending item (whole-proposal action) or the explicitly requested ones
+     * (which must belong to this proposal).
+     *
+     * @param  list<int>|null  $itemIds
+     */
+    private function selectItems(StockRequestProposal $locked, ?array $itemIds)
+    {
+        if ($itemIds === null) {
+            return $locked->items->where('decision_status', 'pending')->values();
+        }
+        $rows = $locked->items->whereIn('id', $itemIds)->values();
+        if ($rows->count() !== count(array_unique($itemIds))) {
+            throw new ApiException('Item proposal tidak ditemukan.', 404);
+        }
+
+        return $rows;
+    }
+
+    /** Header status is DERIVED from the item decisions — never an independent truth. */
+    private function syncHeader(StockRequestProposal $locked, User $actor, ?string $reason = null): void
+    {
+        $locked->load('items');
+        $states = $locked->items->pluck('decision_status')->unique();
+        $status = $states->count() === 1 ? (string) $states->first() : 'partial';
+
+        $changes = ['status' => $status];
+        if ($status === 'approved') {
+            $changes += ['approved_by' => $actor->id, 'approved_at' => now()];
+        } elseif ($status === 'rejected') {
+            $changes += ['rejected_by' => $actor->id, 'rejected_at' => now(), 'rejection_reason' => $reason];
+        }
+        $locked->update($changes);
+    }
+
+    private function loaded(StockRequestProposal $locked): StockRequestProposal
+    {
+        return $locked->fresh()->load(['items.requestItem.product', 'items.requestItem.variation', 'items.requestItem.orderItem', 'requester']);
     }
 
     private function transit(int $agentId, $item)

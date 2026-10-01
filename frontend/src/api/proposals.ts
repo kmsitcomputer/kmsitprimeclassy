@@ -1,10 +1,16 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
 
+export type ProposalDecision = 'pending' | 'approved' | 'rejected'
+
 export interface ProposalItem {
   id: number
   stock_request_item_id: number
   quantity: number
+  /** Admin's per-product decision on Gudang's PROPOSED fulfilment (never the order demand itself). */
+  decision_status: ProposalDecision
+  decision_reason?: string | null
+  decided_at?: string | null
   request_item?: {
     id: number
     product_id: number | null
@@ -13,6 +19,8 @@ export interface ProposalItem {
     variation_label?: string | null
     sku?: string | null
     product_image_url?: string | null
+    order_quantity?: number | null
+    delivery_date?: string | null
     requested_qty: number
     fulfilled_qty: number
     remaining_qty: number
@@ -23,7 +31,7 @@ export interface ProposalItem {
 export interface FulfillmentProposal {
   id: number
   stock_request_id: number
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'partial' | 'approved' | 'rejected'
   rejection_reason?: string | null
   requester?: { id: number; name: string } | null
   created_at?: string | null
@@ -48,5 +56,17 @@ export async function approveProposal(id: number) {
 
 export async function rejectProposal(id: number, reason: string) {
   const { data } = await http.post<ApiEnvelope<FulfillmentProposal>>(`/warehouse/fulfillment-proposals/${id}/reject`, { reason })
+  return data.data
+}
+
+/** Per-product approval: only this proposal line executes; the other lines are untouched. */
+export async function approveProposalItem(proposalId: number, itemId: number) {
+  const { data } = await http.post<ApiEnvelope<FulfillmentProposal>>(`/warehouse/fulfillment-proposals/${proposalId}/items/${itemId}/approve`)
+  return data.data
+}
+
+/** Per-product rejection of the PROPOSED fulfilment; the order demand (requested/remaining) is unchanged. */
+export async function rejectProposalItem(proposalId: number, itemId: number, reason: string) {
+  const { data } = await http.post<ApiEnvelope<FulfillmentProposal>>(`/warehouse/fulfillment-proposals/${proposalId}/items/${itemId}/reject`, { reason })
   return data.data
 }

@@ -732,6 +732,11 @@ class OrderFulfillmentTest extends TestCase
         $productB = $this->makeProduct($agen, 'Produk B', 50000, 10);
         ['order' => $order, 'itemA' => $itemA, 'itemB' => $itemB] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $productB, 3);
 
+        // Same date => one shared shipment; B gets its own delivery date so the two can have different couriers.
+        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", ['requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Tanggal berbeda'])->assertOk();
+        $itemA->refresh();
+        $itemB->refresh();
+
         $courierBudiId = Courier::where('user_id', $kurirBudi->id)->value('id');
         $courierAndiId = Courier::where('user_id', $kurirAndi->id)->value('id');
         $this->actingAs($admin)->patchJson("/api/v1/shipments/{$itemA->shipment_id}/courier", ['courier_id' => $courierBudiId])->assertOk();

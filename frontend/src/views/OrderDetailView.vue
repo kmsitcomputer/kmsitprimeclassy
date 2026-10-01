@@ -827,6 +827,28 @@ async function submitReturn(item: OrderItem) {
           </div>
         </div>
 
+        <!-- Consumer delivery plan: rendered from the canonical backend delivery_groups (Order + delivery date). A date
+             change by Admin shows up here on the next refresh. No warehouse / stock-request internals are exposed. -->
+        <div v-if="auth.isKonsumen && order.delivery_groups?.length" class="mb-3 space-y-2">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">{{ t('orders.deliveryPlan') }}</h3>
+          <div v-for="group in order.delivery_groups" :key="group.delivery_date ?? 'none'" class="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-800/60">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="font-medium text-stone-700 dark:text-stone-200">
+                {{ t('orders.deliveryOn') }} {{ group.delivery_date ? formatDate(group.delivery_date) : '-' }}
+              </p>
+              <span v-if="group.status" class="rounded-full bg-white px-2 py-0.5 text-[11px] dark:bg-stone-900">{{ orderStatusLabel(group.status) }}</span>
+            </div>
+            <ul class="mt-1.5 space-y-0.5 text-xs text-stone-600 dark:text-stone-300">
+              <li v-for="gi in group.items ?? []" :key="gi.id">
+                {{ gi.product_name }}<span v-if="gi.variation_label"> — {{ gi.variation_label }}</span> &times; {{ gi.quantity }}
+              </li>
+            </ul>
+            <p v-for="sh in group.shipments ?? []" :key="sh.id" class="mt-1 text-[11px] text-stone-400">
+              {{ t('orders.shipmentLabel') }} #{{ sh.id }}<template v-if="sh.status"> · {{ sh.status }}</template><template v-if="sh.tracking_number"> · {{ t('orders.trackingNo') }} {{ sh.tracking_number }}</template>
+            </p>
+          </div>
+        </div>
+
         <ul class="divide-y divide-stone-100 dark:divide-stone-800">
           <li v-for="item in order.items" :key="item.id" class="py-2.5 text-sm">
             <div class="flex items-center justify-between">
@@ -840,7 +862,7 @@ async function submitReturn(item: OrderItem) {
                   <span v-if="item.status !== order.status" class="ml-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] dark:bg-stone-800">{{ orderStatusLabel(item.status) }}</span>
                 </p>
                 <!-- This product's own delivery date — items on the same order can differ once rescheduled. -->
-                <p v-if="item.requested_delivery_date" class="mt-0.5 text-xs text-stone-400">
+                <p v-if="item.requested_delivery_date && !auth.isKonsumen" class="mt-0.5 text-xs text-stone-400">
                   {{ t('orders.deliveryDateEstimate') }}: {{ formatDate(item.requested_delivery_date) }}
                 </p>
                 <!-- Which courier is handling this specific product, once one is assigned. -->

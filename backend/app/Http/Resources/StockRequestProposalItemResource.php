@@ -14,6 +14,10 @@ class StockRequestProposalItemResource extends JsonResource
             'stock_request_proposal_id' => $this->stock_request_proposal_id,
             'stock_request_item_id' => $this->stock_request_item_id,
             'quantity' => $this->quantity,
+            'decision_status' => $this->decision_status,
+            'decided_by' => $this->decided_by,
+            'decided_at' => $this->decided_at,
+            'decision_reason' => $this->decision_reason,
             'request_item' => new StockRequestItemResource($this->whenLoaded('requestItem')),
         ];
     }

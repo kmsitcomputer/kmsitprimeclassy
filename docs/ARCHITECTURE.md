@@ -74,6 +74,7 @@ Request path: **route role gate → FormRequest shape validation → controller 
 | Cancellation reversal | `InventoryCancellationService` |
 | Returns | `ReturnService` (`requestReturn`, `review`, `inspectReturn`, `finalizeInspection`, pickup/confirm, `markItemRefunded`) |
 | Order lifecycle | `OrderService` (create, status, cancel), `OrderFulfillmentService` (quantity/reschedule/split), `OrderLineAdditionService` (SC-03), `CourierService`, `DeliveryVerificationService` |
+| Shipment grouping (Order + delivery date) | `ShipmentGroupingService` (`resolveMutableShipmentFor`, `assignItemToDateGroup`, `reconcileOrder`) — the only shipment writer for checkout, SC-03, reschedule and split; `shipments:regroup` for existing orders |
 
 ## 4. Stock and reservation representation
 
@@ -138,7 +139,9 @@ Locks are always acquired in these orders. **Do not introduce a second ordering 
 | Sub-domain | `WarehouseSubLocation` parent → Sub `WarehouseStock` target rows (canonical order) → Sub reservation rows |
 | Sub checkout | **shared** lock on the Sub Location (re-validated: active, same Agent, still owned) → Sub stock targets → reservations; the Gudang executor takes the location **exclusively** first, so no cycle |
 | Warehouse proposal approval | Proposal → Stock Request → per sorted target: Transit → Shipping → Agent commitment row |
-| **SC-03 add-line** | Order → **Stock Request** → Agent targets (canonical) → items/shipment. Stock Request precedes inventory so it matches proposal approval and cannot deadlock against it |
+| **SC-03 add-line / quantity adjustment** | Order → **Stock Request** → Agent targets (canonical) → items/shipment. Stock Request precedes inventory so it matches proposal approval and cannot deadlock against it |
+| Shipment grouping (any writer) | Order row lock first (OrderItem → Order for reschedule/adjust); the Order lock serialises every resolver call, so two writers cannot create duplicate mutable shipments for one Order + date (no unique index needed) |
+| Per-product proposal decision | Proposal → Stock Request → per sorted target (Transit → Shipping → Agent row); only the selected lines are processed |
 | Quantity adjustment / Keuangan settlement | Adjustments lock `OrderItem`/`Order` and use plain (non-locking) reads for pending-obligation guards; settlement locks the financial row first — the two orders were deliberately kept cycle-free |
 
 Reconciliation rule (REPEATABLE READ): when a status or total is derived from rows that another transaction may have just committed while this one waited for a lock, use **locking reads** (`lockForUpdate()->get()` then sum in PHP), never a plain `sum()` that would use the pre-wait snapshot. `StockRequestService::appendItemForOrderItem` and `StockRequestProposalService::approve` follow this. Deadlocks are fixed by ordering, not by sleeps or catching 1213.
@@ -150,7 +153,7 @@ Reconciliation rule (REPEATABLE READ): when a status or total is derived from ro
 | Order creation | `Idempotency-Key`; `UNIQUE(konsumen_id, idempotency_key)`; duplicate returns the original order |
 | Delivery verification | Required key; `UNIQUE(verified_by, idempotency_key)`; identical content replays, otherwise 409 |
 | Sub stock request create | Optional key; unique per requester |
-| Order stock-request fulfilment (approval) | Persisted `stock_request_fulfillments.idempotency_key = proposal-{id}`; approving twice is a no-op |
+| Order stock-request fulfilment (approval) | Persisted `stock_request_fulfillments.idempotency_key` (`proposal-{id}` for a whole-proposal action, `proposal-item-{ids}` per line); a line already decided is a no-op |
 | Sub request execute / transfer approve / opname approve / reservation reserve/consume | State-based: terminal status returns the existing result; per-item UNIQUE rows |
 | Payment webhooks | `UNIQUE(payment_method_id, event_id)`; races return `duplicate` |
 | **SC-03 add-line** | Required key (non-blank, ≤ 100); `UNIQUE(order_id, idempotency_key)` on `order_items` + immutable **request fingerprint** |

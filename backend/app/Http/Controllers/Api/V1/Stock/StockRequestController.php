@@ -24,7 +24,7 @@ class StockRequestController extends Controller
 
         $requests = StockRequest::query()
             ->when(! $actor->isRole('super_admin'), fn ($q) => $q->where('agent_id', $actor->agent_id))
-            ->with(['items.product.images', 'items.variation.compositions.option', 'order'])
+            ->with(['items.product.images', 'items.variation.compositions.option', 'items.orderItem', 'order'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')->toString()))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = '%'.$request->string('search')->toString().'%';
@@ -52,7 +52,7 @@ class StockRequestController extends Controller
     public function show(Request $request, StockRequest $stockRequest)
     {
         $this->authorize('view', $stockRequest);
-        $stockRequest->load(['items.product.images', 'items.variation.compositions.option', 'order']);
+        $stockRequest->load(['items.product.images', 'items.variation.compositions.option', 'items.orderItem', 'order']);
         $stockRequest->items->each(fn ($item) => $item->setAttribute('current_stock', $this->currentBuckets($request->user()->agent_id, $item)));
 
         return $this->ok(new StockRequestResource($stockRequest));

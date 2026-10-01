@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\StockRequestProposalResource;
 use App\Models\StockRequest;
 use App\Models\StockRequestProposal;
+use App\Models\StockRequestProposalItem;
 use App\Services\Stock\StockRequestProposalService;
 use Illuminate\Http\Request;
 
@@ -22,7 +23,7 @@ class StockRequestProposalController extends Controller
 
         $proposals = StockRequestProposal::query()
             ->where('agent_id', $actor->agent_id)
-            ->with(['items.requestItem.product.images', 'items.requestItem.variation.compositions.option', 'requester', 'request.order'])
+            ->with(['items.requestItem.product.images', 'items.requestItem.variation.compositions.option', 'items.requestItem.orderItem', 'requester', 'request.order'])
             ->when($request->string('scope')->toString() === 'mine', fn ($q) => $q->where('requested_by', $actor->id))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')->toString()))
             ->when($request->filled('stock_request_id'), fn ($q) => $q->where('stock_request_id', $request->integer('stock_request_id')))
@@ -38,7 +39,7 @@ class StockRequestProposalController extends Controller
     {
         $this->authorize('view', $proposal);
 
-        return $this->ok(new StockRequestProposalResource($proposal->load(['items.requestItem.product.images', 'items.requestItem.variation.compositions.option', 'requester', 'request.order'])));
+        return $this->ok(new StockRequestProposalResource($proposal->load(['items.requestItem.product.images', 'items.requestItem.variation.compositions.option', 'items.requestItem.orderItem', 'requester', 'request.order'])));
     }
 
     public function store(Request $request, StockRequest $stockRequest)
@@ -66,5 +67,22 @@ class StockRequestProposalController extends Controller
         $data = $request->validate(['reason' => ['required', 'string', 'max:255']]);
 
         return $this->ok(new StockRequestProposalResource($this->proposals->reject($request->user(), $proposal, $data['reason'])));
+    }
+
+    /** Per-product decision: approve ONE proposal line; the other lines stay pending/untouched. */
+    public function approveItem(Request $request, StockRequestProposal $proposal, StockRequestProposalItem $item)
+    {
+        $this->authorize('approve', $proposal);
+
+        return $this->ok(new StockRequestProposalResource($this->proposals->approveItem($request->user(), $proposal, $item)));
+    }
+
+    /** Per-product decision: reject ONE proposed fulfilment line (order demand is unchanged). */
+    public function rejectItem(Request $request, StockRequestProposal $proposal, StockRequestProposalItem $item)
+    {
+        $this->authorize('reject', $proposal);
+        $data = $request->validate(['reason' => ['required', 'string', 'max:255']]);
+
+        return $this->ok(new StockRequestProposalResource($this->proposals->rejectItem($request->user(), $proposal, $item, $data['reason'])));
     }
 }

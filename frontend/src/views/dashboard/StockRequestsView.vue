@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
-import { approveProposal, listProposals, proposeFulfillment, rejectProposal, type FulfillmentProposal } from '@/api/proposals'
+import { approveProposal, approveProposalItem, listProposals, proposeFulfillment, rejectProposal, rejectProposalItem, type FulfillmentProposal } from '@/api/proposals'
 import { listStockRequests, type StockRequest } from '@/api/stockRequests'
 import { useAuthStore } from '@/stores/auth'
 import { skuLabel } from '@/utils/format'
@@ -16,8 +16,10 @@ const requestStatus = ref('')
 const quantities = ref<Record<number, number>>({})
 const proposals = ref<FulfillmentProposal[]>([])
 const proposalMeta = ref({ current_page: 1, last_page: 1, total: 0 })
-const proposalStatus = ref<'pending' | 'approved' | 'rejected' | ''>('pending')
+const proposalStatus = ref<'pending' | 'partial' | 'approved' | 'rejected' | ''>('pending')
 const rejectReason = ref<Record<number, string>>({})
+// Per-product decision: reason keyed by proposal-item id.
+const itemRejectReason = ref<Record<number, string>>({})
 const error = ref('')
 const success = ref('')
 const submitting = ref(false)
@@ -27,11 +29,11 @@ function itemName(item: { product_name?: string | null; product?: { name: string
 }
 
 function proposalStatusLabel(status: string): string {
-  return status === 'pending' ? 'Menunggu' : status === 'approved' ? 'Disetujui' : status === 'rejected' ? 'Ditolak' : status
+  return status === 'pending' ? 'Menunggu' : status === 'partial' ? 'Sebagian' : status === 'approved' ? 'Disetujui' : status === 'rejected' ? 'Ditolak' : status
 }
 
 function proposalStatusClass(status: string): string {
-  return status === 'pending'
+  return status === 'pending' || status === 'partial'
     ? 'bg-amber-100 text-amber-800'
     : status === 'approved'
       ? 'bg-emerald-100 text-emerald-800'
@@ -103,6 +105,31 @@ async function reject(id: number) {
   } catch (e) { error.value = e instanceof Error ? e.message : 'Gagal menolak proposal.' }
 }
 
+async function approveLine(proposalId: number, itemId: number) {
+  error.value = ''; success.value = ''
+  try {
+    await approveProposalItem(proposalId, itemId)
+    success.value = 'Produk disetujui. Hanya produk ini yang diproses; produk lain tidak berubah.'
+    await Promise.all([loadRequests(), loadProposals()])
+  } catch (e) { error.value = e instanceof Error ? e.message : 'Gagal menyetujui produk.' }
+}
+
+async function rejectLine(proposalId: number, itemId: number) {
+  error.value = ''; success.value = ''
+  try {
+    const reason = (itemRejectReason.value[itemId] ?? '').trim()
+    if (!reason) throw new Error('Isi alasan penolakan.')
+    await rejectProposalItem(proposalId, itemId, reason)
+    success.value = 'Usulan produk ditolak. Kebutuhan order tetap ada; Gudang dapat mengusulkan ulang.'
+    delete itemRejectReason.value[itemId]
+    await Promise.all([loadRequests(), loadProposals()])
+  } catch (e) { error.value = e instanceof Error ? e.message : 'Gagal menolak produk.' }
+}
+
+function decisionLabel(d: string): string {
+  return d === 'approved' ? 'Disetujui' : d === 'rejected' ? 'Ditolak' : 'Menunggu'
+}
+
 function onRequestSearch() {
   requestMeta.value.current_page = 1
   void loadRequests()
@@ -131,6 +158,7 @@ onMounted(async () => {
       <div class="mb-3 flex max-w-xl gap-2">
         <select v-model="proposalStatus" class="rounded-lg border border-stone-200 px-3 py-2 text-sm" @change="loadProposals(true)">
           <option value="pending">Menunggu</option>
+          <option value="partial">Sebagian</option>
           <option value="approved">Disetujui</option>
           <option value="rejected">Ditolak</option>
           <option value="">Semua</option>
@@ -151,25 +179,38 @@ onMounted(async () => {
                 <div class="font-medium">{{ line.request_item ? itemName(line.request_item) : 'Item' }}</div>
                 <div v-if="line.request_item?.variation_label" class="text-xs text-stone-500">Varian: {{ line.request_item.variation_label }}</div>
                 <div class="truncate text-xs text-stone-400">{{ skuLabel(line.request_item?.sku ?? null) }}</div>
-                <div class="mt-1 grid grid-cols-2 gap-1 text-xs sm:grid-cols-4">
-                  <span class="rounded bg-white px-2 py-1">Diminta: <strong>{{ line.request_item?.requested_qty ?? '—' }}</strong></span>
-                  <span class="rounded bg-white px-2 py-1">Terpenuhi: <strong>{{ line.request_item?.fulfilled_qty ?? '—' }}</strong></span>
+                <div class="mt-1 grid grid-cols-2 gap-1 text-xs sm:grid-cols-5">
+                  <span class="rounded bg-white px-2 py-1">Jumlah Order: <strong>{{ line.request_item?.order_quantity ?? '—' }}</strong></span>
+                  <span class="rounded bg-white px-2 py-1">Diajukan: <strong>{{ line.request_item?.requested_qty ?? '—' }}</strong></span>
+                  <span class="rounded bg-white px-2 py-1">Dipenuhi: <strong>{{ line.request_item?.fulfilled_qty ?? '—' }}</strong></span>
                   <span class="rounded bg-white px-2 py-1">Sisa: <strong>{{ line.request_item?.remaining_qty ?? '—' }}</strong></span>
                   <span class="rounded bg-white px-2 py-1">Usulan: <strong>+{{ line.quantity }}</strong></span>
                 </div>
+                <div v-if="line.request_item?.delivery_date" class="mt-1 text-xs text-stone-500">Tgl kirim: {{ line.request_item.delivery_date }}</div>
                 <div class="mt-1 grid grid-cols-3 gap-1 text-xs">
                   <span class="rounded bg-white px-2 py-1">Transit: <strong>{{ line.request_item?.current_stock?.transit ?? '—' }}</strong></span>
                   <span class="rounded bg-white px-2 py-1">Shipping: <strong>{{ line.request_item?.current_stock?.shipping ?? '—' }}</strong></span>
                   <span class="rounded bg-white px-2 py-1">Reserved: <strong>{{ line.request_item?.current_stock?.reserved ?? '—' }}</strong></span>
                 </div>
               </div>
-              <div v-if="proposal.status === 'pending'" class="flex shrink-0 flex-wrap items-center gap-2">
-                <button type="button" class="rounded-lg bg-emerald-600 px-3 py-1 text-sm text-white" @click="approve(proposal.id)">Setujui</button>
-                <input v-model="rejectReason[proposal.id]" placeholder="Alasan tolak" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-sm" />
-                <button type="button" class="rounded-lg bg-red-600 px-3 py-1 text-sm text-white" @click="reject(proposal.id)">Tolak</button>
+              <!-- Per-product decision: each line is approved/rejected on its own. -->
+              <div class="flex shrink-0 flex-wrap items-center gap-2">
+                <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="proposalStatusClass(line.decision_status)">{{ decisionLabel(line.decision_status) }}</span>
+                <template v-if="line.decision_status === 'pending'">
+                  <button type="button" class="rounded-lg bg-emerald-600 px-3 py-1 text-sm text-white" @click="approveLine(proposal.id, line.id)">Setujui produk ini</button>
+                  <input v-model="itemRejectReason[line.id]" placeholder="Alasan tolak" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-sm" />
+                  <button type="button" class="rounded-lg bg-red-600 px-3 py-1 text-sm text-white" @click="rejectLine(proposal.id, line.id)">Tolak produk ini</button>
+                </template>
+                <span v-else-if="line.decision_reason" class="text-xs text-stone-500">Alasan: {{ line.decision_reason }}</span>
               </div>
             </li>
           </ul>
+          <!-- Whole-proposal shortcuts act only on the lines that are still pending. -->
+          <div v-if="proposal.status === 'pending' || proposal.status === 'partial'" class="mt-2 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-2 text-sm">
+            <button type="button" class="rounded-lg border border-emerald-600 px-3 py-1 text-emerald-700" @click="approve(proposal.id)">Setujui semua yang menunggu</button>
+            <input v-model="rejectReason[proposal.id]" placeholder="Alasan tolak semua" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-sm" />
+            <button type="button" class="rounded-lg border border-red-600 px-3 py-1 text-red-700" @click="reject(proposal.id)">Tolak semua yang menunggu</button>
+          </div>
         </li>
       </ul>
       <div v-if="proposalMeta.last_page > 1" class="mt-3 flex items-center gap-2 text-sm">
@@ -202,7 +243,13 @@ onMounted(async () => {
           <span class="min-w-0 flex-1 basis-48">
             <span class="font-medium">{{ itemName(item) }}</span>
             <span v-if="item.variation_label"> — {{ item.variation_label }}</span>
-            <span class="block text-xs text-stone-400">{{ skuLabel(item.sku ?? item.sku_snapshot) }} · diminta {{ item.requested_qty }} · terpenuhi {{ item.fulfilled_qty }} · sisa {{ item.remaining_qty }}</span>
+            <span class="block text-xs text-stone-400">{{ skuLabel(item.sku ?? item.sku_snapshot) }}<template v-if="item.delivery_date"> · kirim {{ item.delivery_date }}</template></span>
+            <span class="mt-1 flex flex-wrap gap-1 text-xs">
+              <span class="rounded bg-stone-100 px-2 py-0.5">Jumlah Order: <strong>{{ item.order_quantity ?? '—' }}</strong></span>
+              <span class="rounded bg-stone-100 px-2 py-0.5">Diajukan: <strong>{{ item.requested_qty }}</strong></span>
+              <span class="rounded bg-stone-100 px-2 py-0.5">Dipenuhi: <strong>{{ item.fulfilled_qty }}</strong></span>
+              <span class="rounded bg-stone-100 px-2 py-0.5">Sisa: <strong>{{ item.remaining_qty }}</strong></span>
+            </span>
             <span class="block text-xs text-stone-400">Transit {{ item.current_stock?.transit ?? '—' }} · Shipping {{ item.current_stock?.shipping ?? '—' }} · Reserved {{ item.current_stock?.reserved ?? '—' }}</span>
           </span>
           <input v-model.number="quantities[item.id]" class="w-24 min-w-0 rounded-lg border border-stone-200 p-2" type="number" min="0" :max="item.remaining_qty" :disabled="item.remaining_qty === 0 || submitting" />
@@ -227,8 +274,9 @@ onMounted(async () => {
             <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="proposalStatusClass(proposal.status)">{{ proposalStatusLabel(proposal.status) }}</span>
           </div>
           <div v-for="line in proposal.items" :key="line.id" class="text-xs text-stone-500">
-            {{ line.request_item ? itemName(line.request_item) : '' }} · +{{ line.quantity }}
-            <span v-if="proposal.status === 'rejected' && proposal.rejection_reason"> · Alasan: {{ proposal.rejection_reason }}</span>
+            {{ line.request_item ? itemName(line.request_item) : '' }} · +{{ line.quantity }} ·
+            <span class="font-medium">{{ decisionLabel(line.decision_status) }}</span>
+            <span v-if="line.decision_status === 'rejected' && line.decision_reason"> · Alasan: {{ line.decision_reason }}</span>
           </div>
         </li>
       </ul>

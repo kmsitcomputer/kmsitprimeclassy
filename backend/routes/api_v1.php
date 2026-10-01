@@ -450,6 +450,9 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:admin')->group(function () {
         Route::post('/warehouse/fulfillment-proposals/{proposal}/approve', [StockRequestProposalController::class, 'approve']);
         Route::post('/warehouse/fulfillment-proposals/{proposal}/reject', [StockRequestProposalController::class, 'reject']);
+        // Per-product decision (production UAT): one proposal line at a time.
+        Route::post('/warehouse/fulfillment-proposals/{proposal}/items/{item}/approve', [StockRequestProposalController::class, 'approveItem'])->scopeBindings();
+        Route::post('/warehouse/fulfillment-proposals/{proposal}/items/{item}/reject', [StockRequestProposalController::class, 'rejectItem'])->scopeBindings();
     });
     Route::middleware('role:agen,admin')->group(function () {
         Route::post('/stock/adjust', [StockController::class, 'adjust']);

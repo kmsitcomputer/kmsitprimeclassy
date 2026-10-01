@@ -396,6 +396,11 @@ if (str_starts_with($role, 'sr-')) {
                 // Package C / SC-03 (REV-003): the REAL warehouse approval path, raced against add-line.
                 $result = app(StockRequestProposalService::class)->approve($actor, StockRequestProposal::withoutGlobalScopes()->findOrFail($subjectId));
                 break;
+            case 'proposal-item-approve':
+                // Production UAT: per-product approval raced against another decision on the same proposal.
+                $proposalModel = StockRequestProposal::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(StockRequestProposalService::class)->approveItem($actor, $proposalModel, \App\Models\StockRequestProposalItem::findOrFail((int) $extra['item_id']));
+                break;
             case 'fulfillment-reduce':
                 $item = OrderItem::findOrFail($subjectId);
                 $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test');

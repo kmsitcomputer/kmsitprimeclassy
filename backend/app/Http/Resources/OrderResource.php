@@ -106,16 +106,52 @@ class OrderResource extends JsonResource
             // R-03: derived delivery groups — one per (order, requested_delivery_date). There is NO
             // invoice/delivery-group table: grouping is a pure projection over order items, and the
             // Order-level payment truth (payment_summary above) is never duplicated per group.
-            'delivery_groups' => $this->whenLoaded('items', fn () => $this->items
-                ->groupBy(fn ($item) => $item->requested_delivery_date?->toDateString() ?? '')
-                ->map(fn ($items, $date) => [
-                    'delivery_date' => $date !== '' ? $date : null,
-                    'item_ids' => $items->pluck('id')->values(),
-                    'item_count' => $items->count(),
-                    'total_quantity' => (int) $items->sum('fulfilled_quantity'),
-                    'shipment_ids' => $items->pluck('shipment_id')->filter()->unique()->values(),
-                ])
-                ->values()),
+            // Production UAT: the group is also the CONSUMER-facing delivery plan, so it carries the group's
+            // active products/quantities, a derived delivery status and safe shipment/resi info. It carries NO
+            // Stock Request / Gudang proposal / reservation / financial data. Shipments are one per
+            // (order, date) for mutable groups; committed ones may differ, so the list is per distinct shipment.
+            'delivery_groups' => $this->whenLoaded('items', function () {
+                $shipments = $this->relationLoaded('shipments') ? $this->shipments->keyBy('id') : collect();
+                $rank = ['diterima' => 0, 'diproses' => 1, 'dikirim' => 2, 'terkirim' => 3, 'pengembalian' => 4, 'kembali' => 5];
+
+                return $this->items
+                    ->groupBy(fn ($item) => $item->requested_delivery_date?->toDateString() ?? '')
+                    ->map(function ($items, $date) use ($shipments, $rank) {
+                        $active = $items->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)->values();
+                        $statuses = $active->pluck('status')->unique();
+
+                        return [
+                            'delivery_date' => $date !== '' ? $date : null,
+                            'item_ids' => $items->pluck('id')->values(),
+                            'item_count' => $items->count(),
+                            'total_quantity' => (int) $items->sum('fulfilled_quantity'),
+                            'shipment_ids' => $items->pluck('shipment_id')->filter()->unique()->values(),
+                            'status' => $active->isEmpty()
+                                ? 'dibatalkan'
+                                : $statuses->sortBy(fn ($st) => $rank[$st] ?? 99)->first(),
+                            'items' => $active->map(fn ($item) => [
+                                'id' => $item->id,
+                                'product_name' => $item->product_name_snapshot,
+                                'variation_label' => $item->variation_label_snapshot,
+                                'sku' => $item->sku_snapshot,
+                                'quantity' => (int) $item->fulfilled_quantity,
+                                'status' => $item->status,
+                            ])->values(),
+                            'shipments' => $active->pluck('shipment_id')->filter()->unique()->values()->map(function ($id) use ($shipments, $active) {
+                                $shipment = $shipments->get($id) ?? $active->firstWhere('shipment_id', $id)?->shipment;
+
+                                return $shipment ? [
+                                    'id' => $shipment->id,
+                                    'status' => $shipment->status,
+                                    'tracking_number' => $shipment->tracking_number,
+                                    'shipped_at' => $shipment->shipped_at,
+                                    'delivered_at' => $shipment->delivered_at,
+                                ] : ['id' => $id];
+                            })->values(),
+                        ];
+                    })
+                    ->values();
+            }),
             // R-03: append-only Admin delivery-verification history — Admin/Super Admin only.
             // DeliveryVerificationController enforces the same boundary; exposing it through the
             // generic Order detail to Konsumen/Sales/Korsal/Kurir would bypass it (verifier

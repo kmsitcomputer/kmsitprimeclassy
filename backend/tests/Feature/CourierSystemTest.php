@@ -658,7 +658,7 @@ class CourierSystemTest extends TestCase
      * sibling product, and rescheduling one item never needs to split
      * anything off (there's nothing shared left to split).
      */
-    public function test_each_order_item_has_its_own_independent_shipment_from_creation(): void
+    public function test_items_share_a_shipment_per_date_and_a_reschedule_regroups_them_into_independent_shipments(): void
     {
         $branch = $this->makeAgentBranch();
         $productA = $this->makeProduct($branch['agen'], 'Kue A', 40000, 10);
@@ -679,22 +679,21 @@ class CourierSystemTest extends TestCase
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
-        // Each item already has its own distinct shipment — never shared.
+        // LOCKED rule: shipment grouping = ORDER + REQUESTED DELIVERY DATE — both items share ONE shipment.
         $this->assertNotNull($itemA->shipment_id);
-        $this->assertNotNull($itemB->shipment_id);
-        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
-        $originalShipmentId = $itemA->fresh()->shipment_id;
+        $this->assertSame($itemA->shipment_id, $itemB->shipment_id);
+        $sharedShipmentId = $itemA->shipment_id;
 
-        // Rescheduling A never needs to split anything off (nothing was shared) — its shipment stays the same.
+        // Rescheduling A to another date regroups it onto its own (new) mutable shipment; B keeps the original.
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(5)->toDateString(), 'reason' => 'Konsumen minta diundur',
         ])->assertOk();
 
         $itemA->refresh();
         $itemB->refresh();
-        $this->assertSame($originalShipmentId, $itemA->shipment_id);
+        $this->assertSame($sharedShipmentId, $itemB->shipment_id);
+        $this->assertNotSame($sharedShipmentId, $itemA->shipment_id);
         $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
-        $this->assertDatabaseMissing('activity_logs', ['event' => 'shipment.split_for_reschedule']);
 
         // A second kurir picks up A's shipment; the original kurir carries B — two different couriers, one order,
         // and — the point of this whole test — picking up/delivering one product never touches the other.
@@ -802,7 +801,7 @@ class CourierSystemTest extends TestCase
     }
 
     /**
-     * A multi-product order has one shipment per product (Blueprint: "satu order bisa
+     * A multi-product order has one shipment per delivery date (Blueprint: "satu order bisa
      * beberapa kurir"). If ONE product is still 'diproses' (unclaimed) while ANOTHER has
      * already been picked up by a different kurir, the order-level match (used only to
      * decide whether the order appears at all) must not leak that other kurir's already-
@@ -832,6 +831,13 @@ class CourierSystemTest extends TestCase
 
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        // Same date => one shipment; give B its own delivery date so the two products are independently claimable.
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", [
+            'requested_delivery_date' => now()->addDays(3)->toDateString(), 'reason' => 'Tanggal berbeda',
+        ])->assertOk();
+        $itemA->refresh();
+        $itemB->refresh();
 
         // First kurir picks up product A only — product B stays 'diproses', untouched.
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();

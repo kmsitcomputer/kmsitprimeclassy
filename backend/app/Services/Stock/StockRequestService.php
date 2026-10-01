@@ -107,18 +107,80 @@ class StockRequestService
                 'remaining_qty' => $item->original_quantity,
             ]);
 
-            // Locking read (not a plain sum): under REPEATABLE READ a consistent read would use the
-            // snapshot taken BEFORE this transaction waited on the Stock Request lock and could miss a
-            // concurrently committed warehouse approval (stale fulfilled_qty -> wrong status).
-            $lockedItems = $request->items()->lockForUpdate()->get();
-            $remaining = (int) $lockedItems->sum('remaining_qty');
-            $fulfilled = (int) $lockedItems->sum('fulfilled_qty');
-            $request->update([
-                'status' => $remaining === 0 ? 'fulfilled' : ($fulfilled > 0 ? 'partial' : 'pending'),
-                'fulfilled_at' => $remaining === 0 ? ($request->fulfilled_at ?? now()) : null,
-            ]);
+            $this->reconcileStatus($request);
 
             return $created;
         });
+    }
+
+    /**
+     * Production UAT (root cause C): a quantity adjustment on an order line must be mirrored on the order's
+     * Stock Request item, which is the canonical inventory REQUIREMENT caused by the order. Called FIRST
+     * (right after the Order lock) so the lock order stays Order -> Stock Request -> inventory, matching
+     * SC-03 and warehouse approval.
+     *
+     * A reduction may only consume the still-UNFULFILLED remainder: units Gudang already moved to Shipping are
+     * warehouse history and are never rewritten (422). Returns the locked item, or null when the order has no
+     * active order-generated request / line (Sub-sourced lines, manual flows).
+     */
+    public function lockItemForQuantityChange(Order $order, OrderItem $item, int $delta): ?StockRequestItem
+    {
+        if ($item->isSubSourced()) {
+            return null;
+        }
+
+        $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->lockForUpdate()->first();
+        if (! $request || $request->status === 'cancelled') {
+            return null;
+        }
+
+        $requestItem = StockRequestItem::query()
+            ->where('stock_request_id', $request->id)
+            ->where('order_item_id', $item->id)
+            ->lockForUpdate()
+            ->first();
+
+        if ($requestItem && $delta < 0 && $requestItem->remaining_qty < -$delta) {
+            throw new ApiException(__('messages.fulfillment.stock_request_fulfilled_blocks_reduction'), 422);
+        }
+
+        return $requestItem;
+    }
+
+    /** Applies the order quantity delta to the locked request item and re-derives the request status. */
+    public function applyQuantityChange(StockRequestItem $requestItem, int $delta): void
+    {
+        $requestItem->update([
+            'requested_qty' => max(0, $requestItem->requested_qty + $delta),
+            'remaining_qty' => max(0, $requestItem->remaining_qty + $delta),
+        ]);
+
+        $request = StockRequest::withoutGlobalScopes()->whereKey($requestItem->stock_request_id)->lockForUpdate()->first();
+        if ($request) {
+            $this->reconcileStatus($request);
+        }
+    }
+
+    /**
+     * Single status formula for an order-generated request (pending / partial / fulfilled). Uses locking
+     * reads: under REPEATABLE READ a plain sum() would use the snapshot taken before this transaction
+     * waited on a lock and could miss a concurrently committed warehouse approval. A request with no
+     * actionable demand and no fulfilment (every line reduced to zero) keeps its status.
+     */
+    public function reconcileStatus(StockRequest $request): void
+    {
+        $items = $request->items()->lockForUpdate()->get();
+        $remaining = (int) $items->sum('remaining_qty');
+        $fulfilled = (int) $items->sum('fulfilled_qty');
+
+        if ($remaining === 0) {
+            if ($fulfilled > 0) {
+                $request->update(['status' => 'fulfilled', 'fulfilled_at' => $request->fulfilled_at ?? now()]);
+            }
+
+            return;
+        }
+
+        $request->update(['status' => $fulfilled > 0 ? 'partial' : 'pending', 'fulfilled_at' => null]);
     }
 }

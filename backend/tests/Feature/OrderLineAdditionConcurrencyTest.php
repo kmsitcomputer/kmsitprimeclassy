@@ -175,4 +175,65 @@ class OrderLineAdditionConcurrencyTest extends TestCase
         $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
         $this->assertSame(1, \App\Models\StockRequestFulfillment::withoutGlobalScopes()->where('stock_request_id', $request->id)->count());
     }
+
+    /** Production UAT: two Admin connections each approve a DIFFERENT product line of one proposal. */
+    public function test_concurrent_per_product_approvals_each_execute_exactly_once(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'productA' => $productA, 'order' => $order] = $this->fixture();
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $productB = $this->makeProduct($agen, 'Race B2', 25000, 10);
+        foreach ([$productA, $productB] as $p) {
+            WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $p->id, 'stock_type' => 'transit', 'quantity' => 20]);
+        }
+        WarehouseSetting::create(['agent_id' => $agen->id, 'factory_plan_enabled' => false]);
+        // Add B to the order demand through the real SC-03 path (single connection, before the race).
+        app(\App\Services\Order\OrderLineAdditionService::class)->addLine(Order::withoutGlobalScopes()->findOrFail($order->id), ['product_id' => $productB->id, 'quantity' => 2], $admin, null, 'setup', 'cod', (string) Str::uuid());
+
+        $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
+        $itemA = $request->items()->where('product_id', $productA->id)->firstOrFail();
+        $itemB = $request->items()->where('product_id', $productB->id)->firstOrFail();
+        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $itemA->id, 'quantity' => 1], ['item_id' => $itemB->id, 'quantity' => 2]]);
+        $pa = $proposal->items->firstWhere('stock_request_item_id', $itemA->id);
+        $pb = $proposal->items->firstWhere('stock_request_item_id', $itemB->id);
+
+        $report = (new ConcurrencyHarness)->runServiceRace(
+            ['op' => 'proposal-item-approve', 'actor_id' => $admin->id, 'subject_id' => $proposal->id, 'extra' => ['item_id' => $pa->id]],
+            ['op' => 'proposal-item-approve', 'actor_id' => $admin->id, 'subject_id' => $proposal->id, 'extra' => ['item_id' => $pb->id]],
+        );
+
+        $this->assertTrue($report['true_overlap']);
+        foreach (['a', 'b'] as $side) {
+            $this->assertNotSame(1213, $report[$side]['error_code'] ?? null, 'no deadlock');
+            $this->assertSame('success', $report[$side]['outcome'], json_encode($report[$side]));
+        }
+        $this->assertSame(19, (int) WarehouseStock::withoutGlobalScopes()->where('product_id', $productA->id)->where('stock_type', 'transit')->sum('quantity'));
+        $this->assertSame(18, (int) WarehouseStock::withoutGlobalScopes()->where('product_id', $productB->id)->where('stock_type', 'transit')->sum('quantity'));
+        $this->assertSame([1, 0], [$itemA->fresh()->fulfilled_qty, $itemA->fresh()->remaining_qty]);
+        $this->assertSame([2, 0], [$itemB->fresh()->fulfilled_qty, $itemB->fresh()->remaining_qty]);
+        $this->assertSame('approved', $proposal->fresh()->status);
+        $this->assertSame('fulfilled', $request->fresh()->status);
+        $this->assertSame(2, \App\Models\StockRequestFulfillment::withoutGlobalScopes()->where('stock_request_id', $request->id)->count());
+    }
+
+    /** Production UAT: two additions for the SAME new date must share ONE mutable shipment. */
+    public function test_concurrent_same_date_additions_share_one_mutable_shipment(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'order' => $order] = $this->fixture();
+        $productB = $this->makeProduct($agen, 'Race B3', 25000, 10);
+        $productC = $this->makeProduct($agen, 'Race C3', 30000, 10);
+        $date = now()->addDays(12)->toDateString();
+        $before = Shipment::where('order_id', $order->id)->count();
+
+        $report = (new ConcurrencyHarness)->runServiceRace(
+            ['op' => 'add-line', 'actor_id' => $admin->id, 'subject_id' => $order->id, 'extra' => ['line' => ['product_id' => $productB->id, 'quantity' => 1], 'date' => $date, 'key' => (string) Str::uuid()]],
+            ['op' => 'add-line', 'actor_id' => $admin->id, 'subject_id' => $order->id, 'extra' => ['line' => ['product_id' => $productC->id, 'quantity' => 1], 'date' => $date, 'key' => (string) Str::uuid()]],
+        );
+
+        $this->assertTrue($report['true_overlap']);
+        $this->assertSame('success', $report['a']['outcome']);
+        $this->assertSame('success', $report['b']['outcome']);
+        $this->assertSame($before + 1, Shipment::where('order_id', $order->id)->count(), 'exactly one new shipment for the shared date');
+        $shipments = OrderItem::where('order_id', $order->id)->whereIn('product_id', [$productB->id, $productC->id])->pluck('shipment_id')->unique();
+        $this->assertCount(1, $shipments);
+    }
 }

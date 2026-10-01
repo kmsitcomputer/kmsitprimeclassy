@@ -12,6 +12,9 @@ export interface StockRequestItem {
   sku: string | null
   sku_snapshot: string | null
   product_image_url: string | null
+  /** JUMLAH ORDER: the order line's current active quantity. Diajukan / Dipenuhi / Sisa follow. */
+  order_quantity?: number | null
+  delivery_date?: string | null
   requested_qty: number
   fulfilled_qty: number
   remaining_qty: number

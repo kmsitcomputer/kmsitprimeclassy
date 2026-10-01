@@ -162,6 +162,11 @@ export interface DeliveryGroup {
   item_count: number
   total_quantity: number
   shipment_ids: number[]
+  /** Derived group status (least-progressed active item). */
+  status?: string
+  /** Active products in this delivery group (consumer-safe: no stock-request / warehouse / money data). */
+  items?: { id: number; product_name: string; variation_label: string | null; sku: string | null; quantity: number; status: string }[]
+  shipments?: { id: number; status?: string; tracking_number?: string | null; shipped_at?: string | null; delivered_at?: string | null }[]
 }
 
 export type DeliveryVerificationOutcome = 'received' | 'not_received' | 'return'

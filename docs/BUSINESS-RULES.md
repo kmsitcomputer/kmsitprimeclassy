@@ -136,9 +136,11 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 
 ## 11. Shipment lifecycle
 
-- One Shipment per order item at creation (`standard`, `pending`, no courier); reschedule/split and SC-03 lines get their own fresh shipment. One order may span several shipments/couriers; order status summarizes them.
+- **LOCKED: shipment / delivery / resi grouping = ORDER + REQUESTED DELIVERY DATE** — never per product / per order item. Items of one order sharing a delivery date share ONE shipment (and print ONE resi); each distinct date is its own shipment. Checkout, SC-03 add-line, reschedule and split all use the single canonical resolver `ShipmentGroupingService` (new shipments are `standard`/`self_sub`, `pending`, no courier). Scheduling truth stays `order_items.requested_delivery_date`; a shipment's date is derived from its active items (no second editable date).
+- Only a **mutable** shipment (pending, no courier, not shipped/delivered, no proof, no delivery verification) is reused or merged. Assigned, in-flight, delivered or verified shipments are historical/operational truth and are never regrouped or re-dated — a new/moved item gets its own new mutable shipment instead. Existing orders are brought onto the rule by `shipments:regroup` (dry-run default) or lazily when an order is rescheduled/added to.
+- One order may still span several shipments/couriers (different dates, or committed shipments); order status summarizes them.
 - Kurir may claim an unassigned `diproses` shipment (becomes `dikirim`); another courier can then no longer see or act on it. `delivered` (`terkirim`) requires **photo proof**.
-- Shipment provider/route/rate/ETD/weight are immutable snapshots. Thermal receipt is per shipment (pre/post pickup derived from state), read-only, audited, never for a cancelled order.
+- Shipment provider/route/rate/ETD/weight are immutable snapshots. Thermal receipt is per shipment = per Order + delivery date group and lists every active line of the group (pre/post pickup derived from state), read-only, audited, never for a cancelled order.
 
 ## 12. Delivery lifecycle, self-delivery and verification
 
@@ -170,7 +172,9 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 
 ## 16. Warehouse requests and fulfilment
 
-- **LOCKED chain:** order enters `diproses` → one Stock Request (+ items for Agent-sourced order items) → **Gudang proposes** quantities (≤ remaining) → **Admin approves** → physical move + reservation release (§10). Direct Gudang fulfilment is disabled. Partial fulfilment keeps the remainder on the same request/item; status is derived `pending / partial / fulfilled`.
+- **LOCKED chain:** order enters `diproses` → one Stock Request (+ items for Agent-sourced order items) → **Gudang proposes** quantities (≤ remaining) → **Admin decides PER PRODUCT (proposal line)** → physical move + reservation release for approved lines only (§10). Direct Gudang fulfilment is disabled. Partial fulfilment keeps the remainder on the same request/item; status is derived `pending / partial / fulfilled`.
+- **Proposal item vs order demand (LOCKED distinction):** a `StockRequestItem` is the inventory REQUIREMENT caused by the order (requested / fulfilled / remaining); a proposal item is Gudang's PROPOSED fulfilment of it. Admin approval/rejection is per proposal item (`decision_status` pending/approved/rejected, with actor/time/reason). **Rejecting a proposed fulfilment never changes the order demand** — requested/fulfilled/remaining stay and Gudang may propose again. The proposal header status is derived (`pending`, `partial` = mixed/incomplete, `approved`, `rejected`); the whole-proposal endpoints only act on lines still pending. Approving one line never executes another.
+- **Stock Request follows the order:** `requested_qty` tracks the order line's current active quantity and `remaining = requested − fulfilled` (never negative). Quantity increase adds demand (re-opening a fulfilled request); a reduction may only consume the unfulfilled remainder — reducing below what the warehouse already fulfilled is rejected 422 (warehouse history is never rewritten). Gudang sees Jumlah Order / Diajukan / Dipenuhi / Sisa.
 - Stock Request is created exactly once (idempotent); Sub-sourced items are excluded; an order made only of Sub items has none.
 - Gudang cannot change stock by itself: stock addition (Transit/Factory Plan) and Sub adjustments are **requests approved by Admin**; Super Admin and Agen are not inventory approvers.
 
@@ -211,7 +215,7 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 | Eligibility | Order status `diproses` only; Agent stock only; Sub-sourced orders are rejected 422 |
 | Resolution | Shared `resolveLine`; server price/fees/SKU/snapshot (same code path as checkout); client price/stock-source fields rejected |
 | Quantity / date | `quantity` integer ≥ 1; `requested_delivery_date` optional (defaults to the order's estimate), must not be in the past for a **new** addition |
-| Fulfilment | One fresh `standard` pending shipment; the order's single Stock Request gains one item (and is re-opened to `pending`/`partial` if it was `fulfilled`; history preserved); missing/cancelled request ⇒ 422 |
+| Fulfilment | The line joins the order's mutable shipment for its delivery date (a new one only when that date has none or its shipment is committed); the order's single Stock Request gains one item (and is re-opened to `pending`/`partial` if it was `fulfilled`; history preserved); missing/cancelled request ⇒ 422 |
 | Money | Totals via `OrderTotalCalculator`, payment via `PaymentService::reconcileTotals`; unpaid/partial ⇒ remaining grows; fully paid ⇒ exactly one pending `OrderAdditionalPayment` for the delta linked to the new item; nothing is silently marked paid |
 | Commission | Agent + sales commission rows like checkout; courier fee on delivery |
 | Idempotency | `Idempotency-Key` required (non-blank, ≤ 100 chars); unique per order. Replay of the **same original request** (product, variation, quantity, requested date, payment method; `reason` excluded) returns `200` without any new side effect — even after the line was adjusted/split, the order moved on, or the date elapsed; a materially different request under the same key ⇒ `409` |

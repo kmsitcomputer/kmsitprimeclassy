@@ -130,6 +130,8 @@ Also preserve `public_html/storage` (symlink to `../backend/storage/app/public`)
 
 **Package C pending migrations (not yet applied to production):** `2026_10_02_100000_add_idempotency_key_to_order_items_table` (nullable `idempotency_key` + `UNIQUE(order_id, idempotency_key)`) and `2026_10_02_110000_add_request_fingerprint_to_order_items_table` (nullable `request_fingerprint`). Both are additive; historical rows stay NULL (many NULLs are allowed in a UNIQUE index).
 
+**Production-UAT remediation migration (pending, not applied to production):** `2026_10_03_100000_add_item_decision_to_stock_request_proposal_items` — adds `decision_status/decided_by/decided_at/decision_reason` to `stock_request_proposal_items` and a `partial` value to `stock_request_proposals.status`; backfills only from the proposal header's recorded approval/rejection. After deploy, run `php artisan shipments:regroup` (dry-run, review, then `--apply` with authorization) so existing active orders get the Order + delivery date grouping.
+
 **Migration notes from earlier packages:** `2026_10_01_100000` creates two BEFORE INSERT/UPDATE triggers on `shipments` — on a server with binary logging enabled the migrating user needs `SUPER`/`SET_USER_ID` or `log_bin_trust_function_creators=1` (not needed on production, where `log_bin=OFF`). The Package A role-rename migration's `down()` is not a clean inverse after a "fold" case — do not rely on rolling it back.
 
 ### 7.4 Smoke tests
@@ -154,6 +156,7 @@ Never copy DEV `.env`/credentials to production · preserve production `.env`, u
 | `php artisan regions:import [--reset] [--force]` | Load province/regency/district/village data from `backend/database/data/regions` (source and licence in `SOURCE.md` there). `--reset` deletes region rows first |
 | `php artisan products:backfill-sku [--apply]` | Deterministic SKU backfill; dry-run by default; run `system:audit-catalog-hierarchy` first |
 | `php artisan system:audit-catalog-hierarchy` | Read-only SKU/hierarchy audit (JSON) |
+| `php artisan shipments:regroup [--apply] [--order=ID]` | Merges **mutable** same-date shipments of existing orders (Order + delivery date rule); assigned/in-flight/delivered/verified shipments are never touched; dry-run by default (rolls back). Production use needs a verified backup and explicit Human authorization; preserves the shipping-fee snapshot; idempotent |
 | `php artisan warehouse:reconcile [--agent_id=]` | Read-only diagnostics of warehouse buckets, reservations, movements, requests, opnames |
 | `php artisan warehouse:migrate-legacy-stock --dry-run …` | Historical legacy-stock → Transit backfill tooling (the production cutover is already done). Any non-dry run needs verified backup + explicit Human authorization |
 | `php artisan transactions:reset [--dry-run] [--force]` | **Legacy tool — do not use.** It predates the warehouse/Sub tables and does not know `stock_requests`, `stock_transfers`, `sub_stock_*`, `delivery_verifications`, `inventory_cancellation_reversals`, etc. Their FKs are `RESTRICT`, so on a database with such rows it fails and rolls back, and it can never be a safe production reset. For DEV use §3.1; there is no authorized production reset procedure |

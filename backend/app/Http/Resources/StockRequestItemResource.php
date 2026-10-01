@@ -28,6 +28,10 @@ class StockRequestItemResource extends JsonResource
             'sku' => $this->sku_snapshot ?? $variation?->sku ?? $product?->sku,
             'sku_snapshot' => $this->sku_snapshot,
             'product_image_url' => $this->primaryImageUrl(),
+            // JUMLAH ORDER = the order line's CURRENT active quantity (canonical requirement source); the other three
+            // are the Stock Request's own demand/fulfilment arithmetic: Diajukan / Dipenuhi / Sisa = Diajukan - Dipenuhi.
+            'order_quantity' => $this->relationLoaded('orderItem') ? $this->orderItem?->fulfilled_quantity : null,
+            'delivery_date' => $this->relationLoaded('orderItem') ? $this->orderItem?->requested_delivery_date?->toDateString() : null,
             'requested_qty' => $this->requested_qty,
             'fulfilled_qty' => $this->fulfilled_qty,
             'remaining_qty' => $this->remaining_qty,
