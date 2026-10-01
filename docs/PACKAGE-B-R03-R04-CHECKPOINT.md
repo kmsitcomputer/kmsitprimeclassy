@@ -48,11 +48,15 @@ Read `docs/PACKAGE-B-R03-R04.md`. Key invariants:
 
 ## Baseline / branch
 
+- Package B branch: `feat/package-b-r03-r04`
+- Documentation baseline / branch base: `8b53f78a9368dfd551e12f4c15a84ad9ed821ff3`
+- Base branch: `main`
+- Implementation has not started yet.
+
 Before coding, the implementing agent must record:
 
-- Package B branch name;
-- exact branch base SHA (the documentation baseline on `main`);
 - `git status`;
+- current HEAD (must initially equal or descend from the base above);
 - baseline backend/full test result;
 - baseline frontend type-check/build result.
 
@@ -77,7 +81,7 @@ Any migration added by Package B must be additive and production-data-safe. Reco
 - [x] Package A production deployment closed.
 - [x] Package B business scope documented.
 - [x] AI workflow / compaction / production safety documented in `AGENTS.md`.
-- [ ] Package B branch baseline recorded.
+- [x] Package B branch baseline recorded.
 - [ ] Baseline tests recorded.
 - [ ] R-03 implemented.
 - [ ] R-03 focused tests pass.
@@ -108,10 +112,9 @@ No Package B production deployment/migration is authorized until after implement
 
 ## EXACT NEXT ACTION
 
-1. Sync local repository to the documentation baseline.
-2. Create/switch to the Package B branch.
-3. Read `AGENTS.md`, `docs/PACKAGE-B-R03-R04.md`, and this checkpoint.
-4. Run `git status`, record branch + exact base SHA.
+1. Fetch origin and switch local worktree to `feat/package-b-r03-r04`.
+2. Read `AGENTS.md`, `docs/PACKAGE-B-R03-R04.md`, and this checkpoint.
+3. Run `git status`, `git branch --show-current`, and `git rev-parse HEAD`; verify a clean tree and record the current HEAD.
 5. Perform RECON ONCE focused on R-03:
    - Order / OrderItem state and adjustment flow;
    - Shipment / courier delivery lifecycle and proof;
