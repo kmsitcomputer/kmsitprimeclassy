@@ -443,3 +443,49 @@ Migrations unchanged; production untouched; R-03/R-04 untouched.
 ### EXACT NEXT ACTION
 Manual DEV/UAT (role visibility for Agen/Admin/Gudang/Sales-Kurir-Sub; owner assignment; Sub checkout; Transit<->Sub
 request approve/execute/receive). Then push on user confirmation.
+
+
+---
+
+## Production deployment closure — 2026-10-01
+
+Package A was merged to `main` at `b9ed09b60b1d2cb3d739031c40bd87e79b0f95ed` and subsequently deployed to production after read-only preflight, source/database backup, whitelist deployment, migration verification, reconciliation, and smoke/UAT.
+
+### Production migration result
+All five Package A migrations ran successfully in batch 7:
+
+- `2026_09_29_090000_rename_sales_kurir_role_to_sales_kurir_sub`
+- `2026_09_29_100000_add_owner_to_warehouse_sub_locations`
+- `2026_09_29_110000_create_sub_stock_reservations_table`
+- `2026_09_29_110001_add_stock_source_to_order_items_table`
+- `2026_09_29_120000_create_sub_stock_requests_tables`
+
+### Reconciliation result
+- role count remained 10;
+- `sales-kurir` -> 0, `sales-kurir-sub` -> 1;
+- Nida remains user id 21, role_id 10, agent_id 11, historical referral `SA-4QHJDQ` preserved;
+- all seven new schema/table checks passed;
+- historical Orders = 3 and OrderItems = 3;
+- all three historical OrderItems defaulted safely to `stock_source=agent`, `sub_location_id=NULL`;
+- new Sub reservation/request tables started empty;
+- legacy Sub Locations id 1 `TUTI` and id 2 `tina` remained unowned;
+- Nida owns active Sub Location id 3 `Cibar / Sub Cibarengkok`;
+- warehouse rows remained preserved: WarehouseStocks 4, StockMovements 42, StockTransfers 1.
+
+### Runtime / UAT
+- Package A routes cache successfully.
+- Ten `/api/v1/sub-stock/*` routes are registered.
+- Frontend Package A build deployed with same-origin runtime config.
+- Home and Laravel health return HTTP 200 after maintenance mode was disabled.
+- Unauthenticated `/api/v1/sub-stock/my` returns HTTP 401 (route exists and auth is enforced).
+- Admin and Gudang production UAT passed.
+- Sales-Kurir-Sub ownership resolution for Nida -> Sub Location id 3 passed.
+
+### Final status
+
+**R-01 CLOSED · R-02 CLOSED · Package A CLOSED · Production deployment CLOSED.**
+
+Old sections above that say "production untouched", "main not merged", or "manual UAT still needed" are historical checkpoint entries and are superseded by this closure section.
+
+### EXACT NEXT ACTION
+Proceed with Package B using `AGENTS.md`, `docs/PACKAGE-B-R03-R04.md`, and `docs/PACKAGE-B-R03-R04-CHECKPOINT.md`.
