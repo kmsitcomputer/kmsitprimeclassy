@@ -10,10 +10,11 @@ import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPa
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { getCourierReport } from '@/api/reports'
 import { recordDeliveryVerification } from '@/api/deliveries'
-import { adjustItemFulfillment, rescheduleOrderItem } from '@/api/orderAdjustments'
+import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem } from '@/api/orderAdjustments'
+import { listProducts } from '@/api/catalog'
 import { requestReturn } from '@/api/returns'
 import { useAuthStore } from '@/stores/auth'
-import type { DeliveryVerificationOutcome, Order, OrderItem } from '@/api/types'
+import type { DeliveryVerificationOutcome, Order, OrderItem, Product } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
 import { ApiError } from '@/api/client'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
@@ -530,6 +531,75 @@ async function submitReschedule(item: OrderItem) {
   }
 }
 
+/* ---------- Package C / SC-03: ADMIN ONLY add a NEW product/variation line (only while 'diproses') ---------- */
+// Deliberately role === 'admin' (not auth.can(...)): the backend rule is Admin-only and narrower than
+// the shared fulfillment capability. Server remains authoritative; this only shows the control.
+const canAddLine = computed(() => auth.user?.role === 'admin' && order.value?.status === 'diproses')
+const showingAddForm = ref(false)
+const addProducts = ref<Product[]>([])
+const addForm = reactive({
+  product_id: '' as number | '',
+  product_variation_id: '' as number | '',
+  quantity: 1,
+  requested_delivery_date: '',
+  reason: '',
+  additional_payment_method: 'transfer' as 'transfer' | 'cod',
+})
+const addSubmitting = ref(false)
+const addError = ref<string | null>(null)
+const addIdempotencyKey = ref<string | null>(null)
+
+const addSelectedProduct = computed(() => addProducts.value.find((p) => p.id === Number(addForm.product_id)) ?? null)
+
+async function openAddForm() {
+  showingAddForm.value = true
+  addError.value = null
+  addForm.product_id = ''
+  addForm.product_variation_id = ''
+  addForm.quantity = 1
+  addForm.requested_delivery_date = order.value?.delivery_date_estimate ?? ''
+  addForm.reason = ''
+  addForm.additional_payment_method = 'transfer'
+  // One key per logical submission — retained across retries until it succeeds.
+  addIdempotencyKey.value = crypto.randomUUID()
+  if (addProducts.value.length === 0) {
+    try {
+      const { products } = await listProducts({ per_page: 100 })
+      addProducts.value = products
+    } catch (e) {
+      addError.value = e instanceof ApiError ? e.message : t('orders.errors.addProductLoad')
+    }
+  }
+}
+
+async function submitAddProduct() {
+  if (!order.value || !addIdempotencyKey.value) return
+  addSubmitting.value = true
+  addError.value = null
+  try {
+    await addOrderItem(
+      props.id,
+      {
+        product_id: Number(addForm.product_id),
+        product_variation_id: addForm.product_variation_id ? Number(addForm.product_variation_id) : null,
+        quantity: addForm.quantity,
+        requested_delivery_date: addForm.requested_delivery_date || null,
+        reason: addForm.reason,
+        additional_payment_method: addForm.additional_payment_method,
+      },
+      addIdempotencyKey.value,
+    )
+    showingAddForm.value = false
+    addIdempotencyKey.value = null
+    await load()
+  } catch (e) {
+    addError.value = e instanceof ApiError ? e.message : t('orders.errors.addProduct')
+    // Keep the same idempotency key so a retry of THIS submission cannot duplicate the line.
+  } finally {
+    addSubmitting.value = false
+  }
+}
+
 /* ---------- Konsumen: request a return (only once the item is 'terkirim') ---------- */
 const returningItemId = ref<number | null>(null)
 const returnForm = reactive({ quantity: 1, reason: '', restock: true })
@@ -603,6 +673,53 @@ async function submitReturn(item: OrderItem) {
 
       <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <h2 class="mb-3 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.items') }}</h2>
+
+        <!-- Package C / SC-03: ADMIN ONLY — add a NEW product/variation line (only while 'diproses'). -->
+        <div v-if="canAddLine" class="mb-3 rounded-xl border border-stone-200 bg-stone-50 p-3 dark:border-stone-700 dark:bg-stone-800/60">
+          <button
+            v-if="!showingAddForm"
+            type="button"
+            class="text-xs font-medium text-brand-600 dark:text-brand-400"
+            @click="openAddForm"
+          >
+            + {{ t('orders.addProduct') }}
+          </button>
+          <div v-else class="space-y-2">
+            <p v-if="addError" class="text-xs text-red-600 dark:text-red-400">{{ addError }}</p>
+            <select v-model="addForm.product_id" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
+              <option value="">{{ t('orders.selectProduct') }}</option>
+              <option v-for="p in addProducts" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+            <select
+              v-if="addSelectedProduct?.has_variations"
+              v-model="addForm.product_variation_id"
+              class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950"
+            >
+              <option value="">{{ t('orders.selectVariation') }}</option>
+              <option v-for="v in addSelectedProduct.variations" :key="v.id" :value="v.id">{{ v.label || v.sku }}</option>
+            </select>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-stone-500 dark:text-stone-400">{{ t('orders.quantity') }}</label>
+              <input v-model.number="addForm.quantity" type="number" min="1" class="w-20 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-stone-500 dark:text-stone-400">{{ t('orders.deliveryDateEstimate') }}</label>
+              <input v-model="addForm.requested_delivery_date" type="date" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+            </div>
+            <input v-model="addForm.reason" type="text" :placeholder="t('orders.reason')" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+            <div class="flex gap-2">
+              <AppButton
+                size="sm"
+                :disabled="!addForm.product_id || (addSelectedProduct?.has_variations && !addForm.product_variation_id) || !addForm.reason || addForm.quantity < 1 || addSubmitting"
+                @click="submitAddProduct"
+              >
+                {{ t('orders.save') }}
+              </AppButton>
+              <AppButton size="sm" variant="ghost" @click="showingAddForm = false">{{ t('orders.cancel') }}</AppButton>
+            </div>
+          </div>
+        </div>
+
         <ul class="divide-y divide-stone-100 dark:divide-stone-800">
           <li v-for="item in order.items" :key="item.id" class="py-2.5 text-sm">
             <div class="flex items-center justify-between">

@@ -466,7 +466,7 @@ class OrderService
      * @param  array{product_id:int, product_variation_id?:?int, quantity?:int}  $line
      * @return array{product: Product, variation: ?ProductVariation, quantity: int}
      */
-    private function resolveLine(array $line): array
+    public function resolveLine(array $line): array
     {
         $product = Product::query()->where('status', 'active')->findOrFail($line['product_id']);
         $variationId = $line['product_variation_id'] ?? null;
@@ -569,7 +569,7 @@ class OrderService
      *
      * @param  array{product: Product, variation: ?ProductVariation, quantity: int}  $resolved
      */
-    private function priceAndReserveLine(Order $order, int $agentId, User $konsumen, User $actor, array $resolved, ?WarehouseSubLocation $subLocation = null): array
+    private function priceAndReserveLine(Order $order, int $agentId, User $konsumen, User $actor, array $resolved, ?WarehouseSubLocation $subLocation = null, ?string $requestedDeliveryDate = null, ?string $idempotencyKey = null): array
     {
         $product = $resolved['product'];
         $variation = $resolved['variation'];
@@ -629,10 +629,11 @@ class OrderService
             'subtotal_snapshot' => $lineSubtotal,
             'original_quantity' => $qty,
             'fulfilled_quantity' => $qty,
-            // Per-item delivery schedule defaults to the order's own estimate —
-            // independently reschedulable per item afterwards (see
-            // OrderFulfillmentService::rescheduleItemDeliveryDate).
-            'requested_delivery_date' => $order->delivery_date_estimate,
+            // Package C / SC-03: an added line may carry its own requested date; a checkout line
+            // keeps the existing default (the order's own estimate) and a NULL idempotency key
+            // (only SC-03 appends carry one, uniquely per order).
+            'requested_delivery_date' => $requestedDeliveryDate ?? $order->delivery_date_estimate,
+            'idempotency_key' => $idempotencyKey,
             'status' => $order->status,
         ]);
 
@@ -667,7 +668,25 @@ class OrderService
 
         $this->recordCommission($order, $orderItem, $agentId, $salesBeneficiaryId, $agentFee, $salesFee);
 
-        return [$lineSubtotal, $unitWeight * $qty];
+        return [$lineSubtotal, $unitWeight * $qty, $orderItem];
+    }
+
+    /**
+     * Package C / SC-03: writes (snapshot + reserve + commission) ONE new Agent-sourced line for an
+     * existing order, reusing the EXACT canonical checkout path (resolveLine + priceAndReserveLine)
+     * so pricing/fee/snapshot/reservation semantics can never drift between checkout and addition.
+     *
+     * The caller (OrderLineAdditionService) is responsible for the order row lock, the canonical
+     * inventory target prelock, the Stock Request reconciliation and the order-level financial
+     * reconciliation — this method only owns the line itself.
+     *
+     * @param  array{product: Product, variation: ?ProductVariation, quantity: int}  $resolved
+     */
+    public function addReservedLine(Order $order, User $konsumen, User $actor, array $resolved, ?string $requestedDeliveryDate = null, ?string $idempotencyKey = null): OrderItem
+    {
+        [, , $orderItem] = $this->priceAndReserveLine($order, $order->agent_id, $konsumen, $actor, $resolved, null, $requestedDeliveryDate, $idempotencyKey);
+
+        return $orderItem;
     }
 
     private function recordCommission(Order $order, OrderItem $item, int $agentId, int $salesBeneficiaryId, float $agentFee, float $salesFee): void

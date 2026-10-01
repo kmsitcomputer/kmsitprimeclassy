@@ -36,6 +36,10 @@ return [
         'payment_not_verified' => '付款尚未核实，订单无法处理。',
         'invalid_village' => '所选村/里无效。',
         'sub_item_requires_owner_shipment' => '该商品来自 Sub 库存，只能由其所属的 Sales-Kurir-Sub 自行发货。',
+        'line_added' => '已成功将商品添加到订单。',
+        'line_addition_sub_not_supported' => '无法向来源为 Sub 库存的订单添加商品。',
+        'line_addition_stock_request_unavailable' => '该订单没有可与此添加行核对的有效库存申请。',
+        'line_idempotency_conflict' => '此幂等键已用于不同的添加商品请求。',
     ],
 
     'product' => [

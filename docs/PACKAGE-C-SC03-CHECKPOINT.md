@@ -1,7 +1,8 @@
 # Package C (SC-03) — Checkpoint
 
-**Status:** SPECIFICATION LOCKED — NOT YET IMPLEMENTED. Awaiting Human authorization.
+**Status:** IMPLEMENTED — backend + frontend validation green. Awaiting independent review before DEV UAT. NOT production closed.
 **Created:** 2026-10-01
+**Implementation baseline:** branch `feat/package-c-sc03`, spec HEAD `418bbdd` (unchanged as the parent of the implementation commit).
 **Active spec:** `docs/PACKAGE-C-SC03.md`
 **Roadmap recon:** `docs/PACKAGE-C-ROADMAP-RECON.md` (CLOSED — decisions recorded)
 **Repository protocol:** `AGENTS.md`
@@ -115,6 +116,47 @@ Package B: `self_sub` self-delivery + triggers, append-only delivery verificatio
 
 None. Recorded scope boundary (not a blocker): Sub-sourced/mixed-source order line addition is excluded and would require a separate Human decision.
 
+## IMPLEMENTATION PASS — 2026-10-01
+
+**Status:** COMPLETE and green. Independent review + DEV UAT not yet done; not production-authorized.
+
+### What was built
+
+- **Authority (Admin only):** `OrderPolicy::addLine(User, Order)` = `$user->isRole('admin') && $order->agent_id === $user->agent_id`; dedicated `role:admin` route group. `OrderPolicy::manageFulfillment` untouched (Package A/B authority unchanged, proven by `test_manage_fulfillment_authority_is_unchanged`).
+- **Endpoint:** `POST /orders/{order}/items` (`OrderFulfillmentController::addItem`), required `Idempotency-Key`; `201` on create, `200` on same-request replay, `409` on conflicting key reuse, `422`/`403`/`404` per existing conventions. Returns canonical `OrderResource`.
+- **Orchestration:** new `OrderLineAdditionService` composing existing canonical services — `OrderService::resolveLine` + `addReservedLine` (snapshot + Agent reservation + commission), `OrderFulfillmentService::assignFreshShipment` (one fresh standard pending Shipment) and `reconcileAdditionalObligation` (shared rule extracted from `increaseFulfillment`), `StockRequestService::appendItemForOrderItem` (one-per-order request extended), `OrderTotalCalculator` + `PaymentService::reconcileTotals`.
+- **Eligibility:** order status `diproses` only; Agent stock only (`stock_source`/`sub_location_id` rejected; Sub-sourced orders rejected 422).
+- **Idempotency:** `order_items.idempotency_key` (100, nullable) + `UNIQUE(order_id, idempotency_key)`; DB unique is the concurrency backstop.
+- **Frontend:** `OrderDetailView.vue` bounded "Tambah Produk" flow gated on `role === 'admin' && status === 'diproses'` (product/variation select from `listProducts`, quantity, delivery date, reason, submit + canonical refresh); `api/orderAdjustments.ts::addOrderItem` sends one `Idempotency-Key` per submission; i18n keys added in all 4 locales.
+- **Audit:** `ActivityLogger` `order_item.added` (actor, order, item, product/variation, quantity, source, delivery date, idempotency key, totals, actor role).
+
+### Migration
+
+- `2026_10_02_100000_add_idempotency_key_to_order_items_table.php` — additive, nullable, unique `(order_id, idempotency_key)`; historical rows NULL. No other schema change.
+
+### Files changed
+
+Backend modified: `app/Http/Controllers/Api/V1/Fulfillment/OrderFulfillmentController.php`, `app/Models/OrderItem.php`, `app/Policies/OrderPolicy.php`, `app/Services/Order/OrderService.php`, `app/Services/Order/OrderFulfillmentService.php`, `app/Services/Stock/StockRequestService.php`, `routes/api_v1.php`, `lang/{id,en,ar,zh}/messages.php`, `.phpunit-concurrency-actor.php`.
+Backend new: `app/Services/Order/OrderLineAdditionService.php`, `app/Http/Requests/Fulfillment/AddOrderItemRequest.php`, `database/migrations/2026_10_02_100000_add_idempotency_key_to_order_items_table.php`, `tests/Feature/OrderLineAdditionTest.php`, `tests/Feature/OrderLineAdditionConcurrencyTest.php`.
+Tests modified: `tests/Feature/MigrationVerificationTest.php` (rollback step 3 → 4 to cover the Package C tail migration, plus idempotency-column assertions — coverage extended, not weakened).
+Frontend modified: `src/api/orderAdjustments.ts`, `src/views/OrderDetailView.vue`, `src/i18n/locales/{id,en,ar,zh}.ts`.
+
+### Validation
+
+- Focused: `php artisan test --filter=OrderLineAdditionTest` → 25 passed; `--filter=OrderLineAdditionConcurrencyTest` → 3 passed; `--filter=MigrationVerificationTest` → 2 passed.
+- Full backend suite: `php artisan test` → **843 passed / 5918 assertions / 0 failures** (baseline 815 / 5771 / 0; +28 tests).
+- Frontend: `npm run type-check` PASS; `npm run build-only` PASS (only the pre-existing >500 kB chunk-size warning).
+- `git diff --check` clean.
+
+### Known non-blocking warnings
+
+- CLI: `Cannot load Zend OPcache - it was already loaded`, `Module "mbstring" is already loaded` (pre-existing environment noise).
+- Frontend: pre-existing large-chunk bundle warning.
+
+### Open findings / blockers
+
+None. Recorded scope boundary (not a blocker): Sub-sourced/mixed-source order addition is excluded (separate Human decision required).
+
 ## EXACT NEXT ACTION
 
-**Human reviews and authorizes Package C SC-03 implementation. No other feature implementation is authorized.**
+**Independent review of Package C SC-03 implementation before DEV UAT. No additional feature work is authorized.**

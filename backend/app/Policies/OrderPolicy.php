@@ -155,4 +155,19 @@ class OrderPolicy
 
         return $user->isRole('agen', 'admin') && $order->agent_id === $user->agent_id;
     }
+
+    /**
+     * Package C / SC-03: adding a NEW product/variation line to an existing order is ADMIN ONLY
+     * (Human decision, 2026-10-01) — deliberately narrower than manageFulfillment, which stays
+     * unchanged for the existing Package A/B fulfillment features (super_admin/agen/admin).
+     *
+     * Exactly role `admin`, restricted to the order's own branch. Every other role — including
+     * super_admin and agen — is denied, and a cross-Agent admin is denied. Defence in depth: this
+     * policy runs alongside the dedicated `role:admin` route group and the global
+     * BelongsToAgentScope on Order.
+     */
+    public function addLine(User $user, Order $order): bool
+    {
+        return $user->isRole('admin') && $order->agent_id === $user->agent_id;
+    }
 }

@@ -1,6 +1,30 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
-import type { OrderItem, PaginationMeta } from './types'
+import type { Order, OrderItem, PaginationMeta } from './types'
+
+export interface AddOrderItemPayload {
+  product_id: number
+  product_variation_id?: number | null
+  quantity: number
+  requested_delivery_date?: string | null
+  reason: string
+  additional_payment_method?: 'transfer' | 'cod'
+}
+
+/**
+ * Package C / SC-03 — ADMIN ONLY, same-Agent. Adds a NEW product/variation line to an existing order
+ * (distinct from adjustItemFulfillment, which only changes an existing line's quantity). Only valid
+ * while the order is 'diproses'.
+ *
+ * The caller generates ONE idempotencyKey per logical submission (e.g. crypto.randomUUID()) and holds
+ * it across retries of that same submission; the backend returns the canonical OrderResource.
+ */
+export async function addOrderItem(orderId: number, payload: AddOrderItemPayload, idempotencyKey: string) {
+  const { data } = await http.post<ApiEnvelope<Order>>(`/orders/${orderId}/items`, payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
+  return data.data
+}
 
 export async function adjustItemFulfillment(
   orderId: number,

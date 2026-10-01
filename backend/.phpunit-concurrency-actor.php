@@ -374,6 +374,24 @@ if (str_starts_with($role, 'sr-')) {
                 $item = OrderItem::findOrFail($subjectId);
                 $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test', (string) ($extra['method'] ?? 'cod'));
                 break;
+            case 'add-line':
+                // Package C / SC-03: the REAL existing-order line-addition path, used to race two
+                // additions (same key -> one line; distinct keys -> both) and an addition against a
+                // concurrent Agent reservation on the same target (capacity).
+                $order = Order::withoutGlobalScopes()->findOrFail($subjectId);
+                [$createdItem, $wasReplay] = app(\App\Services\Order\OrderLineAdditionService::class)->addLine(
+                    $order,
+                    $extra['line'],
+                    $actor,
+                    $extra['date'] ?? null,
+                    (string) ($extra['reason'] ?? 'concurrency-test'),
+                    (string) ($extra['method'] ?? 'cod'),
+                    (string) $extra['key'],
+                );
+                $payload['replayed'] = $wasReplay;
+                $payload['order_item_id'] = $createdItem->id;
+                $result = $createdItem;
+                break;
             case 'fulfillment-reduce':
                 $item = OrderItem::findOrFail($subjectId);
                 $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test');

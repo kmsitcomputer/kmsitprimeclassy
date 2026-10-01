@@ -36,6 +36,10 @@ return [
         'payment_not_verified' => 'لم يتم التحقق من الدفع بعد، لا يمكن معالجة الطلب.',
         'invalid_village' => 'القرية/الحي المختار غير صالح.',
         'sub_item_requires_owner_shipment' => 'هذا العنصر مصدره مخزون Sub ولا يمكن شحنه إلا من قبل Sales-Kurir-Sub المالك.',
+        'line_added' => 'تمت إضافة المنتج إلى الطلب بنجاح.',
+        'line_addition_sub_not_supported' => 'لا يمكن إضافة منتج إلى طلب مصدره مخزون Sub.',
+        'line_addition_stock_request_unavailable' => 'لا يوجد طلب مخزون نشط في الطلب لمطابقته مع المنتج المضاف.',
+        'line_idempotency_conflict' => 'تم استخدام مفتاح الـ idempotency هذا مسبقًا لإضافة سطر مختلف.',
     ],
 
     'product' => [

@@ -36,6 +36,10 @@ return [
         'payment_not_verified' => 'Payment has not been verified yet; the order cannot be processed.',
         'invalid_village' => 'The selected village is invalid.',
         'sub_item_requires_owner_shipment' => 'This item is sourced from Sub stock and can only be shipped by its owning Sales-Kurir-Sub.',
+        'line_added' => 'Product line added to the order successfully.',
+        'line_addition_sub_not_supported' => 'A product line cannot be added to a Sub-sourced order.',
+        'line_addition_stock_request_unavailable' => 'The order has no active stock request to reconcile with the added line.',
+        'line_idempotency_conflict' => 'This idempotency key was already used for a different line addition.',
     ],
 
     'product' => [

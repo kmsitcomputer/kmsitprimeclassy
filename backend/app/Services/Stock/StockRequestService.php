@@ -4,7 +4,9 @@ namespace App\Services\Stock;
 
 use App\Exceptions\ApiException;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\StockRequest;
+use App\Models\StockRequestItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -43,5 +45,49 @@ class StockRequestService
         } while (DB::table('stock_requests')->where('request_number', $number)->exists());
 
         return $number;
+    }
+
+    /**
+     * Package C / SC-03: reconcile the order's existing one-per-order Stock Request with a line that
+     * was added to an already-`diproses` order. Reuses the canonical request/items mechanism — never
+     * creates a second Stock Request — and is idempotent per OrderItem (the unique `order_item_id`
+     * invariant is preserved: an existing line for this item is returned, not duplicated).
+     *
+     * Sub-sourced items carry no Agent warehouse demand, so they are rejected here (SC-03 is
+     * Agent-only anyway). A missing or already-cancelled request is reported as a 422 rather than
+     * silently leaving demand untracked.
+     */
+    public function appendItemForOrderItem(Order $order, OrderItem $item): ?StockRequestItem
+    {
+        return DB::transaction(function () use ($order, $item) {
+            if ($item->isSubSourced()) {
+                throw new ApiException(__('messages.order.line_addition_sub_not_supported'), 422);
+            }
+
+            $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->lockForUpdate()->first();
+
+            if (! $request || $request->status === 'cancelled') {
+                throw new ApiException(__('messages.order.line_addition_stock_request_unavailable'), 422);
+            }
+
+            $existing = StockRequestItem::query()
+                ->where('stock_request_id', $request->id)
+                ->where('order_item_id', $item->id)
+                ->first();
+
+            if ($existing) {
+                return $existing;
+            }
+
+            return $request->items()->create([
+                'order_item_id' => $item->id,
+                'product_id' => $item->product_id,
+                'product_variation_id' => $item->product_variation_id,
+                'sku_snapshot' => $item->sku_snapshot,
+                'requested_qty' => $item->original_quantity,
+                'fulfilled_qty' => 0,
+                'remaining_qty' => $item->original_quantity,
+            ]);
+        });
     }
 }
