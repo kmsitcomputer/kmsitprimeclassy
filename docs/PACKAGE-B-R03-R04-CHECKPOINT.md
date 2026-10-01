@@ -1,7 +1,8 @@
 # Package B (R-03 + R-04) — Checkpoint
 
-**Status:** R-03 + R-04 IMPLEMENTED, REVIEWED AND GREEN — independent final review complete; next: Package B DEV manual UAT.
+**Status:** PACKAGE B PRODUCTION CLOSED — R-03 + R-04 implemented, reviewed, DEV/UAT PASS, Human Stage Gate APPROVED, deployed to production and smoke-verified. No remaining Package B implementation/remediation action.
 **Created:** 2026-10-01
+**Closed:** 2026-10-01
 **Active spec:** `docs/PACKAGE-B-R03-R04.md`
 **Repository protocol:** `AGENTS.md`
 
@@ -391,9 +392,15 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Post-remediation regression passes (813/5758/0); frontend PASS.
 - [x] Full Package B regression (cross-domain).
 - [x] Claude independent final review / direct fixes (815/5771/0).
-- [ ] Package B DEV/UAT.
-- [ ] Human Stage Gate.
-- [ ] Production deployment.
+- [x] Package B DEV/UAT — PASS by Human decision.
+- [x] Human Stage Gate — APPROVED.
+- [x] Production pre-deployment backup (filesystem + database).
+- [x] Production migrations (R-03 batch 8); R-04 no migration.
+- [x] Production schema reconciliation (columns/table/triggers verified).
+- [x] Package A regression reconciliation on production.
+- [x] Frontend production build + deploy.
+- [x] Post-deployment smoke test — PASS.
+- [x] Package B production closure documentation.
 
 ## Open findings
 
@@ -410,7 +417,7 @@ Pre-existing technical debt (NOT Package B regressions): Package A role migratio
 
 ## Production state
 
-Production is LIVE after Package A. Package B development must not mutate production. No Package B production deployment/migration is authorized until after implementation, review, DEV/UAT, and Human Stage Gate.
+Production is **LIVE with Package B (R-03 + R-04) deployed and production-closed** (2026-10-01). Package A remains CLOSED. Environment `production`, maintenance mode OFF, config/route/view caches CACHED, health smoke PASS. See §PACKAGE B PRODUCTION CLOSURE for the full evidence trail. No further Package B implementation or remediation action remains.
 
 ## INDEPENDENT FINAL REVIEW (Claude) — Package B
 
@@ -448,6 +455,130 @@ Focused: `R04OrderProjectionTest`, `SalesKurirSubSelfDeliveryTest`, `CourierSyst
 ### Remaining risks / open findings
 None open. Documented by design: R03-1 (triggers instead of single CHECK), R03-3, R03-4 (verification outcome `return` does not itself create a ReturnRequest). Pre-existing debt unchanged.
 
+## PACKAGE B PRODUCTION CLOSURE — 2026-10-01
+
+### Final source
+
+- Final application code HEAD before closure documentation: **`5bf34dd`** (`5bf34dd...` "fix(package-b): close independent review findings").
+- Branch: **`feat/package-b-r03-r04`**.
+- Closure documentation is documentation-only; no application code, migration, or test was changed.
+
+### Verification (pre-deployment, final)
+
+- Backend: **815 tests passed / 5771 assertions / 0 failures**.
+- Frontend `npm run type-check`: **PASS**.
+- Frontend `npm run build-only`: **PASS** (pre-existing chunk-size warning only).
+- Working tree was clean.
+- Independent final reviewer: **Claude**.
+
+### DEV / UAT
+
+- Package B DEV UAT: **PASS** by Human decision.
+- Human Stage Gate: **APPROVED**.
+
+### Production pre-deployment backup
+
+- Production filesystem backup:
+  - `/root/primeclassy-backup-package-b-20261001/backend`
+  - `/root/primeclassy-backup-package-b-20261001/public_html`
+- Database backup: `/root/primeclassy-backup-package-b-20261001/database.sql`
+- DB dump size observed: 3.6 MB; `CREATE TABLE` count observed: 89; dump completed successfully.
+- Production MariaDB: **10.11.10-MariaDB-log**; `log_bin=OFF`; `log_bin_trust_function_creators=OFF`.
+- Because binary logging is OFF, the M1 trigger `SUPER`/`SET_USER_ID` privilege concern (see §Deployment note) was **not** a deployment blocker.
+
+### Production migrations
+
+Package B R-03 migrations ran successfully in **batch 8**:
+
+- `2026_10_01_100000_add_self_delivery_to_shipments_table`
+- `2026_10_01_100001_create_delivery_verifications_table`
+- `2026_10_01_100002_add_split_lineage_to_order_items_table`
+
+R-04 introduced **no migration**.
+
+### Production schema reconciliation
+
+Verified on production:
+
+- `shipments.delivery_mode` exists.
+- `shipments.self_delivered_by_user_id` exists.
+- `delivery_verifications` table exists.
+- `order_items.split_from_order_item_id` exists.
+- Triggers `shipments_self_sub_no_courier_insert` and `shipments_self_sub_no_courier_update` exist; both enforce that a `self_sub` shipment cannot carry a `courier_id`.
+
+### Package A regression reconciliation (production)
+
+Verified on production:
+
+- `roles_count = 10`; `sales-kurir-sub` role count = 1; legacy `sales-kurir` role count = 0.
+- Sub Locations unchanged:
+  1. `TUTI` / Tuti Mugiastuti / active / owner NULL
+  2. `tina` / RS Otista / active / owner NULL
+  3. `Cibar` / Sub Cibarengkok / active / owner_user_id 21
+- `shipments_total = 3`; `self_sub_shipments = 0`; `invalid_self_sub_with_courier = 0`; `delivery_verifications = 0`. The zero values were **expected immediately after deployment**.
+
+### Frontend
+
+- Production frontend build **PASS**.
+- Deployed to: `/www/wwwroot/primeccookies.com/primeclassy/public_html`.
+
+### Deployment incident / PERMANENT PRODUCTION INVARIANT
+
+The initial frontend deployment used:
+
+```bash
+rsync -a --delete frontend/dist/ public_html/
+```
+
+This **deleted production-specific `public_html/laravel.php`**. Production Nginx routes `/api`, `/sanctum`, and `/up` through that Laravel bridge. Effect: the frontend loaded successfully but API requests returned 404, including `/api/v1/install/status`, `/api/v1/auth/me`, and `/api/v1/homepage`, even though the Laravel routes themselves remained registered and healthy.
+
+The bridge was restored from the pre-deployment backup `public_html/laravel.php`. After restoration: `GET /api/v1/install/status` → 200, `GET /api/v1/homepage` → 200, `GET /api/v1/auth/me` → 401 unauthenticated (expected). Browser smoke then PASS.
+
+**PERMANENT FRONTEND PRODUCTION DEPLOYMENT RULE:**
+
+> Never delete `public_html/laravel.php` during frontend deployment.
+
+The canonical deployment command must explicitly preserve it:
+
+```bash
+sudo rsync -a --delete \
+  --exclude='laravel.php' \
+  /www/dev/primeclassy/frontend/dist/ \
+  /www/wwwroot/primeccookies.com/primeclassy/public_html/
+```
+
+This is a **production invariant**, not merely a historical note. It is recorded in `AGENTS.md` §8 (production deployment safety) and the README §19 deployment steps so no future frontend deploy command can delete `laravel.php`. (Nginx architecture is unchanged by this documentation task.)
+
+### Post-deployment smoke verification
+
+- Production environment = `production`.
+- Maintenance mode = OFF.
+- Config cache = CACHED; Routes cache = CACHED; Views cache = CACHED.
+- HTTPS homepage = HTTP/2 200.
+- `GET /api/v1/install/status` = 200.
+- `GET /api/v1/homepage` = 200.
+- Unauthenticated `GET /api/v1/auth/me` = 401 (expected).
+- Final browser smoke = PASS.
+
+### Known non-blocking CLI warnings
+
+- `Cannot load Zend OPcache - it was already loaded`
+- `Module "mbstring" is already loaded`
+
+Neither is a Package B blocker.
+
+### Final status
+
+- Package A = **CLOSED**
+- R-03 = **CLOSED**
+- R-04 = **CLOSED**
+- Package B DEV/UAT = **PASS**
+- Package B Human Stage Gate = **APPROVED**
+- Package B Production Deployment = **PASS**
+- Package B = **PRODUCTION CLOSED**
+
+There is no remaining Package B implementation or remediation action.
+
 ## EXACT NEXT ACTION
 
-**PACKAGE B DEV MANUAL UAT.** Do not merge to main, deploy, or touch production.
+**Package B is production-closed. Determine and authorize the next roadmap package before any new implementation.** Do not pre-authorize a new package.

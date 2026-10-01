@@ -124,6 +124,13 @@ Mandatory rules:
 - Preserve production `.env`, uploads, private credentials, sessions, logs, runtime cache directories, and installed-lock state.
 - Use deployment dry-runs/whitelists when production contains local/runtime differences.
 - Never deploy or migrate production without explicit human authorization for that step.
+- **Frontend production invariant — never delete `public_html/laravel.php`.** The single-domain production layout routes `/api`, `/sanctum`, and `/up` to Laravel through the `public_html/laravel.php` bridge (see README §19/§20). A destructive frontend sync silently removes it and the API returns 404 while the frontend still loads (a real Package B production incident). Never run `rsync --delete` against the document root without `--exclude='laravel.php'`; use the canonical command:
+  ```bash
+  sudo rsync -a --delete \
+    --exclude='laravel.php' \
+    /www/dev/primeclassy/frontend/dist/ \
+    /www/wwwroot/primeccookies.com/primeclassy/public_html/
+  ```
 - Keep maintenance mode active during incompatible code/schema transition windows.
 - Verify migrations as Pending before apply and Ran after apply.
 - Reconcile data before bringing the application fully live.
