@@ -194,6 +194,15 @@ REV-001 ×3, REV-002 ×1, REV-003 ×2 (deterministic SQL lock-order assertion + 
 - `git diff --check` clean.
 - Not done / not claimed: DEV UAT, Human Stage Gate, production closure.
 
+## C-SC03-UAT-PRE-001 — `crypto.randomUUID is not a function` (pre-UAT runtime defect)
+
+- **Cause:** frontend code called `crypto.randomUUID()` directly. It is only exposed in secure contexts / newer browsers; where `crypto` exists without it, `CheckoutView` setup threw and checkout crashed.
+- **Source call sites found (all replaced):** `views/CheckoutView.vue` (order idempotency key), `views/OrderDetailView.vue` (delivery-verification key), `views/dashboard/SubStockView.vue` (Sub stock request key), `utils/addLineSubmission.ts` (SC-03 add-line key). Two doc comments (`api/orders.ts`, `api/orderAdjustments.ts`) updated.
+- **Fix:** one helper `frontend/src/utils/uuid.ts::secureUuid()`: native `crypto.randomUUID()` → RFC 4122 v4 from `crypto.getRandomValues()` → otherwise throws an explicit error (no Math.random/Date.now/counter fallback).
+- **Semantics preserved:** key lifecycle untouched (one key per logical submission; SC-03 sessionStorage pending-submission behavior from `e111bca` unchanged). No backend change.
+- **Validation:** runtime script (tsx, mocked `crypto`): A native used ✔; B getRandomValues-only → valid v4 ✔; C no secure API / no `crypto` → controlled error ✔; D 1000 distinct ✔; E/F key generation works without randomUUID and SC-03 restore-same-key / new-submission-new-key intact ✔. `npm run type-check` PASS; `npm run build-only` PASS; built `CheckoutView` chunk contains no `randomUUID` (only the helper chunk references it, guarded); `git diff --check` clean.
+- **Files:** `src/utils/uuid.ts` (new), `src/utils/addLineSubmission.ts`, `src/views/{CheckoutView,OrderDetailView}.vue`, `src/views/dashboard/SubStockView.vue`, `src/api/{orders,orderAdjustments}.ts`, this checkpoint.
+
 ## EXACT NEXT ACTION
 
-**Codex performs independent final verification of remediation C-SC03-REV-001 through C-SC03-REV-008 before DEV UAT authorization.**
+**Qwen performs bounded verification of C-SC03-UAT-PRE-001 before DEV UAT.**

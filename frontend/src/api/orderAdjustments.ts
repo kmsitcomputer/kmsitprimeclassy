@@ -16,7 +16,7 @@ export interface AddOrderItemPayload {
  * (distinct from adjustItemFulfillment, which only changes an existing line's quantity). Only valid
  * while the order is 'diproses'.
  *
- * The caller generates ONE idempotencyKey per logical submission (e.g. crypto.randomUUID()) and holds
+ * The caller generates ONE idempotencyKey per logical submission (e.g. secureUuid() from @/utils/uuid) and holds
  * it across retries of that same submission; the backend returns the canonical OrderResource.
  */
 export async function addOrderItem(orderId: number, payload: AddOrderItemPayload, idempotencyKey: string) {

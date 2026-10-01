@@ -14,6 +14,7 @@ import {
 } from '@/api/subStock'
 import { ApiError } from '@/api/client'
 import { skuLabel } from '@/utils/format'
+import { secureUuid } from '@/utils/uuid'
 
 const subLocation = ref<{ id: number; code: string; name: string } | null>(null)
 const stocks = ref<SubStockRow[]>([])
@@ -121,7 +122,7 @@ async function submitRequest() {
   }
   submitting.value = true
   try {
-    await createSubStockRequest(direction.value, items, crypto.randomUUID(), note.value.trim() || undefined)
+    await createSubStockRequest(direction.value, items, secureUuid(), note.value.trim() || undefined)
     draftQuantities.value = {}
     note.value = ''
     success.value = direction.value === 'replenish' ? 'Permintaan pengisian stok dikirim. Menunggu persetujuan Admin.' : 'Permintaan retur dikirim. Menunggu persetujuan Admin.'

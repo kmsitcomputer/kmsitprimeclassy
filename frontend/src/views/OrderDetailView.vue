@@ -26,6 +26,7 @@ import { requestReturn } from '@/api/returns'
 import { useAuthStore } from '@/stores/auth'
 import type { DeliveryVerificationOutcome, Order, OrderItem, Product } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
+import { secureUuid } from '@/utils/uuid'
 import { ApiError } from '@/api/client'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
 import GoogleMapView from '@/components/maps/GoogleMapView.vue'
@@ -304,7 +305,7 @@ const verificationForms = reactive<Record<number, { outcome: DeliveryVerificatio
 const verificationKeys = reactive<Record<number, string>>({})
 
 function keyFor(shipmentId: number) {
-  if (!verificationKeys[shipmentId]) verificationKeys[shipmentId] = crypto.randomUUID()
+  if (!verificationKeys[shipmentId]) verificationKeys[shipmentId] = secureUuid()
   return verificationKeys[shipmentId]
 }
 

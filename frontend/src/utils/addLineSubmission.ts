@@ -1,3 +1,4 @@
+import { secureUuid } from '@/utils/uuid'
 import type { AddOrderItemPayload } from '@/api/orderAdjustments'
 
 /**
@@ -77,5 +78,5 @@ export function clearPendingAddLine(orderId: number): void {
 }
 
 export function newAddLineSubmission(payload: AddOrderItemPayload, label: string): PendingAddLine {
-  return { key: crypto.randomUUID(), payload: normalizeAddLinePayload(payload), label }
+  return { key: secureUuid(), payload: normalizeAddLinePayload(payload), label }
 }
