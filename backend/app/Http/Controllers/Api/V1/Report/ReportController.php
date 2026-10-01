@@ -159,6 +159,20 @@ class ReportController extends Controller
         return $this->ok($this->reportService->financeSummary($request->user(), $this->filters($request)));
     }
 
+    /**
+     * R-04 / §G: per-order canonical finance projection — one row per order, figures straight from
+     * PaymentSummaryService (no competing payment truth, no duplication by items/transactions).
+     */
+    public function financeOrders(Request $request)
+    {
+        $result = $this->reportService->financeOrders(
+            $request->user(),
+            $this->filters($request) + ['per_page' => $request->integer('per_page', 15)],
+        );
+
+        return $this->ok($result['orders'], meta: $result['meta']);
+    }
+
     public function couriersPerAgent(Request $request)
     {
         return $this->ok($this->reportService->couriersPerAgent($request->user(), $this->filters($request)));

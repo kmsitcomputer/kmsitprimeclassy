@@ -348,6 +348,8 @@ async function submitVerification(shipmentId: number) {
 
 /* ---------- Office: proactively assign/reassign a courier to a shipment (a kurir otherwise self-assigns via pickupShipment) ---------- */
 const isOfficeRole = computed(() => ['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? ''))
+/** R-04: operational roles (gudang/kurir) receive no financial projection — hide money UI for them. */
+const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'korsal'].includes(auth.user?.role ?? ''))
 const activeCouriers = ref<{ id: number; name: string }[]>([])
 const assignTargets = reactive<Record<number, number | null>>({})
 const assigningCourierId = ref<number | null>(null)
@@ -610,7 +612,7 @@ async function submitReturn(item: OrderItem) {
                 <p class="text-xs text-stone-400">SKU: {{ item.sku || '-' }}</p>
                 <p class="text-xs text-stone-400">
                   {{ item.fulfilled_quantity }}<span v-if="item.fulfilled_quantity !== item.original_quantity">/{{ item.original_quantity }}</span>
-                  &times; {{ formatRupiah(item.unit_price) }}
+                  <template v-if="item.unit_price !== undefined">&times; {{ formatRupiah(item.unit_price) }}</template>
                   <span v-if="item.status !== order.status" class="ml-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] dark:bg-stone-800">{{ orderStatusLabel(item.status) }}</span>
                 </p>
                 <!-- This product's own delivery date — items on the same order can differ once rescheduled. -->
@@ -622,7 +624,7 @@ async function submitReturn(item: OrderItem) {
                   {{ t('orders.itemCourier', { name: item.courier.name }) }}
                 </p>
               </div>
-              <span class="font-medium text-stone-700 dark:text-stone-200">{{ formatRupiah(item.subtotal) }}</span>
+              <span v-if="item.subtotal !== undefined" class="font-medium text-stone-700 dark:text-stone-200">{{ formatRupiah(item.subtotal) }}</span>
             </div>
 
             <!-- Admin: adjust fulfilled quantity, only while order is 'diproses' -->
@@ -730,7 +732,7 @@ async function submitReturn(item: OrderItem) {
           </li>
         </ul>
 
-        <div class="mt-3 space-y-1.5 border-t border-stone-100 pt-3 text-sm dark:border-stone-800">
+        <div v-if="seesFinancials" class="mt-3 space-y-1.5 border-t border-stone-100 pt-3 text-sm dark:border-stone-800">
           <div class="flex justify-between text-stone-500 dark:text-stone-400">
             <span>{{ t('orders.subtotal') }}</span><span>{{ formatRupiah(order.subtotal_amount) }}</span>
           </div>
@@ -887,8 +889,8 @@ async function submitReturn(item: OrderItem) {
         {{ t('orders.cancelledReason', { reason: order.cancellation_reason }) }}
       </div>
 
-      <!-- Payment -->
-      <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+      <!-- Payment (financial projection — hidden for operational-only roles, e.g. gudang/kurir) -->
+      <div v-if="seesFinancials" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.payment') }}</h2>
           <span class="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">

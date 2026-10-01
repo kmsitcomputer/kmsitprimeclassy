@@ -35,6 +35,7 @@ class OrderTransactionReportService
             ->join('orders as o', 'o.id', '=', 'i.order_id')
             ->leftJoin('shipments as sh', 'sh.id', '=', 'i.shipment_id')
             ->leftJoin('couriers as c', 'c.id', '=', 'sh.courier_id')
+            ->leftJoin('users as self_delivered_users', 'self_delivered_users.id', '=', 'sh.self_delivered_by_user_id')
             ->leftJoin('users as customers', 'customers.id', '=', 'o.konsumen_id')
             ->leftJoin('roles as customer_roles', 'customer_roles.id', '=', 'customers.role_id')
             ->leftJoin('users as sales_users', 'sales_users.id', '=', 'o.sales_id')
@@ -55,7 +56,10 @@ class OrderTransactionReportService
             ->selectRaw('i.subtotal_snapshot + 0 as subtotal')
             ->selectRaw("COALESCE(NULLIF(o.recipient_name_snapshot, ''), customers.name, '-') as customer")
             ->selectRaw("COALESCE(DATE_FORMAT(i.requested_delivery_date, '%d/%m/%Y'), '-') as delivery_date")
-            ->selectRaw("COALESCE(NULLIF(c.name, ''), '-') as courier")
+            // R-04 / §F: "Kurir" = the assigned normal Kurir's CURRENT name, or — for a self_sub
+            // shipment — the self-delivering Sales-Kurir-Sub's CURRENT name (resolved live by
+            // stable id, never a name snapshot).
+            ->selectRaw("COALESCE(NULLIF(CASE WHEN sh.delivery_mode = 'self_sub' THEN self_delivered_users.name ELSE c.name END, ''), '-') as courier")
             ->selectRaw("COALESCE(($salesReferrerName), '-') as sales")
             ->selectRaw("COALESCE(($korsalName), '-') as korsal")
             ->selectRaw("$salesReferrerId as sales_referrer_id");

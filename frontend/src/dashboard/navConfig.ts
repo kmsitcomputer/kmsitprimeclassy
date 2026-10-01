@@ -72,7 +72,9 @@ const ROLE_ITEMS: NavItem[] = [
     label: 'Order',
     routeName: 'orders',
     icon: 'box',
-    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub'),
+    // R-04: Gudang executes warehouse work through the stock-request surfaces, not the generic
+    // (financial) order list; the backend order projection is operational-only for them anyway.
+    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub', 'gudang'),
   },
   {
     key: 'commissions',

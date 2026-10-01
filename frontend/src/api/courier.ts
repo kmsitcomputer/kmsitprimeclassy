@@ -19,15 +19,17 @@ export interface CourierOrder {
   id: number
   order_no: string
   status: string
-  recipient_name: string
-  recipient_phone: string
-  address: string
+  /** R-04: false when this is an UNASSIGNED pre-claim queue row — contact/address are withheld. */
+  detail_available?: boolean
+  recipient_name?: string
+  recipient_phone?: string
+  address?: string
   village: string
   district: string
   regency: string
   province: string
-  latitude: string | number | null
-  longitude: string | number | null
+  latitude?: string | number | null
+  longitude?: string | number | null
   items: CourierOrderItem[]
   created_at: string
   /** Only present on the "Selesai" (delivered report) listing — this kurir's own fee earned from this order. */

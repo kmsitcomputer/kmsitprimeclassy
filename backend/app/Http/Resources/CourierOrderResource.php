@@ -21,19 +21,29 @@ class CourierOrderResource extends JsonResource
         $viewerCourierId = $actor?->courierProfile?->id;
         $viewerUserId = $actor?->id;
 
-        return [
+        // R-04 / §C: a normal Kurir's queue may show work they have not claimed yet. Minimize the
+        // pre-claim projection (no recipient contact / street address / coordinates) and expose the
+        // full operational detail only once the shipment is assigned to THEM. A Sales-Kurir-Sub's
+        // own self_sub shipments are already theirs, so they always get full detail.
+        $assignedToViewer = false;
+        if ($viewerIsKurir) {
+            $assignedToViewer = $this->relationLoaded('items') && $this->items->contains(
+                fn ($item) => $item->shipment
+                    && $item->shipment->courier_id !== null
+                    && $item->shipment->courier_id === $viewerCourierId
+            );
+        }
+        $minimal = $viewerIsKurir && ! $assignedToViewer;
+
+        $row = [
             'id' => $this->id,
             'order_no' => $this->order_no,
             'status' => $this->status,
-            'recipient_name' => $this->recipient_name_snapshot,
-            'recipient_phone' => $this->recipient_phone_snapshot,
-            'address' => $this->address_snapshot,
+            'detail_available' => ! $minimal,
             'village' => $this->village_snapshot,
             'district' => $this->district_snapshot,
             'regency' => $this->regency_snapshot,
             'province' => $this->province_snapshot,
-            'latitude' => $this->latitude_snapshot,
-            'longitude' => $this->longitude_snapshot,
             // The order-level query only requires ONE item to be eligible (still
             // 'diproses', or 'dikirim'/beyond on THIS kurir's own shipment) for the
             // whole order to appear — an order can otherwise mix several products
@@ -60,6 +70,18 @@ class CourierOrderResource extends JsonResource
                 ])),
             'created_at' => $this->created_at,
         ];
+
+        if (! $minimal) {
+            $row += [
+                'recipient_name' => $this->recipient_name_snapshot,
+                'recipient_phone' => $this->recipient_phone_snapshot,
+                'address' => $this->address_snapshot,
+                'latitude' => $this->latitude_snapshot,
+                'longitude' => $this->longitude_snapshot,
+            ];
+        }
+
+        return $row;
     }
 
     private function itemVisibleToViewer($item, bool $viewerIsKurir, bool $viewerIsSubActor, ?int $viewerCourierId, ?int $viewerUserId): bool

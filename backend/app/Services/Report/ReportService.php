@@ -11,6 +11,7 @@ use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
 use App\Models\ReturnItem;
 use App\Models\User;
+use App\Services\Payment\PaymentSummaryService;
 use App\Services\Stock\SellableStockService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -60,6 +61,73 @@ class ReportService
         if ($korsalColumn && $actor->isRole('korsal')) {
             $query->where($korsalColumn, $actor->id);
         }
+    }
+
+    /**
+     * R-04 / §G: one canonical Order row per order (never duplicated by its items, payment
+     * transactions, refunds, or additional payments). Every financial figure comes from
+     * PaymentSummaryService — the single Order-level payment truth — and is never re-derived here.
+     * Fees/commissions are limited by the actor's finance authority.
+     *
+     * @return array{orders: array<int, array<string, mixed>>, meta: array<string, int>}
+     */
+    public function financeOrders(User $actor, array $filters = []): array
+    {
+        $allowedFeeRoles = $actor->isRole('super_admin', 'agen')
+            ? ['agent', 'sales', 'courier']
+            : ['sales', 'courier'];
+
+        $query = Order::withoutGlobalScopes()->with('paymentMethod');
+        $this->scopeToActor($query, $actor, 'agent_id', null, $filters);
+
+        if (! empty($filters['from'])) {
+            $query->whereDate('created_at', '>=', $filters['from']);
+        }
+        if (! empty($filters['to'])) {
+            $query->whereDate('created_at', '<=', $filters['to']);
+        }
+        if (! empty($filters['order_status'])) {
+            $query->where('status', $filters['order_status']);
+        }
+        if (! empty($filters['search'])) {
+            $query->where('order_no', 'like', '%'.$filters['search'].'%');
+        }
+
+        $paginated = $query->orderByDesc('created_at')->orderByDesc('id')
+            ->paginate((int) ($filters['per_page'] ?? 15));
+
+        $orders = collect($paginated->items())->map(function (Order $order) use ($allowedFeeRoles) {
+            $summary = PaymentSummaryService::summarize($order);
+            $fees = Commission::query()->where('order_id', $order->id)
+                ->whereIn('beneficiary_role', $allowedFeeRoles)
+                ->selectRaw('beneficiary_role, SUM(amount) as total')
+                ->groupBy('beneficiary_role')
+                ->pluck('total', 'beneficiary_role');
+
+            return [
+                'order_id' => $order->id,
+                'order_no' => $order->order_no,
+                'order_date' => $order->created_at?->toDateString(),
+                'payment_method' => $order->paymentMethod?->name,
+                'grand_total' => $summary['grand_total'],
+                'dp_paid' => $summary['verified_dp'],
+                'total_paid' => $summary['total_paid'],
+                'remaining' => $summary['remaining_balance'],
+                'payment_status' => $summary['payment_status'],
+                'refund' => $summary['refund_amount'],
+                'additional_payment' => $summary['additional_payment_amount'],
+                'fees' => collect($allowedFeeRoles)->mapWithKeys(fn ($role) => [$role => (float) ($fees[$role] ?? 0)])->all(),
+            ];
+        })->all();
+
+        return [
+            'orders' => $orders,
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'last_page' => $paginated->lastPage(),
+                'total' => $paginated->total(),
+            ],
+        ];
     }
 
     private function applyDateFilters(Builder $query, array $filters, string $column, string $fromKey = 'from', string $toKey = 'to'): void

@@ -319,15 +319,21 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:super_admin,agen,admin')->group(function () {
         Route::post('/products', [ProductController::class, 'store']);
         Route::patch('/products/{product}', [ProductController::class, 'update']);
-        Route::delete('/products/{product}', [ProductController::class, 'destroy']);
 
         Route::post('/products/{product}/variations', [ProductVariationController::class, 'store']);
         Route::patch('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update']);
-        Route::delete('/products/{product}/variations/{variation}', [ProductVariationController::class, 'destroy']);
 
         Route::post('/products/{product}/images', [ProductImageController::class, 'store']);
         Route::patch('/products/{product}/images/{image}', [ProductImageController::class, 'update']);
         Route::delete('/products/{product}/images/{image}', [ProductImageController::class, 'destroy']);
+    });
+
+    // R-04 / §E: Admin has Create + Read + Update only — NO Delete. Product and Variation deletion
+    // is therefore NOT in the super_admin,agen,admin group; ProductPolicy::delete enforces the same
+    // boundary server-side (defense in depth) for forged requests.
+    Route::middleware('role:super_admin,agen')->group(function () {
+        Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+        Route::delete('/products/{product}/variations/{variation}', [ProductVariationController::class, 'destroy']);
     });
 
     // Agent stock — read/browse (including cross-agent oversight via
@@ -514,6 +520,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/reports/fees/courier', [ReportController::class, 'courierFees']);
         Route::get('/reports/payment-status', [ReportController::class, 'paymentStatus']);
         Route::get('/reports/finance-summary', [ReportController::class, 'financeSummary']);
+        // R-04 / §G: per-order finance projection (PaymentSummaryService-backed).
+        Route::get('/reports/finance-orders', [ReportController::class, 'financeOrders']);
         Route::get('/reports/couriers-per-agent', [ReportController::class, 'couriersPerAgent']);
         // Roster reports (Blueprint §Agen dashboard) — every korsal/sales/kurir
         // in the branch appears even with zero activity in range, unlike the

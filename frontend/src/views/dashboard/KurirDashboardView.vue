@@ -260,7 +260,11 @@ onMounted(() => loadOrders(1))
               <p class="text-xs text-stone-400 dark:text-stone-500">{{ order.status }}</p>
             </div>
           </div>
-          <div class="mb-3 text-sm text-stone-600 dark:text-stone-300">
+          <!-- R-04: unassigned pre-claim queue rows withhold recipient contact/address until claimed. -->
+          <div v-if="order.detail_available === false" class="mb-3 text-sm text-stone-500 dark:text-stone-400">
+            {{ order.regency }}<span v-if="order.province">, {{ order.province }}</span> — detail penerima tersedia setelah order diambil.
+          </div>
+          <div v-else class="mb-3 text-sm text-stone-600 dark:text-stone-300">
             <p class="font-medium">{{ order.recipient_name }} · {{ order.recipient_phone }}</p>
             <p class="text-stone-500 dark:text-stone-400">
               {{ order.address }}, {{ order.village }}, {{ order.district }}, {{ order.regency }}, {{ order.province }}

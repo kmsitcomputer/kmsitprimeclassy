@@ -144,6 +144,33 @@ export async function getFinanceSummary(filters: ReportFilters = {}) {
   return data.data
 }
 
+/** R-04 / §G: one canonical Order row per order, figures from PaymentSummaryService. */
+export interface FinanceOrderRow {
+  order_id: number
+  order_no: string
+  order_date: string | null
+  payment_method: string | null
+  grand_total: number
+  dp_paid: number
+  total_paid: number
+  remaining: number
+  payment_status: string
+  refund: number
+  additional_payment: number
+  /** Allowed fee totals by beneficiary role (agent/sales/courier) per finance authority. */
+  fees: Record<string, number>
+}
+
+export interface FinanceOrdersResult {
+  orders: FinanceOrderRow[]
+  meta: { current_page: number; last_page: number; total: number }
+}
+
+export async function getFinanceOrders(filters: ReportFilters = {}): Promise<FinanceOrdersResult> {
+  const { data } = await http.get<ApiEnvelope<FinanceOrderRow[]>>(reportUrl('finance-orders', filters, false))
+  return { orders: data.data, meta: data.meta as unknown as FinanceOrdersResult['meta'] }
+}
+
 export interface CourierPerAgentRow {
   agent_id: number
   agent_name: string

@@ -91,9 +91,49 @@ Backend tests: own self_sub visible for diproses/dikirim/terkirim; another Sales
 
 Exact results: `php artisan test` → **801 passed / 5618 assertions / 0 failures** (629.60s). `npm run type-check` → PASS. `npm run build-only` → PASS.
 
+## R-04 RECON ONCE — findings + file map
+
+R-04 authorized. Reviewed baseline HEAD: `e5ec8c8daf7cc66f367e9630e06a2efb344222a9` (R-03 closed, 801/5618/0). No architecture contradiction found; **no migration required** (stable IDs + live relations already support the locked requirements).
+
+### Source findings
+
+1. **Order authority hole (A/D/B).** `OrderController::index` performs **no `authorize` and no role narrowing** for `agen/admin/keuangan/kurir/gudang` (only `konsumen/sales/korsal/sales-kurir-sub` are narrowed; `routes/api_v1.php` `GET /orders` has no role group). `OrderResource` exposes `dp_amount/paid_amount/remaining_amount/payment_summary/payment_transaction` to **every** viewer, so a Gudang/Kurir caller currently receives full financial data. `OrderPolicy::view` returns false for `gudang` on detail, but the list bypasses it.
+2. **Kurir receives money (A/C/D).** `ShipmentController::updateStatus/assign` return full `OrderResource` (money included) on endpoints gated to `kurir,sales-kurir-sub`. `CourierOrderResource` itself is already money-free, and `CourierDashboardController::orders` already scopes: normal kurir = branch `diproses` (all kurir) + own `dikirim/terkirim`; sales-kurir-sub = own `self_sub` for all statuses (R-03/UAT-R03-01).
+3. **Kurir queue exposure (C).** `CourierOrderResource` returns full recipient name/phone/address/lat/lng for **unassigned** `diproses` items (discoverable by every kurir in the branch). Needs a minimal pre-claim projection vs full detail once assigned.
+4. **Product/Variation authority (E).** `ProductPolicy::delete` → `manage()` = `super_admin,agen,admin`; DELETE routes are in the `role:super_admin,agen,admin` group; both Product and ProductVariation use `SoftDeletes`; the frontend Delete button is **ungated** in `ProductManagementView.vue` and variation delete in `ProductFormView.vue`. Admin currently CAN delete.
+5. **Operational report (F/H) already exists**: `OrderTransactionReportService` is one row per `order_item` with exactly the 14 locked columns (`order_no, order_date, sku, product, unit_price, quantity, item_status, subtotal, customer, delivery_date, courier, order_status, sales, korsal`); actor names resolved by **live joins** to `users`/`couriers` (current/latest). `Tgl Kirim` = `order_items.requested_delivery_date`. **Gap:** for `self_sub` shipments `courier` is null — must resolve to `self_delivered_by_user_id`'s current name.
+6. **Finance report (G).** `ReportService::financeSummary/paymentStatus` are aggregate and read `Order.paid_amount/remaining_amount/total_amount` directly; **neither uses `PaymentSummaryService`**, and there is no per-order finance report. Need a per-order finance projection driven by `PaymentSummaryService::summarize()`.
+7. **Current/latest names (H).** No actor-name snapshot columns exist on `orders`/`order_items`/`shipments`/`commissions`; names are live relations. Only product + recipient snapshots exist. `Shipment::selfDeliveredBy()` / `DeliveryVerification::verifiedBy()` already `withTrashed()`.
+
+### R-04 file map
+
+- Modify: `Http/Controllers/Api/V1/Order/OrderController.php` (index scoping + authorize); `Http/Resources/OrderResource.php` (role-gated financial projection); `Http/Resources/CourierOrderResource.php` (minimal pre-claim vs assigned detail); `Http/Controllers/Api/V1/Courier/ShipmentController.php` (money-free response for kurir — via OrderResource gating); `Policies/ProductPolicy.php` (delete: `super_admin,agen` only); `routes/api_v1.php` (split product/variation DELETE gate); `Services/Report/OrderTransactionReportService.php` (self_sub courier = self-delivered user name); `Http/Controllers/Api/V1/Report/ReportController.php` + `Services/Report/ReportService.php` (new per-order finance report using `PaymentSummaryService`); `lang/{id,en,ar,zh}/messages.php` (new messages).
+- Frontend: `views/OrderDetailView.vue` (guard money sections on presence/role); `views/dashboard/ProductManagementView.vue` + `ProductFormView.vue` (hide Delete for admin); `api/reports.ts` + `views/dashboard/FinanceView.vue` (per-order finance report); `i18n/locales/{id,en,ar,zh}.ts` if needed.
+- No migration.
+
 ### Push status — PUSH-1 RESOLVED
 
 PUSH-1 is **RESOLVED**. The deploy-key blocker is considered closed by the human; `git push origin feat/package-b-r03-r04` is the intended publish step. (A push attempt from the CI/dev sandbox may still report `Permission denied (publickey)` if that specific environment lacks the key — the repository-side blocker is treated as resolved.)
+
+## R-04 IMPLEMENTATION RESULT (COMPLETE)
+
+Baseline HEAD before R-04: `e5ec8c8daf7cc66f367e9630e06a2efb344222a9` (801/5618/0). **No migration** (stable IDs + live relations already supported every locked requirement).
+
+- **A/B/D — order authority + operational/financial projection:** `OrderResource` and `OrderItemResource` now emit the financial projection only to `super_admin, agen, admin, keuangan, konsumen, sales, korsal`. Gudang and Kurir receive the operational projection instead — no `payment_status/dp_amount/paid_amount/remaining_amount/payment_summary/payment_method/payment_transaction`, and no item `unit_price`/`subtotal`. This closes the previously ungated `GET /orders` leak (any branch role, incl. Gudang, received full `OrderResource`) and the Kurir shipment-status response (which returned the monetary `OrderResource`).
+- **C — Kurir queue minimal pre-claim vs assigned detail:** `CourierOrderResource` returns `detail_available=false` with recipient name/phone/street address/coords withheld while a normal Kurir has not claimed the shipment, and the full operational detail once a shipment is assigned to them. Sales-Kurir-Sub self_sub shipments are already theirs → always full detail. R-03 self_sub queue behavior preserved.
+- **E — Admin Product/Variation CRU-no-Delete:** `ProductPolicy::delete` is now `super_admin`/`agen` only (Admin denied); the product + variation DELETE routes are moved out of the `super_admin,agen,admin` group (variation delete is authorized against the owning Product policy, so it is covered too); the frontend hides Delete for Admin in `ProductManagementView`/`ProductFormView`. Admin CREATE/READ/UPDATE unchanged.
+- **F/G — reporting:** the operational transaction report's `Kurir` column now resolves a `self_sub` shipment to the self-delivering Sales-Kurir-Sub's **current** name (live join on `self_delivered_by_user_id`), keeping the exact 14-column, one-row-per-`order_item` contract and `Tgl Kirim = order_items.requested_delivery_date`. New per-order finance report `GET /reports/finance-orders` (`PaymentSummaryService`-backed, one canonical row per order — never duplicated by items/transactions/refunds; fees limited by the actor's finance authority), surfaced in `FinanceView`.
+- **H — current/latest actor names:** verified live-relation name resolution (no snapshot columns); renaming the Sales actor or the self-delivering Sales-Kurir-Sub is reflected on the next report render (regression test).
+- **I — security matrix:** forged direct-API tests cover Gudang/Kurir operational-only projection, financial roles/konsumen retaining money, Kurir pre-claim vs assigned detail, and Admin Product/Variation delete denial (with super_admin/agen still allowed).
+
+Files changed (R-04): `Http/Resources/{OrderResource,OrderItemResource,CourierOrderResource}.php`; `Policies/ProductPolicy.php`; `Http/Controllers/Api/V1/Report/ReportController.php`; `Services/Report/{ReportService,OrderTransactionReportService}.php`; `routes/api_v1.php`; frontend `api/courier.ts`, `api/reports.ts`, `dashboard/navConfig.ts`, `views/OrderDetailView.vue`, `views/OrderHistoryView.vue`, `views/dashboard/{FinanceView,KurirDashboardView,ProductFormView,ProductManagementView}.vue`.
+
+Tests added: `R04OrderProjectionTest`, `R04ReportTest` (8 tests).
+
+Migrations: **none**.
+
+Exact results: `php artisan test` → **809 passed / 5751 assertions / 0 failures** (651.68s; 801 baseline + 8 R-04). `npm run type-check` → PASS. `npm run build-only` → PASS.
+
 
 ## Package A starting state
 
@@ -329,10 +369,11 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Final concurrency remediation (MAJOR-10/11) — closed.
 - [x] Post-concurrency full regression passes (799/5599/0).
 - [x] R-03 DEV MANUAL UAT (UAT-R03-01 found and fixed; 801/5618/0; frontend PASS).
-- [ ] **Authorize R-04** (NOT yet authorized).
-- [ ] R-04 implementation.
-- [ ] Full Package B regression.
-- [ ] Claude final review / direct fixes.
+- [x] R-04 authorized + implemented (authority/projection, product CRU-no-Delete, reports).
+- [x] R-04 focused tests pass.
+- [x] Full backend regression passes (809/5751/0); frontend type-check + build PASS.
+- [ ] Full Package B regression (cross-domain).
+- [ ] Claude independent final review / direct fixes.
 - [ ] Package B DEV/UAT.
 - [ ] Human Stage Gate.
 - [ ] Production deployment.
@@ -356,14 +397,15 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-**Authorize R-04.** R-03 implementation, all review remediation, and the R-03 DEV UAT finding (UAT-R03-01) are complete and fully green. **STOP here — do NOT start R-04 until explicitly authorized; do NOT deploy.**
+**R-04 complete — run the full Package B regression next.** R-03 (closed) + R-04 are implemented and green (809/5751/0; frontend PASS). **STOP here — do NOT deploy or start production work.**
 
-Corrected package sequence (R-04 does NOT require a Human Stage Gate between R-03 and R-04):
+Corrected package sequence (no Human Stage Gate between R-03 and R-04):
 
-R-03 DEV UAT → **authorize R-04** → R-04 implementation → full Package B regression → Claude final review / direct fixes → Package B DEV/UAT → Human Stage Gate → production.
+R-03 DEV UAT → authorize R-04 → R-04 implementation → **full Package B regression** → Claude final review / direct fixes → Package B DEV/UAT → Human Stage Gate → production.
 
 Next actions are human-owned:
 
-1. Authorize R-04 on this same branch (`feat/package-b-r03-r04`).
-2. Then implement R-04 (authority/security, operational-vs-financial projections, Admin Product/Variation CRU-no-Delete, operational + finance reports, current/latest actor names).
-3. Push `git push origin feat/package-b-r03-r04` (PUSH-1 resolved).
+1. Run the full Package B cross-domain regression.
+2. Claude independent diff-first final review; any real in-scope finding fixed directly.
+3. Package B DEV/UAT, then Human Stage Gate.
+4. Push `git push origin feat/package-b-r03-r04` (PUSH-1 resolved).

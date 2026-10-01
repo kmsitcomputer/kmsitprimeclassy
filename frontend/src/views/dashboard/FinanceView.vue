@@ -2,18 +2,27 @@
 import { ref, onMounted } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import { getFinanceSummary, type FinanceSummary } from '@/api/reports'
+import { getFinanceSummary, getFinanceOrders, type FinanceSummary, type FinanceOrderRow } from '@/api/reports'
 import { formatRupiah } from '@/utils/format'
 
 const loading = ref(true)
 const summary = ref<FinanceSummary | null>(null)
+const orders = ref<FinanceOrderRow[]>([])
 const from = ref('')
 const to = ref('')
 
 async function load() {
   loading.value = true
-  summary.value = await getFinanceSummary({ from: from.value || undefined, to: to.value || undefined })
+  const filters = { from: from.value || undefined, to: to.value || undefined }
+  const [s, o] = await Promise.all([getFinanceSummary(filters), getFinanceOrders(filters)])
+  summary.value = s
+  orders.value = o.orders
   loading.value = false
+}
+
+/** R-04 / §G: allowed fee/commission totals for this order (per the actor's finance authority). */
+function feeTotal(row: FinanceOrderRow): number {
+  return Object.values(row.fees ?? {}).reduce((sum, amount) => sum + Number(amount || 0), 0)
 }
 
 onMounted(load)
@@ -76,6 +85,45 @@ onMounted(load)
           <span class="text-xs font-medium uppercase tracking-wide">Total Refund</span>
         </div>
         <p class="font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">{{ formatRupiah(summary.total_refunds) }}</p>
+      </div>
+    </div>
+
+    <!-- R-04 / §G: per-order canonical finance projection (PaymentSummaryService truth, one row per order). -->
+    <div v-if="!loading && orders.length" class="mt-8">
+      <h2 class="mb-3 text-sm font-semibold text-stone-800 dark:text-stone-100">Rincian Per Order</h2>
+      <div class="overflow-x-auto rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
+        <table class="min-w-full text-sm">
+          <thead class="bg-stone-50 text-left text-xs uppercase text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+            <tr>
+              <th class="px-3 py-2">Order No</th>
+              <th class="px-3 py-2">Tanggal</th>
+              <th class="px-3 py-2">Metode Bayar</th>
+              <th class="px-3 py-2 text-right">Grand Total</th>
+              <th class="px-3 py-2 text-right">DP Dibayar</th>
+              <th class="px-3 py-2 text-right">Total Dibayar</th>
+              <th class="px-3 py-2 text-right">Sisa</th>
+              <th class="px-3 py-2">Status Pembayaran</th>
+              <th class="px-3 py-2 text-right">Refund</th>
+              <th class="px-3 py-2 text-right">Additional Payment</th>
+              <th class="px-3 py-2 text-right">Fee</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
+            <tr v-for="row in orders" :key="row.order_id">
+              <td class="px-3 py-2 font-medium text-stone-700 dark:text-stone-200">{{ row.order_no }}</td>
+              <td class="px-3 py-2 text-stone-500 dark:text-stone-400">{{ row.order_date ?? '-' }}</td>
+              <td class="px-3 py-2 text-stone-500 dark:text-stone-400">{{ row.payment_method ?? '-' }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.grand_total) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.dp_paid) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.total_paid) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.remaining) }}</td>
+              <td class="px-3 py-2">{{ row.payment_status }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.refund) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.additional_payment) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(feeTotal(row)) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </DashboardLayout>
