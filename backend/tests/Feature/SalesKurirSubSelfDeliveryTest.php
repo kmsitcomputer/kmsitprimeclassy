@@ -295,4 +295,70 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         // A normal Kurir is never the self_sub deliverer.
         $this->actingAs($this->b['kurir'])->getJson("/api/v1/shipments/{$shipment->id}/receipt")->assertForbidden();
     }
+
+    /* ---------------- UAT-R03-01: /kurir/orders status filter + role boundaries ---------------- */
+
+    public function test_sub_orders_status_filter_is_scoped_to_own_self_sub_shipments(): void
+    {
+        $own = $this->placeSubOrder($this->b['sub'], 1);
+        $other = $this->placeSubOrder($this->b['otherSub'], 1);
+        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+        $unrelatedAgentId = $this->secondBranchDeliveredOrder();
+
+        $ids = fn (User $actor, string $status) => collect(
+            $this->actingAs($actor)->getJson("/api/v1/kurir/orders?status={$status}")->assertOk()->json('data')
+        )->pluck('id');
+
+        // diproses — own visible, everyone else's not.
+        $diproses = $ids($this->b['sub'], 'diproses');
+        $this->assertTrue($diproses->contains($own->id));
+        $this->assertFalse($diproses->contains($other->id));
+        $this->assertFalse($diproses->contains($agentOrderId));
+
+        // dikirim — own visible (self_sub ownership), other Sub's not.
+        $shipment = $own->items()->firstOrFail()->shipment;
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $this->b['sub']);
+        $dikirim = $ids($this->b['sub'], 'dikirim');
+        $this->assertTrue($dikirim->contains($own->id));
+        $this->assertFalse($ids($this->b['otherSub'], 'dikirim')->contains($own->id));
+
+        // terkirim — own self_sub history visible; another Sub / Agent-source / unrelated Agent not.
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $this->b['sub'], UploadedFile::fake()->image('proof.jpg'));
+        $terkirim = $ids($this->b['sub'], 'terkirim');
+        $this->assertTrue($terkirim->contains($own->id));
+        $this->assertFalse($terkirim->contains($other->id));
+        $this->assertFalse($terkirim->contains($agentOrderId));
+        $this->assertFalse($terkirim->contains($unrelatedAgentId));
+    }
+
+    public function test_normal_kurir_still_reaches_return_and_delivered_routes(): void
+    {
+        $this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/returns')->assertOk();
+        $this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/reports/delivered')->assertOk();
+    }
+
+    /** A delivered order on a DIFFERENT Agent branch — must never appear in this Sub's queue. */
+    private function secondBranchDeliveredOrder(): int
+    {
+        $agen2 = User::factory()->agen()->create();
+        $agen2->update(['agent_id' => $agen2->id]);
+        AgentProfile::create(['user_id' => $agen2->id, 'store_name' => 'T2', 'address' => 'Jl. T2', 'latitude' => -6.2, 'longitude' => 106.8]);
+        $konsumen2 = User::factory()->konsumen()->create(['agent_id' => $agen2->id]);
+        $product2 = Product::create(['sku' => 'X-'.Str::uuid(), 'name' => 'Other Cake', 'slug' => 'other-'.uniqid(), 'has_variations' => false, 'base_price' => 10000, 'weight_grams' => 500, 'status' => 'active']);
+        ProductStock::create(['agent_id' => $agen2->id, 'product_id' => $product2->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
+
+        $id = $this->actingAs($konsumen2)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', [
+                'payment_method_code' => 'cod',
+                'items' => [['product_id' => $product2->id, 'quantity' => 1]],
+                'recipient_name' => 'Other Buyer', 'recipient_phone' => '0812', 'address_line' => 'Jl. Other',
+                'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
+            ])->assertCreated()->json('data.id');
+
+        Order::withoutGlobalScopes()->whereKey($id)->update(['status' => 'terkirim']);
+        OrderItem::query()->where('order_id', $id)->update(['status' => 'terkirim']);
+
+        return $id;
+    }
 }

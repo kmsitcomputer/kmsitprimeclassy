@@ -91,11 +91,11 @@ async function loadDelivered(page = deliveredPage.value) {
   loading.value = true
   errorMessage.value = ''
   try {
-    const { orders: rows, meta } = await courierDeliveredReport(
-      page,
-      deliveredFrom.value || undefined,
-      deliveredTo.value || undefined,
-    )
+    // R-03 / UAT-R03-01: a Sales-Kurir-Sub has no access to the normal-Kurir delivered report;
+    // their completed self_sub history comes from the role-scoped /kurir/orders?status=terkirim.
+    const { orders: rows, meta } = isSalesKurir.value
+      ? await listCourierOrders(page, 'terkirim')
+      : await courierDeliveredReport(page, deliveredFrom.value || undefined, deliveredTo.value || undefined)
     delivered.value = rows
     deliveredPage.value = meta.current_page
     deliveredLastPage.value = meta.last_page
@@ -107,6 +107,8 @@ async function loadDelivered(page = deliveredPage.value) {
 }
 
 function switchTab(next: 'orders' | 'returns' | 'selesai') {
+  // Sales-Kurir-Sub has no normal-Kurir return workflow — never call /kurir/returns for them.
+  if (next === 'returns' && isSalesKurir.value) return
   tab.value = next
   if (next === 'orders') loadOrders(1)
   else if (next === 'returns') loadReturns(1)
@@ -218,6 +220,7 @@ onMounted(() => loadOrders(1))
         Order
       </button>
       <button
+        v-if="!isSalesKurir"
         type="button"
         class="border-b-2 px-3 py-2 text-sm font-medium"
         :class="tab === 'returns' ? 'border-brand-600 text-brand-700 dark:border-brand-400 dark:text-brand-300' : 'border-transparent text-stone-500 dark:text-stone-400'"
@@ -426,7 +429,7 @@ onMounted(() => loadOrders(1))
     </template>
 
     <template v-else>
-      <div class="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
+      <div v-if="!isSalesKurir" class="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
         <label class="text-sm text-stone-600 dark:text-stone-300">
           Dari
           <input v-model="deliveredFrom" type="date" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
@@ -458,8 +461,8 @@ onMounted(() => loadOrders(1))
               </RouterLink>
               <p class="text-xs text-stone-500 dark:text-stone-400">{{ order.recipient_name }}</p>
             </div>
-            <span class="shrink-0 font-display text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-              {{ formatRupiah(order.fee_amount ?? 0) }}
+            <span v-if="order.fee_amount != null" class="shrink-0 font-display text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+              {{ formatRupiah(order.fee_amount) }}
             </span>
           </div>
         </div>

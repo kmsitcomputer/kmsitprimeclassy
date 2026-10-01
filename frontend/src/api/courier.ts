@@ -34,8 +34,8 @@ export interface CourierOrder {
   fee_amount?: number
 }
 
-export async function listCourierOrders(page = 1) {
-  const { data } = await http.get<ApiEnvelope<CourierOrder[]>>('/kurir/orders', { params: { page } })
+export async function listCourierOrders(page = 1, status?: string) {
+  const { data } = await http.get<ApiEnvelope<CourierOrder[]>>('/kurir/orders', { params: { page, ...(status ? { status } : {}) } })
   return { orders: data.data, meta: data.meta as unknown as PaginationMeta }
 }
 

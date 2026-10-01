@@ -40,19 +40,35 @@ class CourierDashboardController extends Controller
         $actor = $request->user();
         $courierId = $actor->courierProfile?->id;
         $isSubActor = $actor->isRole('sales-kurir-sub');
+        $status = $request->string('status')->toString();
+        $validStatuses = ['diproses', 'dikirim', 'terkirim'];
 
         $orders = Order::query()
             ->where('agent_id', $actor->agent_id)
-            ->whereHas('items', function ($q) use ($courierId, $actor, $isSubActor) {
+            ->whereHas('items', function ($q) use ($courierId, $actor, $isSubActor, $status, $validStatuses) {
                 // Grouped in its own closure — an ungrouped top-level orWhere()
                 // here would escape whereHas's own order_id correlation constraint.
-                $q->where(function ($sq) use ($courierId, $actor, $isSubActor) {
+                $q->where(function ($sq) use ($courierId, $actor, $isSubActor, $status, $validStatuses) {
                     if ($isSubActor) {
-                        $sq->whereIn('status', ['diproses', 'dikirim'])
+                        // Sales-Kurir-Sub: ONLY their own self_sub shipments, for every status
+                        // (their "Selesai" history is status=terkirim). Never an Agent-source
+                        // standard shipment and never another Sales-Kurir-Sub's shipment.
+                        $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
+                        $sq->whereIn('status', $statuses)
                             ->whereHas('shipment', function ($ssq) use ($actor) {
                                 $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB)
                                     ->where('self_delivered_by_user_id', $actor->id);
                             });
+
+                        return;
+                    }
+
+                    // Normal Kurir — a requested status narrows the queue; ownership stays the same.
+                    if (in_array($status, $validStatuses, true)) {
+                        $sq->where('status', $status);
+                        if ($status !== 'diproses') {
+                            $sq->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
+                        }
 
                         return;
                     }

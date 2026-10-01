@@ -78,9 +78,22 @@ Migrations: **unchanged** (no new migration).
 
 Exact results after this pass: `php artisan test` → **799 passed / 5599 assertions / 0 failures** (623.47s). Frontend not touched this pass.
 
-### Push status (BLOCKER, environment)
+## UAT-R03-01 — DEV UAT FINDING (RESOLVED)
 
-`git push origin feat/package-b-r03-r04` fails: the configured deploy key `~/.ssh/github_primeclassy` is passphrase-encrypted (OpenSSH bcrypt/aes256-ctr), there is no ssh-agent (`SSH_AUTH_SOCK` unset) and no TTY for the passphrase prompt, and no credential helper/token is configured. Push must be performed by a human or after the key is added to an agent. Local commits are unaffected.
+Observed in R-03 DEV manual UAT as a Sales-Kurir-Sub: the frontend called the Kurir-only endpoints `GET /kurir/returns` and `GET /kurir/reports/delivered`, both returning 403 after the intentional BLOCKER-2 role-boundary remediation. The backend 403s are **correct** and were preserved (no permission restored).
+
+- **FIX A — Retur tab:** the Retur tab is hidden for Sales-Kurir-Sub and `switchTab('returns')` refuses to run for them, so `/kurir/returns` and `/kurir/returns/*` are never called. Normal Kurir retains the Retur tab and existing behavior unchanged.
+- **FIX B — Selesai tab:** `GET /kurir/orders` now accepts an optional `status` filter. For a Sales-Kurir-Sub every status (`diproses`/`dikirim`/`terkirim`) is scoped to their OWN `self_sub` shipments (`delivery_mode=self_sub AND self_delivered_by_user_id=actor`), so their completed history uses `GET /kurir/orders?status=terkirim`. `CourierOrderResource` keeps the same item-level self_sub ownership filter. Agent-source standard shipments, another Sales-Kurir-Sub's shipments, and unrelated Agent branches are never exposed; normal Kurir behavior is unchanged.
+
+Files changed: `app/Http/Controllers/Api/V1/Courier/CourierDashboardController.php`; `frontend/src/api/courier.ts`; `frontend/src/views/dashboard/KurirDashboardView.vue`; extended `tests/Feature/SalesKurirSubSelfDeliveryTest.php`.
+
+Backend tests: own self_sub visible for diproses/dikirim/terkirim; another Sales-Kurir-Sub / Agent-source standard / unrelated-Agent terkirim NOT visible; `/kurir/returns` and `/kurir/reports/delivered` remain 403 for Sales-Kurir-Sub; normal Kurir still reaches both. Frontend: Retur tab removed for Sales-Kurir-Sub, Selesai uses `/kurir/orders?status=terkirim`, no 403 during normal sub dashboard navigation, normal Kurir unchanged (type-check + build green).
+
+Exact results: `php artisan test` → **801 passed / 5618 assertions / 0 failures** (629.60s). `npm run type-check` → PASS. `npm run build-only` → PASS.
+
+### Push status — PUSH-1 RESOLVED
+
+PUSH-1 is **RESOLVED**. The deploy-key blocker is considered closed by the human; `git push origin feat/package-b-r03-r04` is the intended publish step. (A push attempt from the CI/dev sandbox may still report `Permission denied (publickey)` if that specific environment lacks the key — the repository-side blocker is treated as resolved.)
 
 ## Package A starting state
 
@@ -315,13 +328,18 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Post-final full regression passes (795/5442/0); frontend PASS.
 - [x] Final concurrency remediation (MAJOR-10/11) — closed.
 - [x] Post-concurrency full regression passes (799/5599/0).
-- [ ] **R-03 DEV MANUAL UAT.**
-- [ ] Human Stage Gate approval.
-- [ ] R-04 (NOT authorized).
+- [x] R-03 DEV MANUAL UAT (UAT-R03-01 found and fixed; 801/5618/0; frontend PASS).
+- [ ] **Authorize R-04** (NOT yet authorized).
+- [ ] R-04 implementation.
+- [ ] Full Package B regression.
+- [ ] Claude final review / direct fixes.
+- [ ] Package B DEV/UAT.
+- [ ] Human Stage Gate.
+- [ ] Production deployment.
 
 ## Open findings
 
-- **PUSH-1 (blocker, environment):** cannot push — encrypted deploy key with no passphrase/agent/TTY. Needs human action.
+- **PUSH-1 — RESOLVED.** The deploy-key blocker is closed by the human.
 - **DESIGN-1/2/3:** resolved by the locked A–H architecture.
 - **R03-1 (documented, by design):** MariaDB 10.11 cannot CHECK a SET NULL FK column, so the "self_sub ⇒ courier_id IS NULL" half is enforced by triggers rather than the single CHECK the architecture sketched. Behaviourally equivalent; no existing FK altered.
 - **R03-2 (behavior change — CONFIRMED by review):** a Sales-Kurir-Sub can no longer operate an Agent-sourced (standard) shipment (decision A) — the review additionally required the generic `terkirim` path to be blocked too (BLOCKER-1, now fixed). Package A dual-fee is preserved via Sub-sourced self-delivery.
@@ -338,10 +356,14 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-**R-03 DEV MANUAL UAT.** The R-03 implementation and all review remediation are complete and fully green. **STOP here — do NOT start R-04, deploy, or run any production migration.**
+**Authorize R-04.** R-03 implementation, all review remediation, and the R-03 DEV UAT finding (UAT-R03-01) are complete and fully green. **STOP here — do NOT start R-04 until explicitly authorized; do NOT deploy.**
+
+Corrected package sequence (R-04 does NOT require a Human Stage Gate between R-03 and R-04):
+
+R-03 DEV UAT → **authorize R-04** → R-04 implementation → full Package B regression → Claude final review / direct fixes → Package B DEV/UAT → Human Stage Gate → production.
 
 Next actions are human-owned:
 
-1. Run R-03 DEV manual UAT: self_sub self-delivery, generic-status rejection (dikirim + terkirim), Admin delivery verification (received / not_received / return) + idempotency conflicts, delivery-date grouping, Sub adjust/split/return, quantity counter + financial-obligation reconciliation, courier-fee split/follow-active-quantity (multi-courier and self_sub), and the dual-fee path.
-2. Only after explicit Human Stage Gate authorization: begin R-04 on this same branch.
-3. Push remains blocked (PUSH-1) until the deploy key is usable.
+1. Authorize R-04 on this same branch (`feat/package-b-r03-r04`).
+2. Then implement R-04 (authority/security, operational-vs-financial projections, Admin Product/Variation CRU-no-Delete, operational + finance reports, current/latest actor names).
+3. Push `git push origin feat/package-b-r03-r04` (PUSH-1 resolved).
