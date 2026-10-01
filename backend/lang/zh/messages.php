@@ -152,6 +152,7 @@ return [
         'adjusted' => '商品履行数量更新成功。',
         'rescheduled' => '商品配送日期更新成功。',
         'split_stock_request_locked' => '无法拆分：仓库库存申请已部分履行，剩余数量不足。',
+        'cannot_increase_cancelled' => '已完全取消的商品不能再次增加数量。',
     ],
 
     'courier' => [
@@ -170,6 +171,9 @@ return [
         'invalid_outcome' => '配送验证结果无效。',
         'not_delivered' => '货件尚未送达，无法进行验证。',
         'recorded' => '配送验证已记录。',
+        'idempotency_key_required' => '必须提供 Idempotency-Key 请求头。',
+        'idempotency_key_invalid' => 'Idempotency-Key 请求头无效（最多 100 个字符）。',
+        'idempotency_conflict' => '该 Idempotency-Key 已用于其他验证请求。',
     ],
 
     'return' => [

@@ -139,6 +139,18 @@ class OrderFulfillmentService
      */
     private function increaseFulfillment(Order $order, OrderItem $item, int $quantityAdded, User $actor, string $reason, string $additionalPaymentMethod): void
     {
+        // R-03: a fully cancelled line (reduced to zero / cancelled) is TERMINAL — do not silently
+        // resurrect it, and never reactivate its Sub reservation while it remains dibatalkan.
+        if ($item->status === 'dibatalkan' || $item->fulfilled_quantity <= 0) {
+            throw new ApiException(__('messages.fulfillment.cannot_increase_cancelled'), 422);
+        }
+
+        // R-03 counter reconciliation: an increase first RESTORES previously cancelled units before
+        // anything counts as a genuinely additional quantity. `fulfilled_quantity` is the current
+        // active/billed quantity, so this keeps fulfilled/cancelled/additional mutually consistent.
+        $restoreCancelled = min($quantityAdded, $item->cancelled_quantity);
+        $trulyAdditional = $quantityAdded - $restoreCancelled;
+
         // R-03: a Sub-sourced increase grows the existing Sub reservation after re-checking Sub
         // sellable — never Agent stock, physical Sub stock unchanged.
         if ($item->isSubSourced()) {
@@ -154,7 +166,8 @@ class OrderFulfillmentService
 
         $item->update([
             'fulfilled_quantity' => $item->fulfilled_quantity + $quantityAdded,
-            'additional_quantity' => $item->additional_quantity + $quantityAdded,
+            'cancelled_quantity' => $item->cancelled_quantity - $restoreCancelled,
+            'additional_quantity' => $item->additional_quantity + $trulyAdditional,
         ]);
 
         $order = $this->orderTotalCalculator->recalculate($order);

@@ -152,6 +152,7 @@ return [
         'adjusted' => 'Item fulfillment quantity updated successfully.',
         'rescheduled' => 'Item delivery date updated successfully.',
         'split_stock_request_locked' => 'The split cannot be performed because the warehouse stock request is already partially fulfilled and its remaining quantity is insufficient.',
+        'cannot_increase_cancelled' => 'A fully cancelled item cannot be increased again.',
     ],
 
     'courier' => [
@@ -170,6 +171,9 @@ return [
         'invalid_outcome' => 'Invalid delivery verification outcome.',
         'not_delivered' => 'The shipment has not been delivered yet; it cannot be verified.',
         'recorded' => 'Delivery verification recorded.',
+        'idempotency_key_required' => 'The Idempotency-Key header is required.',
+        'idempotency_key_invalid' => 'The Idempotency-Key header is invalid (max 100 characters).',
+        'idempotency_conflict' => 'This Idempotency-Key was already used for a different verification request.',
     ],
 
     'return' => [

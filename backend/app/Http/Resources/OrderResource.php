@@ -113,9 +113,13 @@ class OrderResource extends JsonResource
                     'shipment_ids' => $items->pluck('shipment_id')->filter()->unique()->values(),
                 ])
                 ->values()),
-            // R-03: append-only Admin delivery-verification history across this order's shipments.
-            'delivery_verifications' => $this->whenLoaded(
-                'deliveryVerifications',
+            // R-03: append-only Admin delivery-verification history — Admin/Super Admin only.
+            // DeliveryVerificationController enforces the same boundary; exposing it through the
+            // generic Order detail to Konsumen/Sales/Korsal/Kurir would bypass it (verifier
+            // identity + internal notes). Non-Admin UIs use GET /shipments/{shipment}/delivery-verifications.
+            'delivery_verifications' => $this->when(
+                $this->relationLoaded('deliveryVerifications')
+                    && ($request->user()?->isRole('super_admin', 'admin') ?? false),
                 fn () => DeliveryVerificationResource::collection($this->deliveryVerifications)->resolve()
             ),
             'payment_method' => $this->whenLoaded('paymentMethod', fn () => $this->paymentMethod ? [

@@ -795,13 +795,12 @@ class OrderService
             $shipmentIds = [];
             foreach ($order->items as $item) {
                 if ($item->canTransitionTo($newStatus)) {
-                    // Sub-sourced goods sit in one Sales-Kurir-Sub's own Sub Location and
-                    // ship only through that owner's self-fulfillment path (CourierService::
-                    // updateShipmentStatus). This generic office bulk override never reaches
-                    // that ownership check, so it must not silently consume Sub inventory —
-                    // block it instead of shipping without the ownership guard (R-03 will
-                    // give Sub-sourced items their own delivery flow).
-                    if ($newStatus === 'dikirim' && $item->isSubSourced()) {
+                    // R-03: Sub-sourced goods ship ONLY through the owning Sales-Kurir-Sub's
+                    // self-delivery path (CourierService::updateShipmentStatus, which checks
+                    // self_delivered_by_user_id and requires delivery proof). This generic office
+                    // bulk override must never advance a Sub item to 'dikirim' OR 'terkirim' —
+                    // doing so would bypass both the ownership check and the proof requirement.
+                    if (in_array($newStatus, ['dikirim', 'terkirim'], true) && $item->isSubSourced()) {
                         throw new ApiException(__('messages.order.sub_item_requires_owner_shipment'), 422);
                     }
                     $item->update(['status' => $newStatus]);

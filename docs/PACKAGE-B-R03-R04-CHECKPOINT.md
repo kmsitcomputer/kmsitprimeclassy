@@ -24,6 +24,28 @@
 - Backend after R-03 (`php artisan test`): **768 passed / 5238 assertions / 0 failures** (693.19s) — baseline 738 + 30 new tests.
 - Frontend after R-03: `npm run type-check` **PASS**; `npm run build-only` **PASS**; same pre-existing chunk-size warning only.
 - Target migrations were applied only to the isolated test database (`primeclassy_testing`). Production untouched; no production migration run.
+- After review remediation (see §R-03 Remediation below): backend **787 passed / 5384 assertions / 0 failures**; frontend PASS.
+
+## R-03 REMEDIATION (review findings closed)
+
+Reviewed baseline HEAD before remediation: `3273278cca9ca078e5040a1799c33fd87383ce61`.
+
+- **BLOCKER-1 — generic status bypass:** `OrderService::updateStatus()` now rejects a Sub-sourced item for BOTH `dikirim` and `terkirim` (previously only `dikirim`). The office generic path can no longer bypass self-delivery ownership or the delivery-proof requirement; Agent-sourced office behavior unchanged.
+- **BLOCKER-2 — courier dashboard leak:** `CourierDashboardController::orders()` scopes a Sales-Kurir-Sub to their OWN `self_sub` shipments (`delivery_mode=self_sub AND self_delivered_by_user_id=self`) for both `diproses` and `dikirim`; `CourierOrderResource` filters items the same way. Route group split: `/kurir/orders` = kurir+sales-kurir-sub; `/kurir/returns*` and `/kurir/reports/delivered` = kurir only (no "missing Courier profile" dead actions for Sales-Kurir-Sub).
+- **MAJOR-3 — verification policy bypass:** `OrderResource.delivery_verifications` is emitted only to `super_admin`/`admin`; Konsumen/Sales/Korsal/Kurir no longer receive verifier identity or internal notes. Admin UI may still use `GET /shipments/{shipment}/delivery-verifications`.
+- **MAJOR-4 — idempotency:** delivery verification now REQUIRES a non-empty `Idempotency-Key` (≤100 chars). A replay is valid only for an identical `(shipment_id, outcome, normalized note)`; otherwise 409. Frontend retains one key per logical submission until success.
+- **MAJOR-5 — counter reconciliation:** an increase restores `cancelled_quantity` before counting `additional_quantity`; a fully cancelled (terminal) line rejects increase with 422 and never reactivates its Sub reservation. Return capacity now uses `fulfilled_quantity - returned_quantity`.
+- **MAJOR-6 — self_sub frontend controls:** `OrderItemResource` exposes `delivery_mode` + `self_delivered_by_user_id`; `OrderDetailView` gates pickup/deliver/assign-courier/receipt accordingly (self_sub = owner only; standard = never a Sales-Kurir-Sub). Backend remains authoritative.
+- **AUDIT continuity:** `Shipment::selfDeliveredBy()` and `DeliveryVerification::verifiedBy()` use `withTrashed()` so soft-deleted actors stay resolvable.
+- **MIGRATION verification:** fresh apply OK; invariants enforced (self_sub+courier rejected, invalid mode/actor rejected, valid standard/self_sub accepted); rollback (`--step=3`) removes triggers → CHECK → FK/columns/table cleanly and `migrate` restores them.
+
+Files changed (remediation): `Services/Order/{OrderService,OrderFulfillmentService,ReturnService,DeliveryVerificationService}.php`; `Http/Controllers/Api/V1/{Courier/CourierDashboardController,Order/DeliveryVerificationController}.php`; `Http/Resources/{OrderResource,OrderItemResource,CourierOrderResource}.php`; `Models/{Shipment,DeliveryVerification}.php`; `routes/api_v1.php`; `lang/{id,en,ar,zh}/messages.php`; `.phpunit-concurrency-actor.php`; frontend `api/types.ts`, `views/OrderDetailView.vue`.
+
+Tests added/extended: new `FulfillmentCounterReconciliationTest`, `AuditContinuityTest`, `DeliveryVerificationConcurrencyTest`, `MigrationVerificationTest`; extended `SalesKurirSubSelfDeliveryTest`, `DeliveryVerificationTest`, `SubQuantityAdjustmentTest`, `SubReturnDomainTest`; new actor op `delivery-verify`.
+
+Migrations: **unchanged** (the three R-03 migrations were not modified; no new migration added).
+
+Exact results after remediation: `php artisan test` → **787 passed / 5384 assertions / 0 failures** (704.97s). `npm run type-check` → PASS. `npm run build-only` → PASS.
 
 ### Push status (BLOCKER, environment)
 
@@ -256,7 +278,9 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - [x] Full backend regression passes (768/5238/0).
 - [x] Frontend type-check/build passes.
 - [x] Checkpoint updated with results.
-- [ ] Human review + DEV manual UAT.
+- [x] Review remediation (BLOCKER-1/2, MAJOR-3/4/5/6, audit continuity, migration verification) — closed.
+- [x] Post-remediation full regression passes (787/5384/0); frontend PASS.
+- [ ] Human re-review + DEV manual UAT.
 - [ ] Human Stage Gate approval.
 - [ ] R-04 (NOT authorized).
 
@@ -265,9 +289,11 @@ R-03 decision A removes the Package A ability for a Sales-Kurir-Sub to operate a
 - **PUSH-1 (blocker, environment):** cannot push — encrypted deploy key with no passphrase/agent/TTY. Needs human action.
 - **DESIGN-1/2/3:** resolved by the locked A–H architecture.
 - **R03-1 (documented, by design):** MariaDB 10.11 cannot CHECK a SET NULL FK column, so the "self_sub ⇒ courier_id IS NULL" half is enforced by triggers rather than the single CHECK the architecture sketched. Behaviourally equivalent; no existing FK altered.
-- **R03-2 (behavior change — NEEDS HUMAN REVIEW):** a Sales-Kurir-Sub can no longer operate an Agent-sourced (standard) shipment (decision A). Package A dual-fee is preserved via Sub-sourced self-delivery. If the human intended Sales-Kurir-Sub to keep delivering Agent orders, this must be revisited before R-04.
+- **R03-2 (behavior change — CONFIRMED by review):** a Sales-Kurir-Sub can no longer operate an Agent-sourced (standard) shipment (decision A) — the review additionally required the generic `terkirim` path to be blocked too (BLOCKER-1, now fixed). Package A dual-fee is preserved via Sub-sourced self-delivery.
 - **R03-3 (by design):** an Agent partial split whose StockRequest remainder cannot cover the moved quantity is rejected 422 (never rewrites fulfilled warehouse history).
 - **R03-4 (deferred):** Admin verification outcome `return` records the operational outcome only; it does not itself create a `ReturnRequest` (per decision B). Return remains its own workflow.
+
+**Review findings:** BLOCKER-1, BLOCKER-2, MAJOR-3, MAJOR-4, MAJOR-5, MAJOR-6, audit continuity, and migration verification are all CLOSED with regression coverage (see §R-03 Remediation).
 
 Pre-existing technical debt (NOT Package B regressions): Package A role migration `down()` imperfect inverse; checkout global unique TEMP `order_no`; CLI duplicate OPcache/mbstring warnings; historical "MAC is invalid" log entries.
 
@@ -277,11 +303,11 @@ Production is LIVE after Package A. Package B development must not mutate produc
 
 ## EXACT NEXT ACTION
 
-R-03 is implemented and fully green. **STOP here — do NOT start R-04, deploy, or run any production migration.**
+R-03 review remediation is complete and fully green. **STOP here — do NOT start R-04, deploy, or run any production migration.**
 
 Next actions are human-owned:
 
-1. Review the R-03 diff (and the R03-2 behavior change in §Open findings).
-2. Run DEV manual UAT for: self_sub self-delivery, Admin delivery verification (received / not_received / return), delivery-date grouping, Sub adjust/split/return, and the dual-fee path.
+1. Re-review the remediation diff (`fix(r03): close delivery and quantity review findings`).
+2. Run DEV manual UAT for: self_sub self-delivery, generic-status rejection, Admin delivery verification (received / not_received / return) + idempotency, delivery-date grouping, Sub adjust/split/return, quantity counter reconciliation, and the dual-fee path.
 3. Only after explicit Human Stage Gate authorization: begin R-04 on this same branch.
 4. Push remains blocked (PUSH-1) until the deploy key is usable.

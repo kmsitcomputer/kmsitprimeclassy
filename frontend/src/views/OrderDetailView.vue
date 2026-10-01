@@ -156,7 +156,10 @@ const deliveryProofFiles = reactive<Record<number, File | null>>({})
 /** One action row per distinct shipment, never per item — several items can share one shipment. */
 const shipmentGroups = computed(() => {
   if (!order.value) return []
-  const groups = new Map<number, { shipmentId: number; status: string; productNames: string[]; courierUserId: number | null }>()
+  const groups = new Map<
+    number,
+    { shipmentId: number; status: string; productNames: string[]; courierUserId: number | null; deliveryMode: string | null; selfDeliveredByUserId: number | null }
+  >()
   for (const item of order.value.items ?? []) {
     if (!item.shipment_id || !['diproses', 'dikirim'].includes(item.status)) continue
     const existing = groups.get(item.shipment_id)
@@ -168,11 +171,19 @@ const shipmentGroups = computed(() => {
         status: item.status,
         productNames: [item.product_name],
         courierUserId: item.courier?.user_id ?? null,
+        deliveryMode: item.delivery_mode ?? null,
+        selfDeliveredByUserId: item.self_delivered_by_user_id ?? null,
       })
     }
   }
   return Array.from(groups.values())
 })
+
+const isSubRole = computed(() => auth.user?.role === 'sales-kurir-sub')
+
+function isSelfSubGroup(group: { deliveryMode: string | null }): boolean {
+  return group.deliveryMode === 'self_sub'
+}
 
 /** A kurir must never see another kurir's already-picked-up shipment rendered as actionable — office roles still can. */
 function shipmentActionableByViewer(group: { courierUserId: number | null }): boolean {
@@ -181,25 +192,52 @@ function shipmentActionableByViewer(group: { courierUserId: number | null }): bo
 }
 
 /**
+ * R-03 UX gating (the backend stays authoritative): a self_sub shipment is operated ONLY by its
+ * recorded Sales-Kurir-Sub owner; a standard shipment is NEVER operated by a Sales-Kurir-Sub.
+ */
+function canOperateShipmentGroup(group: { deliveryMode: string | null; selfDeliveredByUserId: number | null; courierUserId: number | null }): boolean {
+  if (!canManageShipment.value) return false
+  if (isSelfSubGroup(group)) {
+    return isSubRole.value && auth.user?.id === group.selfDeliveredByUserId
+  }
+  if (isSubRole.value) return false
+  return shipmentActionableByViewer(group)
+}
+
+/**
  * Every shipment eligible for a thermal receipt — unlike shipmentGroups
  * above (which drops out once 'terkirim', since there's no more pickup/
  * deliver action left to take), a receipt must stay printable/reprintable
  * even after delivery. A kurir only sees this for shipments actually
- * assigned to them (mirrors ShipmentPolicy::printReceipt server-side).
+ * assigned to them; a Sales-Kurir-Sub only for their own self_sub shipments
+ * (mirrors ShipmentPolicy::printReceipt server-side).
  */
 const printableShipmentGroups = computed(() => {
   if (!order.value) return []
-  const groups = new Map<number, { shipmentId: number; productNames: string[]; courierUserId: number | null }>()
+  const groups = new Map<
+    number,
+    { shipmentId: number; productNames: string[]; courierUserId: number | null; deliveryMode: string | null; selfDeliveredByUserId: number | null }
+  >()
   for (const item of order.value.items ?? []) {
     if (!item.shipment_id || ['diterima', 'dibatalkan'].includes(item.status)) continue
     const existing = groups.get(item.shipment_id)
     if (existing) {
       existing.productNames.push(item.product_name)
     } else {
-      groups.set(item.shipment_id, { shipmentId: item.shipment_id, productNames: [item.product_name], courierUserId: item.courier?.user_id ?? null })
+      groups.set(item.shipment_id, {
+        shipmentId: item.shipment_id,
+        productNames: [item.product_name],
+        courierUserId: item.courier?.user_id ?? null,
+        deliveryMode: item.delivery_mode ?? null,
+        selfDeliveredByUserId: item.self_delivered_by_user_id ?? null,
+      })
     }
   }
-  return Array.from(groups.values()).filter((g) => auth.user?.role !== 'kurir' || shipmentActionableByViewer(g))
+  return Array.from(groups.values()).filter((g) => {
+    if (isSelfSubGroup(g)) return isSubRole.value && auth.user?.id === g.selfDeliveredByUserId
+    if (isSubRole.value) return false
+    return auth.user?.role !== 'kurir' || shipmentActionableByViewer(g)
+  })
 })
 
 function openReceipt(shipmentId: number) {
@@ -242,6 +280,17 @@ const canVerifyDelivery = computed(() => ['super_admin', 'admin'].includes(auth.
 const verificationBusy = ref<number | null>(null)
 const verificationError = ref<string | null>(null)
 const verificationForms = reactive<Record<number, { outcome: DeliveryVerificationOutcome; note: string }>>({})
+/**
+ * The idempotency key for the CURRENT logical verification action per shipment. It is retained
+ * across a failed/unknown-result retry (so the backend replays instead of duplicating history) and
+ * only replaced after a success — a fresh key means a new intentional action.
+ */
+const verificationKeys = reactive<Record<number, string>>({})
+
+function keyFor(shipmentId: number) {
+  if (!verificationKeys[shipmentId]) verificationKeys[shipmentId] = crypto.randomUUID()
+  return verificationKeys[shipmentId]
+}
 
 /** Guarantees a writable default form for a shipment — safe to call from v-model getters. */
 function formFor(shipmentId: number) {
@@ -282,7 +331,8 @@ async function submitVerification(shipmentId: number) {
   verificationBusy.value = shipmentId
   verificationError.value = null
   try {
-    await recordDeliveryVerification(shipmentId, form.outcome, form.note || null, crypto.randomUUID())
+    await recordDeliveryVerification(shipmentId, form.outcome, form.note || null, keyFor(shipmentId))
+    delete verificationKeys[shipmentId]
     await load()
   } catch (e) {
     verificationError.value = e instanceof ApiError ? e.message : t('orders.errors.verification')
@@ -757,11 +807,12 @@ async function submitReturn(item: OrderItem) {
           <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
 
           <div v-if="group.status === 'diproses'" class="mt-2 space-y-2">
-            <AppButton size="sm" :disabled="shipmentBusy === group.shipmentId" @click="pickupShipment(group.shipmentId)">
+            <AppButton v-if="canOperateShipmentGroup(group)" size="sm" :disabled="shipmentBusy === group.shipmentId" @click="pickupShipment(group.shipmentId)">
               {{ t('orders.pickupAndDeliver') }}
             </AppButton>
 
-            <div v-if="isOfficeRole" class="flex flex-wrap items-center gap-2">
+            <!-- R-03: a self_sub shipment is never handed to a normal Kurir — no Assign Courier. -->
+            <div v-if="isOfficeRole && !isSelfSubGroup(group)" class="flex flex-wrap items-center gap-2">
               <p v-if="assignCourierError" class="w-full text-xs text-red-600">{{ assignCourierError }}</p>
               <label class="text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.assignCourierLabel') }}</label>
               <select v-model.number="assignTargets[group.shipmentId]" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
@@ -779,7 +830,7 @@ async function submitReturn(item: OrderItem) {
             </div>
           </div>
 
-          <div v-else-if="group.status === 'dikirim' && shipmentActionableByViewer(group)" class="mt-2 space-y-2">
+          <div v-else-if="group.status === 'dikirim' && canOperateShipmentGroup(group)" class="mt-2 space-y-2">
             <label class="block text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.deliveryProofRequired') }}</label>
             <input type="file" accept="image/*" class="block w-full text-xs" @change="onDeliveryProofSelected(group.shipmentId, $event)" />
             <AppButton

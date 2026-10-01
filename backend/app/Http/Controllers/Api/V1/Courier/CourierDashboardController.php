@@ -10,6 +10,7 @@ use App\Models\Commission;
 use App\Models\Order;
 use App\Models\ReturnItem;
 use App\Models\ReturnRequest;
+use App\Models\Shipment;
 use App\Services\Order\ReturnService;
 use Illuminate\Http\Request;
 
@@ -23,14 +24,16 @@ class CourierDashboardController extends Controller
     public function __construct(private readonly ReturnService $returnService) {}
 
     /**
-     * The delivery queue: every 'diproses' item in this kurir's branch is
-     * visible to EVERY kurir regardless of any pre-assignment — "semua order
-     * diproses bisa dilihat semua kurir." Only once an item is actually
-     * picked up (self-assigned the moment it's marked 'dikirim' — see
-     * CourierService::selfAssignIfUnassigned) does it become exclusive:
-     * 'dikirim' items only ever show to the kurir holding that shipment,
-     * never a sibling kurir in the same branch (Blueprint: "status dikirim
-     * ... tidak bisa dilihat kurir lain").
+     * The delivery queue.
+     *
+     * Normal Kurir: every 'diproses' item in their branch is visible to every kurir
+     * ("semua order diproses bisa dilihat semua kurir"); once picked up ('dikirim') an item is
+     * exclusive to the kurir holding that shipment.
+     *
+     * R-03: a Sales-Kurir-Sub is NOT a normal Kurir — they may only ever see orders containing
+     * their OWN self_sub shipment (delivery_mode = self_sub AND self_delivered_by_user_id = self),
+     * for both 'diproses' and 'dikirim'. They must never see Agent-sourced standard shipments or
+     * another Sales-Kurir-Sub's self_sub shipment.
      */
     public function orders(Request $request)
     {
@@ -44,19 +47,20 @@ class CourierDashboardController extends Controller
                 // Grouped in its own closure — an ungrouped top-level orWhere()
                 // here would escape whereHas's own order_id correlation constraint.
                 $q->where(function ($sq) use ($courierId, $actor, $isSubActor) {
+                    if ($isSubActor) {
+                        $sq->whereIn('status', ['diproses', 'dikirim'])
+                            ->whereHas('shipment', function ($ssq) use ($actor) {
+                                $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB)
+                                    ->where('self_delivered_by_user_id', $actor->id);
+                            });
+
+                        return;
+                    }
+
                     $sq->where('status', 'diproses')
-                        ->orWhere(function ($dq) use ($courierId, $actor, $isSubActor) {
+                        ->orWhere(function ($dq) use ($courierId) {
                             $dq->where('status', 'dikirim')
-                                // R-03: a Sales-Kurir-Sub's own self_sub shipment is theirs via
-                                // self_delivered_by_user_id (courier_id is NULL on it); a normal Kurir
-                                // keeps the existing courier_id ownership.
-                                ->whereHas('shipment', function ($ssq) use ($courierId, $actor, $isSubActor) {
-                                    if ($isSubActor) {
-                                        $ssq->where('self_delivered_by_user_id', $actor->id);
-                                    } else {
-                                        $ssq->where('courier_id', $courierId);
-                                    }
-                                });
+                                ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
                         });
                 });
             })

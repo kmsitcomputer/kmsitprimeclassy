@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\ApiException;
 use App\Models\AgentProfile;
+use App\Models\Commission;
 use App\Models\Courier;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -57,6 +58,8 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         // A real Courier profile ONLY for the normal kurir — the Sales-Kurir-Sub deliberately has none.
         Courier::create(['type' => 'internal', 'user_id' => $kurir->id, 'agent_id' => $agen->id, 'name' => $kurir->name, 'is_active' => true]);
         $referred = User::factory()->konsumen()->create(['agent_id' => $agen->id]);
+        $admin = User::factory()->admin()->create(['agent_id' => $agen->id]);
+        $superAdmin = User::factory()->superAdmin()->create(['agent_id' => $agen->id]);
 
         $location = $this->location($agen, $sub, 'L1');
         $otherLocation = $this->location($agen, $otherSub, 'L2');
@@ -68,7 +71,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $location->id, 'quantity' => 10]);
         WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'stock_type' => 'sub', 'sub_location_id' => $otherLocation->id, 'quantity' => 10]);
 
-        return compact('agen', 'sub', 'otherSub', 'kurir', 'referred', 'location', 'otherLocation', 'product');
+        return compact('agen', 'sub', 'otherSub', 'kurir', 'referred', 'admin', 'superAdmin', 'location', 'otherLocation', 'product');
     }
 
     private function location(User $agen, User $owner, string $code): WarehouseSubLocation
@@ -193,5 +196,89 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
 
         $this->expectException(\Illuminate\Database\QueryException::class);
         $shipment->forceFill(['courier_id' => $courier->id])->save();
+    }
+
+    /* ---------------- BLOCKER-1: generic order status must not bypass self_sub ---------------- */
+
+    public function test_generic_order_status_cannot_advance_a_sub_item_to_dikirim_or_terkirim(): void
+    {
+        $order = $this->placeSubOrder($this->b['sub'], 2);
+        $item = $order->items()->firstOrFail();
+        $shipment = $item->shipment;
+
+        // No office role may bulk-ship the Sub line to 'dikirim'.
+        foreach (['admin', 'agen', 'superAdmin'] as $role) {
+            $this->actingAs($this->b[$role])
+                ->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])
+                ->assertStatus(422);
+        }
+
+        $this->assertSame('diproses', $item->fresh()->status);
+        $this->assertSame('active', SubStockReservation::query()->firstOrFail()->status);
+        $this->assertSame(10, app(SubStockService::class)->physical($this->b['location']->id, $this->b['product']->id, null));
+
+        // The owner ships correctly through the self-delivery path.
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $this->b['sub']);
+        $this->assertSame('dikirim', $item->fresh()->status);
+
+        // ...and no office role may then complete the delivery via the generic path (no proof bypass).
+        foreach (['admin', 'agen', 'superAdmin'] as $role) {
+            $this->actingAs($this->b[$role])
+                ->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])
+                ->assertStatus(422);
+        }
+
+        $this->assertSame('dikirim', $item->fresh()->status);
+        $this->assertNull($shipment->fresh()->delivered_at);
+        $this->assertSame(0, Commission::query()->where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
+
+        // The owner can still finish through the correct shipment endpoint with proof.
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $this->b['sub'], UploadedFile::fake()->image('proof.jpg'));
+        $this->assertSame('terkirim', $item->fresh()->status);
+        $this->assertNotNull($shipment->fresh()->delivered_at);
+    }
+
+    /* ---------------- BLOCKER-2: Sales-Kurir-Sub courier queue is scoped ---------------- */
+
+    public function test_sales_kurir_sub_courier_queue_only_shows_own_self_sub_shipments(): void
+    {
+        $own = $this->placeSubOrder($this->b['sub'], 1);
+        $other = $this->placeSubOrder($this->b['otherSub'], 1);
+        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+
+        $ids = fn (User $actor) => collect($this->actingAs($actor)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->pluck('id');
+
+        $ownIds = $ids($this->b['sub']);
+        $this->assertTrue($ownIds->contains($own->id));
+        $this->assertFalse($ownIds->contains($other->id), 'never another Sales-Kurir-Sub self_sub shipment');
+        $this->assertFalse($ownIds->contains($agentOrderId), 'never an Agent-sourced standard shipment');
+
+        // Still visible to the owner after shipping; never visible to a sibling Sub.
+        app(CourierService::class)->updateShipmentStatus($own->items()->firstOrFail()->shipment->fresh(), 'dikirim', $this->b['sub']);
+        $this->assertTrue($ids($this->b['sub'])->contains($own->id));
+        $this->assertFalse($ids($this->b['otherSub'])->contains($own->id));
+    }
+
+    public function test_sales_kurir_sub_cannot_use_normal_kurir_return_routes(): void
+    {
+        $this->actingAs($this->b['sub'])->getJson('/api/v1/kurir/returns')->assertForbidden();
+        $this->actingAs($this->b['sub'])->getJson('/api/v1/kurir/reports/delivered')->assertForbidden();
+    }
+
+    /* ---------------- MAJOR-6: shipment routing state exposed for UX gating ---------------- */
+
+    public function test_order_item_resource_exposes_delivery_mode_for_ux_gating(): void
+    {
+        $order = $this->placeSubOrder($this->b['sub'], 1);
+        $subItem = $this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data.items.0');
+        $this->assertSame('self_sub', $subItem['delivery_mode']);
+        $this->assertSame($this->b['sub']->id, $subItem['self_delivered_by_user_id']);
+
+        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+        $agentItem = $this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$agentOrderId}")->assertOk()->json('data.items.0');
+        $this->assertSame('standard', $agentItem['delivery_mode']);
+        $this->assertNull($agentItem['self_delivered_by_user_id']);
     }
 }

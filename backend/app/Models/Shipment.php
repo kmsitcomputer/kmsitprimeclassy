@@ -65,10 +65,14 @@ class Shipment extends Model
         return $this->belongsTo(Courier::class);
     }
 
-    /** The Sales-Kurir-Sub who self-delivered this shipment — a stable user reference, not a Kurir. */
+    /**
+     * The Sales-Kurir-Sub who self-delivered this shipment — a stable user reference, not a Kurir.
+     * withTrashed(): Users are SoftDeletes, so the historical delivery actor must stay resolvable
+     * after the account is soft-deleted (audit continuity).
+     */
     public function selfDeliveredBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'self_delivered_by_user_id');
+        return $this->belongsTo(User::class, 'self_delivered_by_user_id')->withTrashed();
     }
 
     /** R-03 append-only Admin delivery-verification history for this shipment. */

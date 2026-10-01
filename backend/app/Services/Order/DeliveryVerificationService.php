@@ -28,14 +28,19 @@ class DeliveryVerificationService
         DeliveryVerification::RETURN,
     ];
 
-    public function record(Shipment $shipment, User $actor, string $outcome, ?string $note = null, ?string $idempotencyKey = null): DeliveryVerification
+    public function record(Shipment $shipment, User $actor, string $outcome, ?string $note, string $idempotencyKey): DeliveryVerification
     {
         if (! in_array($outcome, self::OUTCOMES, true)) {
             throw new ApiException(__('messages.delivery_verification.invalid_outcome'), 422);
         }
 
+        $normalizedNote = $note !== null ? trim($note) : null;
+        if ($normalizedNote === '') {
+            $normalizedNote = null;
+        }
+
         try {
-            return DB::transaction(function () use ($shipment, $actor, $outcome, $note, $idempotencyKey) {
+            return DB::transaction(function () use ($shipment, $actor, $outcome, $normalizedNote, $idempotencyKey) {
                 $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
 
                 // A verification is only meaningful once the shipment has actually been delivered;
@@ -44,28 +49,30 @@ class DeliveryVerificationService
                     throw new ApiException(__('messages.delivery_verification.not_delivered'), 422);
                 }
 
-                if ($idempotencyKey !== null) {
-                    $existing = DeliveryVerification::query()
-                        ->where('verified_by', $actor->id)
-                        ->where('idempotency_key', $idempotencyKey)
-                        ->lockForUpdate()
-                        ->first();
+                $existing = DeliveryVerification::query()
+                    ->where('verified_by', $actor->id)
+                    ->where('idempotency_key', $idempotencyKey)
+                    ->lockForUpdate()
+                    ->first();
 
-                    if ($existing) {
-                        return $existing;
-                    }
+                if ($existing) {
+                    // A replay is only a replay of the SAME request; a reused key for a different
+                    // shipment/outcome/note is a conflict, never an unrelated record.
+                    $this->assertReplayMatches($existing, (int) $shipment->id, $outcome, $normalizedNote);
+
+                    return $existing;
                 }
 
                 $verification = DeliveryVerification::create([
                     'shipment_id' => $shipment->id,
                     'outcome' => $outcome,
-                    'note' => $note,
+                    'note' => $normalizedNote,
                     'verified_by' => $actor->id,
                     'verified_at' => now(),
                     'idempotency_key' => $idempotencyKey,
                 ]);
 
-                ActivityLogger::log($actor->id, $shipment, 'shipment.delivery_verified', $note, [
+                ActivityLogger::log($actor->id, $shipment, 'shipment.delivery_verified', $normalizedNote, [
                     'order_id' => $shipment->order_id,
                     'outcome' => $outcome,
                     'verification_id' => $verification->id,
@@ -77,16 +84,29 @@ class DeliveryVerificationService
         } catch (QueryException $e) {
             // Two concurrent requests with the same Idempotency-Key both passed the pre-check —
             // the unique (verified_by, idempotency_key) index rejected the loser. Return the
-            // winner's row instead of surfacing a 500 / duplicate history.
-            if ($idempotencyKey !== null
-                && str_contains($e->getMessage(), 'delivery_verifications_verified_by_idempotency_key_unique')) {
-                return DeliveryVerification::query()
+            // winner's row when it is the same request, otherwise surface the conflict.
+            if (str_contains($e->getMessage(), 'delivery_verifications_verified_by_idempotency_key_unique')) {
+                $existing = DeliveryVerification::query()
                     ->where('verified_by', $actor->id)
                     ->where('idempotency_key', $idempotencyKey)
                     ->firstOrFail();
+
+                $this->assertReplayMatches($existing, (int) $shipment->id, $outcome, $normalizedNote);
+
+                return $existing;
             }
 
             throw $e;
+        }
+    }
+
+    /** A reused idempotency key is only valid for an identical canonical request. */
+    private function assertReplayMatches(DeliveryVerification $existing, int $shipmentId, string $outcome, ?string $note): void
+    {
+        if ((int) $existing->shipment_id !== $shipmentId
+            || $existing->outcome !== $outcome
+            || $existing->note !== $note) {
+            throw new ApiException(__('messages.delivery_verification.idempotency_conflict'), 409);
         }
     }
 

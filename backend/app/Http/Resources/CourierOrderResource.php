@@ -17,7 +17,9 @@ class CourierOrderResource extends JsonResource
     {
         $actor = $request->user();
         $viewerIsKurir = $actor?->isRole('kurir') ?? false;
+        $viewerIsSubActor = $actor?->isRole('sales-kurir-sub') ?? false;
         $viewerCourierId = $actor?->courierProfile?->id;
+        $viewerUserId = $actor?->id;
 
         return [
             'id' => $this->id,
@@ -42,7 +44,7 @@ class CourierOrderResource extends JsonResource
             // matching — filtered out here so 'dikirim'/'terkirim' items only ever
             // show to the kurir actually holding that shipment.
             'items' => $this->whenLoaded('items', fn () => $this->items
-                ->filter(fn ($item) => $this->itemVisibleToViewer($item, $viewerIsKurir, $viewerCourierId))
+                ->filter(fn ($item) => $this->itemVisibleToViewer($item, $viewerIsKurir, $viewerIsSubActor, $viewerCourierId, $viewerUserId))
                 ->values()
                 ->map(fn ($item) => [
                     'id' => $item->id,
@@ -60,8 +62,14 @@ class CourierOrderResource extends JsonResource
         ];
     }
 
-    private function itemVisibleToViewer($item, bool $viewerIsKurir, ?int $viewerCourierId): bool
+    private function itemVisibleToViewer($item, bool $viewerIsKurir, bool $viewerIsSubActor, ?int $viewerCourierId, ?int $viewerUserId): bool
     {
+        // R-03: a Sales-Kurir-Sub only ever sees items on their OWN self_sub shipment.
+        if ($viewerIsSubActor) {
+            return $item->shipment?->self_delivered_by_user_id !== null
+                && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId;
+        }
+
         if (! $viewerIsKurir) {
             return true;
         }

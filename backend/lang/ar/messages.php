@@ -152,6 +152,7 @@ return [
         'adjusted' => 'تم تحديث كمية تنفيذ الصنف بنجاح.',
         'rescheduled' => 'تم تحديث تاريخ توصيل الصنف بنجاح.',
         'split_stock_request_locked' => 'لا يمكن تنفيذ التقسيم لأن طلب مخزون المستودع تم تنفيذه جزئيًا والكمية المتبقية غير كافية.',
+        'cannot_increase_cancelled' => 'لا يمكن زيادة كمية صنف تم إلغاؤه بالكامل.',
     ],
 
     'courier' => [
@@ -170,6 +171,9 @@ return [
         'invalid_outcome' => 'نتيجة التحقق من التسليم غير صالحة.',
         'not_delivered' => 'لم يتم تسليم الشحنة بعد؛ لا يمكن التحقق منها.',
         'recorded' => 'تم تسجيل التحقق من التسليم.',
+        'idempotency_key_required' => 'ترويسة Idempotency-Key مطلوبة.',
+        'idempotency_key_invalid' => 'ترويسة Idempotency-Key غير صالحة (بحد أقصى 100 حرف).',
+        'idempotency_conflict' => 'تم استخدام Idempotency-Key هذا لطلب تحقق مختلف.',
     ],
 
     'return' => [

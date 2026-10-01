@@ -29,6 +29,17 @@ class OrderItemResource extends JsonResource
             'status' => $this->status,
             'requested_delivery_date' => $this->requested_delivery_date,
             'shipment_id' => $this->shipment_id,
+            // R-03: shipment routing state so the UI can gate operational controls (self_sub
+            // shipments are operated only by their self_delivered_by_user_id). UX-only context —
+            // the backend remains authoritative.
+            'delivery_mode' => $this->when(
+                $this->relationLoaded('shipment'),
+                fn () => $this->shipment?->delivery_mode
+            ),
+            'self_delivered_by_user_id' => $this->when(
+                $this->relationLoaded('shipment'),
+                fn () => $this->shipment?->self_delivered_by_user_id
+            ),
             // Only present once THIS item's own shipment has a courier — a
             // rescheduled item can sit on a different shipment (and courier)
             // than its siblings on the same order (Blueprint: "satu order

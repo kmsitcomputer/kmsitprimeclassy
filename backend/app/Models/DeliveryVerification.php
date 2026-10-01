@@ -39,9 +39,12 @@ class DeliveryVerification extends Model
         return $this->belongsTo(Shipment::class);
     }
 
-    /** The Admin who recorded this verification — never erased (Users are soft-deleted). */
+    /**
+     * The Admin who recorded this verification — withTrashed() so the historical actor stays
+     * resolvable after the account is soft-deleted (audit continuity).
+     */
     public function verifiedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'verified_by');
+        return $this->belongsTo(User::class, 'verified_by')->withTrashed();
     }
 }

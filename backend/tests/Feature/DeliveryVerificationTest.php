@@ -70,7 +70,9 @@ class DeliveryVerificationTest extends TestCase
 
     private function record(Shipment $shipment, User $actor, string $outcome, ?string $note = null, ?string $key = null)
     {
-        return $this->actingAs($actor)->withHeaders(array_filter(['Idempotency-Key' => $key]))
+        // Always send an explicit header: the Laravel test client persists default headers across
+        // requests, so omitting it would silently inherit an earlier Idempotency-Key.
+        return $this->actingAs($actor)->withHeaders(['Idempotency-Key' => $key ?? ''])
             ->postJson("/api/v1/shipments/{$shipment->id}/delivery-verifications", ['outcome' => $outcome, 'note' => $note]);
     }
 
@@ -78,7 +80,7 @@ class DeliveryVerificationTest extends TestCase
     {
         $shipment = $this->deliveredShipment($this->b);
 
-        $this->record($shipment, $this->b['admin'], 'received', 'barang diterima baik')->assertCreated();
+        $this->record($shipment, $this->b['admin'], 'received', 'barang diterima baik', (string) Str::uuid())->assertCreated();
 
         $verification = DeliveryVerification::query()->firstOrFail();
         $this->assertSame('received', $verification->outcome);
@@ -144,7 +146,7 @@ class DeliveryVerificationTest extends TestCase
             ])->assertCreated()->json('data.id');
         $shipment = OrderItem::where('order_id', $id)->firstOrFail()->shipment;
 
-        $this->record($shipment, $this->b['admin'], 'received')->assertUnprocessable();
+        $this->record($shipment, $this->b['admin'], 'received', null, (string) Str::uuid())->assertUnprocessable();
         $this->assertSame(0, DeliveryVerification::query()->count());
     }
 
@@ -152,7 +154,76 @@ class DeliveryVerificationTest extends TestCase
     {
         $shipment = $this->deliveredShipment($this->b);
 
-        $this->record($shipment, $this->b['admin'], 'maybe')->assertUnprocessable();
+        $this->record($shipment, $this->b['admin'], 'maybe', null, (string) Str::uuid())->assertUnprocessable();
         $this->assertSame(0, DeliveryVerification::query()->count());
+    }
+
+    /* ---------------- MAJOR-3: no leak through the generic Order resource ---------------- */
+
+    public function test_generic_order_detail_hides_delivery_verifications_from_non_admin(): void
+    {
+        $shipment = $this->deliveredShipment($this->b);
+        $this->record($shipment, $this->b['admin'], 'received', 'internal admin note', (string) Str::uuid())->assertCreated();
+
+        // Admin sees the history.
+        $admin = $this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$shipment->order_id}")->assertOk();
+        $this->assertNotEmpty($admin->json('data.delivery_verifications'));
+
+        // The konsumen (order owner) must not — no verifier identity, no internal notes.
+        $konsumen = $this->actingAs($this->b['konsumen'])->getJson("/api/v1/orders/{$shipment->order_id}")->assertOk();
+        $this->assertArrayNotHasKey('delivery_verifications', $konsumen->json('data'));
+        $this->assertStringNotContainsString('internal admin note', $konsumen->getContent());
+    }
+
+    /* ---------------- MAJOR-4: idempotency hardening ---------------- */
+
+    public function test_idempotency_key_is_required(): void
+    {
+        $shipment = $this->deliveredShipment($this->b);
+
+        $this->record($shipment, $this->b['admin'], 'received', null, null)->assertStatus(422);
+        $this->assertSame(0, DeliveryVerification::query()->count());
+    }
+
+    public function test_oversized_idempotency_key_is_rejected(): void
+    {
+        $shipment = $this->deliveredShipment($this->b);
+
+        $this->record($shipment, $this->b['admin'], 'received', null, str_repeat('x', 101))->assertStatus(422);
+        $this->assertSame(0, DeliveryVerification::query()->count());
+    }
+
+    public function test_reused_key_for_a_different_shipment_is_a_conflict(): void
+    {
+        $first = $this->deliveredShipment($this->b);
+        $second = $this->deliveredShipment($this->b);
+        $key = (string) Str::uuid();
+
+        $this->record($first, $this->b['admin'], 'received', null, $key)->assertCreated();
+        $this->record($second, $this->b['admin'], 'received', null, $key)->assertStatus(409);
+
+        $this->assertSame(1, DeliveryVerification::query()->count());
+    }
+
+    public function test_reused_key_for_a_different_outcome_is_a_conflict(): void
+    {
+        $shipment = $this->deliveredShipment($this->b);
+        $key = (string) Str::uuid();
+
+        $this->record($shipment, $this->b['admin'], 'received', null, $key)->assertCreated();
+        $this->record($shipment, $this->b['admin'], 'not_received', null, $key)->assertStatus(409);
+
+        $this->assertSame(1, DeliveryVerification::query()->count());
+    }
+
+    public function test_reused_key_for_a_different_note_is_a_conflict(): void
+    {
+        $shipment = $this->deliveredShipment($this->b);
+        $key = (string) Str::uuid();
+
+        $this->record($shipment, $this->b['admin'], 'received', 'first note', $key)->assertCreated();
+        $this->record($shipment, $this->b['admin'], 'received', 'changed note', $key)->assertStatus(409);
+
+        $this->assertSame(1, DeliveryVerification::query()->count());
     }
 }

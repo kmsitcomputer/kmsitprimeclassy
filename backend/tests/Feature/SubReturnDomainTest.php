@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
 use App\Services\Order\CourierService;
+use App\Services\Order\OrderFulfillmentService;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -166,5 +167,36 @@ class SubReturnDomainTest extends TestCase
 
         $this->assertSame(8, $this->subPhysical(), 'inventory is never silently redirected');
         $this->assertSame(20, $this->transit());
+    }
+
+    /* ---------------- MAJOR-5: return capacity uses the active quantity ---------------- */
+
+    public function test_return_capacity_reflects_active_quantity_after_a_pre_shipment_cancellation(): void
+    {
+        $id = $this->actingAs($this->b['sub'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', [
+                'payment_method_code' => 'cod', 'stock_source' => 'sub', 'konsumen_id' => $this->b['konsumen']->id,
+                'items' => [['product_id' => $this->b['product']->id, 'quantity' => 3]],
+                'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
+                'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
+            ])->assertCreated()->json('data.id');
+
+        $item = OrderItem::where('order_id', $id)->firstOrFail();
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 2, $this->b['admin'], 'kurang');
+        $item->refresh();
+        $this->assertSame(2, $item->fulfilled_quantity);
+        $this->assertSame(1, $item->cancelled_quantity);
+
+        $shipment = $item->shipment;
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $this->b['sub']);
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $this->b['sub'], UploadedFile::fake()->image('proof.jpg'));
+
+        // Active delivered quantity is 2 — BOTH units may be returned (the old formula allowed only 1).
+        $this->actingAs($this->b['konsumen'])
+            ->postJson("/api/v1/orders/{$id}/returns", [
+                'reason' => 'rusak',
+                'items' => [['order_item_id' => $item->id, 'quantity' => 2, 'restock' => true]],
+                'evidence' => UploadedFile::fake()->image('evidence.jpg'),
+            ])->assertCreated();
     }
 }

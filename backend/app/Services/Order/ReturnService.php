@@ -67,7 +67,10 @@ class ReturnService
                 }
 
                 $quantity = (int) $line['quantity'];
-                $maxReturnable = $item->fulfilled_quantity - $item->cancelled_quantity - $item->returned_quantity;
+                // `fulfilled_quantity` is ALREADY the current active/billed quantity (cancelled units
+                // were removed from it), so cancelling must not be subtracted a second time — a
+                // delivered active quantity of 2 permits 2 returns.
+                $maxReturnable = $item->fulfilled_quantity - $item->returned_quantity;
 
                 if ($quantity < 1 || $quantity > $maxReturnable) {
                     throw new ApiException(__('messages.return.invalid_quantity'), 422);

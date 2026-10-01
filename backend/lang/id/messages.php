@@ -163,6 +163,7 @@ return [
         'adjusted' => 'Jumlah pemenuhan item berhasil diperbarui.',
         'rescheduled' => 'Tanggal pengiriman item berhasil diubah.',
         'split_stock_request_locked' => 'Pemecahan tidak dapat dilakukan karena permintaan stok gudang sudah dipenuhi sebagian dan sisa tidak mencukupi.',
+        'cannot_increase_cancelled' => 'Item yang sudah dibatalkan sepenuhnya tidak dapat ditambah kembali.',
     ],
 
     'courier' => [
@@ -181,6 +182,9 @@ return [
         'invalid_outcome' => 'Hasil verifikasi pengiriman tidak valid.',
         'not_delivered' => 'Pengiriman belum selesai; verifikasi belum dapat dilakukan.',
         'recorded' => 'Verifikasi pengiriman berhasil dicatat.',
+        'idempotency_key_required' => 'Header Idempotency-Key wajib diisi.',
+        'idempotency_key_invalid' => 'Header Idempotency-Key tidak valid (maksimal 100 karakter).',
+        'idempotency_conflict' => 'Idempotency-Key sudah dipakai untuk permintaan verifikasi yang berbeda.',
     ],
 
     'return' => [

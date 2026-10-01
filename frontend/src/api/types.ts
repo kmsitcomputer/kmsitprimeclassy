@@ -69,6 +69,9 @@ export interface OrderItem {
   status: string
   requested_delivery_date: string | null
   shipment_id: number | null
+  /** R-03 shipment routing state (backend authoritative; UX gating only). */
+  delivery_mode?: 'standard' | 'self_sub' | null
+  self_delivered_by_user_id?: number | null
   courier: { name: string; phone: string | null; user_id: number } | null
   delivery_proof_url: string | null
   agent_fee_amount?: string

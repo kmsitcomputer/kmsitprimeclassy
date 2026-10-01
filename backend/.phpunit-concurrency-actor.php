@@ -4,6 +4,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductVariation;
+use App\Models\Shipment;
 use App\Models\StockOpname;
 use App\Models\StockRequest;
 use App\Models\StockRequestProposal;
@@ -352,6 +353,17 @@ if (str_starts_with($role, 'sr-')) {
                 // Sub stock row so the reservation can never be reduced below zero.
                 $item = OrderItem::findOrFail($subjectId);
                 $result = DB::transaction(fn () => app(SubStockService::class)->reduce($item, (int) ($extra['quantity'] ?? 0), $actor, 'concurrency-test'));
+                break;
+            case 'delivery-verify':
+                // R-03 / MAJOR-4: concurrent exact replays of one delivery verification must yield
+                // exactly one append-only row (unique index + replay match), never a 500/duplicate.
+                $shipment = Shipment::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(\App\Services\Order\DeliveryVerificationService::class)->record(
+                    $shipment, $actor,
+                    (string) ($extra['outcome'] ?? 'received'),
+                    $extra['note'] ?? null,
+                    (string) ($extra['key'] ?? 'race-verify-key'),
+                );
                 break;
             case 'sub-location-assign-owner':
                 // MAJOR-2 remediation: concurrent owner assignment vs. generic transfer approval

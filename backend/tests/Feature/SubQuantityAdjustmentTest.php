@@ -162,4 +162,60 @@ class SubQuantityAdjustmentTest extends TestCase
         $this->assertSame(10, $this->physical());
         $this->assertSame(1, OrderItem::where('order_id', $item->order_id)->count());
     }
+
+    /* ---------------- MAJOR-5: counter reconciliation ---------------- */
+
+    public function test_increase_restores_cancelled_units_before_counting_additional(): void
+    {
+        $item = $this->placeSubItem(3);
+
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 2, $this->b['agen'], 'kurang');
+        $item->refresh();
+        $this->assertSame(2, $item->fulfilled_quantity);
+        $this->assertSame(1, $item->cancelled_quantity);
+
+        // 2 -> 3 is a RESTORE of the cancelled unit: no additional, cancelled back to 0.
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 3, $this->b['agen'], 'restore');
+        $item->refresh();
+        $this->assertSame(3, $item->fulfilled_quantity);
+        $this->assertSame(0, $item->cancelled_quantity);
+        $this->assertSame(0, $item->additional_quantity);
+        $this->assertSame(3, $this->reserved($item));
+        $this->assertSame(10, $this->physical());
+
+        // 3 -> 4 is a genuinely additional unit.
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 4, $this->b['agen'], 'extra');
+        $item->refresh();
+        $this->assertSame(4, $item->fulfilled_quantity);
+        $this->assertSame(0, $item->cancelled_quantity);
+        $this->assertSame(1, $item->additional_quantity);
+        $this->assertSame(4, $this->reserved($item));
+        $this->assertSame(10, $this->physical());
+    }
+
+    public function test_increase_on_a_fully_cancelled_item_is_rejected_and_does_not_reactivate_the_reservation(): void
+    {
+        $item = $this->placeSubItem(3);
+
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 0, $this->b['agen'], 'cancel all');
+        $item->refresh();
+        $this->assertSame(0, $item->fulfilled_quantity);
+        $this->assertSame(3, $item->cancelled_quantity);
+        $this->assertSame('dibatalkan', $item->status);
+        $this->assertSame('released', SubStockReservation::query()->where('order_item_id', $item->id)->value('status'));
+
+        try {
+            app(OrderFulfillmentService::class)->adjustItemQuantity($item, 1, $this->b['agen'], 'reopen');
+            $this->fail('Expected the increase on a fully cancelled item to be rejected.');
+        } catch (ApiException $e) {
+            $this->assertSame(422, $e->status());
+        }
+
+        $item->refresh();
+        $this->assertSame('dibatalkan', $item->status);
+        $this->assertSame(0, $item->fulfilled_quantity);
+        $this->assertSame(3, $item->cancelled_quantity);
+        $this->assertSame('released', SubStockReservation::query()->where('order_item_id', $item->id)->value('status'));
+        $this->assertSame(10, $this->physical());
+    }
 }

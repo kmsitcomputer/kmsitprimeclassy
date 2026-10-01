@@ -276,8 +276,13 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Kurir dashboard — "tidak boleh melakukan transaksi/mengubah harga/fee/
     // payment/melihat data agen lain": every action here is read-only or a
     // pure logistics status flip, scoped to the kurir's own agent branch.
+    // R-03: Sales-Kurir-Sub is NOT a normal Kurir. They may use the delivery queue (scoped
+    // server-side to their own self_sub shipments) but NOT the normal-Kurir return pickup/confirm
+    // actions, which require a Courier profile they deliberately do not have.
     Route::middleware('role:kurir,sales-kurir-sub')->group(function () {
         Route::get('/kurir/orders', [CourierDashboardController::class, 'orders']);
+    });
+    Route::middleware('role:kurir')->group(function () {
         Route::get('/kurir/returns', [CourierDashboardController::class, 'returns']);
         Route::patch('/kurir/returns/{item}/pickup', [CourierDashboardController::class, 'pickupReturn']);
         Route::patch('/kurir/returns/{item}/confirm', [CourierDashboardController::class, 'confirmReturn']);
