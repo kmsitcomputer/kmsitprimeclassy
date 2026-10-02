@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import { decideFulfillmentChange, getDiprosesOrder, listDiprosesOrders, listFulfillmentChangeProposals, proposeFulfillmentChange, type FulfillmentChangeProposal } from '@/api/fulfillmentChanges'
-import type { Order, PaginationMeta } from '@/api/types'
+import type { DeliveryGroup, Order, OrderItem, PaginationMeta } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -42,6 +42,11 @@ async function load() {
     proposals.value = result.proposals
     proposalMeta.value = result.meta
   }
+}
+
+function itemsForGroup(order: Order, group: DeliveryGroup): OrderItem[] {
+  const itemIds = new Set(group.item_ids)
+  return order.items.filter((item) => itemIds.has(item.id))
 }
 
 watch(() => route.params.orderId, load)
@@ -95,12 +100,25 @@ onMounted(load)
           <span>{{ order.recipient_phone }}</span>
           <span class="sm:col-span-2">{{ order.address }}</span>
         </div>
-        <div v-for="item in order.items" :key="item.id" class="mb-3 grid gap-2 border-t border-stone-100 pt-3 md:grid-cols-[1fr_9rem_12rem_auto] md:items-end">
-          <div><div class="font-medium">{{ item.product_name }}<span v-if="item.variation_label"> · {{ item.variation_label }}</span></div><div class="text-xs text-stone-500">Saat ini: {{ item.fulfilled_quantity }} · {{ item.requested_delivery_date || 'Tanpa tanggal' }}</div></div>
-          <label class="text-xs text-stone-500">Jumlah<input v-model.number="quantity[item.id]" :placeholder="String(item.fulfilled_quantity)" type="number" min="0" :max="item.original_quantity" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
-          <label class="text-xs text-stone-500">Tanggal kirim<input v-model="dates[item.id]" :placeholder="item.requested_delivery_date || 'YYYY-MM-DD'" type="date" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
-          <button type="button" class="rounded bg-stone-800 px-3 py-2 text-sm text-white" @click="submit(order, item)">Ajukan</button>
-        </div>
+        <section v-for="group in order.delivery_groups ?? []" :key="`${order.id}-${group.delivery_date ?? 'none'}`" class="border-t border-stone-100 pt-3">
+          <div class="mb-2 flex flex-wrap justify-between gap-2 text-sm">
+            <strong>{{ group.delivery_date || 'Tanpa tanggal' }}</strong>
+            <span class="text-stone-500">{{ (group.delivery_methods ?? []).join(' · ') }}</span>
+          </div>
+          <p v-if="group.courier_names?.length" class="mb-2 text-xs text-stone-500">Kurir: {{ group.courier_names.join(', ') }}</p>
+          <div v-for="item in itemsForGroup(order, group)" :key="item.id" class="mb-3 grid gap-2 border-t border-stone-100 pt-3 md:grid-cols-[1fr_9rem_12rem_auto] md:items-end">
+            <div>
+              <div class="font-medium">{{ item.product_name }}<span v-if="item.variation_label"> · {{ item.variation_label }}</span><span v-if="item.sku" class="ml-1 text-xs text-stone-400">{{ item.sku }}</span></div>
+              <div class="text-xs text-stone-500">Pemenuhan: {{ item.fulfilled_quantity }} / {{ item.original_quantity }} order · {{ item.requested_delivery_date || 'Tanpa tanggal' }}</div>
+            </div>
+            <template v-if="selectedOrder">
+              <label class="text-xs text-stone-500">Jumlah<input v-model.number="quantity[item.id]" :placeholder="String(item.fulfilled_quantity)" type="number" min="0" :max="item.original_quantity" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
+              <label class="text-xs text-stone-500">Tanggal kirim<input v-model="dates[item.id]" :placeholder="item.requested_delivery_date || 'YYYY-MM-DD'" type="date" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
+              <button type="button" class="rounded bg-stone-800 px-3 py-2 text-sm text-white" @click="submit(order, item)">Ajukan</button>
+            </template>
+          </div>
+        </section>
+        <p v-if="selectedOrder && !(selectedOrder.delivery_groups ?? []).length" class="text-sm text-stone-400">Semua item order ini telah diproses.</p>
       </article>
       <p v-if="!selectedOrder && !orders.length" class="text-sm text-stone-400">Tidak ada order diproses.</p>
       <div v-if="!selectedOrder && orderMeta && orderMeta.last_page > 1" class="flex items-center justify-end gap-3 text-sm">

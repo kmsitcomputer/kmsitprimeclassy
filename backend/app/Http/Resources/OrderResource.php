@@ -119,6 +119,27 @@ class OrderResource extends JsonResource
                     ->map(function ($items, $date) use ($shipments, $rank) {
                         $active = $items->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)->values();
                         $statuses = $active->pluck('status')->unique();
+                        $groupShipments = $active->map(fn ($item) => $shipments->get($item->shipment_id) ?? $item->shipment)
+                            ->filter()->unique('id')->values();
+                        $deliveryMethods = $groupShipments->map(function ($shipment) {
+                            $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
+
+                            return match ($shipment->shipping_provider_code) {
+                                'openroute' => 'Kurir Online',
+                                'free' => 'Gratis',
+                                'pickup' => 'Pickup',
+                                'rajaongkir' => trim(strtoupper((string) ($meta['courier'] ?? '')).' '.strtoupper((string) ($meta['service'] ?? ''))) ?: 'Ekspedisi',
+                                default => $shipment->shipping_provider_code,
+                            };
+                        })->filter()->unique()->values();
+                        $courierNames = $groupShipments->map(function ($shipment) {
+                            if ($shipment->shipping_provider_code !== 'openroute') {
+                                return null;
+                            }
+
+                            return $shipment->courier?->name
+                                ?? ($shipment->isSelfDelivery() ? $shipment->selfDeliveredBy?->name : null);
+                        })->filter()->unique()->values();
 
                         return [
                             'delivery_date' => $date !== '' ? $date : null,
@@ -129,6 +150,8 @@ class OrderResource extends JsonResource
                             'status' => $active->isEmpty()
                                 ? 'dibatalkan'
                                 : $statuses->sortBy(fn ($st) => $rank[$st] ?? 99)->first(),
+                            'delivery_methods' => $deliveryMethods,
+                            'courier_names' => $courierNames,
                             'items' => $active->map(fn ($item) => [
                                 'id' => $item->id,
                                 'product_name' => $item->product_name_snapshot,
@@ -146,6 +169,9 @@ class OrderResource extends JsonResource
                                     'tracking_number' => $shipment->tracking_number,
                                     'shipped_at' => $shipment->shipped_at,
                                     'delivered_at' => $shipment->delivered_at,
+                                    'shipping_provider_code' => $shipment->shipping_provider_code,
+                                    'shipping_method_label' => $this->deliveryMethodLabel($shipment),
+                                    'courier_name' => $shipment->shipping_provider_code === 'openroute' ? $shipment->courier?->name : null,
                                 ] : ['id' => $id];
                             })->values(),
                         ];
@@ -178,5 +204,18 @@ class OrderResource extends JsonResource
             ),
             'created_at' => $this->created_at,
         ];
+    }
+
+    private function deliveryMethodLabel($shipment): ?string
+    {
+        $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
+
+        return match ($shipment->shipping_provider_code) {
+            'openroute' => 'Kurir Online',
+            'free' => 'Gratis',
+            'pickup' => 'Pickup',
+            'rajaongkir' => trim(strtoupper((string) ($meta['courier'] ?? '')).' '.strtoupper((string) ($meta['service'] ?? ''))) ?: 'Ekspedisi',
+            default => $shipment->shipping_provider_code,
+        };
     }
 }

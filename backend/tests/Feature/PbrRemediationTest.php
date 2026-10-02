@@ -271,7 +271,7 @@ class PbrRemediationTest extends TestCase
         ProductStock::create(['agent_id' => $b['agent']->id, 'product_id' => $product->id, 'quantity_on_hand' => 0, 'quantity_reserved' => 10]);
         WarehouseStock::create(['agent_id' => $b['agent']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 100]);
         $order = Order::create(['order_no' => 'PBR-REQ-'.uniqid(), 'konsumen_id' => $konsumen->id, 'agent_id' => $b['agent']->id, 'payment_method_id' => PaymentMethod::where('code', 'cod')->value('id'), 'status' => 'diterima', 'payment_status' => 'unpaid', 'subtotal_amount' => 10000, 'total_amount' => 10000, 'recipient_name_snapshot' => 'Test', 'recipient_phone_snapshot' => '0811', 'address_snapshot' => 'Test']);
-        OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 10000, 'original_quantity' => 10, 'fulfilled_quantity' => 0, 'status' => 'diterima']);
+        OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 10000, 'original_quantity' => 10, 'fulfilled_quantity' => 10, 'status' => 'diterima']);
 
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
@@ -293,7 +293,7 @@ class PbrRemediationTest extends TestCase
         $variation = ProductVariation::query()->findOrFail($variationId);
 
         $order = Order::create(['order_no' => 'PBR-VAR-'.uniqid(), 'konsumen_id' => $konsumen->id, 'agent_id' => $b['agent']->id, 'payment_method_id' => PaymentMethod::where('code', 'cod')->value('id'), 'status' => 'diterima', 'payment_status' => 'unpaid', 'subtotal_amount' => 1000, 'total_amount' => 1000, 'recipient_name_snapshot' => 'Test', 'recipient_phone_snapshot' => '0811', 'address_snapshot' => 'Test']);
-        OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_variation_id' => $variation->id, 'product_name_snapshot' => $product->name, 'variation_label_snapshot' => $variation->label(), 'sku_snapshot' => $variation->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 1000, 'original_quantity' => 1, 'fulfilled_quantity' => 0, 'status' => 'diterima']);
+        OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_variation_id' => $variation->id, 'product_name_snapshot' => $product->name, 'variation_label_snapshot' => $variation->label(), 'sku_snapshot' => $variation->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 1000, 'original_quantity' => 1, 'fulfilled_quantity' => 1, 'status' => 'diterima']);
         WarehouseStock::create(['agent_id' => $b['agent']->id, 'product_variation_id' => $variation->id, 'stock_type' => 'transit', 'quantity' => 10]);
 
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();

@@ -23,6 +23,7 @@ import {
 } from '@/utils/addLineSubmission'
 import type { AddOrderItemPayload } from '@/api/orderAdjustments'
 import { requestReturn } from '@/api/returns'
+import { downloadDeliveryGroupInvoice } from '@/api/fulfillmentChanges'
 import { useAuthStore } from '@/stores/auth'
 import type { DeliveryVerificationOutcome, Order, OrderItem, Product } from '@/api/types'
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
@@ -47,6 +48,7 @@ const cancelError = ref<string | null>(null)
 const proofFile = ref<File | null>(null)
 const uploadingProof = ref(false)
 const paymentActionError = ref<string | null>(null)
+const invoiceErrors = ref<Record<string, string>>({})
 const verifying = ref(false)
 const codUpdating = ref(false)
 const rejectionReason = ref('')
@@ -110,6 +112,16 @@ async function requestSettlement() {
     paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.requestSettlement')
   } finally {
     requestingSettlement.value = false
+  }
+}
+
+async function printDeliveryGroupInvoice(orderId: number, deliveryDate: string) {
+  const key = `${orderId}:${deliveryDate}`
+  invoiceErrors.value[key] = ''
+  try {
+    await downloadDeliveryGroupInvoice(orderId, deliveryDate)
+  } catch {
+    invoiceErrors.value[key] = t('orders.invoiceError')
   }
 }
 
@@ -827,8 +839,7 @@ async function submitReturn(item: OrderItem) {
           </div>
         </div>
 
-        <!-- Consumer delivery plan: rendered from the canonical backend delivery_groups (Order + delivery date). A date
-             change by Admin shows up here on the next refresh. No warehouse internals are exposed. -->
+        <!-- Consumer delivery plan and invoice actions are per canonical Order + requested delivery date group. -->
         <div v-if="auth.isKonsumen && order.delivery_groups?.length" class="mb-3 space-y-2">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">{{ t('orders.deliveryPlan') }}</h3>
           <div v-for="group in order.delivery_groups" :key="group.delivery_date ?? 'none'" class="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-800/60">
@@ -843,9 +854,11 @@ async function submitReturn(item: OrderItem) {
                 {{ gi.product_name }}<span v-if="gi.variation_label"> — {{ gi.variation_label }}</span> &times; {{ gi.quantity }}
               </li>
             </ul>
-            <p v-for="sh in group.shipments ?? []" :key="sh.id" class="mt-1 text-[11px] text-stone-400">
-              {{ t('orders.shipmentLabel') }} #{{ sh.id }}<template v-if="sh.status"> · {{ sh.status }}</template><template v-if="sh.tracking_number"> · {{ t('orders.trackingNo') }} {{ sh.tracking_number }}</template>
+            <p v-for="sh in group.shipments ?? []" :key="sh.id" class="mt-1 text-[11px] text-stone-500">
+              {{ t('orders.shippingMethod') }}: {{ sh.shipping_method_label || sh.shipping_provider_code || '-' }}<template v-if="sh.courier_name"> · {{ t('orders.courierName') }}: {{ sh.courier_name }}</template><template v-if="sh.tracking_number"> · {{ t('orders.trackingNo') }} {{ sh.tracking_number }}</template>
             </p>
+            <p v-if="group.delivery_date && invoiceErrors[`${order.id}:${group.delivery_date}`]" class="mt-2 text-xs text-red-600">{{ invoiceErrors[`${order.id}:${group.delivery_date}`] }}</p>
+            <button v-if="group.delivery_date" type="button" class="mt-3 text-xs font-medium text-brand-600 underline dark:text-brand-400" @click="printDeliveryGroupInvoice(order.id, group.delivery_date)">{{ t('orders.printInvoice') }}</button>
           </div>
         </div>
 

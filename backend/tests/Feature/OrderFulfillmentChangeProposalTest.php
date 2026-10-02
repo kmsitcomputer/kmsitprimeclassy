@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Shipment;
+use App\Models\Courier;
 use App\Models\User;
 use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
@@ -179,6 +180,45 @@ class OrderFulfillmentChangeProposalTest extends TestCase
             $this->assertSame($currentDate, $item->fresh()->requested_delivery_date?->toDateString());
             $this->assertSame('pending', OrderFulfillmentChangeProposal::findOrFail($proposalId)->status);
         }
+    }
+
+    public function test_gudang_queue_is_item_oriented_and_hides_only_shipped_items(): void
+    {
+        $f = $this->fixture();
+        $order = $f['order'];
+        $shippedItem = $order->items()->firstOrFail();
+        $shippedDate = now()->addDays(3)->toDateString();
+        $pendingDate = now()->addDays(13)->toDateString();
+        $shippedItem->update(['requested_delivery_date' => $shippedDate, 'status' => 'dikirim']);
+        $shippedItem->shipment->update(['shipping_provider_code' => 'rajaongkir', 'provider_meta' => ['courier' => 'jne', 'service' => 'REG'], 'status' => 'in_transit', 'shipped_at' => now()]);
+
+        $pendingProduct = Product::create(['sku' => 'PENDING-'.Str::uuid(), 'name' => 'Pending Sagu', 'slug' => 'pending-'.uniqid(), 'has_variations' => false, 'base_price' => 12000, 'weight_grams' => 100, 'status' => 'active']);
+        $courierUser = User::factory()->kurir()->create(['agent_id' => $f['agen']->id]);
+        $courier = Courier::create(['type' => 'internal', 'user_id' => $courierUser->id, 'agent_id' => $f['agen']->id, 'name' => 'Kurir Budi', 'is_active' => true]);
+        $pendingShipment = $shippedItem->shipment->replicate(['tracking_number', 'proof_media_id', 'shipped_at', 'delivered_at', 'shipping_fee_snapshot', 'rate_per_km', 'provider_meta']);
+        $pendingShipment->status = 'pending';
+        $pendingShipment->shipping_provider_code = 'openroute';
+        $pendingShipment->courier_id = $courier->id;
+        $pendingShipment->save();
+        $pendingItem = OrderItem::create([
+            'order_id' => $order->id, 'shipment_id' => $pendingShipment->id, 'product_id' => $pendingProduct->id,
+            'product_name_snapshot' => $pendingProduct->name, 'sku_snapshot' => $pendingProduct->sku,
+            'unit_price_snapshot' => 12000, 'subtotal_snapshot' => 12000,
+            'original_quantity' => 2, 'fulfilled_quantity' => 2, 'status' => 'diproses',
+            'requested_delivery_date' => $pendingDate,
+        ]);
+
+        $queue = $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/orders/diproses')
+            ->assertOk()->assertJsonPath('data.0.id', $order->id)->json('data.0');
+        $this->assertSame([$pendingItem->id], collect($queue['items'])->pluck('id')->all());
+        $this->assertSame($pendingDate, $queue['delivery_groups'][0]['delivery_date']);
+        $this->assertSame(['Kurir Online'], $queue['delivery_groups'][0]['delivery_methods']);
+        $this->assertSame(['Kurir Budi'], $queue['delivery_groups'][0]['courier_names']);
+
+        $detail = $this->actingAs($f['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}")
+            ->assertOk()->json('data');
+        $this->assertSame([$pendingItem->id], collect($detail['items'])->pluck('id')->all());
+        $this->assertSame('dikirim', $shippedItem->fresh()->status);
     }
 
     public function test_admin_rejects_without_mutation_and_approve_applies_once(): void

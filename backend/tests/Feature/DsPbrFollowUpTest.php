@@ -107,7 +107,7 @@ class DsPbrFollowUpTest extends TestCase
 
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $b['agent']->id]);
         $order = Order::create(['order_no' => 'DSPBR-'.uniqid(), 'konsumen_id' => $konsumen->id, 'agent_id' => $b['agent']->id, 'payment_method_id' => PaymentMethod::where('code', 'cod')->value('id'), 'status' => 'diproses', 'payment_status' => 'unpaid', 'subtotal_amount' => 1000, 'total_amount' => 1000, 'recipient_name_snapshot' => 'Test', 'recipient_phone_snapshot' => '0811', 'address_snapshot' => 'Test']);
-        $orderItem = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 1000, 'original_quantity' => 2, 'fulfilled_quantity' => 0, 'status' => 'diproses']);
+        $orderItem = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 2000, 'original_quantity' => 2, 'fulfilled_quantity' => 2, 'status' => 'diproses']);
         $stockRequest = StockRequest::withoutGlobalScopes()->create(['agent_id' => $b['agent']->id, 'order_id' => $order->id, 'request_number' => 'DSR-'.Str::uuid(), 'status' => 'pending']);
         $stockRequest->items()->create(['order_item_id' => $orderItem->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 2, 'fulfilled_qty' => 0, 'remaining_qty' => 2]);
 

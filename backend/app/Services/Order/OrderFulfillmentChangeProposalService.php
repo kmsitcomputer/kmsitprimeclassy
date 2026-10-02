@@ -17,7 +17,12 @@ class OrderFulfillmentChangeProposalService
     public function ordersFor(User $actor)
     {
         return Order::query()->where('status', 'diproses')->where('agent_id', $actor->agent_id)
-            ->with(['items.shipment', 'konsumen'])->latest()->paginate(15);
+            ->whereHas('items', fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0))
+            ->with([
+                'items' => fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0)
+                    ->with(['shipment.courier', 'shipment.selfDeliveredBy']),
+                'shipments.courier', 'shipments.selfDeliveredBy', 'konsumen',
+            ])->latest()->paginate(15);
     }
 
     public function operationalOrderFor(User $actor, Order $order): Order
@@ -27,7 +32,13 @@ class OrderFulfillmentChangeProposalService
         }
 
         return Order::query()->whereKey($order->id)->where('agent_id', $actor->agent_id)
-            ->where('status', 'diproses')->with(['items.shipment.courier.user', 'shipments.courier.user', 'konsumen'])
+            ->where('status', 'diproses')
+            ->whereHas('items', fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0))
+            ->with([
+                'items' => fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0)
+                    ->with(['shipment.courier', 'shipment.selfDeliveredBy']),
+                'shipments.courier', 'shipments.selfDeliveredBy', 'konsumen',
+            ])
             ->firstOrFail();
     }
 

@@ -34,6 +34,7 @@ use App\Http\Controllers\Api\V1\Language\LanguageController;
 use App\Http\Controllers\Api\V1\Media\MediaController;
 use App\Http\Controllers\Api\V1\Order\DeliveryVerificationController;
 use App\Http\Controllers\Api\V1\Order\OrderController;
+use App\Http\Controllers\Api\V1\Order\DeliveryGroupInvoiceController;
 use App\Http\Controllers\Api\V1\Payment\PaymentController;
 use App\Http\Controllers\Api\V1\Referral\ReferralController;
 use App\Http\Controllers\Api\V1\Region\RegionController;
@@ -311,6 +312,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // internal role plus konsumen can reach these, never each other's data.
     Route::get('/orders', [OrderController::class, 'index']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
+    Route::get('/orders/{order}/delivery-groups/{deliveryDate}/invoice', DeliveryGroupInvoiceController::class)
+        ->where('deliveryDate', '[0-9]{4}-[0-9]{2}-[0-9]{2}');
     Route::post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
 
     // Category taxonomy — super_admin only (ProductCategoryPolicy); structural,

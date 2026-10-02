@@ -166,7 +166,9 @@ export interface DeliveryGroup {
   status?: string
   /** Active products in this delivery group (consumer-safe: no warehouse or money data). */
   items?: { id: number; product_name: string; variation_label: string | null; sku: string | null; quantity: number; status: string }[]
-  shipments?: { id: number; status?: string; tracking_number?: string | null; shipped_at?: string | null; delivered_at?: string | null }[]
+  delivery_methods?: string[]
+  courier_names?: string[]
+  shipments?: { id: number; status?: string; tracking_number?: string | null; shipped_at?: string | null; delivered_at?: string | null; shipping_provider_code?: string | null; shipping_method_label?: string | null; courier_name?: string | null }[]
 }
 
 export type DeliveryVerificationOutcome = 'received' | 'not_received' | 'return'

@@ -36,7 +36,7 @@ class StockRequestTest extends TestCase
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $agent->id]);
         $product = Product::create(['sku' => 'REQ-'.uniqid(), 'name' => 'Request Cake', 'slug' => 'request-'.uniqid(), 'has_variations' => false, 'base_price' => 1000, 'weight_grams' => 100, 'status' => 'active']);
         $order = Order::create(['order_no' => 'REQ-ORDER-'.uniqid(), 'konsumen_id' => $konsumen->id, 'agent_id' => $agent->id, 'payment_method_id' => PaymentMethod::where('code', 'cod')->value('id'), 'status' => 'diterima', 'payment_status' => 'unpaid', 'subtotal_amount' => 10000, 'total_amount' => 10000, 'recipient_name_snapshot' => 'Test', 'recipient_phone_snapshot' => '0811', 'address_snapshot' => 'Test']);
-        $item = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 10000, 'original_quantity' => 10, 'fulfilled_quantity' => 0, 'status' => 'diterima']);
+        $item = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku, 'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 10000, 'original_quantity' => 10, 'fulfilled_quantity' => 10, 'status' => 'diterima']);
         ProductStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'quantity_on_hand' => 0, 'quantity_reserved' => $reserved]);
         WarehouseStock::create(['agent_id' => $agent->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => $transit]);
         WarehouseSetting::create(['agent_id' => $agent->id, 'factory_plan_enabled' => false]);

@@ -42,3 +42,15 @@ export async function decideFulfillmentChange(id: number, decision: 'approve' | 
   const { data } = await http.post<ApiEnvelope<FulfillmentChangeProposal>>(`/warehouse/fulfillment-change-proposals/${id}/${decision}`, { reason })
   return data.data
 }
+
+export async function downloadDeliveryGroupInvoice(orderId: number, deliveryDate: string) {
+  const { data } = await http.get<Blob>(`/orders/${orderId}/delivery-groups/${deliveryDate}/invoice`, { responseType: 'blob' })
+  const url = URL.createObjectURL(data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `invoice-${orderId}-${deliveryDate}.pdf`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
