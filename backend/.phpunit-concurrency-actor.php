@@ -406,6 +406,12 @@ if (str_starts_with($role, 'sr-')) {
                 $decided = app(StockRequestProposalService::class)->approveItem($actor, $proposalModel, \App\Models\StockRequestProposalItem::findOrFail((int) $extra['item_id']));
                 $payload['proposal_status'] = $decided->status;
                 $payload['item_decisions'] = $decided->items->mapWithKeys(fn ($i) => [(string) $i->id => $i->decision_status])->all();
+                // F07: the fields StockRequestItemResource projects from the related OrderItem, so a replay's
+                // current-read graph can be asserted against the committed DB.
+                $payload['request_item_projection'] = $decided->items->mapWithKeys(fn ($i) => [(string) $i->id => [
+                    'order_quantity' => $i->requestItem?->orderItem?->fulfilled_quantity,
+                    'delivery_date' => $i->requestItem?->orderItem?->requested_delivery_date?->toDateString(),
+                ]])->all();
                 $result = $decided;
                 break;
             case 'shipment-regroup':

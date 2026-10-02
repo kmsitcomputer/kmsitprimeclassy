@@ -4,6 +4,7 @@ namespace App\Services\Stock;
 
 use App\Exceptions\ApiException;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\ProductStock;
 use App\Models\ProductVariationStock;
 use App\Models\StockMovement;
@@ -317,7 +318,18 @@ class StockRequestProposalService
             : StockRequestItem::withoutGlobalScopes()
                 ->whereIn('id', $items->pluck('stock_request_item_id')->all())
                 ->lockForUpdate()->get()
-                ->load(['product.images', 'variation.compositions.option', 'orderItem']);
+                ->load(['product.images', 'variation.compositions.option']);
+
+        // F07: current-read the related OrderItem graph too — the response projects `order_quantity` and
+        // `delivery_date` from it (StockRequestItemResource), which must not come from a stale snapshot.
+        $orderItemIds = $requestItems->pluck('order_item_id')->filter()->unique()->values()->all();
+        $orderItems = $orderItemIds === []
+            ? collect()
+            : OrderItem::query()->whereIn('id', $orderItemIds)->lockForUpdate()->get()->keyBy('id');
+
+        foreach ($requestItems as $requestItem) {
+            $requestItem->setRelation('orderItem', $requestItem->order_item_id ? $orderItems->get($requestItem->order_item_id) : null);
+        }
 
         foreach ($items as $item) {
             $requestItem = $requestItems->firstWhere('id', $item->stock_request_item_id);

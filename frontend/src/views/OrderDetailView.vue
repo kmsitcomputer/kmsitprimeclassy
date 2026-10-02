@@ -903,8 +903,10 @@ async function submitReturn(item: OrderItem) {
               </div>
             </div>
 
-            <!-- Admin: reschedule requested delivery date, only while order is 'diproses' -->
-            <div v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment')" class="mt-1.5">
+            <!-- Admin: reschedule requested delivery date, only while order is 'diproses'.
+                 Ekspedisi (rajaongkir) delivery dates are fixed by business rule — the server returns 422
+                 regardless; this just avoids offering an impossible action. -->
+            <div v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment') && order.shipping_provider !== 'rajaongkir'" class="mt-1.5">
               <button v-if="reschedulingItemId !== item.id" type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="openRescheduleForm(item)">
                 {{ t('orders.rescheduleItem') }}
               </button>

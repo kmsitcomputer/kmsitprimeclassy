@@ -1,5 +1,41 @@
 # Package C — Production UAT Remediation (checkpoint)
 
+## Round 4 — independent Codex review of `7edc877` = BLOCKED (FINAL bounded remediation)
+
+**Codex verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `7edc877`. **Original main:** `938100c`.
+
+**CLOSED (do not reopen):** F01 demand-counter concurrency · F03 tracking/resi commitment · F05 canonical Order-first lock order · F06 regroup failure exit status.
+
+**OPEN being remediated now:**
+- **F02 (BLOCKER)** — shipping quote equivalence incomplete. `feeCarrierSignature()` ignores `provider_meta` courier/service, so `25,000 JNE/REG` and `25,000 J&T/EZ` are treated as equivalent and one is discarded.
+- **F04 (MAJOR)** — quantity adjustment can mutate historical shipment contents: `adjustItemQuantity()` has no shipment-level historical gate, so a `diproses`/stale item on a delivered/proof/verified/in-transit shipment can change `3 → 2` (quantity, StockRequest demand, reservation, order total).
+- **F07 (MINOR)** — approval replay response can expose a stale related `OrderItem`: `loaded()` current-reads proposal/items/StockRequest but `orderItem` is still loaded via a REPEATABLE READ consistent read, so `order_quantity`/`delivery_date` can be stale.
+
+**NEW Human-approved business rule (authoritative):**
+- **Ekspedisi** (`shipping_provider_code = 'rajaongkir'`, the canonical domain representation): Admin **cannot** change the requested delivery date → domain 422 **before any mutation**.
+- **Kurir Online free** (`'openroute'`, `Order.shipping_fee_amount = 0`): date changes allowed while lifecycle permits; all active group snapshots 0.
+- **Kurir Online paid** (`'openroute'`, fee > 0): date changes allowed; `Order.shipping_fee_amount` unchanged; the total is distributed **evenly across all active delivery-date groups** using deterministic integer arithmetic (`base = intdiv(total, N)`, first `total % N` groups get `base + 1`), ordered by `requested_delivery_date ASC` then shipment id. Postcondition: `SUM(active group snapshots) == Order.shipping_fee_amount` exactly. Never floating point.
+- **NEW valid redistribution ≠ historical repair:** the even-allocation rule must never normalise ambiguous historical quotes; conflicting historical carriers stay **fail closed** (human decision required).
+
+**Implementation plan / exact order:**
+1. **F04** — add the shipment-level historical gate (`ShipmentGroupingService::isHistorical`) at the top of `adjustItemQuantity()` (increase AND decrease), before any mutation.
+2. **F02** — extend `feeCarrierSignature()` with normalised `provider_meta.courier` + `.service` (material service identity), keeping the existing fee/rate/provider/distance fields.
+3. **New rule** — `ShipmentGroupingService::usesEkspedisi()/usesKurirOnline()` + `redistributeKurirOnlineShippingFee()`; wire the Ekspedisi 422 gate + redistribution into `rescheduleItemDeliveryDate()` (full reschedule and partial split); 2 new localized messages; bounded frontend guard hiding the reschedule action for `shipping_provider === 'rajaongkir'`.
+4. **F07** — `loaded()` also locking-reads the related `OrderItem` graph.
+5. Focused + deterministic concurrency tests; full backend; frontend; commit; STOP for one final Codex review.
+
+**Round-4 implementation result (awaiting the one final independent review):**
+- **Human rule** — `ShipmentGroupingService::usesEkspedisi()/usesKurirOnline()` (canonical server snapshot `shipping_provider_code`); `rescheduleItemDeliveryDate()` rejects Ekspedisi 422 before any mutation; `redistributeKurirOnlineShippingFee()` distributes the unchanged Order fee evenly across active delivery-date groups (integer rupiah: `base = floor(total/N)`, first `total % N` by `requested_delivery_date ASC` take `base + 1`; sub-rupiah remainder rides the first group so the cent is conserved). Committed/historical groups are never rewritten — a redistribution that would require it is 422. 2 new localized messages (4 locales) + bounded frontend guard hiding reschedule for `rajaongkir`.
+- **F02** — `feeCarrierSignature()` now includes normalised `provider_meta.courier` + `.service` (material service identity); incidental metadata excluded. `25,000 JNE/REG` vs `25,000 J&T/EZ` now fail closed.
+- **F04** — shipment-level `isHistorical` gate added to `adjustItemQuantity()` (increase AND decrease), before any mutation.
+- **F07** — `loaded()` locking-reads the related `OrderItem` graph so `order_quantity`/`delivery_date` are current.
+- **Tests:** new `PackageCProductionUatRound4Test` (24) + `PackageCProposalReplayConcurrencyTest` test #3 (OrderItem projection). New tests fail on `7edc877` (18 failed / 9 passed; F07 genuinely stale `order_quantity` 10 vs 12 when isolated). Concurrency suites repeated 3× green. Full backend **936 passed / 6775 assertions / 0 failures** (baseline 911/6644); `npm run type-check` PASS; clean temporary-outDir build PASS (normal `dist/` build still hits the pre-existing `.well-known/acme-challenge` EACCES).
+- **Docs updated:** BUSINESS-RULES §11/§16/§21 (new delivery-date rule), ARCHITECTURE §7, MASTER-SYSTEM §2/§40/§41, OPERATIONS §4.
+
+**Exact next action:** ONE independent Codex FINAL review of branch `fix/package-c-production-uat` (round-4 delta). No deployment; PRODUCTION TOUCHED: NO; DEPLOYED: NO; PRODUCTION MIGRATION: NO; PRODUCTION REGROUP: NO; Package C remains NOT production closed.
+
+---
+
 ## Round 3 — independent Codex review of `0f26fae` = BLOCKED
 
 **Codex verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `0f26fae`. **Original main:** `938100c`. **Previous remediation base:** `a583b51`.

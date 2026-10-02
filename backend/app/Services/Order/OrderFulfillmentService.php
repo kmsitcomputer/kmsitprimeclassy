@@ -63,6 +63,14 @@ class OrderFulfillmentService
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
 
+            // F04: a historical shipment's CONTENTS (represented quantity, membership) are immutable. Lock the
+            // item's shipment and gate on SHIPMENT-level evidence — never on the possibly-stale item status —
+            // BEFORE any quantity mutation, for an increase AND a decrease alike.
+            $itemShipment = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+            if ($itemShipment && ShipmentGroupingService::isHistorical($itemShipment)) {
+                throw new ApiException(__('messages.fulfillment.historical_shipment_cannot_change'), 422);
+            }
+
             $delta = $newFulfilledQuantity - $item->fulfilled_quantity;
 
             if ($delta === 0) {
@@ -335,6 +343,13 @@ class OrderFulfillmentService
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
 
+            // Human-approved rule: Ekspedisi (RajaOngkir) delivery dates are fixed. Reject the whole attempt —
+            // full reschedule OR partial split — BEFORE any mutation (no date/regroup/StockRequest/reservation/
+            // payment/fee change). Kurir Online (OpenRoute) is resolved by the same server-side snapshot.
+            if (ShipmentGroupingService::usesEkspedisi($order)) {
+                throw new ApiException(__('messages.fulfillment.ekspedisi_cannot_reschedule'), 422);
+            }
+
             // F04: historical commitment protects the shipment's CONTENTS, not just its identity. Lock the
             // current shipment once and derive the gate from SHIPMENT-level evidence — never from item status
             // alone (a stale/inconsistent item status must not defeat proof / verification / final delivery).
@@ -353,7 +368,10 @@ class OrderFulfillmentService
                         throw new ApiException(__('messages.fulfillment.historical_shipment_cannot_change'), 422);
                     }
 
-                    return $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
+                    $child = $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
+                    $this->shipmentGrouping->redistributeKurirOnlineShippingFee($order);
+
+                    return $child;
                 }
             }
 
@@ -392,6 +410,9 @@ class OrderFulfillmentService
                 // committed shipment with siblings) move the item onto the order's mutable shipment for its
                 // new date.
                 $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.regrouped_by_delivery_date');
+                // Human-approved rule: a NEW valid Kurir Online delivery-date change redistributes the
+                // unchanged Order shipping fee evenly across the active groups (no-op for Ekspedisi/free).
+                $this->shipmentGrouping->redistributeKurirOnlineShippingFee($order);
             }
 
             ActivityLogger::log($actor->id, $item, 'order_item.delivery_rescheduled', $reason, [

@@ -175,4 +175,43 @@ class PackageCProposalReplayConcurrencyTest extends TestCase
         $this->assertSame('pending', StockRequestProposalItem::findOrFail($pb->id)->decision_status);
         $this->assertSame('partial', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal->id)->status);
     }
+
+    public function test_replay_returns_current_related_order_item_projection(): void
+    {
+        $f = $this->fixture(quantity: 10, stock: 50);
+        $requestItem = StockRequestItem::where('stock_request_id', $f['request']->id)->firstOrFail();
+        $proposal = app(StockRequestProposalService::class)->propose($f['gudang'], $f['request'], [['item_id' => $requestItem->id, 'quantity' => 6]]);
+        $proposalItem = $proposal->items->firstOrFail();
+
+        // Commit the approval so the replay takes the idempotent early-return path.
+        app(StockRequestProposalService::class)->approveItem($f['admin'], $proposal, $proposalItem);
+
+        $newDate = now()->addDays(20)->toDateString();
+        $result = $this->replayAgainstUncommittedApproval(
+            function () use ($f, $newDate) {
+                // A: hold the ORDER lock and change the related OrderItem (quantity + date) — uncommitted.
+                Order::withoutGlobalScopes()->whereKey($f['order']->id)->lockForUpdate()->first();
+                $item = OrderItem::query()->where('order_id', $f['order']->id)->lockForUpdate()->firstOrFail();
+                $item->update(['fulfilled_quantity' => 12, 'requested_delivery_date' => $newDate]);
+            },
+            ['op' => 'proposal-item-approve', 'actor_id' => $f['admin']->id, 'subject_id' => $proposal->id, 'extra' => ['item_id' => $proposalItem->id]],
+        );
+
+        $this->assertTrue($result['blocked'], 'the replay actor must provably block on the held Order lock');
+        $actor = $result['actor'];
+        $this->assertSame('success', $actor['outcome'] ?? null, json_encode($actor));
+
+        // The projected related OrderItem fields must equal the committed DB, not the pre-wait snapshot.
+        $item = OrderItem::query()->where('order_id', $f['order']->id)->firstOrFail();
+        $projection = $actor['request_item_projection'][(string) $proposalItem->id] ?? null;
+        $this->assertNotNull($projection, 'the response must project the related order item');
+        $this->assertSame((int) $item->fulfilled_quantity, (int) ($projection['order_quantity'] ?? -1), 'order_quantity must be current');
+        $this->assertSame($item->requested_delivery_date?->toDateString(), $projection['delivery_date'] ?? null, 'delivery_date must be current');
+        $this->assertSame(12, (int) $projection['order_quantity']);
+        $this->assertSame($newDate, $projection['delivery_date']);
+
+        // Exactly-once: the replay never executed a second fulfillment.
+        $this->assertSame(1, StockRequestFulfillment::withoutGlobalScopes()->where('stock_request_id', $f['request']->id)->count());
+        $this->assertSame(2, StockMovement::withoutGlobalScopes()->where('reference_type', StockRequest::class)->where('reference_id', $f['request']->id)->count());
+    }
 }

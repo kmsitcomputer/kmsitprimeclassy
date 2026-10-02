@@ -62,6 +62,113 @@ class ShipmentGroupingService
     }
 
     /**
+     * Canonical shipping-method snapshot (server-derived at checkout, `ShippingQuoteService` $labels):
+     * `rajaongkir` = Ekspedisi, `openroute` = Kurir Online. Never inferred from UI strings.
+     */
+    public static function usesEkspedisi(Order $order): bool
+    {
+        return Shipment::query()->where('order_id', $order->id)
+            ->where('shipping_provider_code', 'rajaongkir')->exists();
+    }
+
+    public static function usesKurirOnline(Order $order): bool
+    {
+        return Shipment::query()->where('order_id', $order->id)
+            ->where('shipping_provider_code', 'openroute')->exists();
+    }
+
+    /**
+     * Human-approved rule: after a NEW valid Kurir Online (openroute) delivery-date change, the UNCHANGED
+     * Order shipping fee is redistributed EVENLY across all ACTIVE delivery-date groups, deterministically
+     * (integer arithmetic, no floating point). Called only from a valid reschedule — never as historical
+     * repair, never for Ekspedisi, and it never rewrites immutable historical fee evidence.
+     */
+    public function redistributeKurirOnlineShippingFee(Order $order): void
+    {
+        if (! self::usesKurirOnline($order)) {
+            return;
+        }
+
+        // Consolidate first so there is exactly ONE mutable shipment per active date (idempotent).
+        $this->reconcileOrder($order);
+
+        $shipments = Shipment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+        $mutable = $shipments->filter(fn (Shipment $s) => self::isMutable($s));
+
+        // A committed/historical shipment carrying a nonzero fee would be double-counted, or would have to be
+        // rewritten — refuse instead of corrupting immutable history.
+        foreach ($shipments as $shipment) {
+            if (! self::isMutable($shipment) && (float) $shipment->shipping_fee_snapshot > 0.0) {
+                throw new ApiException(__('messages.fulfillment.cannot_redistribute_committed_fee'), 422);
+            }
+        }
+
+        $activeDates = OrderItem::query()->where('order_id', $order->id)
+            ->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)
+            ->get(['requested_delivery_date'])
+            ->map(fn ($i) => self::key($i->requested_delivery_date?->toDateString()))
+            ->unique()->values()->all();
+
+        $carriers = [];
+        foreach ($activeDates as $date) {
+            $carrier = $mutable->first(fn (Shipment $s) => $this->mutableActiveDate($s) === $date);
+            if (! $carrier) {
+                // The active group is only represented by a committed/historical shipment.
+                throw new ApiException(__('messages.fulfillment.cannot_redistribute_committed_fee'), 422);
+            }
+            $carriers[$date] = $carrier->id;
+        }
+
+        if ($carriers === []) {
+            return;
+        }
+
+        // Deterministic group order: requested_delivery_date ASC ('' sorts first), then explicit order.
+        ksort($carriers);
+
+        // Integer rupiah division (Human-approved examples): base = floor(total/N), the first (total % N)
+        // groups take base + 1. Any sub-rupiah remainder (rare) rides on the first group so the total is
+        // conserved exactly to the cent — no floating point arithmetic is used for the distribution.
+        $totalCents = (int) round(((float) $order->shipping_fee_amount) * 100);
+        $wholeRupiah = intdiv($totalCents, 100);
+        $fractionCents = $totalCents - ($wholeRupiah * 100);
+        $groups = count($carriers);
+        $base = intdiv($wholeRupiah, $groups);
+        $remainder = $wholeRupiah % $groups;
+
+        $assigned = [];
+        $index = 0;
+        foreach ($carriers as $id) {
+            $rupiah = $base + ($index < $remainder ? 1 : 0);
+            $cents = ($rupiah * 100) + ($index === 0 ? $fractionCents : 0);
+            $assigned[$id] = true;
+            Shipment::query()->whereKey($id)->update([
+                'shipping_fee_snapshot' => sprintf('%d.%02d', intdiv($cents, 100), $cents % 100),
+            ]);
+            $index++;
+        }
+
+        // Any other mutable shipment (empty shell / duplicate-date leftover) must not carry fee evidence.
+        foreach ($mutable as $shipment) {
+            if (! isset($assigned[$shipment->id])) {
+                $shipment->update(['shipping_fee_snapshot' => 0]);
+            }
+        }
+    }
+
+    /** The single active requested date a mutable shipment represents, or null (empty / mixed / no active qty). */
+    private function mutableActiveDate(Shipment $shipment): ?string
+    {
+        $dates = OrderItem::query()->where('shipment_id', $shipment->id)
+            ->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)
+            ->get(['requested_delivery_date'])
+            ->map(fn ($i) => self::key($i->requested_delivery_date?->toDateString()))
+            ->unique()->values()->all();
+
+        return count($dates) === 1 ? $dates[0] : null;
+    }
+
+    /**
      * Returns the order's mutable shipment for $date (same delivery mode / self-delivery actor), creating it
      * from $attributes when none exists. Candidates holding exactly that date are preferred over empty shells.
      *
@@ -258,6 +365,11 @@ class ShipmentGroupingService
      * F02 carrier evidence signature: a nonzero fee plus the quote metadata that makes up the snapshot.
      * `null` means "no historical carrier here" (the column is NOT NULL DEFAULT 0, so zero = no evidence).
      *
+     * The material service identity lives in `provider_meta`: RajaOngkir selects a quote by COURIER + SERVICE,
+     * so `25,000 JNE/REG` and `25,000 J&T/EZ` are NOT equivalent even though the number is the same. Only
+     * quote-defining fields are compared — incidental metadata (etd, description, timestamps, debug data,
+     * response order) never changes quote identity and is deliberately excluded.
+     *
      * @return array<string, mixed>|null
      */
     private static function feeCarrierSignature(Shipment $shipment): ?array
@@ -266,18 +378,34 @@ class ShipmentGroupingService
             return null;
         }
 
+        $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
+
         return [
             'fee' => self::money($shipment->shipping_fee_snapshot),
             'rate_per_km' => $shipment->rate_per_km === null ? null : self::money($shipment->rate_per_km),
             'shipping_provider_id' => $shipment->shipping_provider_id,
             'shipping_provider_code' => $shipment->shipping_provider_code,
             'distance_km' => $shipment->distance_km === null ? null : self::money($shipment->distance_km),
+            'courier' => self::normalizeMeta($meta['courier'] ?? null),
+            'service' => self::normalizeMeta($meta['service'] ?? null),
         ];
     }
 
     private static function money(mixed $value): string
     {
         return number_format((float) $value, 2, '.', '');
+    }
+
+    /** Normalize a material metadata string for comparison without erasing real service differences. */
+    private static function normalizeMeta(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+
+        return $normalized === '' ? null : $normalized;
     }
 
     /**
