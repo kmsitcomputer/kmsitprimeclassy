@@ -131,6 +131,15 @@ class DeliveryGroupInvoiceTest extends TestCase
         $this->assertSame(['JNE REG'], $displayedSecond['delivery_methods']);
         $this->assertSame([], $displayedSecond['courier_names']);
         $this->assertSame([$f['items'][2]->product_name_snapshot], array_column($displayedSecond['items'], 'product_name'));
+
+        $receipt = $this->actingAs($f['buyer'])->getJson("/api/v1/orders/{$f['order']->id}/delivery-groups/{$f['firstDate']}/receipt")
+            ->assertOk()->json('data');
+        $this->assertSame(3, $receipt['total_item_count']);
+        $this->assertSame(2, count($receipt['items']), 'same-date items share one resi group');
+        $this->assertSame([$f['items'][0]->product_name_snapshot, $f['items'][1]->product_name_snapshot], array_column($receipt['items'], 'product_name'));
+        $this->assertSame(['Kurir Budi'], $receipt['courier_names']);
+        $this->assertSame('12.00', $receipt['shipping_fee_amount']);
+        $this->assertArrayNotHasKey('remaining_amount', $receipt);
     }
 
     public function test_pdf_route_is_order_authorized_and_does_not_write_payment_transactions(): void
@@ -149,6 +158,11 @@ class DeliveryGroupInvoiceTest extends TestCase
         $this->actingAs($f['foreignBuyer'])->get($url)->assertNotFound();
         $this->actingAs($f['buyer'])->get("/api/v1/orders/{$f['order']->id}/delivery-groups/{$f['secondDate']}/invoice")->assertOk();
         $this->actingAs($f['buyer'])->get("/api/v1/orders/{$f['order']->id}/delivery-groups/2026-12-31/invoice")->assertNotFound();
+        $receiptUrl = "/api/v1/orders/{$f['order']->id}/delivery-groups/{$f['firstDate']}/receipt";
+        $groupReceipt = $this->actingAs($f['buyer'])->getJson($receiptUrl)->assertOk()->json('data');
+        $this->assertSame(3, $groupReceipt['total_item_count']);
+        $this->assertSame(2, count($groupReceipt['items']));
+        $this->actingAs($f['otherBuyer'])->getJson($receiptUrl)->assertForbidden();
         $this->assertSame($transactionsBefore, PaymentTransaction::where('order_id', $f['order']->id)->count());
     }
 }

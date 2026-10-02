@@ -275,6 +275,11 @@ function openReceipt(shipmentId: number) {
   window.open(target.href, '_blank')
 }
 
+function openDeliveryGroupReceipt(orderId: number, deliveryDate: string) {
+  const target = router.resolve({ name: 'delivery-group-receipt-print', params: { orderId, deliveryDate } })
+  window.open(target.href, '_blank')
+}
+
 function deliveryShipmentStatusLabel(status?: string): string {
   if (!status) return '-'
   const key = `orders.deliveryStatus.${status}`
@@ -868,8 +873,8 @@ async function submitReturn(item: OrderItem) {
                 <template v-if="sh.tracking_number"> · {{ t('orders.trackingNo') }} {{ sh.tracking_number }}</template>
                 <span class="ml-1 rounded-full bg-white px-2 py-0.5 dark:bg-stone-900">{{ deliveryShipmentStatusLabel(sh.status) }}</span>
               </p>
-              <button type="button" class="font-medium text-brand-600 underline dark:text-brand-400" @click="openReceipt(sh.id)">{{ t('orders.printReceipt') }}</button>
             </div>
+            <button v-if="group.delivery_date" type="button" class="mt-3 text-xs font-medium text-stone-700 underline dark:text-stone-300" @click="openDeliveryGroupReceipt(order.id, group.delivery_date)">{{ t('orders.printReceipt') }}</button>
             <p v-if="group.delivery_date && invoiceErrors[`${order.id}:${group.delivery_date}`]" class="mt-2 text-xs text-red-600">{{ invoiceErrors[`${order.id}:${group.delivery_date}`] }}</p>
             <button v-if="group.delivery_date" type="button" class="mt-3 text-xs font-medium text-brand-600 underline dark:text-brand-400" @click="printDeliveryGroupInvoice(order.id, group.delivery_date)">{{ t('orders.printInvoice') }}</button>
           </div>

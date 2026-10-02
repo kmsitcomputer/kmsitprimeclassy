@@ -80,3 +80,31 @@ export async function getShipmentReceipt(shipmentId: number) {
   const { data } = await http.get<ApiEnvelope<ShipmentReceipt>>(`/shipments/${shipmentId}/receipt`)
   return data.data
 }
+
+export interface DeliveryGroupReceipt {
+  order_no: string
+  delivery_date: string
+  recipient_name: string
+  recipient_phone: string
+  address_line: string
+  items: ShipmentReceiptItem[]
+  total_item_count: number
+  shipping_fee_amount: string
+  shipping_methods: string[]
+  courier_names: string[]
+  tracking_numbers: string[]
+  shipment_statuses: string[]
+  payment: {
+    is_cod: boolean
+    cod_amount_due: string | number | null
+    initial_dp_amount: string | number | null
+    initial_dp_credit: string | number | null
+    dp_credit_date: string | null
+    order_has_multiple_delivery_groups: boolean
+  }
+}
+
+export async function getDeliveryGroupReceipt(orderId: number, deliveryDate: string) {
+  const { data } = await http.get<ApiEnvelope<DeliveryGroupReceipt>>(`/orders/${orderId}/delivery-groups/${deliveryDate}/receipt`)
+  return data.data
+}

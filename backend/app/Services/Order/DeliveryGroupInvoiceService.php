@@ -52,6 +52,7 @@ class DeliveryGroupInvoiceService
         $deliveryMethods = $shipments->map(fn (Shipment $shipment) => $this->deliveryMethod($shipment))->filter()->unique()->values();
         $courierNames = $shipments->map(fn (Shipment $shipment) => $this->courierName($shipment))->filter()->unique()->values();
         $trackingNumbers = $shipments->pluck('tracking_number')->filter()->unique()->values();
+        $shipmentStatuses = $shipments->pluck('status')->unique()->values();
 
         return [
             'invoice_number' => $order->order_no.'-'.$deliveryDate,
@@ -61,10 +62,16 @@ class DeliveryGroupInvoiceService
             'total_item_count' => (int) $items->sum('fulfilled_quantity'),
             'item_subtotal' => $this->formatMinor($itemSubtotalMinor),
             'shipping_fee' => $this->formatMinor($shippingFeeMinor),
+            'shipping_fee_amount' => $this->decimalFromMinor($shippingFeeMinor),
             'group_total' => $this->formatMinor($itemSubtotalMinor + $shippingFeeMinor),
             'delivery_methods' => $deliveryMethods->all(),
             'courier_names' => $courierNames->all(),
             'tracking_numbers' => $trackingNumbers->all(),
+            'shipment_ids' => $shipments->pluck('id')->values()->all(),
+            'shipment_statuses' => $shipmentStatuses->all(),
+            'total_item_count' => (int) $items->sum('fulfilled_quantity'),
+            'active_delivery_group_count' => $activeItems->pluck('requested_delivery_date')->filter()
+                ->map(fn ($date) => $date->toDateString())->unique()->count(),
             'payment' => [
                 'method' => $order->paymentMethod?->name ?? $order->paymentMethod?->code,
                 'status' => $paymentSummary['payment_status'],
@@ -127,5 +134,10 @@ class DeliveryGroupInvoiceService
     private function formatMinor(int $amount): string
     {
         return number_format(intdiv($amount, 100), 0, ',', '.').','.str_pad((string) ($amount % 100), 2, '0', STR_PAD_LEFT);
+    }
+
+    private function decimalFromMinor(int $amount): string
+    {
+        return intdiv($amount, 100).'.'.str_pad((string) ($amount % 100), 2, '0', STR_PAD_LEFT);
     }
 }

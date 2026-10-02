@@ -122,6 +122,13 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'kurir', 'sales-kurir-sub', 'konsumen'] },
     },
     {
+      path: '/print/orders/:orderId/delivery-groups/:deliveryDate/receipt',
+      name: 'delivery-group-receipt-print',
+      component: () => import('@/views/print/DeliveryGroupReceiptView.vue'),
+      props: (route) => ({ orderId: Number(route.params.orderId), deliveryDate: String(route.params.deliveryDate) }),
+      meta: { requiresAuth: true, requiresAnyRole: ['konsumen'] },
+    },
+    {
       path: '/dashboard',
       name: 'dashboard-home',
       component: () => import('@/views/dashboard/DashboardHomeView.vue'),
