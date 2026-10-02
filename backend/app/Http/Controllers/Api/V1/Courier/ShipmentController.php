@@ -69,7 +69,14 @@ class ShipmentController extends Controller
     {
         $this->authorize('printReceipt', $shipment);
 
-        $shipment->load(['order.paymentMethod', 'courier', 'selfDeliveredBy', 'orderItems']);
+        $shipment->load(['order.paymentMethod', 'order.items', 'courier', 'selfDeliveredBy', 'orderItems']);
+        $shipmentDates = $shipment->orderItems
+            ->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)
+            ->map(fn ($item) => $item->requested_delivery_date?->toDateString() ?? $shipment->order->delivery_date_estimate?->toDateString() ?? '')
+            ->unique();
+        if ($shipmentDates->count() > 1) {
+            abort(422, 'Shipment spans multiple delivery-date groups.');
+        }
 
         $isReprint = ActivityLog::query()
             ->where('subject_type', Shipment::class)

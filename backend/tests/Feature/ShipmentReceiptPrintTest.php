@@ -6,6 +6,7 @@ use App\Models\AgentProfile;
 use App\Models\Courier;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\Shipment;
@@ -184,9 +185,10 @@ class ShipmentReceiptPrintTest extends TestCase
         $order = $this->placeOrder($branch['konsumen'], [['product_id' => $product->id, 'quantity' => 1]]);
         $shipmentId = $this->shipmentIdFor($order);
 
-        foreach (['keuangan', 'korsal', 'sales', 'konsumen'] as $role) {
+        foreach (['keuangan', 'korsal', 'sales'] as $role) {
             $this->actingAs($branch[$role])->getJson("/api/v1/shipments/{$shipmentId}/receipt")->assertStatus(403);
         }
+        $this->actingAs($branch['konsumen'])->getJson("/api/v1/shipments/{$shipmentId}/receipt")->assertOk();
     }
 
     /* ---------------------------------------------------------------
@@ -433,7 +435,23 @@ class ShipmentReceiptPrintTest extends TestCase
         $this->assertArrayNotHasKey('longitude', $response->json('data'));
     }
 
-    public function test_cod_order_shows_minimal_cod_indicator_using_authoritative_amount(): void
+    public function test_receipt_prints_its_shipment_fee_and_tracking_identity(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Resi scope', 50000);
+        $order = $this->placeOrder($branch['konsumen'], [['product_id' => $product->id, 'quantity' => 1]]);
+        $shipment = Shipment::findOrFail($this->shipmentIdFor($order));
+        $shipment->update(['shipping_fee_snapshot' => 12345, 'tracking_number' => 'PC-RESI-123']);
+
+        $receipt = $this->actingAs($branch['agen'])->getJson("/api/v1/shipments/{$shipment->id}/receipt")
+            ->assertOk()->json('data');
+        $this->assertSame('12345.00', $receipt['shipping_fee_amount']);
+        $this->assertSame('PC-RESI-123', $receipt['tracking_number']);
+        $this->assertSame(1, $receipt['total_item_count']);
+        $this->assertArrayNotHasKey('remaining_amount', $receipt);
+    }
+
+    public function test_cod_receipt_shows_order_due_only_when_order_is_one_delivery_group(): void
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue COD', 50000);
@@ -442,5 +460,69 @@ class ShipmentReceiptPrintTest extends TestCase
         $response = $this->actingAs($branch['agen'])->getJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/receipt');
         $response->assertOk()->assertJsonPath('data.payment.is_cod', true);
         $this->assertEquals($order->fresh()->total_amount, $response->json('data.payment.cod_amount_due'));
+        $this->assertArrayNotHasKey('dp_outstanding_amount', $response->json('data.payment'));
+    }
+
+    public function test_multi_date_cod_resi_does_not_mislabel_the_order_balance_as_group_due(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $products = [$this->makeProduct($branch['agen'], 'Resi A', 50000), $this->makeProduct($branch['agen'], 'Resi B', 60000)];
+        $order = $this->placeOrder($branch['konsumen'], [['product_id' => $products[0]->id, 'quantity' => 1], ['product_id' => $products[1]->id, 'quantity' => 1]], 'cod');
+        $items = $order->items()->orderBy('id')->get();
+        $firstShipment = $items[0]->shipment;
+        $secondShipment = $firstShipment->replicate();
+        $secondShipment->save();
+        $items[0]->update(['requested_delivery_date' => now()->addDays(2)->toDateString(), 'shipment_id' => $firstShipment->id]);
+        $items[1]->update(['requested_delivery_date' => now()->addDays(5)->toDateString(), 'shipment_id' => $secondShipment->id]);
+
+        $response = $this->actingAs($branch['agen'])->getJson('/api/v1/shipments/'.$firstShipment->id.'/receipt')->assertOk();
+        $response->assertJsonPath('data.total_item_count', 1)
+            ->assertJsonPath('data.payment.is_cod', true)
+            ->assertJsonPath('data.payment.cod_amount_due', null)
+            ->assertJsonPath('data.shipping_fee_amount', $firstShipment->fresh()->shipping_fee_snapshot);
+        $this->assertArrayNotHasKey('remaining_amount', $response->json('data.payment'));
+        $this->assertArrayNotHasKey('dp_outstanding_amount', $response->json('data.payment'));
+    }
+
+    public function test_multi_date_dp_resi_places_initial_credit_on_earliest_group_only(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $products = [$this->makeProduct($branch['agen'], 'DP Resi A', 50000), $this->makeProduct($branch['agen'], 'DP Resi B', 60000)];
+        $order = $this->placeOrder($branch['konsumen'], [['product_id' => $products[0]->id, 'quantity' => 1], ['product_id' => $products[1]->id, 'quantity' => 1]], 'cod');
+        $items = $order->items()->orderBy('id')->get();
+        $firstShipment = $items[0]->shipment;
+        $secondShipment = $firstShipment->replicate();
+        $secondShipment->save();
+        $earliestDate = now()->addDays(2)->toDateString();
+        $laterDate = now()->addDays(5)->toDateString();
+        $items[0]->update(['requested_delivery_date' => $earliestDate, 'shipment_id' => $firstShipment->id]);
+        $items[1]->update(['requested_delivery_date' => $laterDate, 'shipment_id' => $secondShipment->id]);
+        $downPayment = PaymentMethod::where('code', 'down_payment')->firstOrFail();
+        $order->update(['payment_method_id' => $downPayment->id, 'dp_amount' => 40000, 'paid_amount' => 40000, 'remaining_amount' => $order->total_amount - 40000, 'payment_status' => 'partially_paid']);
+
+        $first = $this->actingAs($branch['agen'])->getJson("/api/v1/shipments/{$firstShipment->id}/receipt")->assertOk();
+        $first->assertJsonPath('data.delivery_date', $earliestDate)
+            ->assertJsonPath('data.payment.initial_dp_amount', '40000.00')
+            ->assertJsonPath('data.payment.initial_dp_credit', 40000);
+        $later = $this->actingAs($branch['agen'])->getJson("/api/v1/shipments/{$secondShipment->id}/receipt")->assertOk();
+        $later->assertJsonPath('data.delivery_date', $laterDate)
+            ->assertJsonPath('data.payment.initial_dp_amount', null)
+            ->assertJsonPath('data.payment.initial_dp_credit', null);
+        $this->assertArrayNotHasKey('dp_outstanding_amount', $later->json('data.payment'));
+        $this->assertArrayNotHasKey('remaining_amount', $later->json('data.payment'));
+
+        $duplicateEarliestShipment = $firstShipment->replicate();
+        $duplicateEarliestShipment->save();
+        OrderItem::create([
+            'order_id' => $order->id, 'shipment_id' => $duplicateEarliestShipment->id,
+            'product_id' => $products[0]->id, 'product_name_snapshot' => $products[0]->name,
+            'sku_snapshot' => $products[0]->sku, 'unit_price_snapshot' => 50000,
+            'subtotal_snapshot' => 50000, 'original_quantity' => 1, 'fulfilled_quantity' => 1,
+            'requested_delivery_date' => $earliestDate, 'status' => 'diproses',
+        ]);
+        $duplicateReceipt = $this->actingAs($branch['agen'])->getJson("/api/v1/shipments/{$duplicateEarliestShipment->id}/receipt")->assertOk();
+        $duplicateReceipt->assertJsonPath('data.delivery_date', $earliestDate)
+            ->assertJsonPath('data.payment.initial_dp_amount', null)
+            ->assertJsonPath('data.payment.initial_dp_credit', null);
     }
 }

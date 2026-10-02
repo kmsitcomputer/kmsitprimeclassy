@@ -38,9 +38,10 @@ export interface ShipmentReceiptPayment {
   is_cod: boolean
   cod_amount_due: string | number | null
   is_down_payment: boolean
-  dp_paid_amount: string | number | null
-  dp_outstanding_amount: string | number | null
-  is_fully_paid: boolean
+  is_earliest_delivery_group: boolean
+  initial_dp_amount: string | number | null
+  initial_dp_credit: string | number | null
+  order_has_multiple_delivery_groups: boolean
 }
 
 /**
@@ -51,6 +52,7 @@ export interface ShipmentReceiptPayment {
 export interface ShipmentReceipt {
   shipment_id: number
   mode: 'pre_pickup' | 'post_pickup'
+  shipment_status: 'pending' | 'picked_up' | 'in_transit' | 'delivered' | 'failed'
   order_no: string
   order_date: string
   recipient_name: string
@@ -61,9 +63,11 @@ export interface ShipmentReceipt {
   regency: string | null
   province: string | null
   delivery_date: string | null
+  shipping_fee_amount: string
   shipping_method_code: string | null
   shipping_method_label: string | null
   is_official_carrier_label: boolean
+  tracking_number: string | null
   courier_name: string | null
   picked_up_at: string | null
   items: ShipmentReceiptItem[]

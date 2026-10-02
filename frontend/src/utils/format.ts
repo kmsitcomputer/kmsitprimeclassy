@@ -28,8 +28,12 @@ const INTL_LOCALES: Record<string, string> = {
  */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '-'
-  const date = new Date(value)
+  const dateParts = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value)
+  const date = dateParts
+    ? new Date(Number(dateParts[1]), Number(dateParts[2]) - 1, Number(dateParts[3]))
+    : new Date(value)
   if (Number.isNaN(date.getTime())) return '-'
+  if (dateParts && (date.getFullYear() !== Number(dateParts[1]) || date.getMonth() !== Number(dateParts[2]) - 1 || date.getDate() !== Number(dateParts[3]))) return '-'
   const locale = INTL_LOCALES[i18n.global.locale.value] ?? 'id-ID'
   return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(date)
 }

@@ -58,6 +58,7 @@ class DeliveryGroupInvoiceService
             'delivery_date' => $deliveryDate,
             'order' => $order,
             'items' => $lineItems->map(fn (array $item) => collect($item)->except('_subtotal_minor')->all())->all(),
+            'total_item_count' => (int) $items->sum('fulfilled_quantity'),
             'item_subtotal' => $this->formatMinor($itemSubtotalMinor),
             'shipping_fee' => $this->formatMinor($shippingFeeMinor),
             'group_total' => $this->formatMinor($itemSubtotalMinor + $shippingFeeMinor),

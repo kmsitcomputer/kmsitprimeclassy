@@ -28,7 +28,7 @@
         <div class="cell" style="text-align:right">
             <strong>{{ $invoice_number }}</strong><br>
             Order {{ $order->order_no }}<br>
-            Tanggal pengiriman: {{ \Illuminate\Support\Carbon::parse($delivery_date)->format('d/m/Y') }}
+            Tanggal Pengiriman: {{ \Illuminate\Support\Carbon::parse($delivery_date)->locale('id')->translatedFormat('j F Y') }}
         </div>
     </div>
 
@@ -64,6 +64,7 @@
     </table>
 
     <table class="totals">
+        <tr><td>Total item</td><td class="num">{{ $total_item_count }}</td></tr>
         <tr><td>Subtotal item grup</td><td class="num">Rp {{ $item_subtotal }}</td></tr>
         <tr><td>Ongkir grup</td><td class="num">Rp {{ $shipping_fee }}</td></tr>
         <tr class="grand"><td>Total grup</td><td class="num">Rp {{ $group_total }}</td></tr>

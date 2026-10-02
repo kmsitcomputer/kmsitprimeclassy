@@ -5,6 +5,9 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import { decideFulfillmentChange, getDiprosesOrder, listDiprosesOrders, listFulfillmentChangeProposals, proposeFulfillmentChange, type FulfillmentChangeProposal } from '@/api/fulfillmentChanges'
 import type { DeliveryGroup, Order, OrderItem, PaginationMeta } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
+import { formatDate } from '@/utils/format'
+
+type ProposalMode = 'quantity' | 'date' | 'both'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -22,6 +25,7 @@ const quantity = ref<Record<number, number>>({})
 const dates = ref<Record<number, string>>({})
 const reasons = ref<Record<number, string>>({})
 const rejectReasons = ref<Record<number, string>>({})
+const proposalModes = ref<Record<number, ProposalMode | null>>({})
 const error = ref('')
 const success = ref('')
 
@@ -59,11 +63,14 @@ async function filterProposals() {
 async function submit(order: Order, item: Order['items'][number]) {
   error.value = ''; success.value = ''
   try {
-    await proposeFulfillmentChange(order.id, item.id, {
-      fulfilled_quantity: quantity.value[item.id] ?? item.fulfilled_quantity,
-      requested_delivery_date: dates.value[item.id] || item.requested_delivery_date,
+    const mode = proposalModes.value[item.id] ?? 'both'
+    const payload: { fulfilled_quantity?: number; requested_delivery_date?: string | null; reason?: string } = {
       reason: reasons.value[item.id]?.trim() || undefined,
-    })
+    }
+    if (mode === 'quantity' || mode === 'both') payload.fulfilled_quantity = quantity.value[item.id] ?? item.fulfilled_quantity
+    if (mode === 'date' || mode === 'both') payload.requested_delivery_date = dates.value[item.id] || item.requested_delivery_date
+    await proposeFulfillmentChange(order.id, item.id, payload)
+    proposalModes.value[item.id] = null
     success.value = 'Perubahan dikirim ke Admin untuk persetujuan.'
     await load()
   } catch (e) { error.value = e instanceof Error ? e.message : 'Gagal mengirim perubahan.' }
@@ -102,19 +109,27 @@ onMounted(load)
         </div>
         <section v-for="group in order.delivery_groups ?? []" :key="`${order.id}-${group.delivery_date ?? 'none'}`" class="border-t border-stone-100 pt-3">
           <div class="mb-2 flex flex-wrap justify-between gap-2 text-sm">
-            <strong>{{ group.delivery_date || 'Tanpa tanggal' }}</strong>
+            <strong>{{ group.delivery_date ? formatDate(group.delivery_date) : 'Tanpa tanggal' }}</strong>
             <span class="text-stone-500">{{ (group.delivery_methods ?? []).join(' · ') }}</span>
           </div>
           <p v-if="group.courier_names?.length" class="mb-2 text-xs text-stone-500">Kurir: {{ group.courier_names.join(', ') }}</p>
           <div v-for="item in itemsForGroup(order, group)" :key="item.id" class="mb-3 grid gap-2 border-t border-stone-100 pt-3 md:grid-cols-[1fr_9rem_12rem_auto] md:items-end">
             <div>
               <div class="font-medium">{{ item.product_name }}<span v-if="item.variation_label"> · {{ item.variation_label }}</span><span v-if="item.sku" class="ml-1 text-xs text-stone-400">{{ item.sku }}</span></div>
-              <div class="text-xs text-stone-500">Pemenuhan: {{ item.fulfilled_quantity }} / {{ item.original_quantity }} order · {{ item.requested_delivery_date || 'Tanpa tanggal' }}</div>
+              <div class="text-xs text-stone-500">Pemenuhan: {{ item.fulfilled_quantity }} / {{ item.original_quantity }} order · {{ item.requested_delivery_date ? formatDate(item.requested_delivery_date) : 'Tanpa tanggal' }}</div>
             </div>
             <template v-if="selectedOrder">
-              <label class="text-xs text-stone-500">Jumlah<input v-model.number="quantity[item.id]" :placeholder="String(item.fulfilled_quantity)" type="number" min="0" :max="item.original_quantity" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
-              <label class="text-xs text-stone-500">Tanggal kirim<input v-model="dates[item.id]" :placeholder="item.requested_delivery_date || 'YYYY-MM-DD'" type="date" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
-              <button type="button" class="rounded bg-stone-800 px-3 py-2 text-sm text-white" @click="submit(order, item)">Ajukan</button>
+              <div v-if="!proposalModes[item.id]" class="flex flex-wrap gap-2 md:col-span-3">
+                <button type="button" class="text-sm font-medium text-stone-700 underline" @click="proposalModes[item.id] = 'quantity'">Ubah Jumlah Pemenuhan</button>
+                <button type="button" class="text-sm font-medium text-stone-700 underline" @click="proposalModes[item.id] = 'date'">Ubah Tanggal Kirim</button>
+                <button type="button" class="text-sm font-medium text-stone-700 underline" @click="proposalModes[item.id] = 'both'">Ajukan Keduanya</button>
+              </div>
+              <template v-else>
+                <label v-if="proposalModes[item.id] !== 'date'" class="text-xs text-stone-500">Jumlah<input v-model.number="quantity[item.id]" :placeholder="String(item.fulfilled_quantity)" type="number" min="0" :max="item.original_quantity" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
+                <label v-if="proposalModes[item.id] !== 'quantity'" class="text-xs text-stone-500">Tanggal kirim<input v-model="dates[item.id]" :placeholder="item.requested_delivery_date || 'YYYY-MM-DD'" type="date" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
+                <button type="button" class="rounded bg-stone-800 px-3 py-2 text-sm text-white" @click="submit(order, item)">Ajukan Perubahan</button>
+                <button type="button" class="rounded px-3 py-2 text-sm text-stone-600" @click="proposalModes[item.id] = null">Batal</button>
+              </template>
             </template>
           </div>
         </section>

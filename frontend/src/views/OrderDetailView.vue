@@ -258,6 +258,7 @@ const printableShipmentGroups = computed(() => {
     }
   }
   return Array.from(groups.values()).filter((g) => {
+    if (auth.isKonsumen) return true
     if (isSelfSubGroup(g)) {
       // Mirrors ShipmentPolicy::printReceipt: the owning Sales-Kurir-Sub, super_admin, and the
       // same-Agent agen/admin may print a self_sub receipt; a normal Kurir may not.
@@ -272,6 +273,13 @@ const printableShipmentGroups = computed(() => {
 function openReceipt(shipmentId: number) {
   const target = router.resolve({ name: 'shipment-receipt-print', params: { id: shipmentId } })
   window.open(target.href, '_blank')
+}
+
+function deliveryShipmentStatusLabel(status?: string): string {
+  if (!status) return '-'
+  const key = `orders.deliveryStatus.${status}`
+  const translated = t(key)
+  return translated === key ? status : translated
 }
 
 function onDeliveryProofSelected(shipmentId: number, e: Event) {
@@ -842,21 +850,26 @@ async function submitReturn(item: OrderItem) {
         <!-- Consumer delivery plan and invoice actions are per canonical Order + requested delivery date group. -->
         <div v-if="auth.isKonsumen && order.delivery_groups?.length" class="mb-3 space-y-2">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">{{ t('orders.deliveryPlan') }}</h3>
-          <div v-for="group in order.delivery_groups" :key="group.delivery_date ?? 'none'" class="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-800/60">
+          <div v-for="(group, groupIndex) in order.delivery_groups" :key="group.delivery_date ?? 'none'" class="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-800/60">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <p class="font-medium text-stone-700 dark:text-stone-200">
-                {{ t('orders.deliveryOn') }} {{ group.delivery_date ? formatDate(group.delivery_date) : '-' }}
+                {{ t('orders.deliveryGroupTitle', { number: groupIndex + 1 }) }} · {{ t('orders.deliveryOn') }} {{ group.delivery_date ? formatDate(group.delivery_date) : '-' }}
               </p>
-              <span v-if="group.status" class="rounded-full bg-white px-2 py-0.5 text-[11px] dark:bg-stone-900">{{ orderStatusLabel(group.status) }}</span>
             </div>
             <ul class="mt-1.5 space-y-0.5 text-xs text-stone-600 dark:text-stone-300">
               <li v-for="gi in group.items ?? []" :key="gi.id">
-                {{ gi.product_name }}<span v-if="gi.variation_label"> — {{ gi.variation_label }}</span> &times; {{ gi.quantity }}
+                {{ gi.product_name }}<span v-if="gi.variation_label"> — {{ gi.variation_label }}</span><span v-if="gi.sku" class="text-stone-400"> · {{ gi.sku }}</span> &times; {{ gi.quantity }}
               </li>
             </ul>
-            <p v-for="sh in group.shipments ?? []" :key="sh.id" class="mt-1 text-[11px] text-stone-500">
-              {{ t('orders.shippingMethod') }}: {{ sh.shipping_method_label || sh.shipping_provider_code || '-' }}<template v-if="sh.courier_name"> · {{ t('orders.courierName') }}: {{ sh.courier_name }}</template><template v-if="sh.tracking_number"> · {{ t('orders.trackingNo') }} {{ sh.tracking_number }}</template>
-            </p>
+            <div v-for="sh in group.shipments ?? []" :key="sh.id" class="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-500">
+              <p>
+                {{ t('orders.shippingMethod') }}: {{ sh.shipping_method_label || sh.shipping_provider_code || '-' }}
+                <template v-if="sh.courier_name"> · {{ t('orders.courierName') }}: {{ sh.courier_name }}</template>
+                <template v-if="sh.tracking_number"> · {{ t('orders.trackingNo') }} {{ sh.tracking_number }}</template>
+                <span class="ml-1 rounded-full bg-white px-2 py-0.5 dark:bg-stone-900">{{ deliveryShipmentStatusLabel(sh.status) }}</span>
+              </p>
+              <button type="button" class="font-medium text-brand-600 underline dark:text-brand-400" @click="openReceipt(sh.id)">{{ t('orders.printReceipt') }}</button>
+            </div>
             <p v-if="group.delivery_date && invoiceErrors[`${order.id}:${group.delivery_date}`]" class="mt-2 text-xs text-red-600">{{ invoiceErrors[`${order.id}:${group.delivery_date}`] }}</p>
             <button v-if="group.delivery_date" type="button" class="mt-3 text-xs font-medium text-brand-600 underline dark:text-brand-400" @click="printDeliveryGroupInvoice(order.id, group.delivery_date)">{{ t('orders.printInvoice') }}</button>
           </div>

@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Services\Payment\PaymentSummaryService;
 
 /**
  * Thermal shipping-receipt payload — read-only, printable before and after
@@ -13,11 +14,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * syncShipmentProgress). mode is therefore derived, never accepted from the
  * caller: 'post_pickup' once shipped_at is set, 'pre_pickup' until then.
  *
- * Deliberately excludes: fee/commission amounts (agent/sales/korsal/courier
- * fee), payment gateway/bank internals, ORS/RajaOngkir raw API data, and
- * lat/lng (kept for routing only, never printed on the customer-facing
- * receipt) — see the printing-feature audit for the business rule this
- * enforces (no financial ledger or internal routing data on a resi).
+ * Deliberately excludes: commission amounts (agent/sales/korsal/courier fee),
+ * Order-wide payment balances on multi-date receipts, payment gateway/bank
+ * internals, ORS/RajaOngkir raw API data, and lat/lng. The canonical shipment
+ * fee snapshot and earliest-group initial DP are the only group-scoped amounts.
  */
 class ShipmentReceiptResource extends JsonResource
 {
@@ -30,22 +30,40 @@ class ShipmentReceiptResource extends JsonResource
 
         $mode = $this->shipped_at !== null ? 'post_pickup' : 'pre_pickup';
 
-        $shippingMethodLabels = [
-            'openroute' => 'Kurir Lokal',
-            'rajaongkir' => 'Ekspedisi',
-        ];
+        $meta = is_array($this->provider_meta) ? $this->provider_meta : [];
+        $shippingMethodLabel = match ($this->shipping_provider_code) {
+            'openroute' => 'Kurir Online',
+            'free' => 'Gratis',
+            'pickup' => 'Pickup',
+            'rajaongkir' => trim(strtoupper((string) ($meta['courier'] ?? '')).' '.strtoupper((string) ($meta['service'] ?? ''))) ?: 'Ekspedisi',
+            default => $this->shipping_provider_code,
+        };
 
         // A RajaOngkir-based shipment's resi is Prime Classy's own internal
         // handover slip — never to be presented as an official JNE/J&T/
         // SiCepat/etc. carrier label, which this project never generates.
         $isOfficialCarrierLabel = false;
 
-        $deliveryDate = $items->pluck('requested_delivery_date')->filter()->first()
-            ?? $order->delivery_date_estimate;
+        $deliveryDate = $items->map(fn ($item) => $item->requested_delivery_date?->toDateString() ?? $order->delivery_date_estimate?->toDateString())->filter()->first();
+        $activeOrderItems = $order->items->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0);
+        $itemDeliveryDate = fn ($item) => $item->requested_delivery_date?->toDateString() ?? $order->delivery_date_estimate?->toDateString() ?? '';
+            $activeDates = $activeOrderItems->map($itemDeliveryDate)->unique();
+            $earliestDate = $activeDates->filter()->sort()->first();
+            $activeDateCount = $activeDates->count();
+        // Historical committed shipments can leave more than one receipt inside one date group. Give the
+        // date group's one-time DP credit to exactly one deterministic receipt (the lowest shipment id).
+        $earliestShipmentId = $earliestDate === null ? null : $activeOrderItems
+            ->filter(fn ($item) => $itemDeliveryDate($item) === $earliestDate)
+            ->pluck('shipment_id')->filter()->min();
+        $isEarliestGroupReceipt = $earliestDate !== null
+            && $deliveryDate === $earliestDate
+            && (int) $this->id === (int) $earliestShipmentId;
+        $verifiedDp = (float) PaymentSummaryService::summarize($order)['verified_dp'];
 
         return [
             'shipment_id' => $this->id,
             'mode' => $mode,
+            'shipment_status' => $this->status,
             'order_no' => $order->order_no,
             'order_date' => $order->created_at,
             'recipient_name' => $order->recipient_name_snapshot,
@@ -56,10 +74,12 @@ class ShipmentReceiptResource extends JsonResource
             'regency' => $order->regency_snapshot,
             'province' => $order->province_snapshot,
             'delivery_date' => $deliveryDate,
+            'shipping_fee_amount' => $this->shipping_fee_snapshot,
             'shipping_method_code' => $this->shipping_provider_code,
-            'shipping_method_label' => $shippingMethodLabels[$this->shipping_provider_code] ?? $this->shipping_provider_code,
+            'shipping_method_label' => $shippingMethodLabel,
             'is_official_carrier_label' => $isOfficialCarrierLabel,
-            'courier_name' => $this->courier?->name ?? $this->selfDeliveredBy?->name,
+            'tracking_number' => $this->tracking_number,
+            'courier_name' => $this->courier?->name ?? ($this->isSelfDelivery() ? $this->selfDeliveredBy?->name : null),
             // Authoritative pickup timestamp — never "now()" at print time, so
             // a reprint always shows the original moment the courier actually
             // picked this shipment up (Shipment.shipped_at is set exactly
@@ -73,25 +93,18 @@ class ShipmentReceiptResource extends JsonResource
             ])->values(),
             'total_item_count' => $items->sum('fulfilled_quantity'),
             'notes' => $order->notes,
-            // Minimal, non-financial payment indicator only (Blueprint print
-            // requirement: no commission/fee ledger, no gateway internals).
+            // A resi never presents an Order-wide balance as a date-group balance. The only numeric
+            // payment fact permitted here is the initial verified DP, and only on the earliest group.
             'payment' => [
                 'is_cod' => $order->paymentMethod?->type === 'cod',
-                // The authoritative amount a COD courier must collect. A
-                // plain (non-DP) COD order never populates remaining_amount
-                // (that field is DP-flow-specific — see OrderService::
-                // createOrder), so "still owed" for COD is simply the
-                // order's own total while payment_status hasn't reached
-                // 'paid' — never recomputed here, just read straight off it.
-                'cod_amount_due' => $order->paymentMethod?->type === 'cod' && $order->payment_status !== 'paid'
-                    ? $order->total_amount
-                    : null,
+                'cod_amount_due' => $order->paymentMethod?->type === 'cod' && $activeDateCount === 1 && $order->payment_status !== 'paid'
+                    ? $order->total_amount : null,
                 'is_down_payment' => (float) $order->dp_amount > 0,
-                'dp_paid_amount' => (float) $order->dp_amount > 0 ? $order->paid_amount : null,
-                'dp_outstanding_amount' => (float) $order->dp_amount > 0 && $order->hasOutstanding()
-                    ? $order->remaining_amount
-                    : null,
-                'is_fully_paid' => $order->isFullyPaid(),
+                'is_earliest_delivery_group' => $isEarliestGroupReceipt,
+                'initial_dp_amount' => $isEarliestGroupReceipt && (float) $order->dp_amount > 0
+                    ? $order->dp_amount : null,
+                'initial_dp_credit' => $isEarliestGroupReceipt && $verifiedDp > 0 ? $verifiedDp : null,
+                'order_has_multiple_delivery_groups' => $activeDateCount > 1,
             ],
         ];
     }

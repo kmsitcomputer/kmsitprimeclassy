@@ -71,6 +71,10 @@ class ShipmentPolicy
             return true;
         }
 
+        if ($user->isRole('konsumen')) {
+            return $shipment->order?->konsumen_id === $user->id;
+        }
+
         if ($user->isRole('agen', 'admin')) {
             return $shipment->order?->agent_id === $user->agent_id;
         }

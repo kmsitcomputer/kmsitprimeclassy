@@ -215,12 +215,9 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // and WHICH transitions).
     Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir-sub')->group(function () {
         Route::patch('/shipments/{shipment}/status', [ShipmentController::class, 'updateStatus']);
-        // Thermal shipping receipt — read-only, before/after pickup mode is
-        // derived server-side (ShipmentReceiptResource), never picked by the
-        // caller. keuangan/korsal/sales/konsumen deliberately excluded from
-        // this middleware group (ShipmentPolicy::printReceipt).
-        Route::get('/shipments/{shipment}/receipt', [ShipmentController::class, 'receipt']);
     });
+    // Read-only internal resi: Consumer access is limited by ShipmentPolicy to the owner of the Order.
+    Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir-sub,konsumen')->get('/shipments/{shipment}/receipt', [ShipmentController::class, 'receipt']);
     Route::middleware('role:super_admin,agen,admin')->group(function () {
         Route::patch('/shipments/{shipment}/courier', [ShipmentController::class, 'assign']);
     });

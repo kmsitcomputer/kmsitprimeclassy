@@ -182,23 +182,23 @@ class OrderFulfillmentChangeProposalTest extends TestCase
         }
     }
 
-    public function test_gudang_queue_is_item_oriented_and_hides_only_shipped_items(): void
+    public function test_gudang_queue_hides_courier_assigned_group_and_keeps_unassigned_sibling(): void
     {
         $f = $this->fixture();
         $order = $f['order'];
-        $shippedItem = $order->items()->firstOrFail();
+        $assignedItem = $order->items()->firstOrFail();
         $shippedDate = now()->addDays(3)->toDateString();
         $pendingDate = now()->addDays(13)->toDateString();
-        $shippedItem->update(['requested_delivery_date' => $shippedDate, 'status' => 'dikirim']);
-        $shippedItem->shipment->update(['shipping_provider_code' => 'rajaongkir', 'provider_meta' => ['courier' => 'jne', 'service' => 'REG'], 'status' => 'in_transit', 'shipped_at' => now()]);
-
-        $pendingProduct = Product::create(['sku' => 'PENDING-'.Str::uuid(), 'name' => 'Pending Sagu', 'slug' => 'pending-'.uniqid(), 'has_variations' => false, 'base_price' => 12000, 'weight_grams' => 100, 'status' => 'active']);
+        $assignedItem->update(['requested_delivery_date' => $shippedDate, 'status' => 'diproses']);
         $courierUser = User::factory()->kurir()->create(['agent_id' => $f['agen']->id]);
         $courier = Courier::create(['type' => 'internal', 'user_id' => $courierUser->id, 'agent_id' => $f['agen']->id, 'name' => 'Kurir Budi', 'is_active' => true]);
-        $pendingShipment = $shippedItem->shipment->replicate(['tracking_number', 'proof_media_id', 'shipped_at', 'delivered_at', 'shipping_fee_snapshot', 'rate_per_km', 'provider_meta']);
+        $assignedItem->shipment->update(['shipping_provider_code' => 'openroute', 'status' => 'pending', 'courier_id' => $courier->id]);
+
+        $pendingProduct = Product::create(['sku' => 'PENDING-'.Str::uuid(), 'name' => 'Pending Sagu', 'slug' => 'pending-'.uniqid(), 'has_variations' => false, 'base_price' => 12000, 'weight_grams' => 100, 'status' => 'active']);
+        $pendingShipment = $assignedItem->shipment->replicate(['tracking_number', 'proof_media_id', 'shipped_at', 'delivered_at', 'shipping_fee_snapshot', 'rate_per_km', 'provider_meta']);
         $pendingShipment->status = 'pending';
         $pendingShipment->shipping_provider_code = 'openroute';
-        $pendingShipment->courier_id = $courier->id;
+        $pendingShipment->courier_id = null;
         $pendingShipment->save();
         $pendingItem = OrderItem::create([
             'order_id' => $order->id, 'shipment_id' => $pendingShipment->id, 'product_id' => $pendingProduct->id,
@@ -213,12 +213,27 @@ class OrderFulfillmentChangeProposalTest extends TestCase
         $this->assertSame([$pendingItem->id], collect($queue['items'])->pluck('id')->all());
         $this->assertSame($pendingDate, $queue['delivery_groups'][0]['delivery_date']);
         $this->assertSame(['Kurir Online'], $queue['delivery_groups'][0]['delivery_methods']);
-        $this->assertSame(['Kurir Budi'], $queue['delivery_groups'][0]['courier_names']);
+        $this->assertSame([], $queue['delivery_groups'][0]['courier_names']);
+        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/orders/{$order->id}/items/{$assignedItem->id}/fulfillment-proposals", ['fulfilled_quantity' => 1])->assertUnprocessable();
 
         $detail = $this->actingAs($f['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}")
             ->assertOk()->json('data');
         $this->assertSame([$pendingItem->id], collect($detail['items'])->pluck('id')->all());
-        $this->assertSame('dikirim', $shippedItem->fresh()->status);
+        $this->assertSame('diproses', $assignedItem->fresh()->status, 'Courier assignment alone hides the group from Gudang without changing item status.');
+    }
+
+    public function test_admin_approval_fails_closed_if_courier_is_assigned_after_proposal(): void
+    {
+        $f = $this->fixture();
+        $item = $f['order']->items()->firstOrFail();
+        $proposalId = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/orders/{$f['order']->id}/items/{$item->id}/fulfillment-proposals", ['fulfilled_quantity' => 2])->assertCreated()->json('data.id');
+        $courierUser = User::factory()->kurir()->create(['agent_id' => $f['agen']->id]);
+        $courier = Courier::create(['type' => 'internal', 'user_id' => $courierUser->id, 'agent_id' => $f['agen']->id, 'name' => 'Kurir Assigned', 'is_active' => true]);
+        $item->shipment()->update(['courier_id' => $courier->id]);
+
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-change-proposals/{$proposalId}/approve")->assertStatus(409);
+        $this->assertSame(3, $item->fresh()->fulfilled_quantity);
+        $this->assertSame('pending', OrderFulfillmentChangeProposal::findOrFail($proposalId)->status);
     }
 
     public function test_admin_rejects_without_mutation_and_approve_applies_once(): void

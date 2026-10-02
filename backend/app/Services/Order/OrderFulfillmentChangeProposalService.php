@@ -6,6 +6,7 @@ use App\Exceptions\ApiException;
 use App\Models\Order;
 use App\Models\OrderFulfillmentChangeProposal;
 use App\Models\OrderItem;
+use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
 use Illuminate\Support\Facades\DB;
@@ -17,9 +18,9 @@ class OrderFulfillmentChangeProposalService
     public function ordersFor(User $actor)
     {
         return Order::query()->where('status', 'diproses')->where('agent_id', $actor->agent_id)
-            ->whereHas('items', fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0))
+            ->whereHas('items', fn ($query) => $this->constrainGudangPendingItems($query))
             ->with([
-                'items' => fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0)
+                'items' => fn ($query) => $this->constrainGudangPendingItems($query)
                     ->with(['shipment.courier', 'shipment.selfDeliveredBy']),
                 'shipments.courier', 'shipments.selfDeliveredBy', 'konsumen',
             ])->latest()->paginate(15);
@@ -33,13 +34,20 @@ class OrderFulfillmentChangeProposalService
 
         return Order::query()->whereKey($order->id)->where('agent_id', $actor->agent_id)
             ->where('status', 'diproses')
-            ->whereHas('items', fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0))
+            ->whereHas('items', fn ($query) => $this->constrainGudangPendingItems($query))
             ->with([
-                'items' => fn ($query) => $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0)
+                'items' => fn ($query) => $this->constrainGudangPendingItems($query)
                     ->with(['shipment.courier', 'shipment.selfDeliveredBy']),
                 'shipments.courier', 'shipments.selfDeliveredBy', 'konsumen',
             ])
             ->firstOrFail();
+    }
+
+    private function constrainGudangPendingItems($query)
+    {
+        return $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0)
+            ->whereDoesntHave('shipment', fn ($shipment) => $shipment
+                ->whereNotNull('courier_id')->orWhereIn('status', ['picked_up', 'in_transit', 'delivered', 'failed']));
     }
 
     public function proposalsFor(User $actor, string $status = 'pending')
@@ -59,6 +67,12 @@ class OrderFulfillmentChangeProposalService
             $lockedOrder = Order::withoutGlobalScopes()->whereKey($order->id)->lockForUpdate()->firstOrFail();
             $lockedItem = OrderItem::whereKey($item->id)->lockForUpdate()->firstOrFail();
             if ($lockedOrder->status !== 'diproses' || $lockedItem->status !== 'diproses') {
+                throw new ApiException(__('messages.fulfillment.window_closed'), 422);
+            }
+            $shipment = $lockedItem->shipment_id
+                ? Shipment::whereKey($lockedItem->shipment_id)->lockForUpdate()->first()
+                : null;
+            if (! $shipment || ! ShipmentGroupingService::isMutable($shipment)) {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
 
@@ -111,6 +125,10 @@ class OrderFulfillmentChangeProposalService
             $item = OrderItem::whereKey($locked->order_item_id)->lockForUpdate()->firstOrFail();
             if ($order->status !== 'diproses' || (int) $item->fulfilled_quantity !== (int) $locked->base_fulfilled_quantity || $item->requested_delivery_date?->toDateString() !== $locked->base_requested_delivery_date?->toDateString()) {
                 throw new ApiException('Proposal sudah tidak sesuai dengan keadaan order saat ini.', 409);
+            }
+            $shipment = $item->shipment_id ? Shipment::whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+            if (! $shipment || ! ShipmentGroupingService::isMutable($shipment)) {
+                throw new ApiException('Shipment sudah ditugaskan atau tidak lagi dapat diubah oleh Gudang.', 409);
             }
             $audit = $this->auditSnapshot($locked->getAttributes());
             if ($locked->proposed_fulfilled_quantity !== $item->fulfilled_quantity) {

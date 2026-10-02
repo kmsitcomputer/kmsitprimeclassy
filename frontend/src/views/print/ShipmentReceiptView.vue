@@ -67,9 +67,13 @@ function pad(n: number): string {
 /** dd/mm/yyyy — the compact numeric format thermal resi use, distinct from the word-form dates used elsewhere in the dashboard. */
 function formatReceiptDate(value: string | null | undefined): string {
   if (!value) return '-'
-  const d = new Date(value)
+  const dateParts = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value)
+  const d = dateParts
+    ? new Date(Number(dateParts[1]), Number(dateParts[2]) - 1, Number(dateParts[3]))
+    : new Date(value)
   if (Number.isNaN(d.getTime())) return '-'
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`
+  if (dateParts && (d.getFullYear() !== Number(dateParts[1]) || d.getMonth() !== Number(dateParts[2]) - 1 || d.getDate() !== Number(dateParts[3]))) return '-'
+  return new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).format(d)
 }
 /** dd/mm/yyyy HH:mm — for the authoritative pickup timestamp only. */
 function formatReceiptDateTime(value: string | null | undefined): string {
@@ -79,7 +83,16 @@ function formatReceiptDateTime(value: string | null | undefined): string {
   return `${formatReceiptDate(value)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const statusLabel = computed(() => (receipt.value?.mode === 'post_pickup' ? 'SUDAH DIPICKUP' : 'MENUNGGU PICKUP'))
+const statusLabel = computed(() => {
+  switch (receipt.value?.shipment_status) {
+    case 'pending': return 'MENUNGGU PICKUP'
+    case 'picked_up':
+    case 'in_transit': return 'SEDANG DIKIRIM'
+    case 'delivered': return 'DITERIMA'
+    case 'failed': return 'GAGAL DIKIRIM'
+    default: return '-'
+  }
+})
 const addressParts = computed(() => {
   if (!receipt.value) return []
   return [
@@ -151,24 +164,27 @@ function closeTab() {
         </div>
         <div class="divider thin"></div>
         <div>Total Item: {{ receipt.total_item_count }}</div>
+        <div>Ongkir Grup: {{ formatRupiah(receipt.shipping_fee_amount) }}</div>
 
-        <div v-if="receipt.payment.is_cod || receipt.payment.is_down_payment || receipt.payment.is_fully_paid" class="divider"></div>
+        <div v-if="receipt.payment.is_cod || receipt.payment.initial_dp_amount !== null" class="divider"></div>
         <template v-if="receipt.payment.is_cod">
           <div class="bold">COD</div>
-          <div v-if="receipt.payment.cod_amount_due !== null">Tagihan: {{ formatRupiah(receipt.payment.cod_amount_due) }}</div>
+          <div v-if="receipt.payment.cod_amount_due !== null">Tagihan COD Order: {{ formatRupiah(receipt.payment.cod_amount_due) }}</div>
+          <div v-else-if="receipt.payment.order_has_multiple_delivery_groups">Tagihan COD order tidak dialokasikan per grup.</div>
         </template>
-        <template v-else-if="receipt.payment.is_down_payment">
-          <div v-if="receipt.payment.dp_paid_amount !== null">DP Dibayar: {{ formatRupiah(receipt.payment.dp_paid_amount) }}</div>
-          <div v-if="receipt.payment.dp_outstanding_amount !== null">Sisa Pembayaran: {{ formatRupiah(receipt.payment.dp_outstanding_amount) }}</div>
-          <div v-else-if="receipt.payment.is_fully_paid">LUNAS</div>
-        </template>
-        <template v-else-if="receipt.payment.is_fully_paid">
-          <div class="bold">LUNAS</div>
+        <template v-if="receipt.payment.initial_dp_amount !== null">
+          <div>DP Awal (grup tanggal paling awal): {{ formatRupiah(receipt.payment.initial_dp_amount) }}</div>
+          <div v-if="receipt.payment.initial_dp_credit !== null">DP terverifikasi: {{ formatRupiah(receipt.payment.initial_dp_credit) }}</div>
+          <div v-else>DP belum terverifikasi.</div>
         </template>
 
         <div class="divider"></div>
         <div class="bold">Metode:</div>
         <div>{{ receipt.shipping_method_label }}</div>
+        <template v-if="receipt.tracking_number">
+          <div class="bold">No. Resi:</div>
+          <div>{{ receipt.tracking_number }}</div>
+        </template>
         <div v-if="!receipt.is_official_carrier_label" class="fine-print">Bukan label resmi ekspedisi — resi internal Prime Classy.</div>
 
         <template v-if="receipt.courier_name">

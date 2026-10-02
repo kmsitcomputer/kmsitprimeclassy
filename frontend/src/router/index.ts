@@ -119,7 +119,7 @@ const router = createRouter({
       props: (route) => ({ id: Number(route.params.id) }),
       // Same roles as GET /shipments/{shipment}/receipt (ShipmentPolicy::printReceipt)
       // — keuangan/korsal/sales/konsumen never get this print permission.
-      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'kurir'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'kurir', 'sales-kurir-sub', 'konsumen'] },
     },
     {
       path: '/dashboard',
