@@ -20,7 +20,7 @@ const isSuperAdmin = auth.user?.role === 'super_admin'
  * soon as the warehouse is the physical-stock authority, and only publishes
  * this capability while that legacy path is still allowed, so the SPA never
  * offers a form the backend would refuse. Stock movement then goes through the
- * warehouse workflows (transfers, opname, stock requests, returns).
+ * warehouse workflows (transfers, opname, fulfillment proposals, returns).
  */
 const canAdjustStockLegacy = computed(() => auth.can('stock.adjust.legacy'))
 

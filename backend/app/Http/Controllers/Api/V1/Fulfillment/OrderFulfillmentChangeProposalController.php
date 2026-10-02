@@ -23,6 +23,11 @@ class OrderFulfillmentChangeProposalController extends Controller
         return $this->ok(OrderResource::collection($orders)->resolve(), meta: ['current_page' => $orders->currentPage(), 'last_page' => $orders->lastPage(), 'total' => $orders->total()]);
     }
 
+    public function orderDetail(Request $request, Order $order)
+    {
+        return $this->ok(new OrderResource($this->service->operationalOrderFor($request->user(), $order)));
+    }
+
     public function index(Request $request)
     {
         abort_unless($request->user()->isRole('admin'), 403);

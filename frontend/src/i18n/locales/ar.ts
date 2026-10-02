@@ -18,7 +18,6 @@ export default {
   warehouse: {
       subLocation: { title: 'المواقع الفرعية', physicalStock: 'المخزون الفعلي في الموقع الفرعي', notSellable: 'ليس مخزوناً متاحاً للبيع' },
       opname: { title: 'جرد المخزون', physical: 'جرد فعلي', plan: 'تسوية الخطة', sellable: 'تسوية المتاح للبيع', approve: 'موافقة', reject: 'رفض', submit: 'إرسال' },
-      stockRequest: { title: 'طلبات المخزون', pending: 'قيد الانتظار', partial: 'جزئي', fulfilled: 'مكتمل', physicalOnly: 'من مخزون العبور الفعلي فقط' },
     stockTransfer: 'نقل المخزون', transferNumber: 'رقم النقل', source: 'المصدر', destination: 'الوجهة', handover: 'التسليم', pending: 'قيد الانتظار', completed: 'مكتمل', cancelled: 'ملغى', printHandover: 'طباعة التسليم',
   },
   nav: {

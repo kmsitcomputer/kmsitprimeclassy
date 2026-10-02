@@ -18,7 +18,6 @@ export default {
   warehouse: {
       subLocation: { title: '子地点', physicalStock: '子地点实物库存', notSellable: '不可售库存' },
       opname: { title: '库存盘点', physical: '实物盘点', plan: '计划对账', sellable: '可售库存对账', approve: '批准', reject: '拒绝', submit: '提交' },
-      stockRequest: { title: '库存请求', pending: '待处理', partial: '部分完成', fulfilled: '已完成', physicalOnly: '仅限实际在途库存' },
     stockTransfer: '库存转移', transferNumber: '转移编号', source: '来源', destination: '目的地', handover: '交接', pending: '待处理', completed: '已完成', cancelled: '已取消', printHandover: '打印交接单',
   },
   nav: {

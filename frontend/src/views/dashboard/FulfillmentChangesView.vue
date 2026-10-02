@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
-import { decideFulfillmentChange, listDiprosesOrders, listFulfillmentChangeProposals, proposeFulfillmentChange, type FulfillmentChangeProposal } from '@/api/fulfillmentChanges'
+import { decideFulfillmentChange, getDiprosesOrder, listDiprosesOrders, listFulfillmentChangeProposals, proposeFulfillmentChange, type FulfillmentChangeProposal } from '@/api/fulfillmentChanges'
 import type { Order, PaginationMeta } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const isGudang = computed(() => auth.user?.role === 'gudang')
 const orders = ref<Order[]>([])
+const selectedOrder = ref<Order | null>(null)
 const proposals = ref<FulfillmentChangeProposal[]>([])
 const orderMeta = ref<PaginationMeta | null>(null)
 const proposalMeta = ref<PaginationMeta | null>(null)
@@ -23,6 +27,13 @@ const success = ref('')
 
 async function load() {
   if (isGudang.value) {
+    const orderId = Number(route.params.orderId)
+    if (Number.isInteger(orderId) && orderId > 0) {
+      selectedOrder.value = await getDiprosesOrder(orderId)
+      orders.value = []
+      return
+    }
+    selectedOrder.value = null
     const result = await listDiprosesOrders(orderPage.value)
     orders.value = result.orders
     orderMeta.value = result.meta
@@ -32,6 +43,8 @@ async function load() {
     proposalMeta.value = result.meta
   }
 }
+
+watch(() => route.params.orderId, load)
 
 async function filterProposals() {
   proposalPage.value = 1
@@ -71,8 +84,17 @@ onMounted(load)
     <p v-if="success" class="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-600">{{ success }}</p>
 
     <section v-if="isGudang" class="grid gap-4">
-      <article v-for="order in orders" :key="order.id" class="rounded-xl border border-stone-200 bg-white p-4">
-        <div class="mb-3 flex flex-wrap justify-between gap-2"><strong>{{ order.order_no }}</strong><span class="text-sm text-stone-500">{{ order.recipient_name }}</span></div>
+      <button v-if="selectedOrder" type="button" class="justify-self-start text-sm text-stone-600 underline" @click="router.push({ name: 'warehouse-fulfillment-changes' })">Kembali ke daftar order</button>
+      <article v-for="order in selectedOrder ? [selectedOrder] : orders" :key="order.id" class="rounded-xl border border-stone-200 bg-white p-4">
+        <div class="mb-3 flex flex-wrap justify-between gap-2">
+          <button v-if="!selectedOrder" type="button" class="font-semibold underline" @click="router.push({ name: 'warehouse-order-detail', params: { orderId: order.id } })">{{ order.order_no }}</button>
+          <strong v-else>{{ order.order_no }}</strong>
+          <span class="text-sm text-stone-500">{{ order.recipient_name }}</span>
+        </div>
+        <div v-if="selectedOrder" class="mb-3 grid gap-1 text-sm text-stone-600 sm:grid-cols-2">
+          <span>{{ order.recipient_phone }}</span>
+          <span class="sm:col-span-2">{{ order.address }}</span>
+        </div>
         <div v-for="item in order.items" :key="item.id" class="mb-3 grid gap-2 border-t border-stone-100 pt-3 md:grid-cols-[1fr_9rem_12rem_auto] md:items-end">
           <div><div class="font-medium">{{ item.product_name }}<span v-if="item.variation_label"> · {{ item.variation_label }}</span></div><div class="text-xs text-stone-500">Saat ini: {{ item.fulfilled_quantity }} · {{ item.requested_delivery_date || 'Tanpa tanggal' }}</div></div>
           <label class="text-xs text-stone-500">Jumlah<input v-model.number="quantity[item.id]" :placeholder="String(item.fulfilled_quantity)" type="number" min="0" :max="item.original_quantity" class="mt-1 w-full rounded border border-stone-200 px-2 py-1 text-sm" /></label>
@@ -80,8 +102,8 @@ onMounted(load)
           <button type="button" class="rounded bg-stone-800 px-3 py-2 text-sm text-white" @click="submit(order, item)">Ajukan</button>
         </div>
       </article>
-      <p v-if="!orders.length" class="text-sm text-stone-400">Tidak ada order diproses.</p>
-      <div v-if="orderMeta && orderMeta.last_page > 1" class="flex items-center justify-end gap-3 text-sm">
+      <p v-if="!selectedOrder && !orders.length" class="text-sm text-stone-400">Tidak ada order diproses.</p>
+      <div v-if="!selectedOrder && orderMeta && orderMeta.last_page > 1" class="flex items-center justify-end gap-3 text-sm">
         <button type="button" :disabled="orderPage <= 1" class="disabled:opacity-40" @click="orderPage--; load()">Sebelumnya</button>
         <span>{{ orderMeta.current_page }} / {{ orderMeta.last_page }}</span>
         <button type="button" :disabled="orderPage >= orderMeta.last_page" class="disabled:opacity-40" @click="orderPage++; load()">Berikutnya</button>

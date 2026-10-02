@@ -64,6 +64,16 @@ class OrderFulfillmentChangeProposalTest extends TestCase
         $item = $f['order']->items()->firstOrFail();
         $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/stock-requests')->assertNotFound();
         $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/orders/diproses')->assertOk()->assertJsonPath('data.0.id', $f['order']->id);
+        $this->actingAs($f['gudang'])->getJson("/api/v1/orders/{$f['order']->id}")->assertForbidden();
+        $detail = $this->actingAs($f['gudang'])->getJson("/api/v1/warehouse/orders/{$f['order']->id}")
+            ->assertOk()->assertJsonPath('data.status', 'diproses')->assertJsonPath('data.items.0.product_name', $f['product']->name);
+        foreach (['payment_status', 'payment_summary', 'total_amount', 'paid_amount', 'remaining_amount', 'payment_method', 'payment_transaction'] as $field) {
+            $this->assertArrayNotHasKey($field, $detail->json('data'));
+        }
+        foreach (['unit_price', 'subtotal', 'agent_fee_amount', 'sales_fee_amount', 'courier_fee_amount'] as $field) {
+            $this->assertArrayNotHasKey($field, $detail->json('data.items.0'));
+        }
+        $this->actingAs($f['foreignGudang'])->getJson("/api/v1/warehouse/orders/{$f['order']->id}")->assertNotFound();
         $payload = ['fulfilled_quantity' => 2, 'requested_delivery_date' => $item->requested_delivery_date?->toDateString()];
         $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/orders/{$f['order']->id}/items/{$item->id}/fulfillment-proposals", $payload)->assertForbidden();
         $this->actingAs($f['buyer'])->postJson("/api/v1/warehouse/orders/{$f['order']->id}/items/{$item->id}/fulfillment-proposals", $payload)->assertForbidden();

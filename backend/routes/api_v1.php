@@ -440,6 +440,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // User-facing warehouse work is now an order-scoped Gudang proposal reviewed by Admin.
     Route::middleware('role:gudang')->group(function () {
         Route::get('/warehouse/orders/diproses', [OrderFulfillmentChangeProposalController::class, 'orders']);
+        Route::get('/warehouse/orders/{order}', [OrderFulfillmentChangeProposalController::class, 'orderDetail']);
         Route::post('/warehouse/orders/{order}/items/{item}/fulfillment-proposals', [OrderFulfillmentChangeProposalController::class, 'store']);
     });
     Route::middleware('role:admin')->group(function () {

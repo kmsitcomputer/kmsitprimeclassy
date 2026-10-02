@@ -37,7 +37,7 @@ Authority by action (route role gate **and** a policy/service ownership check ap
 | Action | Allowed roles |
 |---|---|
 | Place an order | `konsumen`, `agen`, `korsal`, `sales`, `sales-kurir-sub` (policy narrows to own network / self) |
-| View orders | `super_admin` all; `agen`/`admin`/`keuangan` branch; `korsal` own `korsal_id`; `sales`/`sales-kurir-sub` own `sales_id`; `konsumen` own; `gudang` list only (operational projection); `kurir` none (uses `/kurir/orders`) |
+| View orders | `super_admin` all; `agen`/`admin`/`keuangan` branch; `korsal` own `korsal_id`; `sales`/`sales-kurir-sub` own `sales_id`; `konsumen` own; `gudang` diproses list/detail only through the operational projection; `kurir` none (uses `/kurir/orders`) |
 | Move order status (`diproses` …) | `super_admin`, `agen`, `admin` |
 | Cancel an order | `super_admin`; `agen`/`admin` branch; `korsal`/`sales`/`sales-kurir-sub`/`konsumen` for their own (business rule §14 decides when) |
 | Directly adjust fulfilled quantity, reschedule/split | `super_admin`, `agen` |

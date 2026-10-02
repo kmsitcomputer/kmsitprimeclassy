@@ -97,7 +97,7 @@ Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amou
 
 ## 14. Fulfilment
 
-After an order reaches `diproses`, Gudang sees an operational order projection and proposes fulfillment quantity/date changes. A pending proposal does not change canonical state. Admin reviews CURRENT versus PROPOSED values and approves or rejects; approval revalidates and applies through canonical fulfillment/reschedule services, while rejection and stale conflicts leave the order unchanged. Legacy Stock Request tables remain as internal demand/history accounting and are not a user-facing workflow. See [BUSINESS-RULES.md §10](BUSINESS-RULES.md#10-reservation-and-stock-movement-lifecycle-locked) and [BUSINESS-RULES.md §16](BUSINESS-RULES.md#16-warehouse-fulfillment-approval).
+After an order reaches `diproses`, Gudang can open its operational order detail (without payment ledger or financial projections) and propose fulfillment quantity/date changes. A pending proposal does not change canonical state. Admin reviews CURRENT versus PROPOSED values and approves or rejects; approval revalidates and applies through canonical fulfillment/reschedule services, while rejection and stale conflicts leave the order unchanged. Legacy Stock Request tables remain as internal demand/history accounting and are not a user-facing workflow. See [BUSINESS-RULES.md §10](BUSINESS-RULES.md#10-reservation-and-stock-movement-lifecycle-locked) and [BUSINESS-RULES.md §16](BUSINESS-RULES.md#16-warehouse-fulfillment-approval).
 
 ## 15. Shipment
 

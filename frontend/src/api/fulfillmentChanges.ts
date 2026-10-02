@@ -23,6 +23,11 @@ export async function listDiprosesOrders(page = 1) {
   return { orders: data.data, meta: data.meta as unknown as PaginationMeta }
 }
 
+export async function getDiprosesOrder(orderId: number) {
+  const { data } = await http.get<ApiEnvelope<Order>>(`/warehouse/orders/${orderId}`)
+  return data.data
+}
+
 export async function proposeFulfillmentChange(orderId: number, itemId: number, payload: { fulfilled_quantity?: number; requested_delivery_date?: string | null; reason?: string }) {
   const { data } = await http.post<ApiEnvelope<FulfillmentChangeProposal>>(`/warehouse/orders/${orderId}/items/${itemId}/fulfillment-proposals`, payload)
   return data.data

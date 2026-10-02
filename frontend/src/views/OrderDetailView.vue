@@ -828,7 +828,7 @@ async function submitReturn(item: OrderItem) {
         </div>
 
         <!-- Consumer delivery plan: rendered from the canonical backend delivery_groups (Order + delivery date). A date
-             change by Admin shows up here on the next refresh. No warehouse / stock-request internals are exposed. -->
+             change by Admin shows up here on the next refresh. No warehouse internals are exposed. -->
         <div v-if="auth.isKonsumen && order.delivery_groups?.length" class="mb-3 space-y-2">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">{{ t('orders.deliveryPlan') }}</h3>
           <div v-for="group in order.delivery_groups" :key="group.delivery_date ?? 'none'" class="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-800/60">

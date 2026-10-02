@@ -16,7 +16,6 @@ export default {
   warehouse: {
       subLocation: { title: 'Lokasi Sub', physicalStock: 'Stok fisik lokasi Sub', notSellable: 'Bukan stok tersedia untuk dijual' },
       opname: { title: 'Stock Opname', physical: 'Opname Fisik', plan: 'Rekonsiliasi Plan', sellable: 'Rekonsiliasi Sellable', approve: 'Setujui', reject: 'Tolak', submit: 'Submit' },
-      stockRequest: { title: 'Stock Requests', pending: 'Menunggu', partial: 'Sebagian', fulfilled: 'Terpenuhi', physicalOnly: 'Hanya dari stok fisik Transit' },
     stockTransfer: 'Transfer Stok', transferNumber: 'Nomor Transfer', source: 'Sumber', destination: 'Tujuan', handover: 'Serah Terima', pending: 'Menunggu', completed: 'Selesai', cancelled: 'Dibatalkan', printHandover: 'Cetak Serah Terima',
   },
   nav: {

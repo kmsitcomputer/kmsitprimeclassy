@@ -20,6 +20,17 @@ class OrderFulfillmentChangeProposalService
             ->with(['items.shipment', 'konsumen'])->latest()->paginate(15);
     }
 
+    public function operationalOrderFor(User $actor, Order $order): Order
+    {
+        if (! $actor->isRole('gudang')) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        return Order::query()->whereKey($order->id)->where('agent_id', $actor->agent_id)
+            ->where('status', 'diproses')->with(['items.shipment.courier.user', 'shipments.courier.user', 'konsumen'])
+            ->firstOrFail();
+    }
+
     public function proposalsFor(User $actor, string $status = 'pending')
     {
         return OrderFulfillmentChangeProposal::query()->where('agent_id', $actor->agent_id)

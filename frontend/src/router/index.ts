@@ -183,6 +183,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin'] },
     },
     {
+      path: '/dashboard/warehouse/orders/:orderId',
+      name: 'warehouse-order-detail',
+      component: () => import('@/views/dashboard/FulfillmentChangesView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang'] },
+    },
+    {
       path: '/dashboard/warehouse/returns',
       name: 'warehouse-returns',
       component: () => import('@/views/dashboard/WarehouseReturnsView.vue'),
