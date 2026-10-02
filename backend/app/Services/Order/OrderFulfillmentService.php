@@ -378,7 +378,7 @@ class OrderFulfillmentService
                     }
 
                     $child = $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
-                    $this->shipmentGrouping->applyShippingFeeAfterReschedule($order);
+                    $this->shipmentGrouping->applyShippingFeeAfterReschedule($order, $classification);
 
                     return $child;
                 }
@@ -421,7 +421,7 @@ class OrderFulfillmentService
                 $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.regrouped_by_delivery_date');
                 // Human-approved rule: a NEW valid Kurir Online delivery-date change redistributes the
                 // unchanged Order shipping fee evenly across the active groups; Free delivery stays zero.
-                $this->shipmentGrouping->applyShippingFeeAfterReschedule($order);
+                $this->shipmentGrouping->applyShippingFeeAfterReschedule($order, $classification);
             }
 
             ActivityLogger::log($actor->id, $item, 'order_item.delivery_rescheduled', $reason, [

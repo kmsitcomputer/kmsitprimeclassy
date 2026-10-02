@@ -220,7 +220,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $this->assertSame(ShippingMethodClassifier::KURIR_ONLINE, ShippingMethodClassifier::classify('openroute'));
         $this->assertSame(ShippingMethodClassifier::FREE, ShippingMethodClassifier::classify('free'));
         $this->assertSame(ShippingMethodClassifier::PICKUP, ShippingMethodClassifier::classify('pickup'));
-        $this->assertSame(ShippingMethodClassifier::EKSPEDISI, ShippingMethodClassifier::classify(' RajaOngkir '));
+        $this->assertSame(ShippingMethodClassifier::UNKNOWN, ShippingMethodClassifier::classify(' RajaOngkir '));
 
         foreach ([null, '', '   ', 'jne', 'legacy_code', 'unknown'] as $code) {
             $this->assertSame(ShippingMethodClassifier::UNKNOWN, ShippingMethodClassifier::classify($code));

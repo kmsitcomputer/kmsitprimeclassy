@@ -34,6 +34,17 @@ use Illuminate\Support\Facades\DB;
  */
 class ShipmentGroupingService
 {
+    /**
+     * Provenance-vs-allocation: every fee snapshot written by the canonical even allocation is stamped with
+     * this marker inside `provider_meta` (additive JSON key, no schema change). The marker is NOT quote
+     * provenance and is excluded from every provenance signature; it only proves that a carrier's nonzero fee
+     * is an ALLOCATION of the Order total, not an independent provider quote, so legacy quotes with incomplete
+     * persisted provenance are not locked out by their own allocation (see openRouteQuoteSignature()).
+     */
+    private const ALLOCATION_MARKER = 'fee_allocation';
+
+    private const ALLOCATION_METHOD = 'even_order_total_v1';
+
     public static function isMutable(Shipment $shipment): bool
     {
         return $shipment->status === 'pending'
@@ -130,9 +141,17 @@ class ShipmentGroupingService
      * groups. Free delivery is already asserted all-zero by the preflight. Ekspedisi / Pickup / Unknown never
      * reach this method (denied before mutation).
      */
-    public function applyShippingFeeAfterReschedule(Order $order): void
+    public function applyShippingFeeAfterReschedule(Order $order, string $expectedClassification): void
     {
-        if (self::shippingClassification($order) === ShippingMethodClassifier::KURIR_ONLINE) {
+        // The reschedule was authorised under $expectedClassification. If the mutation itself changed the
+        // order's classification (e.g. a new group inherited an inconsistent provider snapshot), silently
+        // skipping the allocation would commit a date change with unreconciled fee evidence: fail closed
+        // instead (the surrounding transaction rolls everything back).
+        if (self::shippingClassification($order) !== $expectedClassification) {
+            throw new ApiException(__('messages.fulfillment.unknown_shipping_method_cannot_reschedule'), 422);
+        }
+
+        if ($expectedClassification === ShippingMethodClassifier::KURIR_ONLINE) {
             $this->redistributeKurirOnlineShippingFee($order);
         }
     }
@@ -199,8 +218,12 @@ class ShipmentGroupingService
             $rupiah = $base + ($index < $remainder ? 1 : 0);
             $cents = ($rupiah * 100) + ($index === 0 ? $fractionCents : 0);
             $assigned[$id] = true;
+            $carrier = $mutable->firstWhere('id', $id);
+            $meta = is_array($carrier->provider_meta) ? $carrier->provider_meta : [];
+            $meta[self::ALLOCATION_MARKER] = ['method' => self::ALLOCATION_METHOD, 'order_fee' => self::decimalFromMinor($totalMinor)];
             Shipment::query()->whereKey($id)->update([
                 'shipping_fee_snapshot' => self::decimalFromMinor($cents),
+                'provider_meta' => $meta,
             ]);
             $index++;
         }
@@ -259,7 +282,10 @@ class ShipmentGroupingService
             if ($dates === [self::key($date)]) {
                 return $candidate;
             }
-            if ($dates === [] && $empty === null) {
+            // An EMPTY shell is reusable only when its provider snapshot matches the group being created: reusing
+            // a shell with a null/foreign provider code would silently turn the order's shipping
+            // classification into UNKNOWN/mixed the moment an item lands on it.
+            if ($dates === [] && $empty === null && $candidate->shipping_provider_code === ($attributes['shipping_provider_code'] ?? null)) {
                 $empty = $candidate;
             }
         }
@@ -511,10 +537,45 @@ class ShipmentGroupingService
             || $signature['minimum_distance_km'] === null
             || $signature['minimum_charge'] === null
             || $signature['chargeable_distance_km'] === null) {
-            $signature['incomplete_identity'] = $shipment->id;
+            $allocation = self::allocationMarker($meta);
+            if ($allocation !== null) {
+                // Incomplete legacy provenance whose nonzero fee is a canonical ALLOCATION of the Order total:
+                // equivalent only to carriers stamped by the same allocation AND holding byte-identical
+                // remaining evidence (cloned from the same persisted quote). Still never equivalent to an
+                // independent quote — those keep the per-shipment marker below.
+                unset($meta[self::ALLOCATION_MARKER]);
+                $signature['allocated_from'] = $allocation + ['evidence' => hash('sha256', json_encode(self::canonicalise($meta)))];
+            } else {
+                $signature['incomplete_identity'] = $shipment->id;
+            }
         }
 
         return $signature;
+    }
+
+    /** @return array{method:string, order_fee:string}|null a well-formed canonical allocation marker */
+    private static function allocationMarker(array $meta): ?array
+    {
+        $marker = $meta[self::ALLOCATION_MARKER] ?? null;
+        if (! is_array($marker) || ($marker['method'] ?? null) !== self::ALLOCATION_METHOD || ! is_string($marker['order_fee'] ?? null)) {
+            return null;
+        }
+
+        return ['method' => self::ALLOCATION_METHOD, 'order_fee' => $marker['order_fee']];
+    }
+
+    /** Recursively key-sorted copy so identical evidence always serialises identically. */
+    private static function canonicalise(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+        $value = array_map(fn ($v) => self::canonicalise($v), $value);
+        if (! array_is_list($value)) {
+            ksort($value);
+        }
+
+        return $value;
     }
 
     /**
@@ -528,7 +589,7 @@ class ShipmentGroupingService
         $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
 
         return [
-            'provider' => ShippingMethodClassifier::normalize($shipment->shipping_provider_code),
+            'provider' => (string) $shipment->shipping_provider_code,
             'shipping_provider_id' => $shipment->shipping_provider_id,
             'fee' => self::money($shipment->shipping_fee_snapshot),
             'rate_per_km' => $shipment->rate_per_km === null ? null : self::money($shipment->rate_per_km),
@@ -643,7 +704,16 @@ class ShipmentGroupingService
     /** Destination/provider snapshot for a NEW group shipment, cloned from the order's original shipment. */
     private function cloneAttributes(Order $order, OrderItem $item, ?Shipment $old): array
     {
-        $reference = Shipment::query()->where('order_id', $order->id)->orderBy('id')->first() ?? $old;
+        // Clone the RELEVANT provider snapshot (a shipment holding an active item or carrying fee evidence),
+        // never an irrelevant lower-id remnant: otherwise a new group could inherit a null/foreign code and
+        // silently turn the order's classification into UNKNOWN/mixed.
+        $activeShipmentIds = OrderItem::query()->where('order_id', $order->id)->where('status', '!=', 'dibatalkan')
+            ->whereNotNull('shipment_id')->pluck('shipment_id');
+        $reference = Shipment::query()->where('order_id', $order->id)
+            ->where(fn ($q) => $q->whereIn('id', $activeShipmentIds)->orWhere('shipping_fee_snapshot', '>', 0))
+            ->orderBy('id')->first()
+            ?? $old
+            ?? Shipment::query()->where('order_id', $order->id)->orderBy('id')->first();
 
         $isSub = $item->isSubSourced();
         $selfDeliveredBy = null;
@@ -670,32 +740,33 @@ class ShipmentGroupingService
 
     /**
      * Exact decimal-string -> integer MINOR units (cents). NEVER uses floating point for money. The DB
-     * columns are DECIMAL(x,2), so the canonical representation is at most two fractional digits.
+     * columns are unsigned DECIMAL(x,2), so the canonical representation is a non-negative number with at most
+     * two significant fractional digits. Anything else — negative, exponent, thousands separators, a nonzero
+     * third decimal that would be truncated, an absurd magnitude — is malformed and fails safely (422); it is
+     * never silently converted.
      */
     private static function toMinorUnits(mixed $value): int
     {
         if (is_int($value)) {
-            return $value * 100;
-        }
-
-        $string = trim((string) $value);
-        if ($string === '') {
+            $string = (string) $value;
+        } elseif ($value === null || (is_string($value) && trim($value) === '')) {
             return 0;
-        }
-
-        $negative = str_starts_with($string, '-');
-        $string = ltrim($string, '+-');
-        $parts = explode('.', $string, 2);
-        $whole = $parts[0] === '' ? '0' : $parts[0];
-        $fraction = str_pad(substr($parts[1] ?? '0', 0, 2), 2, '0');
-
-        if (! ctype_digit($whole) || ! ctype_digit($fraction)) {
+        } elseif (is_string($value) || is_float($value)) {
+            $string = trim((string) $value);
+        } else {
             throw new ApiException(__('messages.fulfillment.invalid_monetary_amount'), 422);
         }
 
-        $minor = ((int) $whole) * 100 + (int) $fraction;
+        if (! preg_match('/^(\d{1,15})(?:\.(\d+))?$/', $string, $m)) {
+            throw new ApiException(__('messages.fulfillment.invalid_monetary_amount'), 422);
+        }
 
-        return $negative ? -$minor : $minor;
+        $fraction = $m[2] ?? '';
+        if (strlen($fraction) > 2 && trim(substr($fraction, 2), '0') !== '') {
+            throw new ApiException(__('messages.fulfillment.invalid_monetary_amount'), 422);
+        }
+
+        return ((int) $m[1]) * 100 + (int) str_pad(substr($fraction, 0, 2), 2, '0');
     }
 
     /** Integer minor units -> canonical 2-decimal string. */
@@ -713,21 +784,39 @@ class ShipmentGroupingService
         return self::decimalFromMinor(self::toMinorUnits($value));
     }
 
-    /** Exact canonical money string for an OpenRoute meta numeric, or null when absent. */
+    /**
+     * Exact canonical decimal string for an OpenRoute meta numeric (comparison identity only — never money
+     * allocation). Unlike money() it keeps every fractional digit, so provenance that differs below two
+     * decimals is still a difference. Absent / non-numeric / non-finite values are `null` (= incomplete).
+     */
     private static function metaNumber(mixed $value): ?string
     {
-        if ($value === null || $value === '') {
+        if (is_int($value)) {
+            $string = (string) $value;
+        } elseif (is_float($value)) {
+            if (! is_finite($value)) {
+                return null;
+            }
+            // 6 fractional digits is far beyond the provider's own precision (2dp config, 2dp distance).
+            $string = number_format($value, 6, '.', '');
+        } elseif (is_string($value) && preg_match('/^-?\d+(\.\d+)?$/', trim($value))) {
+            $string = trim($value);
+        } else {
             return null;
         }
 
-        return self::money($value);
+        if (str_contains($string, '.')) {
+            $string = rtrim(rtrim($string, '0'), '.');
+        }
+
+        return in_array($string, ['', '-0'], true) ? '0' : $string;
     }
 
     /** Normalize a material metadata string for comparison without erasing real service differences. */
     private static function normalizeMeta(mixed $value): ?string
     {
-        if ($value === null) {
-            return null;
+        if (! is_scalar($value)) {
+            return null; // arrays / objects are malformed identity -> incomplete, never coerced
         }
 
         $normalized = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));

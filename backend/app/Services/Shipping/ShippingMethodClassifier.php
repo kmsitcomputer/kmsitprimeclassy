@@ -30,16 +30,14 @@ final class ShippingMethodClassifier
 
     public const UNKNOWN = 'UNKNOWN';
 
-    /** Canonical normalisation for a provider code (whitespace + case only; never invents a code). */
-    public static function normalize(?string $code): string
-    {
-        return strtolower(trim((string) $code));
-    }
-
-    /** Map ONE canonical provider code to its classification — no fallback, no inference. */
+    /**
+     * Map ONE canonical provider code to its classification — no fallback, no inference, and NO case /
+     * whitespace leniency: persistence only ever writes the exact lowercase canonical constants, so
+     * anything else (" openroute", "OpenRoute", ...) is an unrecognised legacy value and is UNKNOWN.
+     */
     public static function classify(?string $code): string
     {
-        return match (self::normalize($code)) {
+        return match ($code) {
             'rajaongkir' => self::EKSPEDISI,
             'openroute' => self::KURIR_ONLINE,
             'free' => self::FREE,
