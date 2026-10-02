@@ -1,5 +1,33 @@
 # Package C — Production UAT Remediation (checkpoint)
 
+## Round 3 — independent Codex review of `0f26fae` = BLOCKED
+
+**Codex verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `0f26fae`. **Original main:** `938100c`. **Previous remediation base:** `a583b51`.
+
+**CLOSED (do not reopen without necessity):** F01 demand-counter concurrency · F03 tracking/resi commitment · F05 canonical lock order/deadlock · F06 regroup failure exit status.
+
+**OPEN being remediated now:**
+- **F02 (BLOCKER)** — conflicting historical shipping-fee snapshots. Target = first nonzero carrier by ID; a second, different nonzero carrier is deleted, so `10,000 + 25,000` can become `10,000` while the canonical Order fee is `25,000`. Multiple nonzero snapshots must be classified, not guessed.
+- **F04 (MAJOR)** — historical shipment **contents** can still change: a delivered/proof/verified shipment with inconsistent item status lets membership change (`2 → 1` items) or a partial split change represented quantity (`3 → 2`). Shipment-level evidence must win over stale item status.
+- **F07 (MINOR)** — concurrent approval replay returns a stale response: after A commits (proposal/item `approved`), B's replay returns `pending/pending` (eager/`fresh()` REPEATABLE READ snapshot), while stock effects stay correct.
+
+**Remediation plan / exact order (F04 first, so immutable historical shipments are rejected before any fee-carrier reconciliation):**
+1. **F04** — add `ShipmentGroupingService::isHistorical()` (delivered / shipped_at / status picked_up-in_transit-delivered-failed / proof / delivery verification). In `OrderFulfillmentService::rescheduleItemDeliveryDate()` gate BOTH the full reschedule and the partial split on it (before any mutation); keep the round-2 committed (assigned/tracked, non-historical) boundary.
+2. **F02** — preflight every consolidation (merge group / `releaseIfEmpty`) and classify carriers: none → safe; exactly one → preserve; multiple → dedupe ONLY if numeric value **and** fee metadata are all equivalent; otherwise **fail closed** (`ApiException` 422 → command marks the order failed / interactive rolls back atomically).
+3. **F07** — `StockRequestProposalService::loaded()` re-reads the proposal, proposal items and their request items with **locking reads** (order-independent current committed state), so a replay response agrees with the DB while effects remain exactly-once.
+
+**Round-3 implementation result (awaiting independent re-review):**
+- **F04** — `ShipmentGroupingService::isHistorical()` (delivered / shipped_at / status picked_up-in_transit-delivered-failed / proof / delivery verification). `rescheduleItemDeliveryDate()` gates **both** the full reschedule and the partial split on it, before any mutation, using shipment-level evidence (inconsistent item status cannot bypass). The assigned/tracked (pre-delivery) boundary is preserved: single-item redate rejected, a sibling may still move off untouched. 18 focused tests incl. 4 lifecycles × shared/single × full/partial, plus assigned/tracked boundary.
+- **F02** — `ShipmentGroupingService` classifies fee carriers by a signature (fee + rate + provider id/code + distance). `assertCarriersConsistent()` runs **before** any merge (`reconcileOrder`) or shell deletion (`releaseIfEmpty`): none → safe; exactly one → preserved (deterministic lowest-id carrier survives); multiple only if all signatures equal; otherwise `ApiException` 422 → interactive 422 / command marks the order failed, transaction rolls back. 8 focused tests incl. conflict values, conflicting metadata, both id orderings, releaseIfEmpty, split, regroup, repeated apply.
+- **F07** — `StockRequestProposalService::loaded()` re-reads the proposal, its items and their request items with **locking reads**, so a replay response equals the committed DB graph while effects stay exactly-once. 2 deterministic held-lock tests (single line, multi-line projection).
+- **Strengthened (bounded):** F05 races now assert no DB error at all (not merely ≠ 1213), plus success outcomes for the deterministic races; new `assertCleanDomainOutcome` helper. No harness rewrite.
+- **Tests:** new `PackageCProductionUatRound3Test` (18) and `PackageCProposalReplayConcurrencyTest` (2). All three new/affected concurrency suites repeated green. Full backend **911 passed / 6644 assertions / 0 failures** (baseline 891/6474); `npm run type-check` PASS; clean temporary-outDir build PASS (normal `dist/` build still hits the pre-existing `.well-known/acme-challenge` EACCES). New tests fail on `0f26fae` (15 failed / 5 passed) and pass after.
+- **Docs updated:** BUSINESS-RULES §11/§16/§21, ARCHITECTURE §7, MASTER-SYSTEM §2/§40/§41, OPERATIONS §4.
+
+**Exact next action:** independent Codex re-review of ONLY this round-3 delta (`F02`/`F04`/`F07`) plus regression verification. No deployment; PRODUCTION TOUCHED: NO; DEPLOYED: NO; Package C remains NOT production closed.
+
+---
+
 ## Round 2 — independent Codex review of `a583b51` = BLOCKED
 
 **Codex verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `a583b51`. **Baseline:** `main @ 938100c`.

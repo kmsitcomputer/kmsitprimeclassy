@@ -335,12 +335,24 @@ class OrderFulfillmentService
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
 
+            // F04: historical commitment protects the shipment's CONTENTS, not just its identity. Lock the
+            // current shipment once and derive the gate from SHIPMENT-level evidence — never from item status
+            // alone (a stale/inconsistent item status must not defeat proof / verification / final delivery).
+            $current = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+            $historical = $current !== null && ShipmentGroupingService::isHistorical($current);
+
             if ($quantity !== null) {
                 if ($quantity < 1 || $quantity > $item->fulfilled_quantity) {
                     throw new ApiException(__('messages.fulfillment.invalid_quantity'), 422);
                 }
 
+                // A partial split changes the represented quantity of the shipment the parent sits on —
+                // immutable once historical delivery evidence exists. Gate BEFORE entering the helper.
                 if ($quantity < $item->fulfilled_quantity) {
+                    if ($historical) {
+                        throw new ApiException(__('messages.fulfillment.historical_shipment_cannot_change'), 422);
+                    }
+
                     return $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
                 }
             }
@@ -349,13 +361,16 @@ class OrderFulfillmentService
             $dateChanged = $previousDate !== $newDate;
 
             if ($dateChanged) {
-                $current = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+                // F04: a historical shipment's membership and date meaning are immutable — reject outright,
+                // even when it still has active siblings (its contents must not change).
+                if ($historical) {
+                    throw new ApiException(__('messages.fulfillment.historical_shipment_cannot_change'), 422);
+                }
 
-                // F04: a committed shipment's operational identity must never be silently redated. When it
-                // carries ONLY this item, moving the item's date would rewrite that shipment — reject the
-                // unsafe operation atomically (before any mutation) with a clear domain 422. When it has
-                // other active items the item simply moves onto its own mutable shipment and the committed
-                // shipment keeps its identity, courier, proof and verification untouched.
+                // F04: a committed-but-not-yet-historical shipment's operational identity must never be
+                // silently re-dated. When it carries ONLY this item, moving the item's date would rewrite that
+                // shipment — reject atomically. With other active items the item moves onto its own mutable
+                // shipment and the committed shipment keeps its identity, courier, tracking and verification.
                 if ($current && ! ShipmentGroupingService::isMutable($current)) {
                     $hasActiveSiblings = OrderItem::query()
                         ->where('shipment_id', $current->id)

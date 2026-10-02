@@ -237,7 +237,18 @@ class PackageCShipmentConcurrencyTest extends TestCase
     {
         $this->assertTrue($report['true_overlap']);
         foreach (['a', 'b'] as $side) {
-            $this->assertNotSame(1213, $report[$side]['error_code'] ?? null, 'no deadlock: '.json_encode($report[$side]));
+            // The actor only records error_code for a QueryException — assert there is NO database error at
+            // all (a strict superset of "not 1213"), and that the actor reported a resolvable outcome.
+            $this->assertNull($report[$side]['error_code'] ?? null, 'no database error: '.json_encode($report[$side]));
+            $this->assertContains($report[$side]['outcome'] ?? null, ['success', 'failed'], 'actor reported an outcome: '.json_encode($report[$side]));
+        }
+    }
+
+    /** A non-success outcome must be a clean domain (ApiException) rejection, never a raw error. */
+    private function assertCleanDomainOutcome(array $result): void
+    {
+        if (($result['outcome'] ?? null) === 'failed') {
+            $this->assertSame(\App\Exceptions\ApiException::class, $result['exception'] ?? null, 'a refused operation must be a domain rejection: '.json_encode($result));
         }
     }
 
@@ -250,8 +261,12 @@ class PackageCShipmentConcurrencyTest extends TestCase
                 ['op' => 'reschedule', 'actor_id' => $f['admin']->id, 'subject_id' => $f['items'][0]->id, 'extra' => ['date' => now()->addDays(9)->toDateString()]],
             );
             $this->assertNoDeadlock($report);
-            // No item is ever lost; the order still has every line.
+            // Neither writer rejects: Order-first serialises them, so both must succeed.
+            $this->assertSame('success', $report['a']['outcome'], 'regroup must succeed: '.json_encode($report['a']));
+            $this->assertSame('success', $report['b']['outcome'], 'reschedule must succeed: '.json_encode($report['b']));
+            // No item is ever lost; the order still has every line, and the moved item is on its new date.
             $this->assertSame(2, OrderItem::where('order_id', $f['order']->id)->count());
+            $this->assertSame(now()->addDays(9)->toDateString(), $f['items'][0]->fresh()->requested_delivery_date?->toDateString());
             $this->assertGreaterThanOrEqual(1, Shipment::where('order_id', $f['order']->id)->count());
         }
     }
@@ -265,7 +280,9 @@ class PackageCShipmentConcurrencyTest extends TestCase
                 ['op' => 'reschedule', 'actor_id' => $f['admin']->id, 'subject_id' => $f['items'][1]->id, 'extra' => ['date' => now()->addDays(9)->toDateString(), 'quantity' => 1]],
             );
             $this->assertNoDeadlock($report);
-            $this->assertGreaterThanOrEqual(2, OrderItem::where('order_id', $f['order']->id)->count());
+            $this->assertSame('success', $report['a']['outcome'], 'regroup must succeed');
+            $this->assertSame('success', $report['b']['outcome'], 'split must succeed');
+            $this->assertSame(3, OrderItem::where('order_id', $f['order']->id)->count(), 'the split child exists exactly once');
         }
     }
 
@@ -278,6 +295,8 @@ class PackageCShipmentConcurrencyTest extends TestCase
                 ['op' => 'fulfillment-increase', 'actor_id' => $f['admin']->id, 'subject_id' => $f['items'][1]->id, 'extra' => ['quantity' => 3]],
             );
             $this->assertNoDeadlock($report);
+            $this->assertSame('success', $report['a']['outcome'], 'regroup must succeed');
+            $this->assertSame('success', $report['b']['outcome'], 'adjustment must succeed');
             [$requested, $fulfilled, $remaining] = $this->counted($f['requestItem']);
             $this->assertSame($requested - $fulfilled, $remaining, 'demand invariant holds');
         }
@@ -293,6 +312,11 @@ class PackageCShipmentConcurrencyTest extends TestCase
                 ['op' => 'reschedule', 'actor_id' => $f['admin']->id, 'subject_id' => $f['items'][0]->id, 'extra' => ['date' => now()->addDays(9)->toDateString()]],
             );
             $this->assertNoDeadlock($report);
+            // Courier lifecycle must always progress; reschedule either wins first or is cleanly rejected once
+            // the item is already in-transit (never an unhandled failure).
+            $this->assertSame('success', $report['a']['outcome'], 'courier action must succeed: '.json_encode($report['a']));
+            $this->assertContains($report['b']['outcome'], ['success', 'failed'], 'reschedule resolves cleanly');
+            $this->assertCleanDomainOutcome($report['b']);
             $this->assertSame(2, OrderItem::where('order_id', $f['order']->id)->count());
         }
     }

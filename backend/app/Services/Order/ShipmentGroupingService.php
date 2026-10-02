@@ -2,6 +2,7 @@
 
 namespace App\Services\Order;
 
+use App\Exceptions\ApiException;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Shipment;
@@ -43,6 +44,21 @@ class ShipmentGroupingService
             // regroup/reschedule cleanup, even while still `pending` and unassigned to a courier.
             && blank($shipment->tracking_number)
             && ! $shipment->deliveryVerifications()->exists();
+    }
+
+    /**
+     * F04: a HISTORICAL shipment has finalized delivery evidence — its identity AND its content (membership,
+     * represented quantity, date meaning) are immutable history. Derived from SHIPMENT-level fields, never
+     * from the item status (an inconsistent/stale item status must not defeat proof/verification/delivery).
+     * This is a strict superset of the non-mutable states that still allow pre-delivery regrouping.
+     */
+    public static function isHistorical(Shipment $shipment): bool
+    {
+        return $shipment->delivered_at !== null
+            || $shipment->shipped_at !== null
+            || $shipment->proof_media_id !== null
+            || in_array($shipment->status, ['picked_up', 'in_transit', 'delivered', 'failed'], true)
+            || $shipment->deliveryVerifications()->exists();
     }
 
     /**
@@ -134,6 +150,9 @@ class ShipmentGroupingService
             return;
         }
 
+        // F02: never guess when the two historical carriers that would be consolidated conflict.
+        $this->assertCarriersConsistent([$old, $target]);
+
         $this->carryFeeSnapshot($old, $target);
         $old->delete();
     }
@@ -169,10 +188,10 @@ class ShipmentGroupingService
                 if (count($shipments) < 2) {
                     continue;
                 }
-                // F02: keep the shipment that actually carries the nonzero shipping-fee snapshot as the survivor,
-                // so the order's fee can never be merged away. (The column is NOT NULL DEFAULT 0, so "not null"
-                // is meaningless — the carrier is the nonzero one.)
-                $target = collect($shipments)->first(fn (Shipment $s) => (float) $s->shipping_fee_snapshot > 0) ?? $shipments[0];
+                // F02: validate the historical fee-carrier evidence for this consolidation BEFORE any mutation.
+                // Multiple nonzero carriers that disagree (value or metadata) fail closed rather than guessing.
+                $this->assertCarriersConsistent($shipments);
+                $target = $this->survivorFor($shipments);
                 foreach ($shipments as $source) {
                     if ($source->id === $target->id) {
                         continue;
@@ -233,6 +252,76 @@ class ShipmentGroupingService
             'shipping_fee_snapshot' => $from->shipping_fee_snapshot,
             'rate_per_km' => $to->rate_per_km ?? $from->rate_per_km,
         ]);
+    }
+
+    /**
+     * F02 carrier evidence signature: a nonzero fee plus the quote metadata that makes up the snapshot.
+     * `null` means "no historical carrier here" (the column is NOT NULL DEFAULT 0, so zero = no evidence).
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function feeCarrierSignature(Shipment $shipment): ?array
+    {
+        if ((float) $shipment->shipping_fee_snapshot <= 0.0) {
+            return null;
+        }
+
+        return [
+            'fee' => self::money($shipment->shipping_fee_snapshot),
+            'rate_per_km' => $shipment->rate_per_km === null ? null : self::money($shipment->rate_per_km),
+            'shipping_provider_id' => $shipment->shipping_provider_id,
+            'shipping_provider_code' => $shipment->shipping_provider_code,
+            'distance_km' => $shipment->distance_km === null ? null : self::money($shipment->distance_km),
+        ];
+    }
+
+    private static function money(mixed $value): string
+    {
+        return number_format((float) $value, 2, '.', '');
+    }
+
+    /**
+     * F02 fail-closed guard. Before consolidating historical carriers (merge group or shell deletion),
+     * classify them:
+     *   - none        -> zero semantics, safe;
+     *   - exactly one -> preserve it;
+     *   - multiple    -> only if numeric value AND fee metadata are ALL equivalent (same canonical snapshot).
+     * Anything else is CONFLICTING historical evidence: abort without choosing a lower/higher id, summing or
+     * discarding — the surrounding transaction rolls back.
+     *
+     * @param  iterable<Shipment>  $shipments
+     */
+    private function assertCarriersConsistent(iterable $shipments): void
+    {
+        $signatures = [];
+        foreach ($shipments as $shipment) {
+            $signature = self::feeCarrierSignature($shipment);
+            if ($signature !== null) {
+                $signatures[json_encode($signature)] = true;
+            }
+        }
+
+        if (count($signatures) > 1) {
+            throw new ApiException(__('messages.fulfillment.conflicting_shipping_fee_snapshots'), 422);
+        }
+    }
+
+    /**
+     * Deterministic survivor for a consolidation: the lowest-id carrier when one exists (so its historical
+     * row/identity is preserved), otherwise the lowest-id shipment. Only ever called after
+     * assertCarriersConsistent() proved the carriers (if several) are equivalent.
+     *
+     * @param  list<Shipment>  $shipments  id-ordered
+     */
+    private function survivorFor(array $shipments): Shipment
+    {
+        foreach ($shipments as $shipment) {
+            if (self::feeCarrierSignature($shipment) !== null) {
+                return $shipment;
+            }
+        }
+
+        return $shipments[0];
     }
 
     /** Destination/provider snapshot for a NEW group shipment, cloned from the order's original shipment. */

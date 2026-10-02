@@ -170,6 +170,8 @@ return [
         'rescheduled' => 'Tanggal pengiriman item berhasil diubah.',
         'split_stock_request_locked' => 'Pemecahan tidak dapat dilakukan karena permintaan stok gudang sudah dipenuhi sebagian dan sisa tidak mencukupi.',
         'committed_shipment_cannot_reschedule' => 'Item ini sudah termasuk dalam pengiriman yang dikomit (kurir sudah ditugaskan / resi sudah terbit); tanggal pengirimannya tidak dapat diubah.',
+        'historical_shipment_cannot_change' => 'Item ini sudah memiliki bukti pengiriman final (terkirim / bukti / verifikasi); isi dan tanggal pengirimannya tidak dapat diubah.',
+        'conflicting_shipping_fee_snapshots' => 'Ditemukan snapshot biaya kirim historis yang bertentangan pada grup pengiriman ini; perubahan ditolak agar tidak ada bukti biaya yang hilang atau terhitung ganda.',
         'stock_request_fulfilled_blocks_reduction' => 'Barang pada item ini sudah dipenuhi gudang; jumlah tidak dapat dikurangi di bawah jumlah yang sudah dipenuhi.',
         'cannot_increase_cancelled' => 'Item yang sudah dibatalkan sepenuhnya tidak dapat ditambah kembali.',
         'pending_refund_blocks_increase' => 'Tidak dapat menambah jumlah selama masih ada refund yang belum diproses untuk item ini.',

@@ -400,8 +400,13 @@ if (str_starts_with($role, 'sr-')) {
                 break;
             case 'proposal-item-approve':
                 // Production UAT: per-product approval raced against another decision on the same proposal.
+                // Also reports the returned decision graph so a replay's response can be asserted against the
+                // committed DB state (F07), instead of only the stock side effects.
                 $proposalModel = StockRequestProposal::withoutGlobalScopes()->findOrFail($subjectId);
-                $result = app(StockRequestProposalService::class)->approveItem($actor, $proposalModel, \App\Models\StockRequestProposalItem::findOrFail((int) $extra['item_id']));
+                $decided = app(StockRequestProposalService::class)->approveItem($actor, $proposalModel, \App\Models\StockRequestProposalItem::findOrFail((int) $extra['item_id']));
+                $payload['proposal_status'] = $decided->status;
+                $payload['item_decisions'] = $decided->items->mapWithKeys(fn ($i) => [(string) $i->id => $i->decision_status])->all();
+                $result = $decided;
                 break;
             case 'shipment-regroup':
                 // F05: the REAL regroup/merge writer (Order -> Shipment -> OrderItem).

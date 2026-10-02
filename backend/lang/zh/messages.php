@@ -159,6 +159,8 @@ return [
         'rescheduled' => '商品配送日期更新成功。',
         'split_stock_request_locked' => '无法拆分：仓库库存申请已部分履行，剩余数量不足。',
         'committed_shipment_cannot_reschedule' => '该商品已属于已确认的配送（已分配配送员／已生成运单号），无法更改其配送日期。',
+        'historical_shipment_cannot_change' => '该商品已有最终配送凭证（已送达／凭证／核验）；其配送内容与日期不可更改。',
+        'conflicting_shipping_fee_snapshots' => '该配送组发现相互冲突的历史运费快照；已拒绝更改，以免运费凭证丢失或被重复计算。',
         'stock_request_fulfilled_blocks_reduction' => '该商品行已由仓库部分发货，数量不能减少到低于已履行的数量。',
         'cannot_increase_cancelled' => '已完全取消的商品不能再次增加数量。',
         'pending_refund_blocks_increase' => '当该商品仍存在未处理的退款义务时，不能增加数量。',

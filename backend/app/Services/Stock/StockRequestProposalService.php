@@ -9,6 +9,7 @@ use App\Models\ProductVariationStock;
 use App\Models\StockMovement;
 use App\Models\StockRequest;
 use App\Models\StockRequestFulfillment;
+use App\Models\StockRequestItem;
 use App\Models\StockRequestProposal;
 use App\Models\StockRequestProposalItem;
 use App\Models\User;
@@ -297,9 +298,38 @@ class StockRequestProposalService
         $locked->update($changes);
     }
 
+    /**
+     * F07: an idempotent replay (or any return) must reflect the CURRENT committed decision graph. Plain
+     * reads — `fresh()` / `load()` — use this transaction's REPEATABLE READ snapshot, which (with the
+     * Order-first discipline) may predate a decision another connection committed while this one waited on
+     * a lock (Codex saw a replay return proposal=pending/item=pending after it had committed). LOCKING reads
+     * always observe the latest committed rows, and here they only re-acquire rows this transaction already
+     * holds — no new lock ordering, no deadlock.
+     */
     private function loaded(StockRequestProposal $locked): StockRequestProposal
     {
-        return $locked->fresh()->load(['items.requestItem.product', 'items.requestItem.variation', 'items.requestItem.orderItem', 'requester']);
+        $fresh = StockRequestProposal::withoutGlobalScopes()->whereKey($locked->id)->lockForUpdate()->firstOrFail();
+
+        $items = $fresh->items()->lockForUpdate()->get();
+
+        $requestItems = $items->isEmpty()
+            ? collect()
+            : StockRequestItem::withoutGlobalScopes()
+                ->whereIn('id', $items->pluck('stock_request_item_id')->all())
+                ->lockForUpdate()->get()
+                ->load(['product.images', 'variation.compositions.option', 'orderItem']);
+
+        foreach ($items as $item) {
+            $requestItem = $requestItems->firstWhere('id', $item->stock_request_item_id);
+            if ($requestItem) {
+                $item->setRelation('requestItem', $requestItem);
+            }
+        }
+
+        $fresh->setRelation('items', $items);
+        $fresh->loadMissing('requester');
+
+        return $fresh;
     }
 
     private function transit(int $agentId, $item)
