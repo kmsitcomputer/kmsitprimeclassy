@@ -239,7 +239,7 @@ class CourierSystemTest extends TestCase
      * Per-item reschedule vs cancel
      * ------------------------------------------------------------- */
 
-    public function test_admin_can_reschedule_an_items_delivery_date_instead_of_cancelling(): void
+    public function test_agen_can_reschedule_an_items_delivery_date_instead_of_cancelling(): void
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Reschedule', 40000, 10);
@@ -247,7 +247,7 @@ class CourierSystemTest extends TestCase
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         $newDate = now()->addDays(5)->toDateString();
-        $response = $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+        $response = $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
             'requested_delivery_date' => $newDate, 'reason' => 'Konsumen minta diundur',
         ]);
         $response->assertOk();
@@ -261,7 +261,7 @@ class CourierSystemTest extends TestCase
     }
 
     /** Rescheduling only part of a line's quantity splits it into a new OrderItem on its own shipment, leaving the rest untouched. */
-    public function test_admin_can_reschedule_only_part_of_an_items_quantity_splitting_it_into_a_new_item(): void
+    public function test_agen_can_reschedule_only_part_of_an_items_quantity_splitting_it_into_a_new_item(): void
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Split', 40000, 10);
@@ -270,7 +270,7 @@ class CourierSystemTest extends TestCase
         $originalShipmentId = $item->shipment_id;
 
         $newDate = now()->addDays(5)->toDateString();
-        $response = $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+        $response = $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
             'requested_delivery_date' => $newDate, 'reason' => '2 dari 3 diundur', 'quantity' => 2,
         ]);
         $response->assertOk();
@@ -307,7 +307,7 @@ class CourierSystemTest extends TestCase
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         $newDate = now()->addDays(4)->toDateString();
-        $response = $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+        $response = $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
             'requested_delivery_date' => $newDate, 'reason' => 'Semua diundur', 'quantity' => 2,
         ]);
         $response->assertOk();
@@ -322,7 +322,7 @@ class CourierSystemTest extends TestCase
         $order = $this->placeOrder($branch['konsumen'], $product, 2);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Too many', 'quantity' => 3,
         ])->assertStatus(422);
     }
@@ -336,12 +336,12 @@ class CourierSystemTest extends TestCase
 
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
 
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(3)->toDateString(), 'reason' => 'Too late',
         ])->assertStatus(422);
     }
 
-    public function test_only_admin_agen_and_super_admin_may_reschedule_never_kurir_sales_or_konsumen(): void
+    public function test_admin_uses_proposals_while_only_agen_and_super_admin_may_directly_reschedule(): void
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Otorisasi', 40000, 10);
@@ -354,6 +354,12 @@ class CourierSystemTest extends TestCase
             ])->assertStatus(403);
         }
 
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+            'requested_delivery_date' => now()->addDays(2)->toDateString(), 'reason' => 'Proposal required',
+        ])->assertForbidden();
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+            'requested_delivery_date' => now()->addDays(2)->toDateString(), 'reason' => 'OK',
+        ])->assertOk();
         $this->actingAs($branch['superAdmin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(2)->toDateString(), 'reason' => 'OK',
         ])->assertOk();
@@ -685,7 +691,7 @@ class CourierSystemTest extends TestCase
         $sharedShipmentId = $itemA->shipment_id;
 
         // Rescheduling A to another date regroups it onto its own (new) mutable shipment; B keeps the original.
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(5)->toDateString(), 'reason' => 'Konsumen minta diundur',
         ])->assertOk();
 
@@ -747,7 +753,7 @@ class CourierSystemTest extends TestCase
         $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
 
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(5)->toDateString(), 'reason' => 'Reschedule',
         ])->assertOk();
 
@@ -833,7 +839,7 @@ class CourierSystemTest extends TestCase
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
         // Same date => one shipment; give B its own delivery date so the two products are independently claimable.
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(3)->toDateString(), 'reason' => 'Tanggal berbeda',
         ])->assertOk();
         $itemA->refresh();

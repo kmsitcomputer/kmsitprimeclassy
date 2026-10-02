@@ -201,14 +201,14 @@ class PackageCProductionUatRemediationTest extends TestCase
 
         // Move BOTH items to d2: the original carrier and the shell are both emptied and released — the
         // fee must land on the single surviving shipment.
-        $move = fn (OrderItem $i) => $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$i->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
+        $move = fn (OrderItem $i) => $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$i->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
         $move($aItem);
         $move($bItem);
         $this->assertSame(25000.0, $this->shipmentFeeTotal($order), 'fee conserved after whole-group move');
         $this->assertSame(1, Shipment::where('order_id', $order->id)->count(), 'emptied shells released');
 
         // Move both back to d1: still exactly one carrier at 25000.
-        $moveBack = fn (OrderItem $i) => $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$i->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
+        $moveBack = fn (OrderItem $i) => $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$i->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
         $moveBack($aItem);
         $moveBack($bItem);
         $this->assertSame(25000.0, $this->shipmentFeeTotal($order));
@@ -233,7 +233,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $this->asPaidKurirOnline($order, 25000);
 
         // Move B back to d1: it joins lower-id S1; S2 (higher id, the fee source) is released and its fee must move.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
 
         $this->assertSame(1, Shipment::where('order_id', $order->id)->count());
         $this->assertSame(25000.0, (float) Shipment::where('order_id', $order->id)->value('shipping_fee_snapshot'));
@@ -252,7 +252,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $item = $this->item($order, $a);
 
         // Split 1 of 3 to d2: Round-5 equal allocation divides the unchanged Order fee across both groups.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
         $this->assertSame(25000.0, $this->shipmentFeeTotal($order), 'conserved exactly across the split groups');
@@ -310,7 +310,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $this->assertSame(2, OrderItem::where('shipment_id', $trackingShipmentId)->count(), 'original membership preserved');
 
         // Reschedule one of the two committed siblings: allowed (it moves off), the committed shipment is untouched.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertOk();
         $this->assertNotNull(Shipment::find($trackingShipmentId));
         $this->assertSame('RESI-123', Shipment::find($trackingShipmentId)->tracking_number);
         $this->assertSame($trackingShipmentId, (int) $this->item($order, $b)->fresh()->shipment_id, 'sibling keeps its committed identity');
@@ -331,7 +331,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $shipment->update(['courier_id' => $courier->id, 'status' => 'pending']);
         $this->assertFalse(ShipmentGroupingService::isMutable($shipment->fresh()));
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
 
         // No partial mutation: date, shipment identity, courier and shipment count all unchanged.
         $this->assertSame($d1, $item->fresh()->requested_delivery_date?->toDateString());
@@ -350,21 +350,21 @@ class PackageCProductionUatRemediationTest extends TestCase
         $order = $this->order($konsumen, [[$a, 1]]);
         $item = $this->item($order, $a);
         $item->update(['status' => 'terkirim']);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
 
         // in_transit
         $b = $this->product($agen, 'B');
         $order2 = $this->order($konsumen, [[$b, 1]]);
         $item2 = $this->item($order2, $b);
         $item2->update(['status' => 'dikirim']);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order2->id}/items/{$item2->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order2->id}/items/{$item2->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
 
         // tracking-committed pending shipment (item still diproses)
         $c = $this->product($agen, 'C');
         $order3 = $this->order($konsumen, [[$c, 1]]);
         $item3 = $this->item($order3, $c);
         Shipment::where('order_id', $order3->id)->firstOrFail()->update(['tracking_number' => 'RESI-9']);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order3->id}/items/{$item3->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order3->id}/items/{$item3->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
         $this->assertSame('RESI-9', Shipment::where('order_id', $order3->id)->value('tracking_number'));
     }
 
@@ -379,7 +379,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $courier = $this->courier($agen);
         $shipment->update(['courier_id' => $courier->id]);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
 
         // Committed shipment keeps its identity, courier and remaining item; the moved item is elsewhere.
         $this->assertSame($shipment->id, (int) $this->item($order, $b)->fresh()->shipment_id);

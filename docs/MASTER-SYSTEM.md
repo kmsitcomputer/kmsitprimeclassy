@@ -97,7 +97,7 @@ Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amou
 
 ## 14. Fulfilment
 
-After an order reaches `diproses`, a one-per-order **Stock Request** is created (Agent-sourced items only). Gudang proposes quantities, **Admin approves or rejects each product line** (a rejection never cancels the order's demand), and approval atomically moves stock Transit → Shipping and releases the matching reservation for the approved lines only. The Stock Request follows order quantity changes. Partial fulfilment stays on the same request. Direct Gudang fulfilment is disabled. Order-level adjustments, splits and add-line keep the Stock Request consistent. See [BUSINESS-RULES.md §10](BUSINESS-RULES.md#10-reservation-and-stock-movement-lifecycle-locked) and [§16](BUSINESS-RULES.md#16-warehouse-requests-and-fulfilment).
+After an order reaches `diproses`, Gudang sees an operational order projection and proposes fulfillment quantity/date changes. A pending proposal does not change canonical state. Admin reviews CURRENT versus PROPOSED values and approves or rejects; approval revalidates and applies through canonical fulfillment/reschedule services, while rejection and stale conflicts leave the order unchanged. Legacy Stock Request tables remain as internal demand/history accounting and are not a user-facing workflow. See [BUSINESS-RULES.md §10](BUSINESS-RULES.md#10-reservation-and-stock-movement-lifecycle-locked) and [BUSINESS-RULES.md §16](BUSINESS-RULES.md#16-warehouse-fulfillment-approval).
 
 ## 15. Shipment
 
@@ -135,10 +135,10 @@ Buckets: `transit` (factory receipts), `factory_plan` (committed/planned supply,
 
 Agent: `quantity_reserved` on the stock row (reserve at order creation / increase; release on cancel/reduce/approved fulfilment). Sub: one `sub_stock_reservations` row per order item (`active` → `consumed` at `dikirim` by the owner, or `released`). Reservation never reduces physical stock; shipment consumes physical stock plus reservation; pre-shipment cancellation releases the reservation.
 
-## 24. Stock requests
+## 24. Legacy Stock Request data
 
 Three different things share the name "request" — keep them apart:
-- **Order Stock Request** (`stock_requests`): one per order, created when the order first enters `diproses`; items per Agent-sourced order item; statuses `pending / partial / fulfilled / cancelled`; processed through **proposals** (Gudang) and **approval** (Admin).
+- **Order Stock Request** (`stock_requests`): retained per order for internal demand/reservation accounting and historical compatibility; it is not exposed as a user-facing workflow.
 - **Warehouse stock-addition request** (`warehouse_stock_requests`): Gudang asks to add stock to Transit/Factory Plan or adjust a Sub balance; Admin approves.
 - **Sub stock request** (`sub_stock_requests`): Sales-Kurir-Sub asks to replenish (Transit→Sub) or return (Sub→Transit); see §28.
 

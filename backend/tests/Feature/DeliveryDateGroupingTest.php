@@ -84,7 +84,7 @@ class DeliveryDateGroupingTest extends TestCase
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $this->b['productA']->id)->firstOrFail();
         $grandTotalBefore = (float) $order->total_amount;
 
-        $this->actingAs($this->b['admin'])
+        $this->actingAs($this->b['agen'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
                 'requested_delivery_date' => '2026-12-15', 'reason' => 'stok belum siap',
             ])->assertOk();

@@ -40,7 +40,9 @@ Authority by action (route role gate **and** a policy/service ownership check ap
 | View orders | `super_admin` all; `agen`/`admin`/`keuangan` branch; `korsal` own `korsal_id`; `sales`/`sales-kurir-sub` own `sales_id`; `konsumen` own; `gudang` list only (operational projection); `kurir` none (uses `/kurir/orders`) |
 | Move order status (`diproses` …) | `super_admin`, `agen`, `admin` |
 | Cancel an order | `super_admin`; `agen`/`admin` branch; `korsal`/`sales`/`sales-kurir-sub`/`konsumen` for their own (business rule §14 decides when) |
-| Adjust fulfilled quantity, reschedule/split | `super_admin`, `agen`, `admin` |
+| Directly adjust fulfilled quantity, reschedule/split | `super_admin`, `agen` |
+| Propose order fulfillment quantity/date changes | `gudang` |
+| Approve/reject order fulfillment change proposals | `admin` (same Agent) |
 | **Add a product line to an existing order (SC-03)** | **`admin` only**, same Agent |
 | Verify payment / mark COD / settle DP / confirm COD proof | `super_admin`, `keuangan` |
 | Refund and additional-payment status; mark return refunded | `super_admin`, `keuangan` (lists also `agen`, `admin`) |
@@ -50,10 +52,10 @@ Authority by action (route role gate **and** a policy/service ownership check ap
 | Return: request / review / inspect / finalize | `konsumen` / `super_admin`,`agen`,`admin` / `gudang` / `admin` (courier pickup+confirm by `kurir`) |
 | Product & Variation create/read/update | `super_admin`, `agen`, `admin` |
 | Product & Variation delete; fee write; category write | delete `super_admin`,`agen` (Admin **denied**); fees `super_admin`,`agen`; categories `super_admin` |
-| Warehouse stock reads, sellable, stock requests (read), transfers/opnames (read) | `super_admin`, `agen`, `admin`, `gudang` |
+| Warehouse stock reads, sellable, transfers/opnames (read) | `super_admin`, `agen`, `admin`, `gudang` |
 | Request stock addition / Sub adjustment | `gudang` (Admin approves/rejects) |
-| Create transfers; create/count/submit opnames; propose fulfilment | `gudang` |
-| Approve/reject transfers, opnames, fulfilment proposals, stock-addition requests; toggle Factory Plan | `admin` only |
+| Create transfers; create/count/submit opnames | `gudang` |
+| Approve/reject transfers, opnames, fulfillment-change proposals, stock-addition requests; toggle Factory Plan | `admin` only |
 | Create Sub Location / assign owner / eligible owners | `agen`, `admin` |
 | Sub stock request: create / cancel / receive | `sales-kurir-sub` (own) |
 | Sub stock request: approve / reject | `admin` |
@@ -176,12 +178,12 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 - Courier fee follows the active fulfilled quantity (scaled on reduce/increase, conserved exactly on split, always from the historical snapshot); Agent/Sales snapshots and existing commission rows are untouched by adjustments.
 - Fee visibility: `agent_fee` only `super_admin`/`agen`; `courier_fee` only `super_admin`/`agen`/`admin`/`keuangan`; sales fee to the beneficiary chain and finance; konsumen and kurir never see fee/price fields.
 
-## 16. Warehouse requests and fulfilment
+## 16. Warehouse fulfillment approval
 
-- **LOCKED chain:** order enters `diproses` → one Stock Request (+ items for Agent-sourced order items) → **Gudang proposes** quantities (≤ remaining) → **Admin decides PER PRODUCT (proposal line)** → physical move + reservation release for approved lines only (§10). Direct Gudang fulfilment is disabled. Partial fulfilment keeps the remainder on the same request/item; status is derived `pending / partial / fulfilled`.
-- **Proposal item vs order demand (LOCKED distinction):** a `StockRequestItem` is the inventory REQUIREMENT caused by the order (requested / fulfilled / remaining); a proposal item is Gudang's PROPOSED fulfilment of it. Admin approval/rejection is per proposal item (`decision_status` pending/approved/rejected, with actor/time/reason). **Rejecting a proposed fulfilment never changes the order demand** — requested/fulfilled/remaining stay and Gudang may propose again. The proposal header status is derived (`pending`, `partial` = mixed/incomplete, `approved`, `rejected`); the whole-proposal endpoints only act on lines still pending. Approving one line never executes another.
-- **Stock Request follows the order:** `requested_qty` tracks the order line's current active quantity and `remaining = requested − fulfilled` (never negative). Approval/rejection always re-reads the current demand and the proposal-item decisions under a row lock — never a stale REPEATABLE READ snapshot — so a concurrent quantity change can never corrupt the counters. An idempotent **replay** likewise returns the CURRENT committed decision graph — proposal, proposal items, Stock Request demand and the related `OrderItem` fields that the response projects (`order_quantity`, `delivery_date`) — via locking reads, while remaining exactly-once on every stock/audit effect. Quantity increase adds demand (re-opening a fulfilled request); a reduction may only consume the unfulfilled remainder — reducing below what the warehouse already fulfilled is rejected 422 (warehouse history is never rewritten). Gudang sees Jumlah Order / Diajukan / Dipenuhi / Sisa.
-- Stock Request is created exactly once (idempotent); Sub-sourced items are excluded; an order made only of Sub items has none.
+- An order in `diproses` is visible to Gudang through the operational order projection. Gudang proposes fulfillment quantity and/or requested delivery date on an order item; the pending proposal does not mutate canonical order, shipment, reservation, inventory, payment, or consumer state.
+- The additive `order_fulfillment_change_proposals` record stores the current quantity/date snapshot, proposed values, Gudang actor, reason, status, and Admin decision metadata. Admin alone approves or rejects. Approval locks Order first, revalidates the snapshots, then delegates to canonical fulfillment/reschedule services; a stale proposal fails closed with no partial effect. Rejection leaves canonical state unchanged. Terminal decisions are idempotent.
+- Gudang cannot approve or directly mutate protected fulfillment state. Existing shipping classifier, historical shipment, inventory, payment, and shipment-grouping rules remain authoritative at approval.
+- **Legacy Stock Request retention:** `stock_requests`, `stock_request_items`, and historical proposal tables remain physically present for internal demand accounting, compatibility, and historical records. They are no longer a user-facing workflow and are not deleted by this change. Internal quantity reconciliation continues to preserve reservations and demand invariants.
 - Gudang cannot change stock by itself: stock addition (Transit/Factory Plan) and Sub adjustments are **requests approved by Admin**; Super Admin and Agen are not inventory approvers.
 
 ## 17. Sub stock requests (**LOCKED chains**)
@@ -223,7 +225,7 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 
 ## 22. SC-03 — add-line to an existing order
 
-**LOCKED (Human decision):** only the **`admin`** role, same Agent/branch, may add a **new** product/variation line to an existing order. `super_admin`, `agen` and every other role are denied; `OrderPolicy::manageFulfillment` is unchanged and is not reused.
+**LOCKED (Human decision):** only the **`admin`** role, same Agent/branch, may add a **new** product/variation line to an existing order. `super_admin`, `agen` and every other role are denied. This add-line authority is separate from Gudang fulfillment proposals; Admin cannot directly mutate fulfillment quantity/date and must approve or reject a pending proposal.
 
 | Rule | Behaviour |
 |---|---|

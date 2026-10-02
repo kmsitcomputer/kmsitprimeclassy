@@ -142,8 +142,8 @@ class OrderPolicy
     }
 
     /**
-     * Fulfillment quantity/delivery-date changes touch price and refund/
-     * additional-payment money — office-only (super_admin/agen/admin).
+     * Direct fulfillment quantity/delivery-date changes touch price and
+     * refund/additional-payment money. Admin uses Gudang proposals instead.
      * "Kurir tidak boleh... mengubah harga... mengubah payment" — kurir must
      * never reach this, unlike updateStatus which they share.
      */
@@ -153,13 +153,13 @@ class OrderPolicy
             return true;
         }
 
-        return $user->isRole('agen', 'admin') && $order->agent_id === $user->agent_id;
+        return $user->isRole('agen') && $order->agent_id === $user->agent_id;
     }
 
     /**
      * Package C / SC-03: adding a NEW product/variation line to an existing order is ADMIN ONLY
-     * (Human decision, 2026-10-01) — deliberately narrower than manageFulfillment, which stays
-     * unchanged for the existing Package A/B fulfillment features (super_admin/agen/admin).
+     * (Human decision, 2026-10-01). It is a separate authority from direct fulfillment changes
+     * (super_admin/agen) and Gudang-proposed changes approved by Admin.
      *
      * Exactly role `admin`, restricted to the order's own branch. Every other role — including
      * super_admin and agen — is denied, and a cross-Agent admin is denied. Defence in depth: this

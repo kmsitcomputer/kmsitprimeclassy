@@ -305,7 +305,7 @@ class DownPaymentTest extends TestCase
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
             'fulfilled_quantity' => 0, 'reason' => 'Stok habis',
         ])->assertOk();
 
@@ -339,7 +339,7 @@ class DownPaymentTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
             'fulfilled_quantity' => 0, 'reason' => 'Batal total',
         ])->assertOk();
 

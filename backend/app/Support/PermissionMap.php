@@ -38,7 +38,7 @@ class PermissionMap
             'admin' => [
                 'users.view.network', 'stock.view.own', 'stock.manage',
                 'orders.view.network', 'orders.manage.status',
-                'orders.manage.fulfillment', 'orders.manage.shipment', 'orders.cancel',
+                'orders.manage.shipment', 'orders.cancel', 'orders.fulfillment.approve',
             ],
             // KEUANGAN = financial operations only (separation of duties):
             // payment/DP/COD verification & settlement, refunds and additional
@@ -55,7 +55,7 @@ class PermissionMap
                 'orders.view.assigned', 'orders.manage.shipment',
             ],
             'gudang' => [
-                'stock.view.own', 'orders.view.assigned',
+                'stock.view.own', 'orders.view.assigned', 'orders.fulfillment.propose',
             ],
             'sales-kurir-sub' => [
                 'users.view.network', 'orders.create', 'orders.view.assigned', 'orders.manage.shipment',

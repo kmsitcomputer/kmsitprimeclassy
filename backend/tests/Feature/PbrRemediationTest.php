@@ -262,7 +262,7 @@ class PbrRemediationTest extends TestCase
         $this->assertSame($product->sku, $item['product']['sku']);
     }
 
-    public function test_stock_request_endpoint_returns_product_name_sku_and_image_through_relations(): void
+    public function test_stock_request_list_is_retired_and_gudang_sees_operational_orders(): void
     {
         $b = $this->branch();
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $b['agent']->id]);
@@ -275,17 +275,11 @@ class PbrRemediationTest extends TestCase
 
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $response = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests');
-        $response->assertOk();
-        $item = $response->json('data.0.items.0');
-        $this->assertSame('PBR Request Cake', $item['product_name']);
-        $this->assertSame($product->sku, $item['sku']);
-        $this->assertSame('PBR Request Cake', $item['product']['name']);
-        $this->assertStringContainsString('/storage/', (string) $item['product_image_url']);
-        $this->assertArrayNotHasKey('product_name_snapshot', $item);
+        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests')->assertNotFound();
+        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/orders/diproses')->assertOk()->assertJsonPath('data.0.id', $order->id);
     }
 
-    public function test_stock_request_endpoint_returns_variant_information_when_applicable(): void
+    public function test_stock_request_list_is_retired_for_variation_orders_too(): void
     {
         $b = $this->branch();
         $superAdmin = User::factory()->superAdmin()->create();
@@ -304,12 +298,8 @@ class PbrRemediationTest extends TestCase
 
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $response = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests');
-        $response->assertOk();
-        $item = $response->json('data.0.items.0');
-        $this->assertSame('PBR Variant Cake', $item['product_name']);
-        $this->assertSame('500gr / Coklat', $item['variation_label']);
-        $this->assertSame($variation->sku, $item['sku']);
+        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests')->assertNotFound();
+        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/orders/diproses')->assertOk()->assertJsonPath('data.0.id', $order->id);
     }
 
     /* ---------------- fixtures ---------------- */

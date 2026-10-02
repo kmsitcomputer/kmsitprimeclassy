@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\V1\Courier\ShipmentController;
 use App\Http\Controllers\Api\V1\Fee\CommissionController;
 use App\Http\Controllers\Api\V1\Fee\FeeController;
 use App\Http\Controllers\Api\V1\Fulfillment\OrderFulfillmentController;
+use App\Http\Controllers\Api\V1\Fulfillment\OrderFulfillmentChangeProposalController;
 use App\Http\Controllers\Api\V1\Install\InstallController;
 use App\Http\Controllers\Api\V1\Integration\SheetsController;
 use App\Http\Controllers\Api\V1\Language\LanguageController;
@@ -41,8 +42,6 @@ use App\Http\Controllers\Api\V1\Return\ReturnController;
 use App\Http\Controllers\Api\V1\Settings\WebsiteSettingController;
 use App\Http\Controllers\Api\V1\Stock\StockController;
 use App\Http\Controllers\Api\V1\Stock\StockOpnameController;
-use App\Http\Controllers\Api\V1\Stock\StockRequestController;
-use App\Http\Controllers\Api\V1\Stock\StockRequestProposalController;
 use App\Http\Controllers\Api\V1\Stock\StockTransferController;
 use App\Http\Controllers\Api\V1\Stock\SubStockRequestController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseController;
@@ -233,7 +232,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'store']);
     });
 
-    Route::middleware('role:super_admin,agen,admin')->group(function () {
+    Route::middleware('role:super_admin,agen')->group(function () {
         // Per-item fulfillment adjustment — only while the order is 'diproses'
         // (OrderFulfillmentService enforces the exact window). Never kurir —
         // this touches price/refund/additional-payment money. This is the
@@ -242,7 +241,9 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/orders/{order}/items/{item}/fulfillment', [OrderFulfillmentController::class, 'adjust']);
         Route::patch('/orders/{order}/items/{item}/reschedule', [OrderFulfillmentController::class, 'reschedule']);
 
-        // Return review is an operational decision (approve/reject, restock).
+    });
+    Route::middleware('role:super_admin,agen,admin')->group(function () {
+        // Return review remains available to Admin; only direct fulfillment mutation is restricted above.
         Route::get('/admin/returns', [ReturnController::class, 'index']);
         Route::get('/admin/returns/{return}', [ReturnController::class, 'show']);
         Route::patch('/admin/returns/{return}/review', [ReturnController::class, 'review']);
@@ -435,24 +436,15 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/warehouse/transfers/{transfer}/approve', [StockTransferController::class, 'approve']);
         Route::post('/warehouse/transfers/{transfer}/reject', [StockTransferController::class, 'reject']);
     });
-    Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
-        Route::get('/warehouse/stock-requests', [StockRequestController::class, 'index']);
-        Route::get('/warehouse/stock-requests/{stockRequest}', [StockRequestController::class, 'show']);
-    });
+    // The old Stock Request is retained as internal historical/demand accounting only.
+    // User-facing warehouse work is now an order-scoped Gudang proposal reviewed by Admin.
     Route::middleware('role:gudang')->group(function () {
-        Route::post('/warehouse/stock-requests/{stockRequest}/fulfill', [StockRequestController::class, 'fulfill']);
-        Route::post('/warehouse/stock-requests/{stockRequest}/proposals', [StockRequestProposalController::class, 'store']);
-    });
-    Route::middleware('role:admin,gudang')->group(function () {
-        Route::get('/warehouse/fulfillment-proposals', [StockRequestProposalController::class, 'index']);
-        Route::get('/warehouse/fulfillment-proposals/{proposal}', [StockRequestProposalController::class, 'show']);
+        Route::get('/warehouse/orders/diproses', [OrderFulfillmentChangeProposalController::class, 'orders']);
+        Route::post('/warehouse/orders/{order}/items/{item}/fulfillment-proposals', [OrderFulfillmentChangeProposalController::class, 'store']);
     });
     Route::middleware('role:admin')->group(function () {
-        Route::post('/warehouse/fulfillment-proposals/{proposal}/approve', [StockRequestProposalController::class, 'approve']);
-        Route::post('/warehouse/fulfillment-proposals/{proposal}/reject', [StockRequestProposalController::class, 'reject']);
-        // Per-product decision (production UAT): one proposal line at a time.
-        Route::post('/warehouse/fulfillment-proposals/{proposal}/items/{item}/approve', [StockRequestProposalController::class, 'approveItem'])->scopeBindings();
-        Route::post('/warehouse/fulfillment-proposals/{proposal}/items/{item}/reject', [StockRequestProposalController::class, 'rejectItem'])->scopeBindings();
+        Route::get('/warehouse/fulfillment-change-proposals', [OrderFulfillmentChangeProposalController::class, 'index']);
+        Route::post('/warehouse/fulfillment-change-proposals/{proposal}/{decision}', [OrderFulfillmentChangeProposalController::class, 'decide']);
     });
     Route::middleware('role:agen,admin')->group(function () {
         Route::post('/stock/adjust', [StockController::class, 'adjust']);

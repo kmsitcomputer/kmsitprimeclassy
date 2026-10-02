@@ -212,7 +212,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $item = $this->item($order, $a);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame($d1, $item->fresh()->requested_delivery_date?->toDateString());
@@ -227,7 +227,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $item = $this->item($order, $a);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'pecah', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'pecah', 'quantity' => 1])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(1, OrderItem::where('order_id', $order->id)->count());
@@ -244,7 +244,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $order = $this->order($konsumen, [[$a, 2]], $d1);
         $this->asKurirOnline($order, 0.0);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         $this->assertSame(0.0, $this->orderFee($order));
         $this->assertSame([$d1 => 0.0, $d2 => 0.0], $this->feeByDate($order));
@@ -260,7 +260,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $order = $this->order($konsumen, [[$a, 2]], $d1);
         $this->asKurirOnline($order, 30000.0);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         $this->assertSame([$d1 => 15000.0, $d2 => 15000.0], $this->feeByDate($order));
         $this->assertSame(30000.0, $this->orderFee($order));
@@ -278,8 +278,8 @@ class PackageCProductionUatRound4Test extends TestCase
         $this->asKurirOnline($order, 30001.0);
         $parent = $this->item($order, $a);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $d3, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $d3, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         // 30001 / 3 = 10000 base + remainder 1 -> first date gets +1.
         $this->assertSame([$d1 => 10001.0, $d2 => 10000.0, $d3 => 10000.0], $this->feeByDate($order));
@@ -308,8 +308,8 @@ class PackageCProductionUatRound4Test extends TestCase
         $this->asKurirOnline($order, $total);
         $parent = $this->item($order, $a);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $dates[1], 'reason' => 'x', 'quantity' => 1])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $dates[2], 'reason' => 'x', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $dates[1], 'reason' => 'x', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $dates[2], 'reason' => 'x', 'quantity' => 1])->assertOk();
 
         $expectedByDate = [$dates[0] => $expected['d1'], $dates[1] => $expected['d2'], $dates[2] => $expected['d3']];
         $this->assertSame($expectedByDate, $this->feeByDate($order));
@@ -327,7 +327,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $parent = $this->item($order, $a);
 
         foreach ([1, 2, 3] as $i) {
-            $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $dates[$i], 'reason' => 'x', 'quantity' => 1])->assertOk();
+            $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $dates[$i], 'reason' => 'x', 'quantity' => 1])->assertOk();
         }
 
         $this->assertSame(30000.0, $this->feeTotal($order));
@@ -345,12 +345,12 @@ class PackageCProductionUatRound4Test extends TestCase
         $this->asKurirOnline($order, 30000.0);
         $parent = $this->item($order, $a);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertOk();
         $this->assertSame([$d1 => 15000.0, $d2 => 15000.0], $this->feeByDate($order));
 
         // Move the split child back to d1: one active group again -> full fee, deterministic, no drift.
         $child = OrderItem::where('order_id', $order->id)->whereKeyNot($parent->id)->firstOrFail();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$child->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$child->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
 
         $this->assertSame([$d1 => 30000.0], $this->feeByDate($order));
         $this->assertSame(30000.0, $this->feeTotal($order));
@@ -367,13 +367,13 @@ class PackageCProductionUatRound4Test extends TestCase
         $this->asKurirOnline($order, 30000.0);
 
         // Move B to its own d2 group, then commit it (courier assigned) with a nonzero fee snapshot.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
         $committed = Shipment::where('order_id', $order->id)->whereKeyNot($this->firstShipment($order)->id)->firstOrFail();
         $committed->update(['courier_id' => $this->courier($agen)->id]);
         $before = $this->snapshot($order);
 
         // Rescheduling A to a new d3 would require redistributing over the committed group -> refuse.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d3, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d3, 'reason' => 'x'])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame($d1, $this->item($order, $a)->fresh()->requested_delivery_date?->toDateString());
@@ -515,7 +515,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $this->item($order, $b)->update(['requested_delivery_date' => $d2, 'shipment_id' => $s2->id]);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
     }
@@ -569,8 +569,8 @@ class PackageCProductionUatRound4Test extends TestCase
         $item = $this->item($order, $a);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 4, 'reason' => 'x'])->assertStatus(422);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 4, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 2, 'reason' => 'x'])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(3, (int) $item->fresh()->fulfilled_quantity);
@@ -583,9 +583,9 @@ class PackageCProductionUatRound4Test extends TestCase
         $order = $this->order($konsumen, [[$a, 3]], now()->addDays(3)->toDateString());
         $item = $this->item($order, $a);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 4, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 4, 'reason' => 'x'])->assertOk();
         $this->assertSame(4, (int) $item->fresh()->fulfilled_quantity);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 2, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => 2, 'reason' => 'x'])->assertOk();
         $this->assertSame(2, (int) $item->fresh()->fulfilled_quantity);
     }
 }

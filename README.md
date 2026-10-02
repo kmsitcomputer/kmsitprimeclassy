@@ -22,7 +22,7 @@ Historical specs, audits and checkpoints live in Git history only.
 
 ## Major modules
 
-Catalog & SKU registry · Referral hierarchy (10 roles) · Checkout & orders · Payment (COD, DP, manual transfer, gateways) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
+Catalog & SKU registry · Referral hierarchy (10 roles) · Checkout & orders · Payment (COD, DP, manual transfer, gateways) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, Gudang fulfillment proposals) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
 
 ## Repository layout
 

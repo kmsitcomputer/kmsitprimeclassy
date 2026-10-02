@@ -296,7 +296,7 @@ class PackageCProductionUatRound3Test extends TestCase
         $before = $this->snapshot($order);
 
         // Rescheduling A to d2 empties S1 -> releaseIfEmpty(S1, S2) would consolidate two conflicting carriers.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
@@ -320,7 +320,7 @@ class PackageCProductionUatRound3Test extends TestCase
         $before = $this->snapshot($order);
 
         // Splitting 1 of P onto d2 triggers the lazy regroup of the d2 group -> conflicting carriers -> refuse.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $p)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $p)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(3, OrderItem::where('order_id', $order->id)->count());
@@ -337,7 +337,7 @@ class PackageCProductionUatRound3Test extends TestCase
         $this->setFee($this->firstShipment($order), 25000, 5000)->update(['shipping_provider_code' => 'openroute']);
         Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => 25000]);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $p)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $p)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         // Round-5 equal allocation: no false conflict, the Order fee is conserved exactly across the groups.
         $this->assertSame(25000.0, $this->feeTotal($order), 'no fee lost or double counted');
@@ -370,11 +370,11 @@ class PackageCProductionUatRound3Test extends TestCase
         $before = $this->snapshot($order);
 
         // Full reschedule of one member -> membership must not change.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
 
         // Partial split -> represented quantity must not change.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
     }
@@ -390,8 +390,8 @@ class PackageCProductionUatRound3Test extends TestCase
         $this->makeHistorical($this->firstShipment($order), $kind, $admin->id);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(1, OrderItem::where('order_id', $order->id)->count());
@@ -408,7 +408,7 @@ class PackageCProductionUatRound3Test extends TestCase
         $shipment1 = $this->firstShipment($order1);
         $courier = $this->courier($agen);
         $shipment1->update(['courier_id' => $courier->id]);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order1->id}/items/{$this->item($order1, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order1->id}/items/{$this->item($order1, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
         $this->assertSame($shipment1->id, (int) $this->item($order1, $a)->fresh()->shipment_id);
         $this->assertSame($courier->id, (int) $shipment1->fresh()->courier_id);
 
@@ -416,7 +416,7 @@ class PackageCProductionUatRound3Test extends TestCase
         $order2 = $this->order($konsumen, [[$a, 1], [$b, 1]], now()->addDays(3)->toDateString());
         $shipment2 = $this->firstShipment($order2);
         $shipment2->update(['courier_id' => $courier->id]);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order2->id}/items/{$this->item($order2, $b)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order2->id}/items/{$this->item($order2, $b)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertOk();
         $this->assertSame($shipment2->id, (int) $this->item($order2, $a)->fresh()->shipment_id);
         $this->assertSame($courier->id, (int) $shipment2->fresh()->courier_id);
         $this->assertNotSame($shipment2->id, (int) $this->item($order2, $b)->fresh()->shipment_id);
@@ -431,7 +431,7 @@ class PackageCProductionUatRound3Test extends TestCase
         $shipment = $this->firstShipment($order);
         $shipment->update(['tracking_number' => 'RESI-1']);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'x'])->assertStatus(422);
         $this->assertSame('RESI-1', $shipment->fresh()->tracking_number);
         $this->assertSame($shipment->id, (int) $this->item($order, $a)->fresh()->shipment_id);
     }

@@ -95,7 +95,7 @@ class DsPbrFollowUpTest extends TestCase
         $this->assertNull($rows->firstWhere('product_id', $bare->id)['product_image_url']);
     }
 
-    public function test_stock_request_item_resolves_primary_image_variant_identity_and_agent_scoping(): void
+    public function test_legacy_stock_request_detail_is_retired_and_order_list_is_branch_scoped(): void
     {
         $b = $this->branch();
         $product = Product::create(['sku' => 'DSPBR-SR-'.uniqid(), 'name' => 'DS-PBR Request Cake', 'slug' => 'dspbr-sr-'.uniqid(), 'has_variations' => false, 'status' => 'active']);
@@ -111,20 +111,10 @@ class DsPbrFollowUpTest extends TestCase
         $stockRequest = StockRequest::withoutGlobalScopes()->create(['agent_id' => $b['agent']->id, 'order_id' => $order->id, 'request_number' => 'DSR-'.Str::uuid(), 'status' => 'pending']);
         $stockRequest->items()->create(['order_item_id' => $orderItem->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 2, 'fulfilled_qty' => 0, 'remaining_qty' => 2]);
 
-        $response = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests/'.$stockRequest->id);
-        $response->assertOk();
-        $item = $response->json('data.items.0');
-        $this->assertSame('DS-PBR Request Cake', $item['product_name']);
-        $this->assertSame($product->sku, $item['sku']);
-        $this->assertStringContainsString('/storage/products/sr.jpg', (string) $item['product_image_url']);
-        $this->assertArrayNotHasKey('product_name_snapshot', $item);
-
-        DB::flushQueryLog();
-        DB::enableQueryLog();
-        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests/'.$stockRequest->id)->assertOk();
-        $imageQueries = collect(DB::getQueryLog())->filter(fn ($q) => str_contains($q['query'], 'product_images'))->all();
-        DB::disableQueryLog();
-        $this->assertCount(1, $imageQueries);
+        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests/'.$stockRequest->id)->assertNotFound();
+        $orders = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/orders/diproses')->assertOk();
+        $this->assertSame($order->id, $orders->json('data.0.id'));
+        $this->assertArrayNotHasKey('total_amount', $orders->json('data.0'));
 
         $list = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse-stock?stock_type=transit')->assertOk()->json('data');
         $this->assertNull(collect($list)->firstWhere('product_id', $foreign->id));

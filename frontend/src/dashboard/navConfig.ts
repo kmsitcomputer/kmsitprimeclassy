@@ -72,9 +72,22 @@ const ROLE_ITEMS: NavItem[] = [
     label: 'Order',
     routeName: 'orders',
     icon: 'box',
-    // R-04: Gudang executes warehouse work through the stock-request surfaces, not the generic
-    // (financial) order list; the backend order projection is operational-only for them anyway.
+    // Gudang uses the operational order projection and proposal workflow, not the generic order list.
     show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub', 'gudang'),
+  },
+  {
+    key: 'warehouse-orders',
+    label: 'Order Diproses',
+    routeName: 'warehouse-fulfillment-changes',
+    icon: 'box',
+    show: (auth) => isRole(auth, 'gudang'),
+  },
+  {
+    key: 'fulfillment-approvals',
+    label: 'Perubahan Fulfillment',
+    routeName: 'warehouse-fulfillment-changes',
+    icon: 'document',
+    show: (auth) => isRole(auth, 'admin'),
   },
   {
     key: 'commissions',
@@ -127,13 +140,6 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Stock Opname',
         routeName: 'warehouse-opnames',
         icon: 'document',
-        show: (auth) => isRole(auth, 'gudang', 'admin', 'agen'),
-      },
-      {
-        key: 'warehouse-stock-requests',
-        label: 'Stock Requests',
-        routeName: 'warehouse-stock-requests',
-        icon: 'box',
         show: (auth) => isRole(auth, 'gudang', 'admin', 'agen'),
       },
       {

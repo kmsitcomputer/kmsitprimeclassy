@@ -540,7 +540,7 @@ class OrderLineAdditionTest extends TestCase
 
     // ----- Package A/B invariant guard --------------------------------------------------------
 
-    public function test_manage_fulfillment_authority_is_unchanged(): void
+    public function test_super_admin_retains_direct_fulfillment_override(): void
     {
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
@@ -631,44 +631,30 @@ class OrderLineAdditionTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', (string) OrderItem::where('idempotency_key', $key)->value('request_fingerprint'));
     }
 
-    public function test_rev002_fulfilled_stock_request_reopens_for_new_demand_and_new_demand_can_be_approved(): void
+    public function test_add_line_updates_legacy_internal_demand_without_exposing_stock_requests(): void
     {
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
-        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
         $productA = $this->makeProduct($agen, 'Kue A', 10000, 10);
         $productB = $this->makeProduct($agen, 'Kue B', 25000, 10);
         $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 2]]);
-        $this->stockWarehouse($agen, $productA);
-        $this->stockWarehouse($agen, $productB);
 
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
-        $firstItem = $request->items()->firstOrFail();
-        $proposal = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $firstItem->id, 'quantity' => 2]]])->assertCreated()->json('data');
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
-        $this->assertSame('fulfilled', $request->fresh()->status);
-        $this->assertNotNull($request->fresh()->fulfilled_at);
+        $this->assertSame(2, $request->items()->firstOrFail()->requested_qty);
 
         $key = (string) Str::uuid();
         $this->addLine($order, $admin, ['product_id' => $productB->id, 'quantity' => 3, 'reason' => 'x'], $key)->assertCreated();
 
         $request = $request->fresh();
-        $this->assertSame('partial', $request->status, 'history is preserved (fulfilled_qty > 0), new demand is outstanding');
-        $this->assertNull($request->fulfilled_at);
+        $this->assertSame('pending', $request->status);
         $this->assertSame(2, StockRequest::withoutGlobalScopes()->findOrFail($request->id)->items()->count());
         $this->assertSame(1, StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->count());
-        $this->assertSame(2, $firstItem->fresh()->fulfilled_qty);
-        $this->assertSame(0, $firstItem->fresh()->remaining_qty);
+        $this->assertSame([2, 3], $request->items()->orderBy('id')->pluck('requested_qty')->map(fn ($quantity) => (int) $quantity)->all());
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $this->actingAs($gudang)->getJson('/api/v1/warehouse/stock-requests')->assertNotFound();
 
         $newItem = $request->items()->where('product_id', $productB->id)->firstOrFail();
         $this->assertSame([3, 0, 3], [$newItem->requested_qty, $newItem->fulfilled_qty, $newItem->remaining_qty]);
 
-        $second = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $newItem->id, 'quantity' => 3]]])->assertCreated()->json('data');
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
-
-        $this->assertSame('fulfilled', $request->fresh()->status);
-        $this->assertSame(3, $newItem->fresh()->fulfilled_qty);
-        $this->assertSame(2, $firstItem->fresh()->fulfilled_qty, 'previously fulfilled quantity stays truthful');
-        $this->assertSame(0, (int) ProductStock::withoutGlobalScopes()->where('product_id', $productB->id)->value('quantity_reserved'));
     }
 
     public function test_rev003_addition_locks_stock_request_before_inventory_like_warehouse_approval(): void

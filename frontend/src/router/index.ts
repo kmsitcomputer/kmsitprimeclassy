@@ -177,10 +177,10 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
     },
     {
-      path: '/dashboard/warehouse/stock-requests',
-      name: 'warehouse-stock-requests',
-      component: () => import('@/views/dashboard/StockRequestsView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
+      path: '/dashboard/warehouse/fulfillment-changes',
+      name: 'warehouse-fulfillment-changes',
+      component: () => import('@/views/dashboard/FulfillmentChangesView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin'] },
     },
     {
       path: '/dashboard/warehouse/returns',

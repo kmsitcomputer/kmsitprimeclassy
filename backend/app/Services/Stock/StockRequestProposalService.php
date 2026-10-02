@@ -320,8 +320,7 @@ class StockRequestProposalService
                 ->lockForUpdate()->get()
                 ->load(['product.images', 'variation.compositions.option']);
 
-        // F07: current-read the related OrderItem graph too — the response projects `order_quantity` and
-        // `delivery_date` from it (StockRequestItemResource), which must not come from a stale snapshot.
+        // F07: current-read the related OrderItem graph so legacy proposal projections cannot be stale.
         $orderItemIds = $requestItems->pluck('order_item_id')->filter()->unique()->values()->all();
         $orderItems = $orderItemIds === []
             ? collect()

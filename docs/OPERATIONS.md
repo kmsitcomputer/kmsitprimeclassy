@@ -42,6 +42,8 @@ cd ../frontend && npm run type-check && npm run build-only   # rebuild dist for 
 
 Benign CLI noise on this host: `Cannot load Zend OPcache - it was already loaded` and `Module "mbstring" is already loaded`.
 
+The user-facing Stock Request workflow is retired. DEV/UAT uses the Gudang operational order projection for proposals and the Admin fulfillment-change-proposals view for approval. Legacy Stock Request tables remain for internal demand/history accounting; do not drop them or delete their rows.
+
 ### 3.1 DEV maintenance tool — `primeclassy:reset-dev-transactions` (DEV ONLY)
 
 **This is a DEV maintenance tool. It is not a production reset procedure and must never be run against production.**

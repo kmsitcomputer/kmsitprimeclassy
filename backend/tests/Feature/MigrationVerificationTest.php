@@ -21,8 +21,7 @@ use Tests\TestCase;
  * intended invariants on MariaDB, and roll back to a clean pre-R-03/pre-Package-C schema.
  *
  * The rollback step count covers the tail migrations from BOTH packages:
- * Package B (add_self_delivery_to_shipments, create_delivery_verifications, add_split_lineage_to_order_items)
- * and Package C (add_idempotency_key_to_order_items, add_request_fingerprint_to_order_items, add_item_decision_to_stock_request_proposal_items).
+ * Package B, Package C, and the additive Gudang fulfillment proposal migration.
  */
 class MigrationVerificationTest extends TestCase
 {
@@ -44,6 +43,7 @@ class MigrationVerificationTest extends TestCase
         $this->assertTrue(Schema::hasColumn('order_items', 'idempotency_key'));
         $this->assertTrue(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertTrue(Schema::hasColumn('stock_request_proposal_items', 'decision_status'));
+        $this->assertTrue(Schema::hasTable('order_fulfillment_change_proposals'));
         $this->assertNotEmpty($this->selfSubTriggers());
 
         [$order, $user, $courier] = $this->context();
@@ -63,7 +63,7 @@ class MigrationVerificationTest extends TestCase
 
     public function test_rollback_removes_everything_and_migrate_restores_it(): void
     {
-        Artisan::call('migrate:rollback', ['--step' => 6, '--force' => true]);
+        Artisan::call('migrate:rollback', ['--step' => 7, '--force' => true]);
 
         $this->assertFalse(Schema::hasTable('delivery_verifications'));
         $this->assertFalse(Schema::hasColumn('shipments', 'delivery_mode'));
@@ -72,6 +72,7 @@ class MigrationVerificationTest extends TestCase
         $this->assertFalse(Schema::hasColumn('order_items', 'idempotency_key'));
         $this->assertFalse(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertFalse(Schema::hasColumn('stock_request_proposal_items', 'decision_status'));
+        $this->assertFalse(Schema::hasTable('order_fulfillment_change_proposals'));
         $this->assertEmpty($this->selfSubTriggers(), 'rollback must drop the self_sub courier triggers');
 
         Artisan::call('migrate', ['--force' => true]);
@@ -82,6 +83,7 @@ class MigrationVerificationTest extends TestCase
         $this->assertTrue(Schema::hasColumn('order_items', 'idempotency_key'));
         $this->assertTrue(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertTrue(Schema::hasColumn('stock_request_proposal_items', 'decision_status'));
+        $this->assertTrue(Schema::hasTable('order_fulfillment_change_proposals'));
         $this->assertNotEmpty($this->selfSubTriggers(), 're-migrate must recreate the triggers');
     }
 

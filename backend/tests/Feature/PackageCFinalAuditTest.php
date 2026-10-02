@@ -181,7 +181,7 @@ class PackageCFinalAuditTest extends TestCase
         $order = $this->order($konsumen, [[$a, 4]], $d[1]);
         $this->asKurirOnline($order, '30001.00', $this->metaFor($shape));
         $total = 3000100;
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $parent = $this->item($order, $a);
 
         // 1 -> 3
@@ -219,7 +219,7 @@ class PackageCFinalAuditTest extends TestCase
         [$d1, $d2, $d3, $d4] = [now()->addDays(3)->toDateString(), now()->addDays(6)->toDateString(), now()->addDays(9)->toDateString(), now()->addDays(12)->toDateString()];
         $order = $this->order($konsumen, [[$a, 4]], $d1);
         $this->asKurirOnline($order, '30000.00', $this->openRouteMeta());
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $parent = $this->item($order, $a);
         $this->reschedule($order->id, $parent->id, $d2, 1)->assertOk();
         $this->reschedule($order->id, $parent->id, $d3, 1)->assertOk();
@@ -251,7 +251,7 @@ class PackageCFinalAuditTest extends TestCase
         $shell->save();
         $this->item($order, $b)->update(['requested_delivery_date' => $d2, 'shipment_id' => $shell->id]);
 
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $this->reschedule($order->id, $this->item($order, $a)->id, $d3, 1)->assertStatus(422);
         $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
     }
@@ -276,7 +276,7 @@ class PackageCFinalAuditTest extends TestCase
         $this->asKurirOnline($order, '30000.00', $this->openRouteMeta());
         Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'OpenRoute']);
 
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $this->reschedule($order->id, $this->item($order, $a)->id, now()->addDays(9)->toDateString(), 1)->assertStatus(422);
         $this->assertSame(1, OrderItem::where('order_id', $order->id)->count());
     }
@@ -339,7 +339,7 @@ class PackageCFinalAuditTest extends TestCase
         $shell->save();
         $this->item($order, $b)->update(['requested_delivery_date' => $d2, 'shipment_id' => $shell->id]);
 
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $this->reschedule($order->id, $this->item($order, $a)->id, $d3, 1)->assertStatus(422);
     }
 
@@ -384,7 +384,7 @@ class PackageCFinalAuditTest extends TestCase
         $remnant->update(['shipping_provider_code' => null, 'shipping_fee_snapshot' => '0.00', 'provider_meta' => null]);
 
         $this->assertSame(ShippingMethodClassifier::KURIR_ONLINE, ShipmentGroupingService::shippingClassification($order));
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $response = $this->reschedule($order->id, $this->item($order, $a)->id, $d2, 1);
         $this->assertSame(200, $response->status(), $response->getContent());
 

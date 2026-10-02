@@ -11,7 +11,6 @@ use App\Models\ProductStock;
 use App\Models\Shipment;
 use App\Models\StockRequest;
 use App\Models\StockRequestItem;
-use App\Models\StockRequestProposal;
 use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
@@ -98,28 +97,6 @@ class PackageCUatRemediationTest extends TestCase
         return StockRequestItem::query()->whereHas('request', fn ($q) => $q->withoutGlobalScopes()->where('order_id', $order->id))->where('product_id', $product->id)->firstOrFail();
     }
 
-    private function propose(User $gudang, Order $order, array $qtyByProduct): StockRequestProposal
-    {
-        $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
-        $items = [];
-        foreach ($qtyByProduct as $productId => $qty) {
-            $items[] = ['item_id' => StockRequestItem::where('stock_request_id', $request->id)->where('product_id', $productId)->value('id'), 'quantity' => $qty];
-        }
-        $id = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => $items])->assertCreated()->json('data.id');
-
-        return StockRequestProposal::withoutGlobalScopes()->with('items')->findOrFail($id);
-    }
-
-    private function proposalItemId(StockRequestProposal $proposal, Product $product): int
-    {
-        return (int) $proposal->items->firstWhere(fn ($i) => $i->requestItem->product_id === $product->id)->id;
-    }
-
-    private function approveLine(User $admin, StockRequestProposal $proposal, int $itemId)
-    {
-        return $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal->id}/items/{$itemId}/approve");
-    }
-
     private function transitQty(User $agen, Product $product): int
     {
         return (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $agen->id)->where('product_id', $product->id)->where('stock_type', 'transit')->sum('quantity');
@@ -130,148 +107,33 @@ class PackageCUatRemediationTest extends TestCase
         return (int) ProductStock::withoutGlobalScopes()->where('agent_id', $agen->id)->where('product_id', $product->id)->value('quantity_reserved');
     }
 
-    // ===================== B. per-product approval =====================
-
-    public function test_admin_approves_one_product_rejects_another_and_third_stays_pending(): void
-    {
-        ['agen' => $agen, 'admin' => $admin, 'gudang' => $gudang, 'konsumen' => $konsumen] = $this->branch();
-        [$a, $b, $c] = [$this->product($agen, 'A'), $this->product($agen, 'B'), $this->product($agen, 'C')];
-        $order = $this->order($konsumen, [[$a, 3], [$b, 2], [$c, 4]]);
-        foreach ([$a, $b, $c] as $p) {
-            $this->transit($agen, $p);
-        }
-        $reservedBefore = [$this->reserved($agen, $a), $this->reserved($agen, $b), $this->reserved($agen, $c)];
-        $proposal = $this->propose($gudang, $order, [$a->id => 3, $b->id => 2, $c->id => 4]);
-
-        // Approve A only.
-        $this->approveLine($admin, $proposal, $this->proposalItemId($proposal, $a))->assertOk()->assertJsonPath('data.status', 'partial');
-        $ra = $this->requestItem($order, $a);
-        $this->assertSame([3, 3, 0], [$ra->requested_qty, $ra->fulfilled_qty, $ra->remaining_qty]);
-        $this->assertSame(47, $this->transitQty($agen, $a));
-        $this->assertSame($reservedBefore[0] - 3, $this->reserved($agen, $a), 'reservation released only for A');
-        foreach ([$b, $c] as $p) {
-            $this->assertSame(50, $this->transitQty($agen, $p), 'B and C physical stock untouched');
-        }
-        $this->assertSame([$reservedBefore[1], $reservedBefore[2]], [$this->reserved($agen, $b), $this->reserved($agen, $c)]);
-
-        // Reject B only: the proposed fulfilment is rejected, the ORDER DEMAND is not.
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal->id}/items/{$this->proposalItemId($proposal, $b)}/reject", ['reason' => 'Stok belum siap'])->assertOk();
-        $rb = $this->requestItem($order, $b);
-        $this->assertSame([2, 0, 2], [$rb->requested_qty, $rb->fulfilled_qty, $rb->remaining_qty], 'rejected proposal must NOT erase order demand');
-        $this->assertSame(50, $this->transitQty($agen, $b));
-
-        $proposal->refresh()->load('items');
-        $states = $proposal->items->mapWithKeys(fn ($i) => [$i->requestItem->product_id => $i->decision_status]);
-        $this->assertSame(['approved', 'rejected', 'pending'], [$states[$a->id], $states[$b->id], $states[$c->id]]);
-        $this->assertSame('partial', $proposal->status);
-        $rc = $this->requestItem($order, $c);
-        $this->assertSame([4, 0, 4], [$rc->requested_qty, $rc->fulfilled_qty, $rc->remaining_qty]);
-        $this->assertNotNull($proposal->items->firstWhere('decision_status', 'rejected')->decided_by);
-    }
-
-    public function test_a_new_proposal_can_satisfy_previously_rejected_demand_and_partial_fulfilment_arithmetic(): void
-    {
-        ['agen' => $agen, 'admin' => $admin, 'gudang' => $gudang, 'konsumen' => $konsumen] = $this->branch();
-        [$a, $b] = [$this->product($agen, 'A'), $this->product($agen, 'B')];
-        $order = $this->order($konsumen, [[$a, 10], [$b, 1]]);
-        $this->transit($agen, $a);
-        $this->transit($agen, $b);
-
-        $first = $this->propose($gudang, $order, [$a->id => 6]);
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$first->id}/items/{$first->items->first()->id}/reject", ['reason' => 'tidak cukup'])->assertOk();
-        $this->assertSame('rejected', $first->fresh()->status);
-        $ra = $this->requestItem($order, $a);
-        $this->assertSame([10, 0, 10], [$ra->requested_qty, $ra->fulfilled_qty, $ra->remaining_qty]);
-
-        // Gudang may propose again for the SAME outstanding demand; 6 now approved => 4 left.
-        $second = $this->propose($gudang, $order, [$a->id => 6]);
-        $this->approveLine($admin, $second, $second->items->first()->id)->assertOk()->assertJsonPath('data.status', 'approved');
-        $ra->refresh();
-        $this->assertSame([10, 6, 4], [$ra->requested_qty, $ra->fulfilled_qty, $ra->remaining_qty]);
-
-        // Gudang view: JUMLAH ORDER / DIAJUKAN / DIPENUHI / SISA — never a stale 10 remaining.
-        $row = collect($this->actingAs($gudang)->getJson('/api/v1/warehouse/stock-requests')->assertOk()->json('data.0.items'))->firstWhere('product_id', $a->id);
-        $this->assertSame([10, 10, 6, 4], [$row['order_quantity'], $row['requested_qty'], $row['fulfilled_qty'], $row['remaining_qty']]);
-        $this->assertSame('partial', StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->value('status'));
-    }
-
-    public function test_item_decisions_are_idempotent_final_and_authorized(): void
-    {
-        ['agen' => $agen, 'admin' => $admin, 'gudang' => $gudang, 'konsumen' => $konsumen] = $this->branch();
-        [$a, $b] = [$this->product($agen, 'A'), $this->product($agen, 'B')];
-        $order = $this->order($konsumen, [[$a, 2], [$b, 2]]);
-        $this->transit($agen, $a);
-        $this->transit($agen, $b);
-        $proposal = $this->propose($gudang, $order, [$a->id => 2, $b->id => 2]);
-        $ia = $this->proposalItemId($proposal, $a);
-        $ib = $this->proposalItemId($proposal, $b);
-
-        $this->approveLine($admin, $proposal, $ia)->assertOk();
-        $this->approveLine($admin, $proposal, $ia)->assertOk(); // replay: nothing moves twice
-        $this->assertSame(48, $this->transitQty($agen, $a));
-        $this->assertSame(2, $this->requestItem($order, $a)->fulfilled_qty);
-
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal->id}/items/{$ia}/reject", ['reason' => 'x'])->assertStatus(422);
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal->id}/items/{$ib}/reject", ['reason' => 'x'])->assertOk();
-        $this->approveLine($admin, $proposal, $ib)->assertStatus(422);
-
-        // Authority: Gudang cannot decide; another branch's Admin cannot see it.
-        $this->approveLine($gudang, $proposal, $ib)->assertForbidden();
-        $foreignAgen = User::factory()->agen()->create();
-        $foreignAgen->update(['agent_id' => $foreignAgen->id]);
-        $foreignAdmin = User::factory()->admin()->create(['agent_id' => $foreignAgen->id]);
-        $this->approveLine($foreignAdmin, $proposal, $ib)->assertStatus(404);
-    }
-
-    public function test_whole_proposal_endpoints_act_only_on_still_pending_lines(): void
-    {
-        ['agen' => $agen, 'admin' => $admin, 'gudang' => $gudang, 'konsumen' => $konsumen] = $this->branch();
-        [$a, $b] = [$this->product($agen, 'A'), $this->product($agen, 'B')];
-        $order = $this->order($konsumen, [[$a, 2], [$b, 3]]);
-        $this->transit($agen, $a);
-        $this->transit($agen, $b);
-        $proposal = $this->propose($gudang, $order, [$a->id => 2, $b->id => 3]);
-
-        $this->approveLine($admin, $proposal, $this->proposalItemId($proposal, $a))->assertOk();
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal->id}/approve")->assertOk()->assertJsonPath('data.status', 'approved');
-
-        $this->assertSame(48, $this->transitQty($agen, $a), 'A was not executed a second time');
-        $this->assertSame(47, $this->transitQty($agen, $b));
-        $this->assertSame('fulfilled', StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->value('status'));
-    }
-
-    // ===================== C. stock request follows the order =====================
+    // ===================== C. legacy demand accounting follows the order =====================
 
     public function test_quantity_increase_and_decrease_reconcile_the_stock_request(): void
     {
-        ['agen' => $agen, 'admin' => $admin, 'gudang' => $gudang, 'konsumen' => $konsumen] = $this->branch();
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->branch();
         $a = $this->product($agen, 'A');
         $this->transit($agen, $a);
         $order = $this->order($konsumen, [[$a, 5]]);
         $item = $this->item($order, $a);
-        $adjust = fn (int $qty) => $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => $qty, 'reason' => 'ubah']);
+        $adjust = fn (int $qty) => $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", ['fulfilled_quantity' => $qty, 'reason' => 'ubah']);
 
         $adjust(3)->assertOk();
         $ri = $this->requestItem($order, $a);
         $this->assertSame([3, 0, 3], [$ri->requested_qty, $ri->fulfilled_qty, $ri->remaining_qty]);
 
-        $proposal = $this->propose($gudang, $order, [$a->id => 2]);
-        $this->approveLine($admin, $proposal, $proposal->items->first()->id)->assertOk();
-        $adjust(2)->assertOk(); // remaining was 1 => ok
+        $adjust(2)->assertOk();
         $ri->refresh();
-        $this->assertSame([2, 2, 0], [$ri->requested_qty, $ri->fulfilled_qty, $ri->remaining_qty]);
-        $this->assertSame('fulfilled', StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->value('status'));
+        $this->assertSame([2, 0, 2], [$ri->requested_qty, $ri->fulfilled_qty, $ri->remaining_qty]);
 
-        // Cannot reduce below what the warehouse already fulfilled; nothing changes.
-        $adjust(1)->assertStatus(422);
-        $this->assertSame(2, $item->fresh()->fulfilled_quantity);
-        $this->assertSame(2, $ri->fresh()->requested_qty);
-
-        // Increase re-opens the fulfilled request for the new demand.
         $adjust(4)->assertOk();
         $ri->refresh();
-        $this->assertSame([4, 2, 2], [$ri->requested_qty, $ri->fulfilled_qty, $ri->remaining_qty]);
-        $this->assertSame('partial', StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->value('status'));
+        $this->assertSame([4, 0, 4], [$ri->requested_qty, $ri->fulfilled_qty, $ri->remaining_qty]);
+        $this->assertSame('pending', StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->value('status'));
+
+        // Stock Request is internal demand accounting; quantity changes never create warehouse fulfillments.
+        $this->assertSame(4, $item->fresh()->fulfilled_quantity);
+        $this->assertSame(4, $ri->fresh()->requested_qty);
         $this->assertSame(1, StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->count());
         $this->assertSame(1, StockRequestItem::where('order_item_id', $item->id)->count());
     }
@@ -298,7 +160,7 @@ class PackageCUatRemediationTest extends TestCase
         $d2 = now()->addDays(6)->toDateString();
         $order = $this->order($konsumen, [[$a, 2], [$b, 1], [$c, 3]], $d1);
         [$ia, $ib, $ic] = [$this->item($order, $a), $this->item($order, $b), $this->item($order, $c)];
-        $move = fn (OrderItem $i, string $d) => $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$i->id}/reschedule", ['requested_delivery_date' => $d, 'reason' => 'ubah']);
+        $move = fn (OrderItem $i, string $d) => $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$i->id}/reschedule", ['requested_delivery_date' => $d, 'reason' => 'ubah']);
 
         // C -> d2: two shipments (A,B on d1 | C on d2).
         $move($ic, $d2)->assertOk();
@@ -330,9 +192,9 @@ class PackageCUatRemediationTest extends TestCase
         $ia = $this->item($order, $a);
         $ic = $this->item($order, $c);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$ia->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'ubah'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$ia->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'ubah'])->assertOk();
         // 1 of C's 3 units goes to d2: the split child joins A's existing d2 shipment.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$ic->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$ic->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         $child = OrderItem::where('split_from_order_item_id', $ic->id)->firstOrFail();
         $this->assertSame($ia->fresh()->shipment_id, $child->shipment_id);
@@ -423,7 +285,7 @@ class PackageCUatRemediationTest extends TestCase
         $this->assertSame(3, $receipt['total_item_count']);
 
         // A cancelled/zero line is not printed on the group's resi.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/fulfillment", ['fulfilled_quantity' => 0, 'reason' => 'batal'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/fulfillment", ['fulfilled_quantity' => 0, 'reason' => 'batal'])->assertOk();
         $receipt = $this->actingAs($admin)->getJson("/api/v1/shipments/{$shipmentId}/receipt")->assertOk()->json('data');
         $this->assertSame(['Produk A'], collect($receipt['items'])->pluck('product_name')->all());
     }
@@ -437,7 +299,7 @@ class PackageCUatRemediationTest extends TestCase
         $d1 = now()->addDays(3)->toDateString();
         $d2 = now()->addDays(6)->toDateString();
         $order = $this->order($konsumen, [[$a, 2], [$b, 1], [$c, 3]], $d1);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $c)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'ubah'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $c)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'ubah'])->assertOk();
 
         $groups = fn () => collect($this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data.delivery_groups'));
         $g = $groups();
@@ -447,7 +309,7 @@ class PackageCUatRemediationTest extends TestCase
         $this->assertCount(1, $g->firstWhere('delivery_date', $d1)['shipments']);
 
         // Admin moves B to d2: a normal refresh shows the new plan.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'ubah'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'ubah'])->assertOk();
         $g = $groups();
         $this->assertSame(['A'], collect($g->firstWhere('delivery_date', $d1)['items'])->pluck('product_name')->all());
         $this->assertSame(['B', 'C'], collect($g->firstWhere('delivery_date', $d2)['items'])->pluck('product_name')->sort()->values()->all());
@@ -469,7 +331,7 @@ class PackageCUatRemediationTest extends TestCase
         $before = Order::withoutGlobalScopes()->find($order->id)->only(['total_amount', 'paid_amount', 'remaining_amount', 'payment_status']);
         $stockBefore = [$this->reserved($agen, $a), $this->reserved($agen, $b), ProductStock::withoutGlobalScopes()->where('product_id', $a->id)->value('quantity_on_hand')];
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => now()->addDays(8)->toDateString(), 'reason' => 'ubah'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => now()->addDays(8)->toDateString(), 'reason' => 'ubah'])->assertOk();
 
         $this->assertEquals($before, Order::withoutGlobalScopes()->find($order->id)->only(['total_amount', 'paid_amount', 'remaining_amount', 'payment_status']));
         $this->assertSame($stockBefore, [$this->reserved($agen, $a), $this->reserved($agen, $b), ProductStock::withoutGlobalScopes()->where('product_id', $a->id)->value('quantity_on_hand')]);

@@ -121,7 +121,8 @@ class KeuanganRoleTest extends TestCase
         $this->assertNotContains('orders.manage.payment', $permissions);
         $this->assertNotContains('finance.payment.verify', $permissions);
         // Still the transaction-operations role.
-        $this->assertContains('orders.manage.fulfillment', $permissions);
+        $this->assertNotContains('orders.manage.fulfillment', $permissions);
+        $this->assertContains('orders.fulfillment.approve', $permissions);
         $this->assertContains('orders.manage.status', $permissions);
     }
 

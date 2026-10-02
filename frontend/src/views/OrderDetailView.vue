@@ -487,7 +487,7 @@ const canShowCancel = computed(() => {
   return order.value.status === 'diproses' && order.value.payment_method?.type === 'cod'
 })
 
-/* ---------- Admin: per-item fulfillment adjustment (only while order is 'diproses') ---------- */
+/* ---------- Agen/Super Admin: direct per-item fulfillment adjustment ---------- */
 const adjustingItemId = ref<number | null>(null)
 const adjustForm = reactive({ fulfilled_quantity: 0, reason: '', additional_payment_method: 'transfer' as 'transfer' | 'cod' })
 const adjusting = ref(false)
@@ -514,7 +514,7 @@ async function submitAdjust(item: OrderItem) {
   }
 }
 
-/* ---------- Office: reschedule an item's requested delivery date (only while order is 'diproses') ---------- */
+/* ---------- Agen/Super Admin: direct reschedule of an item's requested delivery date ---------- */
 const reschedulingItemId = ref<number | null>(null)
 const rescheduleForm = reactive({ requested_delivery_date: '', reason: '', quantity: 1 })
 const rescheduling = ref(false)
@@ -903,7 +903,7 @@ async function submitReturn(item: OrderItem) {
               </div>
             </div>
 
-            <!-- Admin: reschedule requested delivery date, only while order is 'diproses'.
+            <!-- Agen/Super Admin: direct reschedule, only while order is 'diproses'.
                  Bounded UX convenience only — the SERVER is authoritative. Only Kurir Online (openroute) and
                  Free delivery may be rescheduled; Ekspedisi (rajaongkir), Pickup and any unknown/legacy
                  provider code are denied by the server with 422 regardless. -->

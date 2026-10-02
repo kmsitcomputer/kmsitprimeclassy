@@ -59,7 +59,7 @@ export interface OrderRefund {
 }
 
 /**
- * Office-only (super_admin/agen/admin), only while the order is 'diproses' — see OrderFulfillmentController::reschedule.
+ * Direct mutation is limited to super_admin/agen; Admin uses the Gudang proposal approval workflow.
  * `quantity` optionally moves only part of the line onto the new date — the moved units become a new OrderItem (own
  * shipment, own date) while the rest stays on the original item/date. Omit it (or pass the item's full
  * fulfilled_quantity) to reschedule the whole line in place, as before.

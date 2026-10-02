@@ -169,7 +169,7 @@ class OrderFulfillmentTest extends TestCase
 
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $response = $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $response = $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Stok tidak mencukupi',
         ]);
         $response->assertOk();
@@ -208,7 +208,7 @@ class OrderFulfillmentTest extends TestCase
         $productB = $this->makeProduct($agen, 'Product B', 50000, 10);
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $productB, 3);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Stok tidak mencukupi',
         ])->assertOk();
 
@@ -226,7 +226,7 @@ class OrderFulfillmentTest extends TestCase
         $product = $this->makeProduct($agen, 'Only Product', 100000, 10);
         ['order' => $order, 'itemA' => $item] = $this->placeTwoProductOrder($agen, $konsumen, $product, 2, $this->makeProduct($agen, 'Filler', 10000, 10), 1);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
             'fulfilled_quantity' => 0, 'reason' => 'Habis',
         ])->assertOk();
 
@@ -248,7 +248,7 @@ class OrderFulfillmentTest extends TestCase
 
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $response = $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $response = $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 5, 'reason' => 'Customer wants 2 more', 'additional_payment_method' => 'transfer',
         ]);
         $response->assertOk();
@@ -281,7 +281,7 @@ class OrderFulfillmentTest extends TestCase
         $order = $this->payInFull($order);
 
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Extra unit', 'additional_payment_method' => 'cod',
         ])->assertOk();
 
@@ -297,7 +297,7 @@ class OrderFulfillmentTest extends TestCase
         $productA = $this->makeProduct($agen, 'Product A', 100000, 10);
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 1, $this->makeProduct($agen, 'Filler', 10000, 10), 1);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Extra unit', 'additional_payment_method' => 'transfer',
         ])->assertOk();
 
@@ -315,7 +315,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 2, $this->makeProduct($agen, 'Filler', 10000, 10), 1);
         // 2 reserved, 1 left available.
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 5, 'reason' => 'Try to add too many',
         ])->assertStatus(422);
 
@@ -332,7 +332,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 3, $this->makeProduct($agen, 'Filler', 10000, 10), 1, 'bank_transfer');
 
         // Still 'diterima' — too early.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Too early',
         ])->assertStatus(422);
 
@@ -341,7 +341,7 @@ class OrderFulfillmentTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
 
         // Too late — already shipped.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Too late',
         ])->assertStatus(422);
     }
@@ -371,7 +371,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $this->makeProduct($agen, 'Filler', 10000, 10), 1, 'bank_transfer');
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Shortfall',
         ])->assertOk();
 
@@ -398,7 +398,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 1, $this->makeProduct($agen, 'Filler', 10000, 10), 1, 'bank_transfer');
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Extra', 'additional_payment_method' => 'cod',
         ])->assertOk();
 
@@ -423,7 +423,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $this->makeProduct($agen, 'Filler', 10000, 10), 1, 'bank_transfer');
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Shortfall',
         ])->assertOk();
 
@@ -450,7 +450,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'item' => $item] = $this->placeSingleItemOrder($konsumen, $product, 5);
         $this->assertEquals(500000, (float) $order->total_amount);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
             'fulfilled_quantity' => 6, 'reason' => 'Tambah 1 unit',
         ])->assertOk();
 
@@ -468,7 +468,7 @@ class OrderFulfillmentTest extends TestCase
         $product = $this->makeProduct($agen, 'Kue COD', 100000, 10);
         ['order' => $order, 'item' => $item] = $this->placeSingleItemOrder($konsumen, $product, 5);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi 1 unit',
         ])->assertOk();
 
@@ -485,12 +485,12 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'item' => $item] = $this->placeSingleItemOrder($konsumen, $product, 4);
         $this->assertEquals(200000, (float) $order->total_amount);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
             'fulfilled_quantity' => 7, 'reason' => 'Naik',
         ])->assertOk();
         $this->assertEquals(350000, (float) $order->fresh()->total_amount);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Turun',
         ])->assertOk();
         $this->assertEquals(100000, (float) $order->fresh()->total_amount);
@@ -524,7 +524,7 @@ class OrderFulfillmentTest extends TestCase
         $this->assertEquals(300000, (float) $order->remaining_amount);
 
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
             'fulfilled_quantity' => 2, 'reason' => 'Tambah 1 unit produk tambahan',
         ])->assertOk();
 
@@ -557,7 +557,7 @@ class OrderFulfillmentTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
         // Remove the 100k item entirely -> new total 400k, paid still 200k < 400k -> no refund, just outstanding.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
             'fulfilled_quantity' => 0, 'reason' => 'Batal produk tambahan',
         ])->assertOk();
 
@@ -589,7 +589,7 @@ class OrderFulfillmentTest extends TestCase
         $this->assertEquals(300000, (float) $order->paid_amount);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
             'fulfilled_quantity' => 0, 'reason' => 'Batal produk 300k',
         ])->assertOk();
 
@@ -614,7 +614,7 @@ class OrderFulfillmentTest extends TestCase
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi',
         ])->assertOk();
 
@@ -636,13 +636,13 @@ class OrderFulfillmentTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
         // First reduction: -1 unit of A (100k) -> overpaid 100k.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi A',
         ])->assertOk();
         $this->assertDatabaseHas('order_item_adjustments', ['order_item_id' => $itemA->id, 'refund_amount' => 100000]);
 
         // Second reduction: -1 unit of B (100k) -> total overpaid now 200k, but only the NEW 100k belongs to this adjustment.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi B',
         ])->assertOk();
         $this->assertDatabaseHas('order_item_adjustments', ['order_item_id' => $itemB->id, 'refund_amount' => 100000]);
@@ -664,7 +664,7 @@ class OrderFulfillmentTest extends TestCase
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 6, 'reason' => 'Tambah 1 unit', 'additional_payment_method' => 'transfer',
         ])->assertOk();
 
@@ -698,7 +698,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'item' => $itemA] = $this->placeSingleItemOrder($konsumen, $productA, 5, 'bank_transfer');
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi',
         ])->assertOk();
 
@@ -733,7 +733,7 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA, 'itemB' => $itemB] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $productB, 3);
 
         // Same date => one shared shipment; B gets its own delivery date so the two can have different couriers.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", ['requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Tanggal berbeda'])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/reschedule", ['requested_delivery_date' => now()->addDays(4)->toDateString(), 'reason' => 'Tanggal berbeda'])->assertOk();
         $itemA->refresh();
         $itemB->refresh();
 
@@ -743,7 +743,7 @@ class OrderFulfillmentTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/v1/shipments/{$itemB->shipment_id}/courier", ['courier_id' => $courierAndiId])->assertOk();
 
         // Adjust item A only.
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi A',
         ])->assertOk();
 

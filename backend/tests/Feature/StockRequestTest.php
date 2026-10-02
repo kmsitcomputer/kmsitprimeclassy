@@ -49,7 +49,8 @@ class StockRequestTest extends TestCase
         $f = $this->fixture();
         $this->actingAs($f['admin'])->patchJson("/api/v1/orders/{$f['order']->id}/status", ['status' => 'diproses'])->assertOk();
         $this->assertDatabaseCount('stock_requests', 1);
-        $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/stock-requests')->assertOk();
+        $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/stock-requests')->assertNotFound();
+        $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/orders/diproses')->assertOk()->assertJsonPath('data.0.id', $f['order']->id);
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $this->assertSame(10, $request->items()->firstOrFail()->requested_qty);
         $this->assertDatabaseCount('stock_requests', 1);
@@ -61,25 +62,11 @@ class StockRequestTest extends TestCase
         $this->actingAs($f['admin'])->patchJson("/api/v1/orders/{$f['order']->id}/status", ['status' => 'diproses'])->assertOk();
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $item = $request->items()->firstOrFail();
-        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/fulfill", ['idempotency_key' => 'fulfill-1', 'items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertUnprocessable();
+        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/fulfill", ['idempotency_key' => 'fulfill-1', 'items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertNotFound();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 100]);
         $this->assertDatabaseCount('stock_movements', 0);
-
-        $proposal = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertCreated()->json('data');
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
-        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 94]);
-        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'shipping', 'quantity' => 6]);
-        $this->assertDatabaseHas('product_stocks', ['product_id' => $f['product']->id, 'quantity_reserved' => 4]);
-        $request->refresh();
-        $this->assertSame(4, $request->items()->firstOrFail()->remaining_qty);
-        $this->assertSame('partial', $request->status);
-        $second = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 4]]])->assertCreated()->json('data');
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
-        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 90]);
-        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'shipping', 'quantity' => 10]);
-        $this->assertDatabaseHas('product_stocks', ['product_id' => $f['product']->id, 'quantity_reserved' => 0]);
-        $request->refresh();
-        $this->assertSame('fulfilled', $request->status);
+        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertNotFound();
+        $this->assertSame(10, $request->items()->firstOrFail()->remaining_qty);
     }
 
     public function test_direct_fulfill_cannot_use_plan_and_proposal_needs_physical_transit(): void
@@ -90,13 +77,9 @@ class StockRequestTest extends TestCase
         $this->actingAs($f['admin'])->patchJson("/api/v1/orders/{$f['order']->id}/status", ['status' => 'diproses']);
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $item = $request->items()->firstOrFail();
-        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/fulfill", ['idempotency_key' => 'same-key', 'items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertUnprocessable();
+        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/fulfill", ['idempotency_key' => 'same-key', 'items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertNotFound();
         $this->assertDatabaseHas('stock_requests', ['id' => $request->id, 'status' => 'pending']);
-        WarehouseStock::withoutGlobalScopes()->where('agent_id', $f['agent']->id)->where('stock_type', 'transit')->update(['quantity' => 10]);
-        $proposal = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertCreated()->json('data');
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
-        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 9]);
-        $this->assertDatabaseCount('stock_request_fulfillments', 1);
+        $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertNotFound();
+        $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'factory_plan', 'quantity' => 10]);
     }
 }

@@ -282,7 +282,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $shell->update(['shipping_provider_code' => $codeB]);
 
         $before = $this->snapshot($order);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $a)->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
     }
 
@@ -303,10 +303,10 @@ class PackageCProductionUatRound5Test extends TestCase
         $item = $this->item($order, $a);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(1, OrderItem::where('order_id', $order->id)->count());
     }
@@ -326,8 +326,8 @@ class PackageCProductionUatRound5Test extends TestCase
         $item = $this->item($order, $a);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x'])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => now()->addDays(9)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame($d1, $item->fresh()->requested_delivery_date?->toDateString());
@@ -341,7 +341,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $d2 = now()->addDays(9)->toDateString();
         $order = $this->order($konsumen, [[$a, 2]], $d1);
         $this->asKurirOnline($order, 30000.0);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
 
         $this->reschedule($order->id, $this->item($order, $a)->id, $d2, 1)->assertOk();
 
@@ -359,7 +359,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $d3 = now()->addDays(9)->toDateString();
         $order = $this->order($konsumen, [[$a, 3]], $d1);
         $this->asKurirOnline($order, 30000.0);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $parent = $this->item($order, $a);
 
         $this->reschedule($order->id, $parent->id, $d2, 1)->assertOk();
@@ -384,7 +384,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $d2 = now()->addDays(9)->toDateString();
         $order = $this->order($konsumen, [[$a, 2]], $d1);
         $this->asKurirOnline($order, 30001.0);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $this->reschedule($order->id, $this->item($order, $a)->id, $d2, 1)->assertOk();
 
         $first = $this->feeMinorByDate($order);
@@ -404,7 +404,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $order = $this->order($konsumen, [[$a, 3]], $dates[0]);
         $parent = $this->item($order, $a);
         $this->assertSame(ShippingMethodClassifier::FREE, ShipmentGroupingService::shippingClassification($order));
-        $this->actingAs($admin);
+        $this->actingAs($agen);
 
         $this->reschedule($order->id, $parent->id, $dates[1], 1)->assertOk();
         $this->reschedule($order->id, $parent->id, $dates[2], 1)->assertOk();
@@ -427,7 +427,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $order = $this->order($konsumen, [[$a, 2]], $d1);
         Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => 5000]);
         $before = $this->snapshot($order);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
 
         $this->reschedule($order->id, $this->item($order, $a)->id, now()->addDays(9)->toDateString(), 1)->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
@@ -440,7 +440,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $order = $this->order($konsumen, [[$a, 2]], now()->addDays(3)->toDateString());
         $this->firstShipment($order)->update(['shipping_fee_snapshot' => 7000]);
         $before = $this->snapshot($order);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
 
         $this->reschedule($order->id, $this->item($order, $a)->id, now()->addDays(9)->toDateString(), 1)->assertStatus(422);
         $this->assertSame($before, $this->snapshot($order));
@@ -455,7 +455,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $d3 = now()->addDays(9)->toDateString();
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], $d1);
         $this->asKurirOnline($order, 30000.0);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
 
         $this->reschedule($order->id, $this->item($order, $b)->id, $d2)->assertOk();
         $committed = Shipment::where('order_id', $order->id)->whereKeyNot($this->firstShipment($order)->id)->firstOrFail();
@@ -554,7 +554,7 @@ class PackageCProductionUatRound5Test extends TestCase
     /**
      * Two OPENROUTE groups on different dates, each with a nonzero snapshot, and the given provenance.
      *
-     * @return array{0:Order,1:OrderItem,2:OrderItem,3:User}
+    * @return array{0:Order,1:OrderItem,2:OrderItem,3:User}
      */
     private function openRouteTwoGroupOrder(array $metaA, array $metaB, bool $swap = false): array
     {
@@ -573,7 +573,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $itemB->update(['requested_delivery_date' => $d2, 'shipment_id' => $shell->id]);
         Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => 30000]);
 
-        return [$order, $itemA->fresh(), $itemB->fresh(), $admin];
+        return [$order, $itemA->fresh(), $itemB->fresh(), $agen];
     }
 
     public function test_cross_date_provenance_conflict_denies_full_reschedule_both_orderings(): void
@@ -582,10 +582,10 @@ class PackageCProductionUatRound5Test extends TestCase
         $metaB = $this->openRouteMeta(['chargeable_distance_km' => 40.0, 'distance_meters' => 40000]);
 
         foreach ([false, true] as $swap) {
-            [$order, $itemA, , $admin] = $this->openRouteTwoGroupOrder($metaA, $metaB, $swap);
+            [$order, $itemA, , $agen] = $this->openRouteTwoGroupOrder($metaA, $metaB, $swap);
             $before = $this->snapshot($order);
 
-            $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x'])->assertStatus(422);
+            $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x'])->assertStatus(422);
 
             $this->assertSame($before, $this->snapshot($order));
             $this->assertSame(3000000, $this->feeTotalMinor($order));
@@ -596,10 +596,10 @@ class PackageCProductionUatRound5Test extends TestCase
     {
         $metaA = $this->openRouteMeta();
         $metaB = $this->openRouteMeta(['pricing' => array_replace($this->openRouteMeta()['pricing'], ['price_per_km' => 3500.0])]);
-        [$order, $itemA, , $admin] = $this->openRouteTwoGroupOrder($metaA, $metaB);
+        [$order, $itemA, , $agen] = $this->openRouteTwoGroupOrder($metaA, $metaB);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
         $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
@@ -608,10 +608,10 @@ class PackageCProductionUatRound5Test extends TestCase
     public function test_cross_date_incomplete_provenance_fails_closed(): void
     {
         // Two nonzero OpenRoute groups that both lack the required pricing provenance cannot be proven equal.
-        [$order, $itemA, , $admin] = $this->openRouteTwoGroupOrder(['reason' => 'legacy'], ['reason' => 'legacy']);
+        [$order, $itemA, , $agen] = $this->openRouteTwoGroupOrder(['reason' => 'legacy'], ['reason' => 'legacy']);
         $before = $this->snapshot($order);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertStatus(422);
 
         $this->assertSame($before, $this->snapshot($order));
     }
@@ -620,9 +620,9 @@ class PackageCProductionUatRound5Test extends TestCase
     {
         // Identical provenance on both groups -> a valid redistribution must proceed (no false conflict).
         $meta = $this->openRouteMeta();
-        [$order, $itemA, , $admin] = $this->openRouteTwoGroupOrder($meta, $meta);
+        [$order, $itemA, , $agen] = $this->openRouteTwoGroupOrder($meta, $meta);
 
-        $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertOk();
+        $this->actingAs($agen)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", ['requested_delivery_date' => now()->addDays(12)->toDateString(), 'reason' => 'x', 'quantity' => 1])->assertOk();
 
         $this->assertSame(3000000, $this->feeTotalMinor($order));
         $this->assertCount(3, $this->feeMinorByDate($order));
@@ -658,7 +658,7 @@ class PackageCProductionUatRound5Test extends TestCase
         $this->asKurirOnline($order, 0.0);
         Shipment::where('order_id', $order->id)->update(['shipping_fee_snapshot' => 0]);
         Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => $this->minorToString($totalMinor)]);
-        $this->actingAs($admin);
+        $this->actingAs($agen);
         $parent = $this->item($order, $a);
 
         $this->reschedule($order->id, $parent->id, $dates[1], 1)->assertOk();

@@ -253,10 +253,10 @@ class ReportSystemTest extends TestCase
         // symmetric: if they exactly offset, the increase would just absorb the
         // reduction's overpayment and genuinely owe no new additional payment
         // (correct behavior, but useless for asserting the 'pending' status here).
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [
             'fulfilled_quantity' => 4, 'reason' => 'Kurangi A',
         ])->assertOk();
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
+        $this->actingAs($branch['agen'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemB->id}/fulfillment", [
             'fulfilled_quantity' => 7, 'reason' => 'Tambah B', 'additional_payment_method' => 'transfer',
         ])->assertOk();
 
