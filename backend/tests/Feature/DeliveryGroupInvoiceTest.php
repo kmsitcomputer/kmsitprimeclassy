@@ -76,6 +76,7 @@ class DeliveryGroupInvoiceTest extends TestCase
         $firstShipment->update([
             'shipping_provider_code' => 'openroute', 'courier_id' => $courier->id,
             'shipping_fee_snapshot' => 12, 'provider_meta' => ['rule' => 'distance_rate_applied'],
+            'status' => 'in_transit', 'shipped_at' => now(),
         ]);
         $secondShipment->update([
             'shipping_provider_code' => 'rajaongkir', 'shipping_fee_snapshot' => 28,
@@ -125,6 +126,7 @@ class DeliveryGroupInvoiceTest extends TestCase
         $displayedSecond = $groups->firstWhere('delivery_date', $f['secondDate']);
         $this->assertSame(['Kurir Online'], $displayedFirst['delivery_methods']);
         $this->assertSame(['Kurir Budi'], $displayedFirst['courier_names']);
+        $this->assertSame('in_transit', $displayedFirst['shipments'][0]['status']);
         $this->assertSame([$f['items'][0]->product_name_snapshot, $f['items'][1]->product_name_snapshot], array_column($displayedFirst['items'], 'product_name'));
         $this->assertSame(['JNE REG'], $displayedSecond['delivery_methods']);
         $this->assertSame([], $displayedSecond['courier_names']);
