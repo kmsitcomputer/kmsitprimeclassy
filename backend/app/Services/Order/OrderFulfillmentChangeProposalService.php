@@ -46,8 +46,9 @@ class OrderFulfillmentChangeProposalService
     private function constrainGudangPendingItems($query)
     {
         return $query->where('status', 'diproses')->where('fulfilled_quantity', '>', 0)
-            ->whereDoesntHave('shipment', fn ($shipment) => $shipment
-                ->whereNotNull('courier_id')->orWhereIn('status', ['picked_up', 'in_transit', 'delivered', 'failed']));
+            ->whereDoesntHave('shipment', fn ($shipment) => $shipment->where(function ($state) {
+                $state->whereNotNull('courier_id')->orWhereIn('status', ['picked_up', 'in_transit', 'delivered', 'failed']);
+            }));
     }
 
     public function proposalsFor(User $actor, string $status = 'pending')

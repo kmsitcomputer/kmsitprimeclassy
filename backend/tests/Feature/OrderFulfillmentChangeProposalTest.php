@@ -208,6 +208,21 @@ class OrderFulfillmentChangeProposalTest extends TestCase
             'requested_delivery_date' => $pendingDate,
         ]);
 
+        $otherOrder = Order::create([
+            'order_no' => 'SHP-'.Str::random(12), 'konsumen_id' => $f['buyer']->id, 'agent_id' => $f['agen']->id,
+            'payment_method_id' => \App\Models\PaymentMethod::where('code', 'cod')->value('id'),
+            'status' => 'diproses', 'payment_status' => 'unpaid', 'subtotal_amount' => 10000, 'total_amount' => 10000,
+            'recipient_name_snapshot' => 'Buyer', 'recipient_phone_snapshot' => '0811', 'address_snapshot' => 'Street',
+        ]);
+        $otherShipment = Shipment::create(['order_id' => $otherOrder->id, 'shipping_provider_code' => 'openroute', 'status' => 'in_transit', 'shipped_at' => now()]);
+        OrderItem::create([
+            'order_id' => $otherOrder->id, 'shipment_id' => $otherShipment->id, 'product_id' => $f['product']->id,
+            'product_name_snapshot' => $f['product']->name, 'sku_snapshot' => $f['product']->sku,
+            'unit_price_snapshot' => 10000, 'subtotal_snapshot' => 10000,
+            'original_quantity' => 1, 'fulfilled_quantity' => 1, 'status' => 'dikirim',
+            'requested_delivery_date' => now()->addDays(4)->toDateString(),
+        ]);
+
         $queue = $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/orders/diproses')
             ->assertOk()->assertJsonPath('data.0.id', $order->id)->json('data.0');
         $this->assertSame([$pendingItem->id], collect($queue['items'])->pluck('id')->all());
