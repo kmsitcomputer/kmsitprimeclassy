@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
+use App\Models\Shipment;
 use App\Models\StockRequest;
 use App\Models\StockRequestItem;
 use App\Models\User;
@@ -55,8 +56,10 @@ class StockRequestSplitTest extends TestCase
             'subtotal_amount' => 10000, 'total_amount' => 10000,
             'recipient_name_snapshot' => 'Test', 'recipient_phone_snapshot' => '0811', 'address_snapshot' => 'Test',
         ]);
+        // Round-5: a reschedulable order needs a canonical shipping classification; free delivery is zero-fee.
+        $shipment = Shipment::create(['order_id' => $order->id, 'status' => 'pending', 'shipping_provider_code' => 'free', 'shipping_fee_snapshot' => 0]);
         $item = OrderItem::create([
-            'order_id' => $order->id, 'product_id' => $product->id,
+            'order_id' => $order->id, 'product_id' => $product->id, 'shipment_id' => $shipment->id,
             'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku,
             'unit_price_snapshot' => 1000, 'subtotal_snapshot' => 10000,
             'original_quantity' => 10, 'fulfilled_quantity' => 10,

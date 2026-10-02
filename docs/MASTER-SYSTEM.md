@@ -85,7 +85,7 @@ Statuses: `diterima → diproses → dikirim → terkirim → pengembalian → k
 
 ## 11. Existing-order adjustments
 
-Admin/Agen/Super Admin can: adjust an item's fulfilled quantity (only while the order is `diproses`), reschedule an item's delivery date (a partial quantity creates a new split item with its own shipment and lineage), and process returns. Quantity changes recompute the order total through `OrderTotalCalculator`; refunds and additional payments arise only from real money movement, never from a price/quantity change alone. A pending obligation freezes further increases/reductions on that item until it is settled.
+Admin/Agen/Super Admin can: adjust an item's fulfilled quantity (only while the order is `diproses`), reschedule an item's delivery date (a partial quantity creates a new split item with its own shipment and lineage), and process returns. Quantity changes recompute the order total through `OrderTotalCalculator`; refunds and additional payments arise only from real money movement, never from a price/quantity change alone. A pending obligation freezes further increases/reductions on that item until it is settled. A delivery-date reschedule is governed by ONE canonical server-side shipping classifier: Ekspedisi (`rajaongkir`) and Pickup are denied 422 before mutation; Kurir Online (`openroute`) keeps `shipping_fee_amount` unchanged and redistributes it evenly (exact integer rupiah) across active delivery-date groups; Free (`free`) must stay zero (inconsistent nonzero fails closed); any null/unknown/mixed provider code fails closed. See [BUSINESS-RULES.md §21](BUSINESS-RULES.md#21-existing-order-adjustments).
 
 ## 12. SC-03 add-line (Package C)
 

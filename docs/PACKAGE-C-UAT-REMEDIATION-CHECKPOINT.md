@@ -1,5 +1,48 @@
 # Package C — Production UAT Remediation (checkpoint)
 
+## Round 5 — independent final review of `ea5913c` = BLOCKED (bounded remediation)
+
+**Verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `ea5913c`. **Original main:** `938100c`.
+
+**CLOSED (do not reopen):** F01 · F03 · F04 · F05 · F06 · F07.
+
+**OPEN being remediated now:**
+- **R5-F02A (BLOCKER)** — missing RajaOngkir quote identity treated as equivalent: two nonzero carriers with the same fee but missing `courier`/`service` produce the same signature (both null) and are silently deduped.
+- **R5-F02B (BLOCKER)** — cross-date OpenRoute quote conflicts overwritten: `reconcileOrder()` only validates conflicts inside one date group, then `redistributeKurirOnlineShippingFee()` writes a new allocation across multiple groups and can normalise `10000/10000/10000`, hiding original conflicting provenance.
+- **R5-CLASS-01 (MAJOR)** — null/unknown provider bypasses shipping-method classification (`usesEkspedisi()` is false and `usesKurirOnline()` is false → reschedule proceeds).
+- **OBSERVATION** — monetary DECIMAL converted through float (`(int) round(((float) $x) * 100)`) before cents conversion.
+
+**Human-locked shipping classification matrix (authoritative, no implicit fallback):**
+| canonical code | classification | reschedule |
+|---|---|---|
+| `rajaongkir` | EKSPEDISI | DENY (422 before mutation) |
+| `openroute` | KURIR_ONLINE | ALLOW while lifecycle mutable; even integer allocation of the unchanged Order fee |
+| `free` | FREE | ALLOW while lifecycle mutable; every active group must be zero, Order fee stays zero |
+| `pickup` | PICKUP | DENY (422 before mutation) |
+| null / empty / unknown / legacy / mixed | UNKNOWN | DENY / FAIL CLOSED (422 before mutation) |
+
+**Implementation plan / exact order:**
+1. One canonical classifier `App\Services\Shipping\ShippingMethodClassifier` (`rajaongkir→EKSPEDISI`, `openroute→KURIR_ONLINE`, `free→FREE`, `pickup→PICKUP`, else `UNKNOWN`; only KURIR_ONLINE/FREE allow a date change). `ShipmentGroupingService::shippingClassification(Order)` resolves the order from the canonical provider codes of its relevant shipments; mixed/empty/unknown → UNKNOWN.
+2. **R5-F02A** — provider-aware carrier signature: `rajaongkir` requires complete normalized `provider_meta.courier` + `.service`; missing/empty identity gets a per-shipment `incomplete_identity` marker so two such carriers always conflict while a single legacy carrier is preserved.
+3. **R5-F02B** — OpenRoute quote **provenance** signature (pricing rule `price_per_km`, `minimum_distance_km`, `minimum_charge`, `chargeable_distance_km` + `rate_per_km`/`distance_km`/`routing_profile`), DELIBERATELY excluding the persisted fee (which an equal allocation rewrites) so a previous canonical allocation is never re-read as a new independent quote. A new `preflightShippingFeeChange()` validates ALL fee evidence across groups BEFORE any date/membership mutation; conflicting/incomplete provenance → 422.
+4. **FREE** — `preflight` asserts Order fee + every snapshot zero; anomalous nonzero → 422 unchanged.
+5. **Money** — exact decimal-string → integer minor units (`toMinorUnits`), never float; allocation unchanged in whole-rupiah domain.
+6. Bounded frontend guard: hide reschedule unless provider is `openroute`/`free`.
+7. Round-5 regression suite + adapt Round-4 fixtures to realistic OpenRoute provenance / explicit rajaongkir codes; run focused, concurrency ×3, full backend, frontend; commit; STOP for one narrow independent verification of the Round-5 delta only.
+
+**Round-5 implementation result (awaiting one narrow independent verification of the delta only):**
+- **R5-CLASS-01** — new `App\Services\Shipping\ShippingMethodClassifier` (`rajaongkir→EKSPEDISI`, `openroute→KURIR_ONLINE`, `free→FREE`, `pickup→PICKUP`, anything else → `UNKNOWN`; only KURIR_ONLINE/FREE allow a date change). `ShipmentGroupingService::shippingClassification(order)` resolves from the canonical provider code of the order's relevant shipments; no relevant shipment / null / empty / unknown / mixed → UNKNOWN. `rescheduleItemDeliveryDate()` denies 422 **before any mutation** (per-classification localized message; `pickup`/`unknown` messages added in all 4 locales).
+- **R5-F02A** — provider-aware carrier signature: a nonzero `rajaongkir` quote requires complete normalised `provider_meta.courier` **and** `service`; a missing/empty identity carries a per-shipment `incomplete_identity` marker so two such carriers always conflict while a single legacy carrier is preserved (never guessed by price or shipment id). `openroute` compares provenance; a nonzero fee under `free`/`pickup`/unknown code is never equivalent.
+- **R5-F02B** — OpenRoute quote **provenance** signature (pricing `price_per_km` / `minimum_distance_km` / `minimum_charge`, `chargeable_distance_km`, `routing_profile`, distance) deliberately **excludes** the persisted fee, so a previous canonical equal-allocation never masquerades as a new independent quote. New `preflightShippingFeeChange()` runs **before** any date/membership mutation (Order lock first) and validates every fee snapshot a redistribution would overwrite; conflicting/incomplete provenance or a committed nonzero fee → 422.
+- **FREE** — preflight asserts `orders.shipping_fee_amount` and every active snapshot are zero; an anomalous nonzero fee fails closed 422 unchanged.
+- **Money** — exact decimal-string → integer minor units (`toMinorUnits`/`decimalFromMinor`); the whole-rupiah allocation domain is unchanged; no float anywhere in the path.
+- **Tests:** new `PackageCProductionUatRound5Test` (39 passing incl. data providers): full classifier matrix, F02A identity matrix (both ID orderings, both source/target), regroup exit code 1, F02B full/partial/both-orderings/incomplete/identical-provenance, free zero + anomalous fail-closed, committed-fee protection, exact money (`0`, `0.01`, `1`, `1.01`, `30000.01`, `30000/30001/30002`, `9999999999.99` boundary) with conservation, idempotency. Round-2/3/4 fixtures adapted to explicit canonical provider codes (no assertion weakened except the two obsolete "fee stays on one carrier across a paid reschedule" cases, re-expressed to the Human even-allocation). Full backend **975 passed / 7024 assertions / 0 failures** (baseline 936); concurrency suites ×3 green; frontend `npm run type-check` PASS; normal `dist/` build still hits the pre-existing `.well-known/acme-challenge` EACCES, clean temporary-outDir build PASS; `git diff --check` clean.
+- **Docs updated:** BUSINESS-RULES §11/§21, ARCHITECTURE §7, MASTER-SYSTEM §11.
+
+**Exact next action:** ONE narrow independent Codex verification of the round-5 delta only. No deployment; PRODUCTION TOUCHED: NO; DEPLOYED: NO; PRODUCTION MIGRATION: NO; PRODUCTION REGROUP: NO; Package C remains NOT production closed.
+
+---
+
 ## Round 4 — independent Codex review of `7edc877` = BLOCKED (FINAL bounded remediation)
 
 **Codex verdict:** BLOCKED. **Branch:** `fix/package-c-production-uat`. **Starting HEAD:** `7edc877`. **Original main:** `938100c`.

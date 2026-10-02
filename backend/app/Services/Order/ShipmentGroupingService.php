@@ -9,6 +9,8 @@ use App\Models\Shipment;
 use App\Models\User;
 use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
+use App\Services\Shipping\ShippingMethodClassifier;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -62,30 +64,88 @@ class ShipmentGroupingService
     }
 
     /**
-     * Canonical shipping-method snapshot (server-derived at checkout, `ShippingQuoteService` $labels):
-     * `rajaongkir` = Ekspedisi, `openroute` = Kurir Online. Never inferred from UI strings.
+     * ONE canonical server-side shipping classification for an order, resolved from the canonical
+     * `shipping_provider_code` snapshot of its RELEVANT shipments (a shipment holding a non-cancelled item,
+     * or carrying nonzero fee evidence). There is no implicit fallback and no "first shipment wins":
+     *   - a single recognised code      -> that classification;
+     *   - no relevant shipment          -> UNKNOWN;
+     *   - any null/empty/unknown code   -> UNKNOWN;
+     *   - mixed/conflicting codes       -> UNKNOWN (fail closed).
+     * Callers gate delivery-date mutation on ShippingMethodClassifier::allowsDeliveryDateChange().
      */
-    public static function usesEkspedisi(Order $order): bool
+    public static function shippingClassification(Order $order): string
     {
-        return Shipment::query()->where('order_id', $order->id)
-            ->where('shipping_provider_code', 'rajaongkir')->exists();
+        $itemShipmentIds = OrderItem::query()
+            ->where('order_id', $order->id)
+            ->where('status', '!=', 'dibatalkan')
+            ->whereNotNull('shipment_id')
+            ->distinct()
+            ->pluck('shipment_id');
+
+        $classifications = Shipment::query()
+            ->where('order_id', $order->id)
+            ->where(function ($query) use ($itemShipmentIds) {
+                $query->whereIn('id', $itemShipmentIds)->orWhere('shipping_fee_snapshot', '>', 0);
+            })
+            ->pluck('shipping_provider_code')
+            ->map(fn ($code) => ShippingMethodClassifier::classify($code))
+            ->unique();
+
+        return $classifications->count() === 1 ? $classifications->first() : ShippingMethodClassifier::UNKNOWN;
     }
 
-    public static function usesKurirOnline(Order $order): bool
+    /**
+     * Round-5 preflight (F02B): runs BEFORE any date/membership mutation so a redistribution can never
+     * rewrite quote evidence that cannot be proven safe. Transaction rollback remains the mandatory defence,
+     * but the domain gate belongs in front of the business mutation.
+     *
+     *  - KURIR_ONLINE: prove every OpenRoute fee snapshot a redistribution would overwrite comes from the
+     *    SAME canonical provider quote, and that no immutable committed group carries fee evidence;
+     *  - FREE: assert the whole order stays zero-fee;
+     *  - EKSPEDISI/PICKUP/UNKNOWN: denied by the caller's classification gate (no-op here).
+     */
+    public function preflightShippingFeeChange(Order $order, ?string $classification = null): void
     {
-        return Shipment::query()->where('order_id', $order->id)
-            ->where('shipping_provider_code', 'openroute')->exists();
+        $classification ??= self::shippingClassification($order);
+
+        if (! ShippingMethodClassifier::allowsDeliveryDateChange($classification)) {
+            return;
+        }
+
+        $shipments = Shipment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+
+        if ($classification === ShippingMethodClassifier::FREE) {
+            $this->assertFreeShippingInvariant($order, $shipments);
+
+            return;
+        }
+
+        $this->assertOpenRouteQuoteProvenanceConsistent($shipments);
+        $this->assertNoCommittedNonzeroFee($shipments);
+    }
+
+    /**
+     * Post-reschedule fee step. Order.shipping_fee_amount is the authoritative total and is NEVER changed
+     * here: for Kurir Online the unchanged total is redistributed evenly across the active delivery-date
+     * groups. Free delivery is already asserted all-zero by the preflight. Ekspedisi / Pickup / Unknown never
+     * reach this method (denied before mutation).
+     */
+    public function applyShippingFeeAfterReschedule(Order $order): void
+    {
+        if (self::shippingClassification($order) === ShippingMethodClassifier::KURIR_ONLINE) {
+            $this->redistributeKurirOnlineShippingFee($order);
+        }
     }
 
     /**
      * Human-approved rule: after a NEW valid Kurir Online (openroute) delivery-date change, the UNCHANGED
      * Order shipping fee is redistributed EVENLY across all ACTIVE delivery-date groups, deterministically
-     * (integer arithmetic, no floating point). Called only from a valid reschedule — never as historical
+     * (exact integer arithmetic, no floating point). Called only from a valid reschedule — never as historical
      * repair, never for Ekspedisi, and it never rewrites immutable historical fee evidence.
      */
     public function redistributeKurirOnlineShippingFee(Order $order): void
     {
-        if (! self::usesKurirOnline($order)) {
+        if (self::shippingClassification($order) !== ShippingMethodClassifier::KURIR_ONLINE) {
             return;
         }
 
@@ -95,13 +155,10 @@ class ShipmentGroupingService
         $shipments = Shipment::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
         $mutable = $shipments->filter(fn (Shipment $s) => self::isMutable($s));
 
-        // A committed/historical shipment carrying a nonzero fee would be double-counted, or would have to be
-        // rewritten — refuse instead of corrupting immutable history.
-        foreach ($shipments as $shipment) {
-            if (! self::isMutable($shipment) && (float) $shipment->shipping_fee_snapshot > 0.0) {
-                throw new ApiException(__('messages.fulfillment.cannot_redistribute_committed_fee'), 422);
-            }
-        }
+        // Defence in depth (the preflight already proved this): a committed/historical shipment carrying a
+        // nonzero fee would be double-counted, or would have to be rewritten — refuse instead of corrupting
+        // immutable history.
+        $this->assertNoCommittedNonzeroFee($shipments);
 
         $activeDates = OrderItem::query()->where('order_id', $order->id)
             ->where('status', '!=', 'dibatalkan')->where('fulfilled_quantity', '>', 0)
@@ -126,12 +183,12 @@ class ShipmentGroupingService
         // Deterministic group order: requested_delivery_date ASC ('' sorts first), then explicit order.
         ksort($carriers);
 
-        // Integer rupiah division (Human-approved examples): base = floor(total/N), the first (total % N)
-        // groups take base + 1. Any sub-rupiah remainder (rare) rides on the first group so the total is
-        // conserved exactly to the cent — no floating point arithmetic is used for the distribution.
-        $totalCents = (int) round(((float) $order->shipping_fee_amount) * 100);
-        $wholeRupiah = intdiv($totalCents, 100);
-        $fractionCents = $totalCents - ($wholeRupiah * 100);
+        // EXACT integer minor-unit arithmetic (never float). The whole-rupiah domain is preserved
+        // (Human-approved examples: 1/3 -> 1,0,0); any sub-rupiah remainder rides the first group so the
+        // total is conserved exactly to the cent.
+        $totalMinor = self::toMinorUnits($order->shipping_fee_amount);
+        $wholeRupiah = intdiv($totalMinor, 100);
+        $fractionCents = $totalMinor % 100;
         $groups = count($carriers);
         $base = intdiv($wholeRupiah, $groups);
         $remainder = $wholeRupiah % $groups;
@@ -143,7 +200,7 @@ class ShipmentGroupingService
             $cents = ($rupiah * 100) + ($index === 0 ? $fractionCents : 0);
             $assigned[$id] = true;
             Shipment::query()->whereKey($id)->update([
-                'shipping_fee_snapshot' => sprintf('%d.%02d', intdiv($cents, 100), $cents % 100),
+                'shipping_fee_snapshot' => self::decimalFromMinor($cents),
             ]);
             $index++;
         }
@@ -296,7 +353,8 @@ class ShipmentGroupingService
                     continue;
                 }
                 // F02: validate the historical fee-carrier evidence for this consolidation BEFORE any mutation.
-                // Multiple nonzero carriers that disagree (value or metadata) fail closed rather than guessing.
+                // Multiple nonzero carriers that disagree (value or material identity) fail closed rather than
+                // guessing.
                 $this->assertCarriersConsistent($shipments);
                 $target = $this->survivorFor($shipments);
                 foreach ($shipments as $source) {
@@ -348,10 +406,10 @@ class ShipmentGroupingService
      */
     private function carryFeeSnapshot(Shipment $from, Shipment $to): void
     {
-        if ((float) $from->shipping_fee_snapshot <= 0.0) {
+        if (self::toMinorUnits($from->shipping_fee_snapshot) <= 0) {
             return;
         }
-        if ((float) $to->shipping_fee_snapshot > 0.0) {
+        if (self::toMinorUnits($to->shipping_fee_snapshot) > 0) {
             return;
         }
 
@@ -362,50 +420,180 @@ class ShipmentGroupingService
     }
 
     /**
-     * F02 carrier evidence signature: a nonzero fee plus the quote metadata that makes up the snapshot.
-     * `null` means "no historical carrier here" (the column is NOT NULL DEFAULT 0, so zero = no evidence).
-     *
-     * The material service identity lives in `provider_meta`: RajaOngkir selects a quote by COURIER + SERVICE,
-     * so `25,000 JNE/REG` and `25,000 J&T/EZ` are NOT equivalent even though the number is the same. Only
-     * quote-defining fields are compared — incidental metadata (etd, description, timestamps, debug data,
-     * response order) never changes quote identity and is deliberately excluded.
+     * Provider-aware carrier evidence signature for a NONZERO fee snapshot. `null` means "no historical
+     * carrier here" (the column is NOT NULL DEFAULT 0, so zero = no evidence). Compared by JSON equality in
+     * assertCarriersConsistent(); only quote-defining fields are compared — incidental metadata (etd,
+     * description, timestamps, response order) never changes quote identity and is excluded.
      *
      * @return array<string, mixed>|null
      */
     private static function feeCarrierSignature(Shipment $shipment): ?array
     {
-        if ((float) $shipment->shipping_fee_snapshot <= 0.0) {
+        if (self::toMinorUnits($shipment->shipping_fee_snapshot) <= 0) {
             return null;
         }
 
+        return match (ShippingMethodClassifier::classify($shipment->shipping_provider_code)) {
+            ShippingMethodClassifier::EKSPEDISI => self::ekspedisiQuoteSignature($shipment),
+            ShippingMethodClassifier::KURIR_ONLINE => self::openRouteQuoteSignature($shipment),
+            default => self::unrecognisedQuoteSignature($shipment),
+        };
+    }
+
+    /**
+     * R5-F02A: for a nonzero RajaOngkir quote the MATERIAL identity is COURIER + SERVICE (RajaOngkir selects a
+     * quote by that pair — see RajaOngkirProvider::quote()). Missing / empty / whitespace-only identity must
+     * NEVER become an equivalence signature, so it carries a per-shipment `incomplete_identity` marker that
+     * makes each such carrier conflict with every other one. A single legacy carrier is still preserved
+     * (only one signature exists), but two cannot be silently deduped. Never guessed, never inferred from
+     * price, never selected by shipment id.
+     *
+     * @return array<string, mixed>
+     */
+    private static function ekspedisiQuoteSignature(Shipment $shipment): array
+    {
+        $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
+        $courier = self::normalizeMeta($meta['courier'] ?? null);
+        $service = self::normalizeMeta($meta['service'] ?? null);
+
+        $signature = [
+            'provider' => 'rajaongkir',
+            'shipping_provider_id' => $shipment->shipping_provider_id,
+            'fee' => self::money($shipment->shipping_fee_snapshot),
+            'rate_per_km' => $shipment->rate_per_km === null ? null : self::money($shipment->rate_per_km),
+            'distance_km' => $shipment->distance_km === null ? null : self::money($shipment->distance_km),
+            'courier' => $courier,
+            'service' => $service,
+        ];
+
+        if ($courier === null || $service === null) {
+            $signature['incomplete_identity'] = $shipment->id;
+        }
+
+        return $signature;
+    }
+
+    /**
+     * R5-F02B: OpenRoute quote PROVENANCE signature. The persisted fee snapshot is DELIBERATELY excluded:
+     * after a canonical equal-allocation the persisted fee is no longer the provider-calculated amount, so a
+     * previous allocation must never masquerade as a new independent quote. Allocation only rewrites the fee;
+     * every provenance field below (from OpenRouteProvider's own persisted meta — pricing rule, minimum
+     * distance, minimum charge, chargeable distance — plus the persisted rate/distance/profile) stays stable,
+     * which is exactly what lets a future operation prove the evidence is still the same quote.
+     *
+     * If the required material provenance is missing, two carriers cannot be proven equivalent: the
+     * per-shipment `incomplete_identity` marker makes them fail closed, while a single legacy carrier is
+     * preserved.
+     *
+     * @return array<string, mixed>
+     */
+    private static function openRouteQuoteSignature(Shipment $shipment): array
+    {
+        $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
+        $pricing = is_array($meta['pricing'] ?? null) ? $meta['pricing'] : [];
+
+        // NB: the persisted `rate_per_km` column is deliberately NOT compared — it is redundant with
+        // pricing.price_per_km and is not carried onto a legitimate split group (ShipmentGroupingService
+        // clones route/provider/meta but not the fee/rate snapshot), so comparing it would raise a false
+        // conflict for the very allocation workflow this method protects. provider_meta is authoritative.
+        $signature = [
+            'provider' => 'openroute',
+            'shipping_provider_id' => $shipment->shipping_provider_id,
+            'distance_km' => $shipment->distance_km === null ? null : self::money($shipment->distance_km),
+            'price_per_km' => self::metaNumber($pricing['price_per_km'] ?? null),
+            'minimum_distance_km' => self::metaNumber($pricing['minimum_distance_km'] ?? null),
+            'minimum_charge' => self::metaNumber($pricing['minimum_charge'] ?? null),
+            'chargeable_distance_km' => self::metaNumber($meta['chargeable_distance_km'] ?? null),
+            'routing_profile' => self::normalizeMeta($meta['routing_profile'] ?? null),
+        ];
+
+        if ($signature['price_per_km'] === null
+            || $signature['minimum_distance_km'] === null
+            || $signature['minimum_charge'] === null
+            || $signature['chargeable_distance_km'] === null) {
+            $signature['incomplete_identity'] = $shipment->id;
+        }
+
+        return $signature;
+    }
+
+    /**
+     * A nonzero fee under a FREE / PICKUP / UNKNOWN code is already inconsistent data: it can never be
+     * proven equivalent to another piece of evidence, so it is marked incomplete per shipment.
+     *
+     * @return array<string, mixed>
+     */
+    private static function unrecognisedQuoteSignature(Shipment $shipment): array
+    {
         $meta = is_array($shipment->provider_meta) ? $shipment->provider_meta : [];
 
         return [
+            'provider' => ShippingMethodClassifier::normalize($shipment->shipping_provider_code),
+            'shipping_provider_id' => $shipment->shipping_provider_id,
             'fee' => self::money($shipment->shipping_fee_snapshot),
             'rate_per_km' => $shipment->rate_per_km === null ? null : self::money($shipment->rate_per_km),
-            'shipping_provider_id' => $shipment->shipping_provider_id,
-            'shipping_provider_code' => $shipment->shipping_provider_code,
             'distance_km' => $shipment->distance_km === null ? null : self::money($shipment->distance_km),
             'courier' => self::normalizeMeta($meta['courier'] ?? null),
             'service' => self::normalizeMeta($meta['service'] ?? null),
+            'incomplete_identity' => $shipment->id,
         ];
     }
 
-    private static function money(mixed $value): string
+    /**
+     * R5-F02B cross-date preflight: every OpenRoute fee snapshot a redistribution would overwrite must come
+     * from the SAME canonical provider quote. Differing provenance — or two carriers that each lack the
+     * required provenance — is ambiguous historical evidence and fails closed BEFORE any mutation.
+     *
+     * @param  Collection<int, Shipment>  $shipments
+     */
+    private function assertOpenRouteQuoteProvenanceConsistent(Collection $shipments): void
     {
-        return number_format((float) $value, 2, '.', '');
-    }
-
-    /** Normalize a material metadata string for comparison without erasing real service differences. */
-    private static function normalizeMeta(mixed $value): ?string
-    {
-        if ($value === null) {
-            return null;
+        $signatures = [];
+        foreach ($shipments as $shipment) {
+            if (self::toMinorUnits($shipment->shipping_fee_snapshot) <= 0) {
+                continue;
+            }
+            $signatures[json_encode(self::openRouteQuoteSignature($shipment))] = true;
         }
 
-        $normalized = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+        if (count($signatures) > 1) {
+            throw new ApiException(__('messages.fulfillment.conflicting_shipping_fee_snapshots'), 422);
+        }
+    }
 
-        return $normalized === '' ? null : $normalized;
+    /**
+     * A committed/historical group carrying a nonzero fee would be double-counted or rewritten — refuse.
+     *
+     * @param  Collection<int, Shipment>  $shipments
+     */
+    private function assertNoCommittedNonzeroFee(Collection $shipments): void
+    {
+        foreach ($shipments as $shipment) {
+            if (! self::isMutable($shipment) && self::toMinorUnits($shipment->shipping_fee_snapshot) > 0) {
+                throw new ApiException(__('messages.fulfillment.cannot_redistribute_committed_fee'), 422);
+            }
+        }
+    }
+
+    /**
+     * Human rule for `free`: a reschedule may proceed only while the whole order stays zero-fee. A nonzero
+     * canonical fee — or any conflicting historical nonzero fee evidence — is inconsistent data and FAILS
+     * CLOSED; it is never silently erased.
+     *
+     * @param  Collection<int, Shipment>|null  $shipments
+     */
+    private function assertFreeShippingInvariant(Order $order, ?Collection $shipments = null): void
+    {
+        if (self::toMinorUnits($order->shipping_fee_amount) !== 0) {
+            throw new ApiException(__('messages.fulfillment.free_shipping_must_be_zero'), 422);
+        }
+
+        $shipments ??= Shipment::query()->where('order_id', $order->id)->get();
+        foreach ($shipments as $shipment) {
+            if (self::toMinorUnits($shipment->shipping_fee_snapshot) !== 0) {
+                throw new ApiException(__('messages.fulfillment.free_shipping_must_be_zero'), 422);
+            }
+        }
     }
 
     /**
@@ -413,7 +601,7 @@ class ShipmentGroupingService
      * classify them:
      *   - none        -> zero semantics, safe;
      *   - exactly one -> preserve it;
-     *   - multiple    -> only if numeric value AND fee metadata are ALL equivalent (same canonical snapshot).
+     *   - multiple    -> only if every material signature is identical (same canonical snapshot / quote).
      * Anything else is CONFLICTING historical evidence: abort without choosing a lower/higher id, summing or
      * discarding — the surrounding transaction rolls back.
      *
@@ -478,5 +666,72 @@ class ShipmentGroupingService
             'delivery_mode' => $isSub ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD,
             'self_delivered_by_user_id' => $selfDeliveredBy,
         ];
+    }
+
+    /**
+     * Exact decimal-string -> integer MINOR units (cents). NEVER uses floating point for money. The DB
+     * columns are DECIMAL(x,2), so the canonical representation is at most two fractional digits.
+     */
+    private static function toMinorUnits(mixed $value): int
+    {
+        if (is_int($value)) {
+            return $value * 100;
+        }
+
+        $string = trim((string) $value);
+        if ($string === '') {
+            return 0;
+        }
+
+        $negative = str_starts_with($string, '-');
+        $string = ltrim($string, '+-');
+        $parts = explode('.', $string, 2);
+        $whole = $parts[0] === '' ? '0' : $parts[0];
+        $fraction = str_pad(substr($parts[1] ?? '0', 0, 2), 2, '0');
+
+        if (! ctype_digit($whole) || ! ctype_digit($fraction)) {
+            throw new ApiException(__('messages.fulfillment.invalid_monetary_amount'), 422);
+        }
+
+        $minor = ((int) $whole) * 100 + (int) $fraction;
+
+        return $negative ? -$minor : $minor;
+    }
+
+    /** Integer minor units -> canonical 2-decimal string. */
+    private static function decimalFromMinor(int $minor): string
+    {
+        $sign = $minor < 0 ? '-' : '';
+        $minor = abs($minor);
+
+        return sprintf('%s%d.%02d', $sign, intdiv($minor, 100), $minor % 100);
+    }
+
+    /** Exact canonical money string for a DECIMAL value (used only for comparison signatures). */
+    private static function money(mixed $value): string
+    {
+        return self::decimalFromMinor(self::toMinorUnits($value));
+    }
+
+    /** Exact canonical money string for an OpenRoute meta numeric, or null when absent. */
+    private static function metaNumber(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return self::money($value);
+    }
+
+    /** Normalize a material metadata string for comparison without erasing real service differences. */
+    private static function normalizeMeta(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $value)));
+
+        return $normalized === '' ? null : $normalized;
     }
 }

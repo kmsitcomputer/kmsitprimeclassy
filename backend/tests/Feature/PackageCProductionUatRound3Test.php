@@ -226,6 +226,9 @@ class PackageCProductionUatRound3Test extends TestCase
         [$a, $b] = [$this->product($agen, 'A'), $this->product($agen, 'B')];
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], now()->addDays(3)->toDateString());
         $s1 = $this->setFee($this->firstShipment($order), 25000, 5000);
+        // Round-5: a paid RajaOngkir quote carries its material identity (courier + service); the shell
+        // replicates it, so the two carriers are genuinely equivalent and may dedupe.
+        $s1->update(['shipping_provider_code' => 'rajaongkir', 'provider_meta' => ['courier' => 'jne', 'service' => 'REG']]);
         $s2 = $this->shell($order, 25000, 5000); // identical fee + metadata (replicated provider/distance)
         $this->item($order, $b)->update(['shipment_id' => $s2->id]);
 
@@ -330,12 +333,15 @@ class PackageCProductionUatRound3Test extends TestCase
         $d1 = now()->addDays(3)->toDateString();
         $d2 = now()->addDays(9)->toDateString();
         $order = $this->order($konsumen, [[$p, 3]], $d1);
-        $this->setFee($this->firstShipment($order), 25000, 5000);
+        // Round-5: a reschedulable paid order is Kurir Online (openroute) with a consistent Order-level fee.
+        $this->setFee($this->firstShipment($order), 25000, 5000)->update(['shipping_provider_code' => 'openroute']);
+        Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => 25000]);
 
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $p)->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
-        $this->assertSame(25000.0, $this->feeTotal($order), 'single carrier conserved, no false conflict');
-        $this->assertSame(1, Shipment::where('order_id', $order->id)->where('shipping_fee_snapshot', '>', 0)->count());
+        // Round-5 equal allocation: no false conflict, the Order fee is conserved exactly across the groups.
+        $this->assertSame(25000.0, $this->feeTotal($order), 'no fee lost or double counted');
+        $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
     }
 
     // ============================== F04 ==============================

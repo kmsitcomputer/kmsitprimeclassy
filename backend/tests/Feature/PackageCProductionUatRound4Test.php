@@ -103,10 +103,42 @@ class PackageCProductionUatRound4Test extends TestCase
         Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => $fee]);
     }
 
+    /**
+     * Realistic OpenRoute provider_meta, matching OpenRouteProvider::quote() for the distance_rate_applied
+     * rule (pricing rule + minimum distance + minimum charge + chargeable distance). Round-5 provenance
+     * comparison deliberately excludes the persisted fee but requires this material provenance.
+     *
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function openRouteMeta(array $overrides = []): array
+    {
+        return array_replace([
+            'api_version' => 'v2',
+            'routing_profile' => 'driving-car',
+            'distance_meters' => 15000,
+            'pricing' => [
+                'price_per_km' => 2000.0,
+                'minimum_distance_km' => 0.0,
+                'minimum_charge' => 0.0,
+                'free_shipping_enabled' => false,
+                'free_shipping_min_amount' => null,
+            ],
+            'chargeable_distance_km' => 15.0,
+            'rule' => 'distance_rate_applied',
+        ], $overrides);
+    }
+
     /** Mark the order as a Kurir Online (OpenRoute) order with the given total fee on its single group. */
     private function asKurirOnline(Order $order, float $fee): void
     {
-        Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'openroute', 'shipping_fee_snapshot' => $fee]);
+        Shipment::where('order_id', $order->id)->update([
+            'shipping_provider_code' => 'openroute',
+            'shipping_fee_snapshot' => $fee,
+            'rate_per_km' => 2000,
+            'distance_km' => 15,
+            'provider_meta' => $this->openRouteMeta(),
+        ]);
         Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => $fee]);
     }
 
@@ -372,7 +404,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], now()->addDays(3)->toDateString());
 
         $base = $this->firstShipment($order);
-        $base->update(['shipping_fee_snapshot' => $fee, 'rate_per_km' => 5000, 'provider_meta' => $swap ? $metaB : $metaA]);
+        $base->update(['shipping_provider_code' => 'rajaongkir', 'shipping_fee_snapshot' => $fee, 'rate_per_km' => 5000, 'provider_meta' => $swap ? $metaB : $metaA]);
         $shell = $this->shell($order, $fee, 5000, $swap ? $metaA : $metaB);
 
         $this->item($order, $a)->update(['shipment_id' => $base->id]);
@@ -478,7 +510,7 @@ class PackageCProductionUatRound4Test extends TestCase
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], $d1);
 
         $s1 = $this->firstShipment($order);
-        $s1->update(['shipping_fee_snapshot' => 25000, 'provider_meta' => ['courier' => 'jne', 'service' => 'REG']]);
+        $s1->update(['shipping_provider_code' => 'rajaongkir', 'shipping_fee_snapshot' => 25000, 'provider_meta' => ['courier' => 'jne', 'service' => 'REG']]);
         $s2 = $this->shell($order, 25000, 5000, ['courier' => 'jnt', 'service' => 'EZ']);
         $this->item($order, $b)->update(['requested_delivery_date' => $d2, 'shipment_id' => $s2->id]);
         $before = $this->snapshot($order);
@@ -494,7 +526,7 @@ class PackageCProductionUatRound4Test extends TestCase
         [$a, $b] = [$this->product($agen, 'A'), $this->product($agen, 'B')];
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], now()->addDays(3)->toDateString());
         $base = $this->firstShipment($order);
-        $base->update(['shipping_fee_snapshot' => 25000, 'provider_meta' => ['courier' => 'jne', 'service' => 'REG']]);
+        $base->update(['shipping_provider_code' => 'rajaongkir', 'shipping_fee_snapshot' => 25000, 'provider_meta' => ['courier' => 'jne', 'service' => 'REG']]);
         $shell = $this->shell($order, 25000, 5000, ['courier' => 'jnt', 'service' => 'EZ']);
         $this->item($order, $b)->update(['shipment_id' => $shell->id]);
         $before = $this->snapshot($order);

@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Payment\PaymentService;
+use App\Services\Shipping\ShippingMethodClassifier;
 use App\Services\Stock\StockRequestService;
 use App\Services\Stock\StockService;
 use App\Services\Stock\SubStockService;
@@ -343,12 +344,20 @@ class OrderFulfillmentService
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
 
-            // Human-approved rule: Ekspedisi (RajaOngkir) delivery dates are fixed. Reject the whole attempt —
-            // full reschedule OR partial split — BEFORE any mutation (no date/regroup/StockRequest/reservation/
-            // payment/fee change). Kurir Online (OpenRoute) is resolved by the same server-side snapshot.
-            if (ShipmentGroupingService::usesEkspedisi($order)) {
-                throw new ApiException(__('messages.fulfillment.ekspedisi_cannot_reschedule'), 422);
+            // Round-5 canonical shipping classification (no implicit fallback): only Kurir Online (openroute)
+            // and Free delivery may have their requested date changed. Ekspedisi (rajaongkir), Pickup (pickup)
+            // and any null / empty / unknown / legacy / MIXED provider code are DENIED here — BEFORE any
+            // mutation (no date / regroup / StockRequest / reservation / payment / fee change). Server-side
+            // classification is authoritative; the frontend is never relied on for enforcement.
+            $classification = ShipmentGroupingService::shippingClassification($order);
+            if (! ShippingMethodClassifier::allowsDeliveryDateChange($classification)) {
+                throw new ApiException(__($this->rescheduleDeniedMessage($classification)), 422);
             }
+
+            // F02B: prove the quote evidence a redistribution would overwrite is safe (the same canonical
+            // provider quote, with no immutable committed fee evidence) BEFORE mutating any date/membership.
+            // Transaction rollback remains mandatory defence; this is the domain gate in front of it.
+            $this->shipmentGrouping->preflightShippingFeeChange($order, $classification);
 
             // F04: historical commitment protects the shipment's CONTENTS, not just its identity. Lock the
             // current shipment once and derive the gate from SHIPMENT-level evidence — never from item status
@@ -369,7 +378,7 @@ class OrderFulfillmentService
                     }
 
                     $child = $this->splitItemForReschedule($item, $quantity, $newDate, $actor, $reason);
-                    $this->shipmentGrouping->redistributeKurirOnlineShippingFee($order);
+                    $this->shipmentGrouping->applyShippingFeeAfterReschedule($order);
 
                     return $child;
                 }
@@ -411,8 +420,8 @@ class OrderFulfillmentService
                 // new date.
                 $this->shipmentGrouping->assignItemToDateGroup($item, $order, $actor, 'shipment.regrouped_by_delivery_date');
                 // Human-approved rule: a NEW valid Kurir Online delivery-date change redistributes the
-                // unchanged Order shipping fee evenly across the active groups (no-op for Ekspedisi/free).
-                $this->shipmentGrouping->redistributeKurirOnlineShippingFee($order);
+                // unchanged Order shipping fee evenly across the active groups; Free delivery stays zero.
+                $this->shipmentGrouping->applyShippingFeeAfterReschedule($order);
             }
 
             ActivityLogger::log($actor->id, $item, 'order_item.delivery_rescheduled', $reason, [
@@ -421,6 +430,16 @@ class OrderFulfillmentService
 
             return $item->fresh();
         });
+    }
+
+    /** Localized denial message for a non-reschedulable canonical shipping classification. */
+    private function rescheduleDeniedMessage(string $classification): string
+    {
+        return match ($classification) {
+            ShippingMethodClassifier::EKSPEDISI => 'messages.fulfillment.ekspedisi_cannot_reschedule',
+            ShippingMethodClassifier::PICKUP => 'messages.fulfillment.pickup_cannot_reschedule',
+            default => 'messages.fulfillment.unknown_shipping_method_cannot_reschedule',
+        };
     }
 
     /**

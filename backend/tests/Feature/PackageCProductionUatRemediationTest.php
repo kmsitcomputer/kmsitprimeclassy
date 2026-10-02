@@ -124,6 +124,28 @@ class PackageCProductionUatRemediationTest extends TestCase
         return (float) Shipment::where('order_id', $order->id)->sum('shipping_fee_snapshot');
     }
 
+    /** Complete OpenRoute quote provenance so a split group clones an equivalent (not incomplete) quote. */
+    private function openRouteMeta(): array
+    {
+        return [
+            'routing_profile' => 'driving-car',
+            'pricing' => [
+                'price_per_km' => 2000.0, 'minimum_distance_km' => 0.0, 'minimum_charge' => 0.0,
+                'free_shipping_enabled' => false, 'free_shipping_min_amount' => null,
+            ],
+            'chargeable_distance_km' => 15.0,
+        ];
+    }
+
+    /** Make an order a reschedulable paid Kurir Online (openroute) order with a consistent Order fee. */
+    private function asPaidKurirOnline(Order $order, float $fee): void
+    {
+        Shipment::where('order_id', $order->id)->update([
+            'shipping_provider_code' => 'openroute', 'distance_km' => 15, 'provider_meta' => $this->openRouteMeta(),
+        ]);
+        Order::withoutGlobalScopes()->whereKey($order->id)->update(['shipping_fee_amount' => $fee]);
+    }
+
     // ===================== F02 — shipping-fee conservation =====================
 
     public function test_regroup_keeps_the_nonzero_fee_regardless_of_source_target_id_order(): void
@@ -171,6 +193,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], $d1);
         [, $shell] = $this->seedLegacyPair($order);
         $this->item($order, $b)->update(['shipment_id' => $shell->id]);
+        $this->asPaidKurirOnline($order, 25000);
         $aItem = $this->item($order, $a);
         $bItem = $this->item($order, $b);
 
@@ -207,6 +230,7 @@ class PackageCProductionUatRemediationTest extends TestCase
         $s2->save();
         $s2->fresh()->update(['shipping_fee_snapshot' => 25000, 'rate_per_km' => 5000]);
         $this->item($order, $b)->update(['requested_delivery_date' => $d2, 'shipment_id' => $s2->id]);
+        $this->asPaidKurirOnline($order, 25000);
 
         // Move B back to d1: it joins lower-id S1; S2 (higher id, the fee source) is released and its fee must move.
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$this->item($order, $b)->id}/reschedule", ['requested_delivery_date' => $d1, 'reason' => 'x'])->assertOk();
@@ -224,14 +248,16 @@ class PackageCProductionUatRemediationTest extends TestCase
         $d2 = now()->addDays(7)->toDateString();
         $order = $this->order($konsumen, [[$a, 3]], $d1);
         Shipment::where('order_id', $order->id)->update(['shipping_fee_snapshot' => 25000, 'rate_per_km' => 5000]);
+        $this->asPaidKurirOnline($order, 25000);
         $item = $this->item($order, $a);
 
-        // Split 1 of 3 to d2: the child joins a NEW d2 shipment (fee 0); the parent keeps d1 + the fee.
+        // Split 1 of 3 to d2: Round-5 equal allocation divides the unchanged Order fee across both groups.
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", ['requested_delivery_date' => $d2, 'reason' => 'pecah', 'quantity' => 1])->assertOk();
 
         $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
-        $this->assertSame(25000.0, $this->shipmentFeeTotal($order), 'exactly one shipment still carries the fee');
-        $this->assertSame(1, Shipment::where('order_id', $order->id)->where('shipping_fee_snapshot', '>', 0)->count(), 'never double-counted');
+        $this->assertSame(25000.0, $this->shipmentFeeTotal($order), 'conserved exactly across the split groups');
+        $this->assertSame(2, Shipment::where('order_id', $order->id)->where('shipping_fee_snapshot', '>', 0)->count());
+        $this->assertSame(12500.0, (float) Shipment::where('order_id', $order->id)->first()->shipping_fee_snapshot);
     }
 
     public function test_regroup_apply_is_idempotent_and_conserves_the_numeric_fee(): void
@@ -267,7 +293,8 @@ class PackageCProductionUatRemediationTest extends TestCase
         $d1 = now()->addDays(3)->toDateString();
         $order = $this->order($konsumen, [[$a, 1], [$b, 1]], $d1);
         $s1 = Shipment::where('order_id', $order->id)->orderBy('id')->firstOrFail();
-        $s1->update(['tracking_number' => 'RESI-123', 'shipping_fee_snapshot' => 25000, 'rate_per_km' => 5000]);
+        // Free delivery order (no paid carrier code): the tracked shipment must stay zero-fee.
+        $s1->update(['tracking_number' => 'RESI-123']);
         $trackingShipmentId = $s1->id;
         $this->assertFalse(ShipmentGroupingService::isMutable($s1->fresh()));
 

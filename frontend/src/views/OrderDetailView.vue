@@ -904,9 +904,10 @@ async function submitReturn(item: OrderItem) {
             </div>
 
             <!-- Admin: reschedule requested delivery date, only while order is 'diproses'.
-                 Ekspedisi (rajaongkir) delivery dates are fixed by business rule — the server returns 422
-                 regardless; this just avoids offering an impossible action. -->
-            <div v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment') && order.shipping_provider !== 'rajaongkir'" class="mt-1.5">
+                 Bounded UX convenience only — the SERVER is authoritative. Only Kurir Online (openroute) and
+                 Free delivery may be rescheduled; Ekspedisi (rajaongkir), Pickup and any unknown/legacy
+                 provider code are denied by the server with 422 regardless. -->
+            <div v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment') && (order.shipping_provider === 'openroute' || order.shipping_provider === 'free')" class="mt-1.5">
               <button v-if="reschedulingItemId !== item.id" type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="openRescheduleForm(item)">
                 {{ t('orders.rescheduleItem') }}
               </button>
