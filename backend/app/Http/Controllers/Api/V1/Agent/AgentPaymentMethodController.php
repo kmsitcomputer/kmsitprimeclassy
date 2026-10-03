@@ -115,9 +115,11 @@ class AgentPaymentMethodController extends Controller
             ?? AgentPaymentMethodSetting::query()->where('agent_id', $agentId)->where('payment_method_id', $method->id)->value('active_environment')
             ?? 'sandbox';
 
-        AgentPaymentGatewayConfig::query()->updateOrCreate(
-            ['agent_id' => $agentId, 'payment_method_id' => $method->id, 'environment' => $environment],
-            ['config' => $request->input('config')],
+        AgentPaymentGatewayConfig::replaceConfig(
+            $agentId,
+            $method->id,
+            $environment,
+            $request->input('config'),
         );
 
         ActivityLogger::log($actor->id, $method, 'agent_payment_method.config_updated', null, [
