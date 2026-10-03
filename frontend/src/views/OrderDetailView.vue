@@ -1187,6 +1187,16 @@ async function submitReturn(item: OrderItem) {
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.grandTotal') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.grand_total) }}</dd>
             </div>
+            <div v-if="order.dp_submission && ['pending', 'rejected'].includes(order.dp_submission.status)" class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.dpClaimed') }}</dt>
+              <dd class="text-right font-medium text-stone-800 dark:text-stone-100">
+                {{ formatRupiah(order.dp_submission.amount) }}
+                <span class="block text-[11px] font-normal text-stone-500 dark:text-stone-400">{{ t(`orders.dpSubmissionStatus.${order.dp_submission.status}`) }}</span>
+              </dd>
+            </div>
+            <p v-if="order.dp_submission?.status === 'rejected' && order.dp_submission.rejection_reason" class="text-right text-xs text-red-600">
+              {{ t('orders.rejectionReason', { reason: order.dp_submission.rejection_reason }) }}
+            </p>
             <div v-if="order.payment_summary.requested_dp > 0" class="flex justify-between">
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.dpPaid') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.verified_dp) }}</dd>
@@ -1240,6 +1250,9 @@ async function submitReturn(item: OrderItem) {
           </div>
 
           <div v-else-if="order.payment_transaction?.bank_transfer_verification" class="mt-3 text-sm">
+            <p v-if="order.payment_transaction.bank_transfer_verification.status === 'pending'" class="mb-1 font-semibold text-stone-700 dark:text-stone-200">
+              {{ order.payment_transaction.instructions?.note === 'down_payment' ? t('orders.dpClaimed') : t('orders.paymentClaimed') }}: {{ formatRupiah(order.payment_transaction.amount) }}
+            </p>
             <p>
               {{ t('orders.verificationStatusLabel') }}
               <strong>{{ { pending: t('orders.verificationPending'), verified: t('orders.verificationVerified'), rejected: t('orders.verificationRejected') }[order.payment_transaction.bank_transfer_verification.status] }}</strong>

@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use App\Services\Payment\PaymentSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class OrderResource extends JsonResource
 {
@@ -16,6 +17,23 @@ class OrderResource extends JsonResource
         // financial truth stays canonical in the payment layer for the authorized roles.
         $seesFinancials = $user !== null
             && $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal');
+
+        $dpSubmission = null;
+        if ($seesFinancials && $this->relationLoaded('paymentTransactions')) {
+            $dpTransaction = $this->paymentTransactions->sortBy('id')
+                ->first(fn ($transaction) => $transaction->paymentMethod?->code === 'down_payment');
+            $verification = $dpTransaction?->bankTransferVerification;
+            if ($dpTransaction) {
+                $dpSubmission = [
+                    'amount' => $dpTransaction->amount,
+                    'status' => $verification?->status ?? 'not_submitted',
+                    'proof_url' => $verification?->proof_image_path
+                        ? Storage::disk('public')->url($verification->proof_image_path) : null,
+                    'rejection_reason' => $verification?->rejection_reason,
+                    'submitted_at' => $verification?->created_at,
+                ];
+            }
+        }
 
         return [
             'id' => $this->id,
@@ -35,6 +53,8 @@ class OrderResource extends JsonResource
             // Canonical payment summary (PaymentSummaryService) — the single formula every payment
             // display reads instead of each re-deriving its own.
             'payment_summary' => $this->when($seesFinancials, fn () => PaymentSummaryService::summarize($this->resource)),
+            // Claimed initial DP transaction/evidence, separate from verified paid/remaining truth.
+            'dp_submission' => $this->when($seesFinancials, $dpSubmission),
             'recipient_name' => $this->recipient_name_snapshot,
             'recipient_phone' => $this->recipient_phone_snapshot,
             'address' => $this->address_snapshot,

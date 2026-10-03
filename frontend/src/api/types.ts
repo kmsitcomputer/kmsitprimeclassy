@@ -152,6 +152,14 @@ export interface Order {
   payment_transaction: PaymentTransaction | null
   /** Canonical payment figures (PaymentSummaryService) — the single source for Grand Total / DP / Total Dibayar / Sisa Pembayaran everywhere they're displayed. */
   payment_summary: PaymentSummary
+  /** Claimed initial DP transaction/evidence, never added to verified payment totals. */
+  dp_submission: {
+    amount: string
+    status: 'not_submitted' | 'pending' | 'verified' | 'rejected'
+    proof_url: string | null
+    rejection_reason: string | null
+    submitted_at: string | null
+  } | null
   created_at: string
 }
 

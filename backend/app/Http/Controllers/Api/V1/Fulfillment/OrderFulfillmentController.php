@@ -88,7 +88,7 @@ class OrderFulfillmentController extends Controller
         // The service mutated/recalculated its own locked Order instance, so this route-bound one is
         // stale: reload the persisted truth (attributes + the same relations OrderController::show
         // serializes) so the response itself carries the new total/paid/remaining/payment status.
-        $order->refresh()->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'shipments.selfDeliveredBy', 'shipments.deliveryVerifications.verifiedBy', 'deliveryVerifications.verifiedBy', 'returnRequests.items']);
+        $order->refresh()->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'shipments.selfDeliveredBy', 'shipments.deliveryVerifications.verifiedBy', 'deliveryVerifications.verifiedBy', 'returnRequests.items']);
 
         return $wasReplay
             ? $this->ok(new OrderResource($order), __('messages.order.line_added'))

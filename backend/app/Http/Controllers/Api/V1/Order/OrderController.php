@@ -102,7 +102,7 @@ class OrderController extends Controller
     {
         $this->authorize('view', $order);
 
-        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'shipments.selfDeliveredBy', 'shipments.deliveryVerifications.verifiedBy', 'deliveryVerifications.verifiedBy', 'returnRequests.items']);
+        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification', 'paymentTransactions.codPaymentProof.proof', 'shipments.courier.user', 'shipments.proof', 'shipments.selfDeliveredBy', 'shipments.deliveryVerifications.verifiedBy', 'deliveryVerifications.verifiedBy', 'returnRequests.items']);
 
         return $this->ok(new OrderResource($order));
     }

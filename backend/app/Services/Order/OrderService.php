@@ -99,7 +99,7 @@ class OrderService
                 ->first();
 
             if ($existing) {
-                return $existing->load(['items', 'shipments', 'paymentMethod', 'paymentTransactions.bankTransferVerification']);
+                return $existing->load(['items', 'shipments', 'paymentMethod', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification']);
             }
         }
 
@@ -297,7 +297,7 @@ class OrderService
                     'shipping_provider' => $quote->providerCode,
                 ]);
 
-                return $order->fresh(['items', 'shipments.courier.user', 'paymentMethod', 'paymentTransactions.bankTransferVerification']);
+                return $order->fresh(['items', 'shipments.courier.user', 'paymentMethod', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification']);
             });
         } catch (QueryException $e) {
             // Two concurrent requests with the same Idempotency-Key both
@@ -308,7 +308,7 @@ class OrderService
                     ->where('konsumen_id', $konsumen->id)
                     ->where('idempotency_key', $idempotencyKey)
                     ->firstOrFail()
-                    ->load(['items', 'shipments.courier.user', 'paymentMethod', 'paymentTransactions.bankTransferVerification']);
+                    ->load(['items', 'shipments.courier.user', 'paymentMethod', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification']);
             }
 
             throw $e;

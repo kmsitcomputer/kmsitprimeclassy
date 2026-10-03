@@ -426,9 +426,21 @@ class DownPaymentTest extends TestCase
         $this->assertSame(0.0, (float) $pending['total_paid']);
         $this->assertSame(500000.0, (float) $pending['remaining_balance']);
         $this->assertFalse($pending['is_fully_paid']);
+        $orderView = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame(200000.0, (float) $orderView['dp_submission']['amount']);
+        $this->assertSame('not_submitted', $orderView['dp_submission']['status']);
+
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $keuanganView = $this->actingAs($keuangan)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame(200000.0, (float) $keuanganView['dp_submission']['amount']);
+        $this->assertSame('pending', $keuanganView['dp_submission']['status']);
+        $this->assertNotNull($keuanganView['dp_submission']['proof_url']);
+        $this->assertSame(200000.0, (float) $keuanganView['payment_transaction']['amount']);
+        $this->assertSame('pending', $keuanganView['payment_transaction']['bank_transfer_verification']['status']);
+        $this->assertSame(0.0, (float) $keuanganView['payment_summary']['verified_dp']);
+        $this->assertSame(0.0, (float) $keuanganView['payment_summary']['total_paid']);
 
         // Verified: DP cleared -> verified_dp/total_paid show 200.000, remaining 300.000.
-        $this->submitProof($konsumen, $order->id)->assertOk();
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
 
         $verified = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->json('data.payment_summary');
@@ -437,10 +449,17 @@ class DownPaymentTest extends TestCase
         $this->assertSame(300000.0, (float) $verified['remaining_balance']);
         $this->assertSame('partially_paid', $verified['payment_status']);
         $this->assertFalse($verified['is_fully_paid']);
+        $verifiedSubmission = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->json('data.dp_submission');
+        $this->assertSame('verified', $verifiedSubmission['status']);
+        $this->assertSame(200000.0, (float) $verifiedSubmission['amount']);
 
         // Settled: pelunasan verified -> total_paid=grand_total, remaining=0, verified_dp
         // stays capped at the ORIGINAL requested DP (200.000), never inflated by the settlement.
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
+        $settlementPending = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame(300000.0, (float) $settlementPending['payment_transaction']['amount']);
+        $this->assertSame(200000.0, (float) $settlementPending['dp_submission']['amount'], 'Initial DP claim must not be replaced by the latest settlement transaction.');
+        $this->assertSame('verified', $settlementPending['dp_submission']['status']);
         $this->submitProof($konsumen, $order->id)->assertOk();
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
 
@@ -450,5 +469,24 @@ class DownPaymentTest extends TestCase
         $this->assertSame(0.0, (float) $settled['remaining_balance']);
         $this->assertSame('paid', $settled['payment_status']);
         $this->assertTrue($settled['is_fully_paid']);
+    }
+
+    public function test_rejected_dp_claim_remains_visible_without_becoming_verified_payment(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 500000);
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $product, 200000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", [
+            'approved' => false, 'rejection_reason' => 'Nominal pada bukti tidak sesuai',
+        ])->assertOk();
+
+        $data = $this->actingAs($konsumen)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame(200000.0, (float) $data['dp_submission']['amount']);
+        $this->assertSame('rejected', $data['dp_submission']['status']);
+        $this->assertSame('Nominal pada bukti tidak sesuai', $data['dp_submission']['rejection_reason']);
+        $this->assertSame(0.0, (float) $data['payment_summary']['verified_dp']);
+        $this->assertSame(0.0, (float) $data['payment_summary']['total_paid']);
+        $this->assertSame(500000.0, (float) $data['payment_summary']['remaining_balance']);
     }
 }

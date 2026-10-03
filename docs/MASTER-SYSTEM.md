@@ -93,7 +93,7 @@ Admin/Agen/Super Admin can: adjust an item's fulfilled quantity (only while the 
 
 ## 13. Payment
 
-Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amount`, `remaining_amount`, `payment_status`, written only by `OrderTotalCalculator` (totals) and `PaymentService` (money). `PaymentSummaryService` is the single canonical summary read by Order Detail, reports and Sheets. Flows: COD (photo proof + Finance confirmation), manual bank transfer (proof + Finance verification), DP (partial payment + separate settlement), gateways (signature-verified, idempotent webhooks). Payment verification, shipment/delivery and delivery verification are three separate concerns.
+Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amount`, `remaining_amount`, `payment_status`, written only by `OrderTotalCalculator` (totals) and `PaymentService` (money). `PaymentSummaryService` is the single canonical verified-payment summary read by Order Detail, reports and Sheets. A pending/rejected DP claim is sourced from the initial `down_payment` transaction plus its verification record and is shown separately for review; it never increments `paid_amount`, `verified_dp` or reduces `remaining_amount`. Flows: COD (photo proof + Finance confirmation), manual bank transfer (proof + Finance verification), DP (partial payment + separate settlement), gateways (signature-verified, idempotent webhooks). Payment verification, shipment/delivery and delivery verification are three separate concerns.
 
 ## 14. Fulfilment
 

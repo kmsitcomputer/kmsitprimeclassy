@@ -162,7 +162,7 @@ class PaymentController extends Controller
             'transaction' => new PaymentTransactionResource($transaction),
             'order' => new OrderResource($order->fresh([
                 'items', 'konsumen', 'sales', 'korsal', 'paymentMethod',
-                'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof',
+                'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof',
             ])),
         ], __('messages.payment.settlement_requested'));
     }
