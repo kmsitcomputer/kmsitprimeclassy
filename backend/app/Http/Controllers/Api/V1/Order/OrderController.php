@@ -115,7 +115,7 @@ class OrderController extends Controller
 
         Log::info('order.status_changed', ['order_id' => $order->id, 'status' => $order->status, 'by' => $request->user()->id]);
 
-        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'shipments.courier.user', 'shipments.proof']);
+        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof']);
 
         return $this->ok(new OrderResource($order), __('messages.order.status_updated'));
     }
@@ -128,7 +128,7 @@ class OrderController extends Controller
 
         Log::info('order.cancelled', ['order_id' => $order->id, 'by' => $request->user()->id]);
 
-        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'shipments.courier.user', 'shipments.proof']);
+        $order->load(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof']);
 
         return $this->ok(new OrderResource($order), __('messages.order.cancelled'));
     }

@@ -1187,7 +1187,7 @@ async function submitReturn(item: OrderItem) {
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.grandTotal') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.grand_total) }}</dd>
             </div>
-            <div v-if="order.dp_submission && ['pending', 'rejected'].includes(order.dp_submission.status)" class="flex justify-between">
+            <div v-if="order.dp_submission" class="flex justify-between" data-testid="dp-claimed">
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.dpClaimed') }}</dt>
               <dd class="text-right font-medium text-stone-800 dark:text-stone-100">
                 {{ formatRupiah(order.dp_submission.amount) }}

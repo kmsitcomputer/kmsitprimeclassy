@@ -489,4 +489,86 @@ class DownPaymentTest extends TestCase
         $this->assertSame(0.0, (float) $data['payment_summary']['total_paid']);
         $this->assertSame(500000.0, (float) $data['payment_summary']['remaining_balance']);
     }
+
+    /** DP Diajukan projection as the Keuangan page reads it (GET /orders/{id}). */
+    private function keuanganView(User $keuangan, int $orderId): array
+    {
+        return $this->actingAs($keuangan)->getJson("/api/v1/orders/{$orderId}")->assertOk()->json('data');
+    }
+
+    public function test_keuangan_sees_pending_dp_claim_with_zero_paid_and_canonical_remaining(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $this->makeProduct($agen, price: 500000), 100000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+
+        $view = $this->keuanganView($keuangan, $order->id);
+        $this->assertSame(100000.0, (float) $view['dp_submission']['amount']);
+        $this->assertSame('pending', $view['dp_submission']['status']);
+        $this->assertSame(0.0, (float) $view['payment_summary']['verified_dp']);
+        $this->assertSame(0.0, (float) $view['payment_summary']['total_paid']);
+        $this->assertSame((float) $view['payment_summary']['grand_total'], (float) $view['payment_summary']['remaining_balance']);
+        $this->assertSame(0, \App\Models\PaymentTransaction::where('order_id', $order->id)->count() - 1, 'the claim must not create a second PaymentTransaction');
+    }
+
+    public function test_keuangan_sees_approved_dp_claim_and_verified_dp_credited_only_after_approval(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $this->makeProduct($agen, price: 500000), 100000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+
+        $view = $this->keuanganView($keuangan, $order->id);
+        $this->assertSame(100000.0, (float) $view['dp_submission']['amount']);
+        $this->assertSame('verified', $view['dp_submission']['status']);
+        $this->assertSame(100000.0, (float) $view['payment_summary']['verified_dp']);
+        $this->assertSame(100000.0, (float) $view['payment_summary']['total_paid']);
+        $this->assertSame((float) $view['payment_summary']['grand_total'] - 100000.0, (float) $view['payment_summary']['remaining_balance']);
+    }
+
+    public function test_keuangan_sees_rejected_dp_claim_reason_and_no_credit(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $this->makeProduct($agen, price: 500000), 100000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $before = $this->keuanganView($keuangan, $order->id)['payment_summary'];
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => false, 'rejection_reason' => 'Nominal tidak sesuai'])->assertOk();
+
+        $view = $this->keuanganView($keuangan, $order->id);
+        $this->assertSame(100000.0, (float) $view['dp_submission']['amount']);
+        $this->assertSame('rejected', $view['dp_submission']['status']);
+        $this->assertSame('Nominal tidak sesuai', $view['dp_submission']['rejection_reason']);
+        $this->assertSame(0.0, (float) $view['payment_summary']['verified_dp']);
+        $this->assertSame(0.0, (float) $view['payment_summary']['total_paid']);
+        $this->assertSame((float) $before['remaining_balance'], (float) $view['payment_summary']['remaining_balance']);
+    }
+
+    public function test_later_settlement_never_replaces_the_initial_dp_claim_for_keuangan(): void
+    {
+        ['agen' => $agen, 'keuangan' => $keuangan, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $this->makeProduct($agen, price: 500000), 100000)->json('data.id'));
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
+
+        $pending = $this->keuanganView($keuangan, $order->id);
+        $this->assertSame(100000.0, (float) $pending['dp_submission']['amount']);
+        $this->assertSame('verified', $pending['dp_submission']['status']);
+
+        $this->submitProof($konsumen, $order->id)->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $settled = $this->keuanganView($keuangan, $order->id);
+        $this->assertSame(100000.0, (float) $settled['dp_submission']['amount']);
+        $this->assertSame(100000.0, (float) $settled['payment_summary']['verified_dp'], 'verified DP stays capped at the original DP');
+    }
+
+    public function test_order_action_responses_keep_the_dp_claim_projection(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $order = Order::withoutGlobalScopes()->findOrFail($this->placeDpOrder($konsumen, $this->makeProduct($agen, price: 500000), 100000)->json('data.id'));
+
+        $cancelled = $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/cancel", ['reason' => 'berubah pikiran'])->assertOk()->json('data');
+        $this->assertSame(100000.0, (float) $cancelled['dp_submission']['amount']);
+        $this->assertSame('not_submitted', $cancelled['dp_submission']['status']);
+    }
 }

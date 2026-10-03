@@ -92,7 +92,7 @@ class PaymentController extends Controller
         }
 
         $order = $this->paymentService->markCod($order, $actor, $request->boolean('paid'));
-        $order->load(['konsumen', 'sales', 'korsal', 'shipments.courier.user', 'shipments.proof']);
+        $order->load(['konsumen', 'sales', 'korsal', 'paymentTransactions.paymentMethod', 'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof']);
 
         return $this->ok(new OrderResource($order), __('messages.payment.cod_status_updated'));
     }
