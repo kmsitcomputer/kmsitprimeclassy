@@ -7,6 +7,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
@@ -18,20 +19,70 @@ class ResetTransactions extends Command
 
     protected $description = 'Safely remove transaction-derived data while preserving users, catalog, hierarchy, configuration, and current stock.';
 
-    /** @var list<string> */
+    /**
+     * Child-before-parent deletion order, derived from the actual FK graph
+     * (migrations + production FK recon).
+     *
+     * Blocking references among transaction tables (all RESTRICT / NO ACTION
+     * unless noted):
+     * - sub_stock_reservations -> order_items
+     * - stock_request_proposal_items -> stock_request_proposals (CASCADE) + stock_request_items
+     * - stock_request_proposals / stock_request_fulfillments -> stock_requests
+     * - inventory_cancellation_reversals -> orders + order_items (stock_requests is NULL ON DELETE)
+     * - stock_request_items -> stock_requests (CASCADE) + order_items
+     * - stock_requests -> orders
+     * - return_items -> returns (CASCADE) + order_items
+     * - returns / commissions -> orders (commissions.order_item_id is SET NULL)
+     * - order_item_adjustments -> order_items (CASCADE)
+     * - order_fulfillment_change_proposals -> orders + order_items (CASCADE)
+     * - delivery_verifications -> shipments
+     * - cod_payment_proofs / bank_transfer_verifications -> payment_transactions (CASCADE)
+     * - order_items.split_from_order_item_id self-reference (RESTRICT; nulled before delete)
+     *   plus order_items.shipment_id / additional_payment_id (nullOnDelete; nulled before delete)
+     * - shipments / payment_transactions -> orders
+     * - order_additional_payments -> orders (CASCADE; payment_transactions is SET NULL)
+     * - stock_handovers -> stock_transfers
+     * - sub_stock_request_items -> sub_stock_requests (CASCADE)
+     * - sub_stock_requests -> stock_transfers
+     * - stock_transfer_items -> stock_transfers (CASCADE)
+     *
+     * Deliberately NOT listed (preserved master / physical / configuration state):
+     * product_stocks, product_variation_stocks, warehouse_stocks, warehouse_settings,
+     * warehouse_sub_locations, warehouse_migration_runs/markers, stock_opnames(+items),
+     * warehouse_stock_requests, vouchers, product_discounts, invoice_configs and every
+     * other catalog/hierarchy/config table. Warehouse-domain stock_movements only touch
+     * warehouse_stocks and are left as history; only the Agent-reservation movements that
+     * drove product_stocks restoration are deleted (see transactionStockMovementQuery).
+     *
+     * @var list<string>
+     */
     private const TRANSACTION_TABLES = [
+        'sub_stock_reservations',
+        'stock_request_proposal_items',
+        'stock_request_proposals',
+        'stock_request_fulfillments',
+        'inventory_cancellation_reversals',
+        'stock_request_items',
+        'stock_requests',
         'return_items',
         'returns',
         'order_item_adjustments',
         'commissions',
+        'order_fulfillment_change_proposals',
+        'delivery_verifications',
         'cod_payment_proofs',
         'bank_transfer_verifications',
-        'order_additional_payments',
-        'payment_transactions',
         'order_items',
         'shipments',
+        'order_additional_payments',
         'payment_webhook_logs',
+        'payment_transactions',
         'orders',
+        'stock_handovers',
+        'sub_stock_request_items',
+        'sub_stock_requests',
+        'stock_transfer_items',
+        'stock_transfers',
     ];
 
     /** @var list<string> */
@@ -61,7 +112,9 @@ class ResetTransactions extends Command
             return self::FAILURE;
         }
 
-        $before = $this->counts(self::TRANSACTION_TABLES);
+        $tables = $this->coveredTables();
+        $skipped = array_values(array_diff(self::TRANSACTION_TABLES, $tables));
+        $before = $this->counts($tables);
         $masterBefore = $this->counts(self::MASTER_TABLES);
         $inventory = $this->inventoryImpact();
         $media = $this->transactionMedia();
@@ -82,6 +135,9 @@ class ResetTransactions extends Command
         $this->line('Product stock rows with reservations: '.$inventory['product_reserved_rows']);
         $this->line('Variant stock rows with reservations: '.$inventory['variation_reserved_rows']);
         $this->line('On-hand restoration delta: '.$inventory['on_hand_delta']);
+        if ($skipped !== []) {
+            $this->line('Tables absent from this database (skipped): '.implode(', ', $skipped));
+        }
 
         if ($inventory['unsafe_rows'] > 0) {
             $this->error('BLOCKER: transaction stock history contains unsupported movement types. No data was changed.');
@@ -101,10 +157,12 @@ class ResetTransactions extends Command
             return self::FAILURE;
         }
 
-        DB::transaction(function () use ($inventory): void {
+        DB::transaction(function () use ($inventory, $tables): void {
             $this->restoreInventory($inventory['rows']);
 
-            foreach (self::TRANSACTION_TABLES as $table) {
+            $this->breakOrderItemCrossReferences();
+
+            foreach ($tables as $table) {
                 DB::table($table)->delete();
             }
 
@@ -118,7 +176,7 @@ class ResetTransactions extends Command
         Cache::forget('dashboard.metrics');
         Cache::forget('reports.summary');
 
-        $after = $this->counts(self::TRANSACTION_TABLES);
+        $after = $this->counts($tables);
         $masterAfter = $this->counts(self::MASTER_TABLES);
         $remainingTransactionMovements = $this->transactionStockMovementQuery()->count();
         $remainingReservations = DB::table('product_stocks')->where('quantity_reserved', '>', 0)->count()
@@ -148,6 +206,47 @@ class ResetTransactions extends Command
     private function counts(array $tables): array
     {
         return collect($tables)->mapWithKeys(fn (string $table) => [$table => DB::table($table)->count()])->all();
+    }
+
+    /**
+     * Tables from TRANSACTION_TABLES that exist in this database, in order.
+     * A production database may legitimately hold transaction tables that this
+     * codebase no longer (or not yet) migrates — and vice versa — so existence
+     * is checked instead of assuming either side. Skipped names are reported,
+     * never silently treated as empty.
+     *
+     * @return list<string>
+     */
+    private function coveredTables(): array
+    {
+        return array_values(array_filter(
+            self::TRANSACTION_TABLES,
+            fn (string $table) => Schema::hasTable($table)
+        ));
+    }
+
+    /**
+     * Break the in-table / cross-table references among rows that are all being
+     * deleted anyway: order_items.split_from_order_item_id is RESTRICT ON DELETE,
+     * so a blanket delete with split rows present would fail with 1451; the
+     * shipment/additional-payment links are nulled for the same atomic pass.
+     */
+    private function breakOrderItemCrossReferences(): void
+    {
+        if (! Schema::hasTable('order_items')) {
+            return;
+        }
+
+        $nulled = [];
+        foreach (['split_from_order_item_id', 'shipment_id', 'additional_payment_id'] as $column) {
+            if (Schema::hasColumn('order_items', $column)) {
+                $nulled[$column] = null;
+            }
+        }
+
+        if ($nulled !== []) {
+            DB::table('order_items')->update($nulled);
+        }
     }
 
     private function transactionStockMovementQuery()
@@ -208,6 +307,10 @@ class ResetTransactions extends Command
             'App\\Models\\Order', 'App\\Models\\OrderItem', 'App\\Models\\OrderItemAdjustment',
             'App\\Models\\PaymentTransaction', 'App\\Models\\Shipment', 'App\\Models\\ReturnRequest',
             'App\\Models\\ReturnItem', 'App\\Models\\Commission',
+            'App\\Models\\StockRequest', 'App\\Models\\StockRequestProposal',
+            'App\\Models\\InventoryCancellationReversal', 'App\\Models\\DeliveryVerification',
+            'App\\Models\\StockTransfer', 'App\\Models\\StockHandover',
+            'App\\Models\\SubStockRequest', 'App\\Models\\SubStockReservation',
         ];
 
         return DB::table('activity_logs')->where(function ($query) use ($subjectTypes): void {
@@ -217,7 +320,11 @@ class ResetTransactions extends Command
                 ->orWhere('event', 'like', 'shipment.%')
                 ->orWhere('event', 'like', 'return.%')
                 ->orWhere('event', 'like', 'commission.%')
-                ->orWhere('event', 'like', 'order_item_adjustment.%');
+                ->orWhere('event', 'like', 'order_item_adjustment.%')
+                ->orWhere('event', 'like', 'stock_request.%')
+                ->orWhere('event', 'like', 'stock_transfer.%')
+                ->orWhere('event', 'like', 'sub_stock_request.%')
+                ->orWhere('event', 'like', 'fulfillment.%');
         });
     }
 
