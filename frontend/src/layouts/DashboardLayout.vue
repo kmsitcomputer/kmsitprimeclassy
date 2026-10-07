@@ -102,6 +102,7 @@ const ROLE_LABELS: Record<string, string> = {
   kurir: 'Kurir',
   gudang: t('roles.gudang'),
   'sales-kurir-sub': t('roles.salesKurir'),
+  'koordinator-kurir': t('roles.koordinatorKurir'),
   konsumen: 'Konsumen',
 }
 

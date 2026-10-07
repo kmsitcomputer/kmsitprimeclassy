@@ -98,13 +98,24 @@ export interface PaymentTransaction {
     status: string
     proof_url: string | null
     rejection_reason: string | null
+    submitted_on_behalf?: boolean
+    submitted_by?: PaymentPayer | null
   } | null
   cod_payment_proof: {
     id: number
     status: 'pending' | 'confirmed' | 'rejected'
     proof_url: string | null
     rejection_reason: string | null
+    submitted_on_behalf?: boolean
+    submitted_by?: PaymentPayer | null
   } | null
+}
+
+/** IMP-001: who submitted a payment proof (the payer actor) — distinct from the order owner (the konsumen). */
+export interface PaymentPayer {
+  id: number
+  name: string
+  role: string | null
 }
 
 export interface OrderReturnRequest {
@@ -129,13 +140,37 @@ export interface Order {
   subtotal_amount: string
   shipping_fee_amount: string
   admin_fee_amount: string
+  effective_discount_amount?: string
+  discount_amount?: string
   total_amount: string
   recipient_name: string
   recipient_phone: string
   address: string
   latitude: string | null
   longitude: string | null
+  /** A1-21: persisted structured-address ids + postal code (canonical region identifiers, nullable historically). */
+  province_id?: string | null
+  regency_id?: string | null
+  district_id?: string | null
+  village_id?: string | null
+  postal_code?: string | null
+  voucher_id?: number | null
+  /** A1-15: server-derived capability — the order's own konsumen or a same-branch financial role. */
+  viewer_can_download_invoice?: boolean
+  konsumen_id?: number
   shipping_provider: string | null
+  /**
+   * UAT-005 LOCKED rule (Human 2026-10-07): may an item's requested delivery date be changed?
+   * Server-derived (true for Kurir Online / Self Delivery-Sub; false for RajaOngkir / Pickup).
+   * Convenience gate only — the backend enforces the same rule authoritatively.
+   */
+  reschedule_allowed?: boolean
+  /**
+   * UAT-005 LOCKED: Shipment is the delivery-date unit. The canonical delivery date per shipment id,
+   * derived server-side from that shipment's OWN items (null when unset or when its items disagree).
+   * The UI renders this instead of inventing or inferring a date.
+   */
+  shipment_delivery_dates?: Record<string, { delivery_date: string | null; status: string; delivery_mode: string | null }>
   delivery_date_estimate: string | null
   cancellation_reason: string | null
   konsumen: { name: string; phone: string | null } | null
@@ -183,6 +218,8 @@ export interface PaymentSummary {
   requested_dp: number
   /** How much of the DP has actually cleared verification, capped at requested_dp. */
   verified_dp: number
+  /** UAT-004: submitted-but-unverified nominal ("DP Diajukan") — informational only, never counted as paid. */
+  submitted_dp: number
   /** All verified money received so far, DP + settlement combined. */
   total_paid: number
   remaining_balance: number
@@ -190,6 +227,10 @@ export interface PaymentSummary {
   overpaid_amount: number
   payment_status: string
   is_fully_paid: boolean
+  /** UAT-004: 'pending' while a submitted proof awaits verification, otherwise null. */
+  pending_verification_status: string | null
+  /** UAT-004: whether a pending proof photo is available for review. */
+  has_pending_proof: boolean
   /** Outstanding (pending) additional-payment obligation only — once paid it folds into total_paid and this returns to 0. */
   additional_payment_amount: number
   additional_payment_status: string | null
@@ -234,6 +275,10 @@ export interface CheckoutQuote {
   subtotal_amount: number
   shipping_fee_amount: number
   admin_fee_amount: number
+  /** IMP-002 voucher discount (currency) — server-derived, never invented. */
+  discount_amount: number
+  /** IMP-002 voucher id attribution when a voucher was applied. */
+  voucher_id: number | null
   total_amount: number
   distance_km: number | null
   shipping_provider: string
@@ -273,6 +318,7 @@ export interface KonsumenAddress {
 }
 
 export interface AuthUser {
+  parent_id?: number | null
   id: number
   name: string
   email: string
@@ -284,6 +330,8 @@ export interface AuthUser {
   korsal_id: number | null
   sales_id: number | null
   status: string
+  /** IMP-001: present only on the signed-in user's own record. */
+  google_linked?: boolean
   created_at: string
 }
 

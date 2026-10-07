@@ -119,7 +119,7 @@ const router = createRouter({
       props: (route) => ({ id: Number(route.params.id) }),
       // Same roles as GET /shipments/{shipment}/receipt (ShipmentPolicy::printReceipt)
       // — keuangan/korsal/sales/konsumen never get this print permission.
-      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'kurir'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'kurir', 'sales-kurir-sub', 'koordinator-kurir'] },
     },
     {
       path: '/dashboard',
@@ -127,14 +127,14 @@ const router = createRouter({
       component: () => import('@/views/dashboard/DashboardHomeView.vue'),
       meta: {
         requiresAuth: true,
-        requiresAnyRole: ['super_admin', 'agen', 'korsal', 'sales', 'admin', 'kurir', 'sales-kurir-sub', 'gudang', 'keuangan'],
+        requiresAnyRole: ['super_admin', 'agen', 'korsal', 'sales', 'admin', 'kurir', 'sales-kurir-sub', 'gudang', 'keuangan', 'koordinator-kurir'],
       },
     },
     {
       path: '/dashboard/kurir',
       name: 'kurir-dashboard',
       component: () => import('@/views/dashboard/KurirDashboardView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['kurir', 'sales-kurir-sub'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['kurir', 'sales-kurir-sub', 'koordinator-kurir'] },
     },
     {
       path: '/dashboard/stock',
@@ -177,10 +177,27 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
     },
     {
-      path: '/dashboard/warehouse/stock-requests',
-      name: 'warehouse-stock-requests',
-      component: () => import('@/views/dashboard/StockRequestsView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
+      // IMP-001 Gap 2: Gudang's "Order Diproses" work queue (server-side
+      // scoped: status === 'diproses' AND no courier assigned yet).
+      path: '/dashboard/warehouse/orders',
+      name: 'warehouse-orders',
+      component: () => import('@/views/dashboard/OrderDiprosesView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang'] },
+    },
+    {
+      // IMP-003: Koordinator-Kurir dispatch workspace (server-side scoped
+      // same branch + diproses + no courier — see DispatchController).
+      path: '/dashboard/dispatch',
+      name: 'dispatch',
+      component: () => import('@/views/dashboard/DispatchView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['koordinator-kurir', 'super_admin', 'agen', 'admin'] },
+    },
+    {
+      // Admin reviews/approves/rejects the Gudang's fulfillment proposals.
+      path: '/dashboard/warehouse/fulfillment-proposals',
+      name: 'fulfillment-proposals',
+      component: () => import('@/views/dashboard/FulfillmentProposalsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['admin'] },
     },
     {
       path: '/dashboard/warehouse/returns',
@@ -414,6 +431,36 @@ const router = createRouter({
       name: 'admin-shipping-settings',
       component: () => import('@/views/admin/AdminShippingSettingsView.vue'),
       meta: { requiresAuth: true, requiresPermission: 'system.shipping.manage' },
+    },
+    {
+      path: '/admin/google-auth',
+      name: 'admin-google-auth',
+      component: () => import('@/views/admin/AdminGoogleAuthSettingsView.vue'),
+      // Super Admin only — GoogleAuthSettingController authorizes
+      // ('manage-system-config' — the server is the real gate).
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin'] },
+    },
+    {
+      path: '/dashboard/agent/google-auth',
+      name: 'agent-google-auth',
+      component: () => import('@/views/dashboard/AgentGoogleAuthSettingsView.vue'),
+      // §11: only the Agen manages its OWN branch Google Auth config — Admin
+      // and every other role must not receive this UI (route gate + backend).
+      meta: { requiresAuth: true, requiresAnyRole: ['agen'] },
+    },
+    {
+      // IMP-002: discount + voucher management (super_admin/agen/admin).
+      path: '/dashboard/promo',
+      name: 'promo-management',
+      component: () => import('@/views/dashboard/PromoManagementView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin'] },
+    },
+    {
+      // IMP-002: dynamic invoice presentation config (super_admin global, agen branch).
+      path: '/dashboard/invoice-config',
+      name: 'invoice-config',
+      component: () => import('@/views/dashboard/InvoiceConfigView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen'] },
     },
     {
       path: '/admin/refunds',

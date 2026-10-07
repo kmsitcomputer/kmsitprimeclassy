@@ -39,6 +39,26 @@ class ReportSystemTest extends TestCase
         Storage::fake('public');
     }
 
+    /**
+     * Moves ONE item onto a later requested delivery date through the canonical reschedule path.
+     *
+     * Needed because LOCKED UAT-005 groups same-date items onto ONE canonical shipment, and a
+     * shipment carries exactly one executor — so "two couriers on one order" is expressed as two
+     * real deliveries. Rescheduling is Kurir-Online-only and this fixture seeds no shipping-provider
+     * infrastructure, so the shipment snapshot is placed in that canonical state first instead of
+     * weakening the LOCKED provider rule.
+     */
+    private function spreadDeliveryDates(array $branch, Order $order, OrderItem $item, string $date): void
+    {
+        \App\Models\Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'openroute']);
+
+        $this->actingAs($branch['admin'])
+            ->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
+                'requested_delivery_date' => $date,
+                'reason' => 'Pisahkan tanggal kirim untuk dua kurir',
+            ])->assertOk();
+    }
+
     private function makeAgentBranch(): array
     {
         $agen = User::factory()->agen()->create();
@@ -470,9 +490,16 @@ class ReportSystemTest extends TestCase
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
+        // LOCKED UAT-005: same date => ONE canonical shipment, and one shipment has exactly one
+        // executor. Two couriers on one order is therefore expressed through two real deliveries,
+        // so item B is moved onto a later date FIRST (canonical reschedule path) and the two items
+        // end up on separate shipments. The assertion under test is unchanged.
+        $this->assertSame($itemA->shipment_id, $itemB->shipment_id, 'precondition: same date starts on one canonical shipment');
+        $this->spreadDeliveryDates($branch, $order, $itemB, '2026-10-22');
+
         // Item A picked up by Budi, item B by Andi — two independent shipments.
-        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
-        $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$itemB->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->fresh()->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+        $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$itemB->fresh()->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
 
         $rows = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/transactions')->json('data'))
             ->filter(fn ($r) => $r['order_id'] === $order->id);
@@ -520,9 +547,15 @@ class ReportSystemTest extends TestCase
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
+        // LOCKED UAT-005: two couriers on one order require two real deliveries (one shipment = one
+        // executor), so item B is moved onto a later date through the canonical reschedule path.
+        // The per-item fee assertions below are unchanged.
+        $this->spreadDeliveryDates($branch, $order, $itemB, '2026-10-22');
+
         foreach ([['kurir' => $branch['kurir'], 'item' => $itemA], ['kurir' => $secondKurir, 'item' => $itemB]] as $leg) {
-            $this->actingAs($leg['kurir'])->patchJson("/api/v1/shipments/{$leg['item']->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
-            $this->actingAs($leg['kurir'])->patch("/api/v1/shipments/{$leg['item']->shipment_id}/status", ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('p.jpg')])->assertOk();
+            $shipmentId = $leg['item']->fresh()->shipment_id;
+            $this->actingAs($leg['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
+            $this->actingAs($leg['kurir'])->patch("/api/v1/shipments/{$shipmentId}/status", ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('p.jpg')])->assertOk();
         }
 
         // Two distinct item-level fee records, never one order-level Rp9.000 (or Rp15.000-style) lump sum.

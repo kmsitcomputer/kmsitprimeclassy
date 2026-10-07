@@ -89,6 +89,34 @@ class FinancialConcurrencyTest extends TestCase
         }
     }
 
+    public function test_distinct_refunds_on_same_order_preserve_both_money_movements(): void
+    {
+        $base = $this->agentBase();
+        $service = app(OrderFulfillmentService::class);
+        $service->adjustItemQuantity($base['item'], 2, $base['admin'], 'first reduction');
+        $service->adjustItemQuantity($base['item']->fresh(), 1, $base['admin'], 'second reduction');
+        $refunds = OrderItemAdjustment::where('order_item_id', $base['item']->id)->where('refund_status', 'pending')->orderBy('id')->get();
+        $this->assertCount(2, $refunds);
+
+        // Two DIFFERENT refund rows of the SAME order are guarded by two
+        // different locks, so the canonical Order row lock is what serializes
+        // them. The result must not depend on read ordering any more: each
+        // processor re-reads the CURRENT paid_amount under the Order lock, so
+        // both movements survive (30000 -> 20000 -> 10000).
+        $report = (new ConcurrencyHarness)->runServiceRace(
+            ['op' => 'refund-process', 'actor_id' => $base['admin']->id, 'subject_id' => $refunds[0]->id],
+            ['op' => 'refund-process', 'actor_id' => $base['admin']->id, 'subject_id' => $refunds[1]->id],
+        );
+        $this->assertTrue($report['different_connections']);
+        $this->assertSame('success', $report['a']['outcome'], json_encode($report));
+        $this->assertSame('success', $report['b']['outcome'], json_encode($report));
+        $this->assertNoDeadlock($report);
+        $order = Order::withoutGlobalScopes()->findOrFail($base['item']->order_id);
+        $this->assertSame(10000.0, (float) $order->paid_amount, 'both 10000 refunds must leave 10000 of the original 30000 paid');
+        $this->assertSame(0.0, (float) $order->remaining_amount);
+        $this->assertSame(2, OrderItemAdjustment::where('order_item_id', $base['item']->id)->where('refund_status', 'processed')->count());
+    }
+
     private function assertNoDeadlock(array $report): void
     {
         foreach (['a', 'b'] as $side) {

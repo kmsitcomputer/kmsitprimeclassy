@@ -275,9 +275,11 @@ class PbrRemediationTest extends TestCase
 
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $response = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests');
+        // §8: the standalone Stock Request list is removed — the internal
+        // order-scoped endpoint serves the same StockRequestResource.
+        $response = $this->actingAs($b['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}/stock-request");
         $response->assertOk();
-        $item = $response->json('data.0.items.0');
+        $item = $response->json('data.items.0');
         $this->assertSame('PBR Request Cake', $item['product_name']);
         $this->assertSame($product->sku, $item['sku']);
         $this->assertSame('PBR Request Cake', $item['product']['name']);
@@ -304,9 +306,11 @@ class PbrRemediationTest extends TestCase
 
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
 
-        $response = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests');
+        // §8: standalone list removed — the internal order-scoped endpoint
+        // serves the same StockRequestResource (variant identity here).
+        $response = $this->actingAs($b['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}/stock-request");
         $response->assertOk();
-        $item = $response->json('data.0.items.0');
+        $item = $response->json('data.items.0');
         $this->assertSame('PBR Variant Cake', $item['product_name']);
         $this->assertSame('500gr / Coklat', $item['variation_label']);
         $this->assertSame($variation->sku, $item['sku']);

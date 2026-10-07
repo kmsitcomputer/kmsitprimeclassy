@@ -3,7 +3,7 @@ import type { ApiEnvelope } from './client'
 import type { AuthUser, PaginationMeta } from './types'
 
 export interface CreateUserPayload {
-  role: 'agen' | 'korsal' | 'sales' | 'admin' | 'keuangan' | 'kurir' | 'gudang' | 'sales-kurir-sub'
+  role: 'agen' | 'korsal' | 'sales' | 'admin' | 'keuangan' | 'kurir' | 'gudang' | 'sales-kurir-sub' | 'koordinator-kurir'
   name: string
   email: string
   phone: string

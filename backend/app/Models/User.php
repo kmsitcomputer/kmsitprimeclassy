@@ -27,6 +27,11 @@ class User extends Authenticatable
         'email',
         'phone',
         'password',
+        // IMP-001: email_verified_at is a POST-REGISTRATION field; making it
+        // fillable lets ProfileController invalidate it when the address
+        // changes (a changed address is a new, unverified address — see the
+        // Finding #1 remediation there). Nothing else may set it.
+        'email_verified_at',
         'referral_code',
         'status',
         'avatar_media_id',
@@ -114,6 +119,11 @@ class User extends Authenticatable
     public function ownedSubLocation(): HasOne
     {
         return $this->hasOne(WarehouseSubLocation::class, 'owner_user_id')->withoutGlobalScopes();
+    }
+
+    public function socialIdentities(): HasMany
+    {
+        return $this->hasMany(UserSocialIdentity::class);
     }
 
     public function isRole(string ...$slugs): bool

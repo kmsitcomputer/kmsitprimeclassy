@@ -31,6 +31,13 @@ class UserPolicy
             return true;
         }
 
+        if ($user->isRole('koordinator-kurir')) {
+            return $user->agent_id !== null
+                && $target->agent_id === $user->agent_id
+                && $target->isRole('kurir')
+                && $target->parent_id === $user->id;
+        }
+
         if ($user->isRole('agen', 'admin', 'keuangan')) {
             return $target->agent_id === $user->agent_id;
         }
@@ -56,6 +63,13 @@ class UserPolicy
      */
     public function update(User $user, User $target): bool
     {
+        if ($user->isRole('koordinator-kurir')) {
+            return $user->agent_id !== null
+                && $target->agent_id === $user->agent_id
+                && $target->isRole('kurir')
+                && $target->parent_id === $user->id;
+        }
+
         if ($user->isRole('keuangan')) {
             return $user->id === $target->id;
         }

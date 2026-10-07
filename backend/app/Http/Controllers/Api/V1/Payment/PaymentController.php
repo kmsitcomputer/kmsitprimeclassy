@@ -14,6 +14,7 @@ use App\Http\Resources\PaymentTransactionResource;
 use App\Models\CodPaymentProof;
 use App\Models\Order;
 use App\Models\PaymentTransaction;
+use App\Models\User;
 use App\Services\Payment\PaymentService;
 use Illuminate\Http\Request;
 
@@ -35,12 +36,11 @@ class PaymentController extends Controller
 
     public function submitProof(StoreBankTransferProofRequest $request, Order $order)
     {
-        $this->authorize('view', $order);
-        $this->assertOwnedByActor($request, $order);
+        $this->authorizeProofSubmission($request, $order);
 
         $transaction = $this->latestManualTransaction($order);
 
-        $this->paymentService->submitBankTransferProof($transaction, $request->file('proof'));
+        $this->paymentService->submitBankTransferProof($transaction, $request->file('proof'), $request->user());
 
         return $this->ok([
             'transaction' => new PaymentTransactionResource($transaction->fresh('bankTransferVerification')),
@@ -51,9 +51,14 @@ class PaymentController extends Controller
     {
         $actor = $request->user();
 
-        if (! $actor->isRole('super_admin') && ! ($actor->isRole('keuangan') && $order->agent_id === $actor->agent_id)) {
-            throw new ApiException(__('messages.system.unauthorized_action'), 403);
-        }
+        // UAT-008: Keuangan/super_admin keep their existing authority; an
+        // in-scope Sales/Korsal/Sales-Kurir-Sub may additionally verify the
+        // required payment/pelunasan for orders inside their own legitimate
+        // scope (OrderPolicy::payOnBehalf — current referral chain,
+        // same-Agent). Scope stays server-authoritative; the canonical
+        // PaymentService::verifyBankTransfer (locked, idempotent,
+        // approve/reject) is reused, never duplicated.
+        $this->assertMayVerifyPayment($actor, $order);
 
         $transaction = $this->latestManualTransaction($order);
         $verification = $transaction->bankTransferVerification;
@@ -97,11 +102,9 @@ class PaymentController extends Controller
         return $this->ok(new OrderResource($order), __('messages.payment.cod_status_updated'));
     }
 
-    /** Konsumen submits a photo of the cash handed to the kurir, requesting Admin/Agen mark the COD order as paid in full. */
-    public function submitCodProof(StoreCodPaymentProofRequest $request, Order $order)
+    /** Konsumen submits a photo of the cash handed to the kurir, requesting Admin/Agen mark the COD order as paid in full. */    public function submitCodProof(StoreCodPaymentProofRequest $request, Order $order)
     {
-        $this->authorize('view', $order);
-        $this->assertOwnedByActor($request, $order);
+        $this->authorizeProofSubmission($request, $order);
 
         if ($order->paymentMethod?->type !== 'cod') {
             throw new ApiException(__('messages.payment.order_not_cod'), 422);
@@ -121,9 +124,9 @@ class PaymentController extends Controller
         $actor = $request->user();
         $order = $codPaymentProof->paymentTransaction->order;
 
-        if (! $actor->isRole('super_admin') && ! ($actor->isRole('keuangan') && $order->agent_id === $actor->agent_id)) {
-            throw new ApiException(__('messages.system.unauthorized_action'), 403);
-        }
+        // UAT-008: same scoped authority as verify() — the proof-based
+        // approve/reject workflow is reused, never duplicated.
+        $this->assertMayVerifyPayment($actor, $order);
 
         if ($codPaymentProof->status !== 'pending') {
             throw new ApiException(__('messages.payment.cod_proof_already_processed'), 422);
@@ -148,23 +151,78 @@ class PaymentController extends Controller
     {
         $actor = $request->user();
 
-        if (! $actor->isRole('super_admin') && ! ($actor->isRole('keuangan') && $order->agent_id === $actor->agent_id)) {
-            throw new ApiException(__('messages.system.unauthorized_action'), 403);
-        }
+        // UAT-008: pelunasan request follows the same scoped authority as
+        // verification (it only *creates* the settlement transaction; the
+        // money still moves only through verifyBankTransfer()).
+        $this->assertMayVerifyPayment($actor, $order);
 
         if ($order->paymentMethod?->code !== 'down_payment') {
             throw new ApiException(__('messages.payment.not_dp_order'), 422);
         }
 
-        $transaction = $this->paymentService->requestSettlement($order, $actor);
+        [$transaction, $wasReplay] = $this->paymentService->requestSettlement($order, $actor);
 
         return $this->ok([
             'transaction' => new PaymentTransactionResource($transaction),
+            // A retry of an equivalent request is not a new creation, so the HTTP status stays 200
+            // for both; `replay` tells the caller which happened without a status change.
+            'replay' => $wasReplay,
             'order' => new OrderResource($order->fresh([
                 'items', 'konsumen', 'sales', 'korsal', 'paymentMethod',
                 'paymentTransactions.bankTransferVerification', 'shipments.courier.user', 'shipments.proof',
             ])),
-        ], __('messages.payment.settlement_requested'));
+        ], $wasReplay ? __('messages.payment.settlement_replayed') : __('messages.payment.settlement_requested'));
+    }
+
+    /**
+     * UAT-008 scoped verification authority — who may approve/reject a
+     * payment proof or request pelunasan on this order:
+     *
+     * - super_admin anywhere (existing override);
+     * - keuangan of the order's own branch (existing separation of duties);
+     * - sales / korsal / sales-kurir-sub ONLY inside their legitimate
+     *   scope (OrderPolicy::payOnBehalf — the konsumen's CURRENT referral
+     *   chain, same-Agent). Cross-scope and cross-Agent actors are denied.
+     *
+     * The direct COD paid/unpaid toggle (markCod) deliberately stays
+     * keuangan-only: it flips payment state with no proof workflow, so it
+     * is not part of the scoped approve/reject path.
+     */
+    private function assertMayVerifyPayment(User $actor, Order $order): void
+    {
+        if ($actor->isRole('super_admin')) {
+            return;
+        }
+
+        if ($actor->isRole('keuangan') && $order->agent_id === $actor->agent_id) {
+            return;
+        }
+
+        if ($actor->isRole('korsal', 'sales', 'sales-kurir-sub') && $actor->can('payOnBehalf', $order)) {
+            return;
+        }
+
+        throw new ApiException(__('messages.system.unauthorized_action'), 403);
+    }
+
+    /**
+     * Who may submit a payment proof: the konsumen who owns the order, that branch's agen/admin/keuangan,
+     * super_admin — and (IMP-001) a Korsal/Sales/Sales-Kurir-Sub paying ON BEHALF of a konsumen inside their
+     * own current referral scope (OrderPolicy::payOnBehalf). Those roles are authorized ONLY through that
+     * policy, never through the order snapshot or the konsumen path.
+     */
+    private function authorizeProofSubmission(Request $request, Order $order): void
+    {
+        if ($request->user()->isRole('korsal', 'sales', 'sales-kurir-sub') && $request->user()->id !== $order->konsumen_id) {
+            if (! $request->user()->can('payOnBehalf', $order)) {
+                throw new ApiException(__('messages.payment.on_behalf_forbidden'), 403);
+            }
+
+            return;
+        }
+
+        $this->authorize('view', $order);
+        $this->assertOwnedByActor($request, $order);
     }
 
     /** Only the konsumen who owns the order, or that branch's agen/admin/keuangan, may act on its payment. */

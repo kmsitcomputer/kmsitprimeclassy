@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
@@ -8,7 +8,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import { useCartStore } from '@/stores/cart'
 import { useAuthStore } from '@/stores/auth'
 import { createOrder, submitBankTransferProof, getOrder } from '@/api/orders'
-import { getCheckoutSteps, quoteCheckout, getCourierOptions } from '@/api/checkout'
+import { getCheckoutSteps, quoteCheckout, getCourierOptions, locateByGps } from '@/api/checkout'
 import { listUsers } from '@/api/users'
 import { listAddresses, createAddress } from '@/api/addresses'
 import { listProvinces, listRegencies, listDistricts, listVillages } from '@/api/regions'
@@ -106,6 +106,11 @@ const destination = reactive({
   village_id: null as string | null,
   latitude: null as number | null,
   longitude: null as number | null,
+  // IMP-002 structured address (region ids + postal) — prefilled by GPS or saved address.
+  postal_code: null as string | null,
+  province_id: null as string | null,
+  regency_id: null as string | null,
+  district_id: null as string | null,
 })
 const locating = ref(false)
 const locationError = ref<string | null>(null)
@@ -152,13 +157,47 @@ function useMyLocation() {
   locating.value = true
   locationError.value = null
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
+    async (pos) => {
       // Reactive assignment — AddressMapPicker's :latitude/:longitude props
       // pick this up and pan/place its marker automatically, no separate
       // wiring needed between the two ways of setting the same coordinate.
       destination.latitude = pos.coords.latitude
       destination.longitude = pos.coords.longitude
-      locating.value = false
+      // IMP-002: reverse-geocode + match against the canonical regional
+      // master. A confident match prefills the region ids/names (editable);
+      // otherwise the manual selectors stay fully usable.
+      try {
+        const located = await locateByGps(pos.coords.latitude, pos.coords.longitude)
+        if (located.matched && located.result) {
+          const region = located.result
+          if (region.province_id && region.regency_id && region.district_id && region.village_id) {
+            // Load the whole canonical chain before updating visible cascading selectors.
+            const [gpsRegencies, gpsDistricts, gpsVillages] = await Promise.all([
+              listRegencies(region.province_id), listDistricts(region.regency_id), listVillages(region.district_id),
+            ])
+            applyingGpsRegion.value = true
+            try {
+              regencies.value = gpsRegencies
+              districts.value = gpsDistricts
+              villages.value = gpsVillages
+              selectedProvince.value = destination.province_id = region.province_id
+              selectedRegency.value = destination.regency_id = region.regency_id
+              selectedDistrict.value = destination.district_id = region.district_id
+              destination.village_id = region.village_id
+              destination.postal_code = region.postal_code ?? destination.postal_code
+              await nextTick()
+            } finally {
+              applyingGpsRegion.value = false
+            }
+          }
+        } else {
+          locationError.value = t('checkout.address.geolocationNoRegion')
+        }
+      } catch {
+        // geocode unavailable — coordinates are still set; keep manual selectors.
+      } finally {
+        locating.value = false
+      }
     },
     (err) => {
       // permission denied / position unavailable / timeout all land here —
@@ -192,6 +231,7 @@ const provinces = ref<RegionOption[]>([])
 const regencies = ref<RegionOption[]>([])
 const districts = ref<RegionOption[]>([])
 const villages = ref<RegionOption[]>([])
+const applyingGpsRegion = ref(false)
 const selectedProvince = ref<string | null>(null)
 const selectedRegency = ref<string | null>(null)
 const selectedDistrict = ref<string | null>(null)
@@ -199,6 +239,10 @@ const selectedDistrict = ref<string | null>(null)
 listProvinces().then((list) => (provinces.value = list))
 
 watch(selectedProvince, async (id) => {
+  if (applyingGpsRegion.value) return
+  destination.province_id = id
+  destination.regency_id = null
+  destination.district_id = null
   regencies.value = []
   districts.value = []
   villages.value = []
@@ -209,6 +253,9 @@ watch(selectedProvince, async (id) => {
 })
 
 watch(selectedRegency, async (id) => {
+  if (applyingGpsRegion.value) return
+  destination.regency_id = id
+  destination.district_id = null
   districts.value = []
   villages.value = []
   selectedDistrict.value = null
@@ -217,6 +264,8 @@ watch(selectedRegency, async (id) => {
 })
 
 watch(selectedDistrict, async (id) => {
+  if (applyingGpsRegion.value) return
+  destination.district_id = id
   villages.value = []
   destination.village_id = null
   if (id) villages.value = await listVillages(id)
@@ -332,7 +381,7 @@ async function loadQuote() {
   quoteError.value = null
   try {
     quote.value = await quoteCheckout(
-      orderLines.value, destination, selectedShippingMethod.value, selectedKonsumen.value?.id, selectedCourierOption.value,
+      orderLines.value, destination, selectedShippingMethod.value, selectedKonsumen.value?.id, selectedCourierOption.value, voucherCode.value.trim() || null,
     )
   } catch (e) {
     quoteError.value = e instanceof ApiError ? e.message : t('checkout.review.quoteError')
@@ -408,6 +457,18 @@ const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const createdOrder = ref<Order | null>(null)
 
+// IMP-002 voucher code — server re-validates eligibility/value.
+const voucherCode = ref<string>('')
+
+// A1-19: clearing the voucher is the recovery path from a rejected code — it
+// must stay reachable while a quote error is showing. Removes the code and
+// re-quotes so the customer can finish checkout without resetting the page.
+function clearVoucher() {
+  if (quoting.value) return
+  voucherCode.value = ''
+  void loadQuote()
+}
+
 async function placeOrder() {
   if (!selectedPaymentCode.value) return
   submitError.value = null
@@ -430,6 +491,7 @@ async function placeOrder() {
       courier: selectedCourierOption.value,
       konsumenId: selectedKonsumen.value?.id,
       dpAmount: isDpSelected.value ? Number(dpAmount.value) : null,
+      voucherCode: voucherCode.value.trim() || null,
       idempotencyKey,
     })
     createdOrder.value = order
@@ -612,6 +674,9 @@ async function refreshOrderStatus() {
                  "Gunakan Lokasi Sekarang" below sets, available regardless of shipping
                  method. Pre-fills its marker from whatever coordinate the form already
                  has (a prior geolocation click, or re-entering this step). -->
+            <p class="text-xs text-stone-500">
+              GPS: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" class="underline">© OpenStreetMap contributors</a>
+            </p>
             <AddressMapPicker
               v-if="mapPickerEnabled"
               :latitude="destination.latitude"
@@ -866,14 +931,35 @@ async function refreshOrderStatus() {
         <div v-else-if="currentStep === 'review'" class="space-y-4">
           <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">{{ t('checkout.review.title') }}</h2>
 
+          <!-- IMP-002 voucher: code only — the server re-validates value/eligibility.
+               A1-19: the editor + clear stay available even when the quote FAILS
+               (invalid/expired/exhausted voucher), so the customer can correct or
+               remove the code and recover checkout WITHOUT resetting page state. -->
+          <div class="flex gap-2">
+            <input
+              v-model="voucherCode"
+              :placeholder="t('checkout.review.voucherPlaceholder')"
+              class="flex-1 rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+              @change="loadQuote"
+            />
+            <AppButton variant="secondary" size="sm" :disabled="quoting" @click="loadQuote">{{ t('checkout.review.voucherApply') }}</AppButton>
+            <AppButton v-if="voucherCode.trim()" variant="secondary" size="sm" :disabled="quoting" @click="clearVoucher">{{ t('checkout.review.voucherClear') }}</AppButton>
+          </div>
+
           <div v-if="quoting" class="text-sm text-stone-400">{{ t('checkout.review.calculating') }}</div>
           <p v-else-if="quoteError" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">{{ quoteError }}</p>
           <template v-else-if="quote">
+            <p v-if="quote.voucher_id" class="text-xs text-emerald-600">
+              {{ t('checkout.review.voucherApplied', { code: voucherCode.toUpperCase() }) }}
+            </p>
             <ul v-if="quote.warnings.length" class="space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
               <li v-for="(w, i) in quote.warnings" :key="i">{{ w.message }}</li>
             </ul>
             <dl class="space-y-1.5 text-sm">
               <div class="flex justify-between text-stone-600 dark:text-stone-300"><dt>{{ t('checkout.review.subtotal') }}</dt><dd>{{ formatRupiah(quote.subtotal_amount) }}</dd></div>
+              <div v-if="Number(quote.discount_amount) > 0" class="flex justify-between text-emerald-600">
+                <dt>{{ t('checkout.review.voucherLabel') }}</dt><dd>- {{ formatRupiah(Number(quote.discount_amount)) }}</dd>
+              </div>
               <div class="flex justify-between text-stone-600 dark:text-stone-300">
                 <dt>{{ t('checkout.review.shipping') }}</dt><dd>{{ quote.shipping_enabled ? formatRupiah(quote.shipping_fee_amount) : t('checkout.review.free') }}</dd>
               </div>

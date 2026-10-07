@@ -93,7 +93,10 @@ class UserController extends Controller
 
         $query = User::query()->with('role')->whereHas(
             'role',
-            fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir-sub', 'sales-kurir', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang'])
+            // A1-20: koordinator-kurir is a real provisionable role (IMP-003) —
+            // it MUST appear in the roster or Agen/Super Admin can create the
+            // account but never find it again in the user-management list.
+            fn ($q) => $q->whereIn('slug', ['agen', 'korsal', 'sales', 'sales-kurir-sub', 'sales-kurir', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang', 'koordinator-kurir'])
         );
 
         if (! $user->isRole('super_admin')) {
@@ -106,6 +109,9 @@ class UserController extends Controller
             $query->where(fn ($q) => $q->where('korsal_id', $user->id)->orWhere('id', $user->id));
         } elseif ($user->isRole('sales', 'sales-kurir-sub')) {
             $query->where(fn ($q) => $q->where('sales_id', $user->id)->orWhere('id', $user->id));
+        }
+        if ($user->isRole('koordinator-kurir')) {
+            $query->where('parent_id', $user->id)->whereHas('role', fn ($q) => $q->where('slug', 'kurir'));
         }
         // agen/admin/super_admin: the agent_id filter above (or none, for super_admin) is enough.
 

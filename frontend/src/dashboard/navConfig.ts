@@ -65,15 +65,17 @@ const ROLE_ITEMS: NavItem[] = [
     label: 'Pengiriman Saya',
     routeName: 'kurir-dashboard',
     icon: 'truck',
-    show: (auth) => isRole(auth, 'kurir', 'sales-kurir-sub'),
+    show: (auth) => isRole(auth, 'kurir', 'sales-kurir-sub', 'koordinator-kurir'),
   },
   {
     key: 'orders',
     label: 'Order',
     routeName: 'orders',
     icon: 'box',
-    // R-04: Gudang executes warehouse work through the stock-request surfaces, not the generic
-    // (financial) order list; the backend order projection is operational-only for them anyway.
+    // R-04 + IMP-001 Gap 2: Gudang works the warehouse queue (Order Diproses,
+    // operations-only projection), not the generic (financial) order list —
+    // its backend order projection is operational-only anyway. Kurir uses
+    // /kurir/orders; konsumen uses their own order history.
     show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub', 'gudang'),
   },
   {
@@ -130,11 +132,21 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'gudang', 'admin', 'agen'),
       },
       {
-        key: 'warehouse-stock-requests',
-        label: 'Stock Requests',
-        routeName: 'warehouse-stock-requests',
+        key: 'warehouse-orders',
+        label: 'Order Diproses',
+        routeName: 'warehouse-orders',
         icon: 'box',
-        show: (auth) => isRole(auth, 'gudang', 'admin', 'agen'),
+        // IMP-001 Gap 2: Gudang's work queue — diproses AND no courier
+        // assigned (server-side scope rule; see WarehouseOrderController).
+        show: (auth) => isRole(auth, 'gudang'),
+      },
+      {
+        key: 'fulfillment-proposals',
+        label: 'Fulfillment Proposal',
+        routeName: 'fulfillment-proposals',
+        icon: 'document',
+        // Admin reviews the Gudang's fulfillment proposals (approve/reject).
+        show: (auth) => isRole(auth, 'admin'),
       },
       {
         key: 'warehouse-returns',
@@ -326,6 +338,37 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'truck',
         show: (auth) => isRole(auth, 'agen'),
       },
+      {
+        key: 'agent-google-auth',
+        label: 'Google Auth (Cabang)',
+        routeName: 'agent-google-auth',
+        icon: 'globe',
+        // §11: ONLY the Agen manages its OWN branch config — Admin/Keuangan/
+        // Gudang/Kurir/Korsal/Sales/Sales-Kurir-Sub/Konsumen never see this
+        // surface. (The backend route is role:agen,admin, but the ADMIN is a
+        // branch-owner fallback for ops, not a config UI audience; the SPA
+        // gates the entry to the Agen only.)
+        show: (auth) => isRole(auth, 'agen'),
+      },
+      {
+        // IMP-002: discount + voucher management — agen/admin (same branch),
+        // super_admin (any branch via agent_id selector).
+        key: 'promotions',
+        label: 'Promosi & Voucher',
+        routeName: 'promo-management',
+        icon: 'cash',
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin'),
+      },
+      {
+        // IMP-003: Koordinator-Kurir dispatch workspace — branch delivery
+        // queue + courier assignment. Also visible to agen/admin/super_admin
+        // (same backend role gate) as an operational oversight surface.
+        key: 'dispatch',
+        label: 'Dispatch',
+        routeName: 'dispatch',
+        icon: 'truck',
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'koordinator-kurir'),
+      },
     ],
   },
   {
@@ -385,10 +428,29 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin'),
       },
       {
+        // IMP-002: invoice presentation config — super_admin global, agen own
+        // branch (server re-authorizes; InvoiceConfigController).
+        key: 'invoice-config',
+        label: 'Invoice Config',
+        routeName: 'invoice-config',
+        icon: 'document',
+        show: (auth) => isRole(auth, 'super_admin', 'agen'),
+      },
+      {
         key: 'website-settings',
         label: 'Pengaturan Website',
         routeName: 'website-settings',
         icon: 'settings',
+        show: (auth) => isRole(auth, 'super_admin'),
+      },
+      {
+        key: 'google-auth',
+        label: 'Google Auth',
+        routeName: 'admin-google-auth',
+        icon: 'globe',
+        // GLOBAL/default Google Auth config — Super Admin only (the backend
+        // re-authorizes via manage-system-config). Per-Agen config lives
+        // under Pembayaran & Pengiriman > Google Auth (Cabang).
         show: (auth) => isRole(auth, 'super_admin'),
       },
       {

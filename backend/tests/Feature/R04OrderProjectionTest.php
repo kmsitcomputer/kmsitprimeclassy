@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AgentPaymentGatewayConfig;
 use App\Models\AgentProfile;
 use App\Models\Courier;
 use App\Models\Order;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
 use App\Models\ProductVariation;
@@ -56,6 +58,13 @@ class R04OrderProjectionTest extends TestCase
         ProductStock::create(['agent_id' => $agen->id, 'product_id' => $productB->id, 'quantity_on_hand' => 20, 'quantity_reserved' => 0]);
         WarehouseStock::create(['agent_id' => $agen->id, 'product_id' => $productA->id, 'stock_type' => 'transit', 'quantity' => 30]);
 
+        // bank_transfer needs the branch's destination account configured before checkout accepts it.
+        $bankTransfer = PaymentMethod::where('code', 'bank_transfer')->firstOrFail();
+        AgentPaymentGatewayConfig::create([
+            'agent_id' => $agen->id, 'payment_method_id' => $bankTransfer->id, 'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'Toko', 'account_number' => '123'],
+        ]);
+
         $this->b = compact('agen', 'admin', 'keuangan', 'gudang', 'kurir', 'courier', 'kurirB', 'courierB', 'konsumen', 'productA', 'productB');
     }
 
@@ -91,16 +100,41 @@ class R04OrderProjectionTest extends TestCase
         }
     }
 
-    public function test_gudang_order_list_is_operational_only_and_detail_is_forbidden(): void
+    public function test_gudang_order_list_is_operational_only_and_scoped_to_the_warehouse_queue(): void
     {
+        // A COD order is created straight into 'diproses' (OrderService): with
+        // no courier it is immediately in the warehouse queue.
         $order = $this->placeAgentOrder();
+        $this->assertSame('diproses', $order->status);
 
         $list = $this->actingAs($this->b['gudang'])->getJson('/api/v1/orders')->assertOk();
         $row = collect($list->json('data'))->firstWhere('id', $order->id);
-        $this->assertNotNull($row);
+        $this->assertNotNull($row, 'a COD order already in diproses (no courier) must appear in the gudang order list');
         $this->assertArrayHasKey('order_no', $row);
         $this->assertNoFinancialFields($row);
+        $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertOk();
 
+        // The moment a courier is assigned, the order leaves the gudang surface.
+        $shipment = $order->shipments()->firstOrFail();
+        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $this->b['courier']->id])->assertOk();
+        $this->assertNull(collect($this->actingAs($this->b['gudang'])->getJson('/api/v1/orders')->assertOk()->json('data'))->firstWhere('id', $order->id), 'once a courier is assigned the order must leave the gudang list');
+        $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
+    }
+
+    public function test_gudang_never_sees_a_non_diproses_order(): void
+    {
+        // A manual-transfer order starts in 'diterima' — nowhere visible to Gudang.
+        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', [
+                'payment_method_code' => 'bank_transfer',
+                'items' => [['product_id' => $this->b['productA']->id, 'quantity' => 1]],
+                'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
+                'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
+            ])->assertCreated()->json('data.id');
+        $order = Order::withoutGlobalScopes()->findOrFail($id);
+        $this->assertSame('diterima', $order->status);
+
+        $this->assertNull(collect($this->actingAs($this->b['gudang'])->getJson('/api/v1/orders')->assertOk()->json('data'))->firstWhere('id', $id), 'a non-diproses order must never appear in the gudang order list');
         $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
     }
 
@@ -184,6 +218,18 @@ class R04OrderProjectionTest extends TestCase
         $items = $order->items()->get();
         [$itemA, $itemB] = [$items[0], $items[1]];
 
+        // Two couriers means two real deliveries. Under the LOCKED grouping rule (Human UAT-005)
+        // two same-date items now share ONE canonical shipment, which by design cannot carry two
+        // executors — so give item B its own requested delivery date first.
+        $this->assertSame($itemA->shipment_id, $itemB->shipment_id, 'precondition: same-date items share one shipment');
+        \App\Models\Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'openroute']);
+        app(\App\Services\Order\OrderFulfillmentService::class)->rescheduleItemDeliveryDate(
+            $itemB->fresh(), now()->addDays(3)->toDateString(), $this->b['admin'], 'Separate delivery',
+        );
+        $itemA = $itemA->fresh();
+        $itemB = $itemB->fresh();
+        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
+
         app(CourierService::class)->assignCourier($itemA->shipment()->first(), $this->b['courier'], $this->b['admin']);
         app(CourierService::class)->assignCourier($itemB->shipment()->first(), $this->b['courierB'], $this->b['admin']);
 
@@ -235,6 +281,68 @@ class R04OrderProjectionTest extends TestCase
 
         $konsumen = $this->actingAs($this->b['konsumen'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
         $this->assertArrayHasKey('payment_summary', $konsumen);
+    }
+
+    /* ------------- A1-14: operational order detail must not leak refund money ------------- */
+
+    public function test_koordinator_order_detail_keeps_operational_return_status_but_never_refund_amounts(): void
+    {
+        $order = $this->placeAgentOrder();
+        $item = $order->items()->firstOrFail();
+
+        // A return with a distinctive pending refund on the order.
+        $return = \App\Models\ReturnRequest::create([
+            'order_id' => $order->id, 'requested_by' => $this->b['konsumen']->id,
+            'reason' => 'rusak', 'status' => 'requested', 'total_refund_amount' => 12345.00,
+        ]);
+        \App\Models\ReturnItem::create([
+            'return_id' => $return->id, 'order_item_id' => $item->id,
+            'quantity_returned' => 1, 'refund_amount' => 12345.00,
+            'status' => 'pending', 'refund_status' => 'pending',
+        ]);
+
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $this->b['agen']->id]);
+        $data = $this->actingAs($koordinator)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+
+        // Operational projection: no money fields at all…
+        $this->assertNoFinancialFields($data);
+        // …and the nested return's amount is gated too (A1-14): the koordinator
+        // still learns the return exists (operational status/quantity preserved)
+        // but never learns the exact Rp amount.
+        $this->assertCount(1, $data['returns']);
+        $this->assertSame('requested', $data['returns'][0]['status']);
+        $this->assertSame(1, $data['returns'][0]['items'][0]['quantity_returned']);
+        $this->assertArrayNotHasKey('total_refund_amount', $data['returns'][0]);
+
+        // The financial viewer (same branch admin) keeps the canonical amount.
+        $admin = $this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame('12345.00', $admin['returns'][0]['total_refund_amount']);
+    }
+
+    /* ------------- A1-15: consumer invoice capability contract ------------- */
+
+    public function test_viewer_can_download_invoice_capability_is_derived_server_side_for_owner_and_financial_roles_only(): void
+    {
+        $order = $this->placeAgentOrder();
+
+        // The order's own konsumen gets the capability (the UI's only authorized
+        // ownership signal — konsumen_id is never broadcast).
+        $owner = $this->actingAs($this->b['konsumen'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertTrue($this->b['admin'] !== null && $owner['viewer_can_download_invoice'] === true);
+        $this->assertArrayNotHasKey('konsumen_id', $owner, 'ownership id is never serialized (A1-15)');
+
+        // Same-branch financial roles keep it.
+        $this->assertTrue($this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data')['viewer_can_download_invoice']);
+        $this->assertTrue($this->actingAs($this->b['keuangan'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data')['viewer_can_download_invoice']);
+
+        // Operational roles (koordinator) may view the order but never the invoice.
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $this->b['agen']->id]);
+        $op = $this->actingAs($koordinator)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertFalse($koordinator !== null && ($op['viewer_can_download_invoice'] ?? true));
+
+        // Cross-agent: invisible (BelongsToAgentScope 404) — nothing to assert beyond denial.
+        $other = User::factory()->konsumen()->create();   // no agent_id → different scope
+        $this->actingAs($other)->getJson("/api/v1/orders/{$order->id}")->assertNotFound();
     }
 
     public function test_admin_product_and_variation_delete_denied_but_cru_allowed(): void

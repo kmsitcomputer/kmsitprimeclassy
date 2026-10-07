@@ -14,6 +14,7 @@ use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Media\MediaService;
 use App\Services\Stock\SubStockService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
@@ -39,6 +40,21 @@ class CourierService
      * "Kurir wajib berada di bawah Agen" — a courier may only ever be
      * assigned to a shipment from their own agent's branch, never another
      * agent's (Blueprint: "Kurir tidak boleh... melihat data agen lain").
+     *
+     * Assignment integrity (A1-03): the authoritative mutation lock re-reads
+     * and re-checks the shipment, its order, any existing executor and the
+     * courier's eligibility BEFORE writing. Initial assignment only ever
+     * lands on unassigned, in-progress ('diproses') work; assigning the SAME
+     * courier again is an idempotent replay (same 200), while assigning a
+     * DIFFERENT courier to an already-claimed shipment is rejected. Terminal
+     * work ('dibayar'/'dikirim'/'terkirim'/cancelled) is never re-targeted.
+     *
+     * A1-01 (Koordinator self-executor): when the assigning actor is a
+     * Koordinator-Kurir and the chosen "courier" is THEMSELVES, they become
+     * the actual executor — their Courier profile (created on first
+     * self-assignment) is recorded on the shipment, exactly like a normal
+     * Kurir's. No dispatcher fee: commissions still only ever credit the
+     * recorded executor on completion.
      */
     public function assignCourier(Shipment $shipment, Courier $courier, User $actor): Shipment
     {
@@ -48,33 +64,141 @@ class CourierService
             throw new ApiException(__('messages.courier.self_delivery_no_courier'), 422);
         }
 
-        // Raw query-builder value bypasses Order's own integer cast, so force
-        // it here — otherwise $courier->agent_id (cast) !== string fails and a
-        // valid office assignment is wrongly rejected on some driver builds.
-        $agentId = (int) $shipment->order()->value('agent_id');
+        $actorKoordinator = $actor->isRole('koordinator-kurir');
 
-        if ($courier->agent_id !== $agentId || ! $courier->is_active) {
-            throw new ApiException(__('messages.courier.invalid_assignment'), 422);
-        }
-
-        return DB::transaction(function () use ($shipment, $courier, $actor) {
+        return DB::transaction(function () use ($shipment, $courier, $actor, $actorKoordinator) {
+            $order = Order::query()->whereKey($shipment->order_id)->lockForUpdate()->firstOrFail();
             $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
+
+            // Raw query-builder value bypasses Order's own integer cast, so force
+            // it here — otherwise $courier->agent_id (cast) !== string fails and a
+            // valid office assignment is wrongly rejected on some driver builds.
+            $agentId = (int) $order->agent_id;
+
+            $isSelfExecutor = $actorKoordinator && (int) $courier->user_id === (int) $actor->id;
+            if ($isSelfExecutor && $courier->agent_id !== $agentId) {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            // Canonical eligibility under the lock (A1-03). Order-status + shipment-terminal
+            // checks come FIRST: an idempotent replay is only ever valid on live, in-progress
+            // work — never on a cancelled/completed order.
+            if ($order->status !== 'diproses') {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+            if ($shipment->status !== 'pending') {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            $courier = Courier::query()->whereKey($courier->id)->lockForUpdate()->firstOrFail();
+            $executor = $courier->user_id !== null
+                ? User::query()->whereKey($courier->user_id)->lockForUpdate()->first()
+                : null;
+            if ($courier->agent_id !== $agentId || ! $courier->is_active
+                || ($courier->user_id !== null && (! $executor || $executor->status !== 'active'
+                    || $executor->agent_id !== $agentId || ! $executor->isRole('kurir', 'koordinator-kurir')))) {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            if ($shipment->courier_id !== null) {
+                // The identical executor is already on it — idempotent replay, not an overwrite.
+                if ((int) $shipment->courier_id === (int) $courier->id) {
+                    ActivityLogger::log($actor->id, $shipment, 'shipment.courier_assigned', null, [
+                        'order_id' => $shipment->order_id, 'courier_id' => $courier->id,
+                        'previous_courier_id' => $shipment->courier_id, 'actor_role' => $actor->role?->slug,
+                        'idempotent_replay' => true,
+                    ]);
+
+                    return $shipment->fresh();
+                }
+                throw new ApiException(__('messages.courier.already_assigned'), 422);
+            }
+
+            $this->assertAddedDemandFulfilled($order->id);
+
             $previousCourierId = $shipment->courier_id;
             $shipment->update(['courier_id' => $courier->id]);
 
             ActivityLogger::log($actor->id, $shipment, 'shipment.courier_assigned', null, [
                 'order_id' => $shipment->order_id, 'courier_id' => $courier->id,
                 'previous_courier_id' => $previousCourierId, 'actor_role' => $actor->role?->slug,
+                'self_executor' => $isSelfExecutor,
             ]);
 
             return $shipment->fresh();
         });
     }
 
+    /** Called only while the canonical Order boundary is held. SC-03-first must
+     * retain Gudang access until its new demand is fulfilled, including pickup self-assignment. */
+    private function assertAddedDemandFulfilled(int $orderId): void
+    {
+        $request = \App\Models\StockRequest::query()->where('order_id', $orderId)->lockForUpdate()->first();
+        $items = OrderItem::query()->where('order_id', $orderId)->lockForUpdate()
+            ->get(['id', 'idempotency_key', 'split_from_order_item_id']);
+        $addedIds = $items->whereNotNull('idempotency_key')->pluck('id');
+        // Rescheduling may split an added line; its descendants carry the same demand lineage.
+        do {
+            $before = $addedIds->count();
+            $addedIds = $addedIds->merge($items->whereIn('split_from_order_item_id', $addedIds)->pluck('id'))->unique();
+        } while ($addedIds->count() > $before);
+        if ($addedIds->isEmpty()) {
+            return;
+        }
+        $lines = $request ? \App\Models\StockRequestItem::query()->where('stock_request_id', $request->id)
+            ->whereIn('order_item_id', $addedIds)->lockForUpdate()->get() : collect();
+        if ($lines->count() !== $addedIds->count() || $lines->contains(fn ($line) => $line->remaining_qty > 0)) {
+            throw new ApiException(__('messages.courier.sc03_fulfillment_pending'), 422);
+        }
+    }
+
+    /**
+     * A koordinator-kurir assigning THEMSELVES the executor role must have a
+     * Courier profile (the same row a normal Kurir has: `courier_id` →
+     * `Courier.user_id` drives ownership checks, receipts and the courier
+     * fee). Created lazily on first self-assignment — a coordinator that
+     * only dispatches other couriers stays profile-less. Never called for a
+     * normal kurir (they get their profile at account creation) or for a
+     * sales-kurir-sub (self_sub only). Same-agent enforced — a coordinator
+     * can never mint a profile in another branch.
+     */
+    public function ensureSelfExecutorProfile(User $koordinator): Courier
+    {
+        if (! $koordinator->isRole('koordinator-kurir') || ! $koordinator->agent_id) {
+            throw new ApiException(__('messages.user.unsupported_role_combination'), 422);
+        }
+
+        // UAT-006: two simultaneous "Ambil Pengiriman" taps by the SAME
+        // coordinator can both observe "no profile yet". couriers_user_unique is
+        // the real guard, so the loser's insert raises a duplicate-key error —
+        // re-read the winner's row instead of surfacing a 500, so a self-take
+        // race fails safely rather than crashing.
+        try {
+            return Courier::firstOrCreate([
+                'user_id' => $koordinator->id,
+            ], [
+                'type' => 'internal', 'user_id' => $koordinator->id, 'agent_id' => $koordinator->agent_id,
+                'name' => $koordinator->name, 'is_active' => true,
+            ]);
+        } catch (QueryException $e) {
+            $existing = Courier::query()->where('user_id', $koordinator->id)->first();
+
+            if (! $existing) {
+                throw $e;
+            }
+
+            return $existing;
+        }
+    }
+
     /**
      * A courier picking up an unassigned delivery self-assigns the moment
      * they mark it 'dikirim' — never overwrites an existing assignment to a
-     * different courier (that shipment isn't theirs to take).
+     * different courier (that shipment isn't theirs to take). A
+     * koordinator-kurir may only ever claim a delivery assigned to their OWN
+     * executor profile; they never take another courier's or an unassigned
+     * standard delivery on pickup (dispatch is their job — self-execution is
+     * a deliberate, audited assignment through the dispatch workspace).
      */
     public function selfAssignIfUnassigned(Shipment $shipment, User $kurirActor): void
     {
@@ -84,9 +208,20 @@ class CourierService
             throw new ApiException(__('messages.courier.no_profile'), 422);
         }
 
+        if ($kurirActor->isRole('koordinator-kurir')) {
+            // Koordinators never silently grab a queue delivery on pickup — they can only
+            // operate a shipment already explicitly assigned to their own executor profile.
+            if ((int) $shipment->courier_id !== (int) $courier->id) {
+                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
+            }
+
+            return;
+        }
+
         $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
 
         if ($shipment->courier_id === null) {
+            $this->assertAddedDemandFulfilled($shipment->order_id);
             $shipment->update(['courier_id' => $courier->id]);
         } elseif ($shipment->courier_id !== $courier->id) {
             throw new ApiException(__('messages.courier.not_your_delivery'), 403);
@@ -102,6 +237,13 @@ class CourierService
      *  - standard: the normal Kurir workflow. A Sales-Kurir-Sub must NEVER operate it — they may
      *    only self-deliver Sub-sourced shipments — so this is rejected explicitly instead of
      *    relying on an accidental "missing courier profile" failure.
+     *
+     * A1-01 (Koordinator self-executor): a Koordinator-Kurir may progress a
+     * standard shipment ONLY when it is assigned to their OWN executor
+     * profile (`courier_id` → Courier.user_id === themselves). This is the
+     * recorded-executor ownership check — the exact same rule a normal Kurir
+     * passes on 'terkirim'. They never get dispatch-style authority over a
+     * shipment a different courier is executing.
      */
     private function assertMayOperateShipment(Shipment $shipment, User $actor, string $newStatus, ?UploadedFile $proof): void
     {
@@ -127,6 +269,24 @@ class CourierService
 
         if ($actor->isRole('sales-kurir-sub')) {
             throw new ApiException(__('messages.courier.sales_kurir_sub_standard_forbidden'), 403);
+        }
+
+        // A1-01 (Koordinator self-executor): the Koordinator progresses delivery ONLY as the
+        // recorded executor of THIS shipment (Shipment.courier_id -> Courier.user_id === self).
+        // They never develop dispatch authority over another courier's assignment, and can never
+        // claim an unassigned delivery through the pickup path (that is dispatch's job).
+        if ($actor->isRole('koordinator-kurir')) {
+            $assignedCourierUserId = $shipment->courier?->user_id;
+
+            if ($assignedCourierUserId === null || (int) $assignedCourierUserId !== (int) $actor->id) {
+                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
+            }
+
+            if ($newStatus === 'terkirim' && ! $proof) {
+                throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
+            }
+
+            return;
         }
 
         if ($newStatus === 'dikirim' && $actor->isRole('kurir')) {
@@ -175,18 +335,17 @@ class CourierService
             throw new ApiException(__('messages.order.status_endpoint_required', ['status' => $newStatus]), 422);
         }
 
-        if ($newStatus === 'dikirim') {
-            // Applies regardless of actor role — an office actor (agen/admin/super_admin)
-            // reaches this same per-shipment endpoint (see ShipmentPolicy::updateStatus) and
-            // must be blocked from consuming another user's Sub stock exactly like a foreign
-            // kurir/Sales-Kurir-Sub is.
-            $this->assertMayShipSubStock($shipment, $actor);
-        }
-
-        $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
-
         return DB::transaction(function () use ($shipment, $newStatus, $actor, $proof) {
+            // Serialize with dispatch/proposal/cancellation before touching the shipment.
+            $order = Order::query()->whereKey($shipment->order_id)->lockForUpdate()->firstOrFail();
             $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
+            if (! in_array($order->status, ['diproses', 'dikirim'], true)) {
+                throw new InvalidStateTransitionException($order->status, $newStatus, 'order');
+            }
+            if ($newStatus === 'dikirim') {
+                $this->assertMayShipSubStock($shipment, $actor);
+            }
+            $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
             $items = OrderItem::query()->where('shipment_id', $shipment->id)->lockForUpdate()->get();
 
             $anyTransitioned = false;
@@ -210,7 +369,7 @@ class CourierService
                 $shipment->update(['proof_media_id' => $media->id]);
             }
 
-            $this->syncShipmentProgress($shipment, $newStatus);
+            $this->syncShipmentAggregate($shipment);
 
             ActivityLogger::log($actor->id, $shipment, 'shipment.status_changed', null, [
                 'order_id' => $shipment->order_id, 'to' => $newStatus, 'actor_role' => $actor->role?->slug,
@@ -229,13 +388,128 @@ class CourierService
         });
     }
 
-    private function syncShipmentProgress(Shipment $shipment, string $itemStatus): void
+    /**
+     * Per-ITEM counterpart of {@see updateShipmentStatus} — the LOCKED courier work-unit model
+     * (Human UAT: courier progress is PER OrderItem, never per Shipment).
+     *
+     * Transitions exactly ONE canonical OrderItem and leaves its shipment siblings untouched, even
+     * though they share the order, the shipment, the delivery date and the courier. The shipment
+     * stays the assignment/delivery container: executor authorization, the sub-stock guard, the
+     * proof rule and the aggregate progress/order recomputation all reuse the exact same
+     * shipment-level semantics as the bulk path — only the mutation itself is item-scoped.
+     */
+    public function updateOrderItemStatus(OrderItem $item, string $newStatus, User $actor, ?UploadedFile $proof = null): OrderItem
     {
-        $shipment->update(match ($itemStatus) {
-            'dikirim' => ['status' => 'in_transit', 'shipped_at' => $shipment->shipped_at ?? now()],
-            'terkirim' => ['status' => 'delivered', 'delivered_at' => now()],
-            default => [],
+        if (! in_array($newStatus, ['dikirim', 'terkirim'], true)) {
+            throw new ApiException(__('messages.order.status_endpoint_required', ['status' => $newStatus]), 422);
+        }
+
+        return DB::transaction(function () use ($item, $newStatus, $actor, $proof) {
+            // Same canonical lock order as the shipment path: Order → Shipment → item, so a
+            // per-item action and a per-shipment action on the same unit serialize identically.
+            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            $shipment = Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->firstOrFail();
+            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+
+            // The item must still be where the caller claims it is: same order, same shipment.
+            // A forged id pointing at another item/order can never move anything else.
+            if ((int) $item->order_id !== (int) $order->id || (int) $item->shipment_id !== (int) $shipment->id) {
+                throw new ApiException(__('messages.system.unauthorized_action'), 404);
+            }
+
+            if (! in_array($order->status, ['diproses', 'dikirim'], true)) {
+                throw new InvalidStateTransitionException($order->status, $newStatus, 'order');
+            }
+            if ($newStatus === 'dikirim') {
+                $this->assertMayShipSubStock($shipment, $actor);
+            }
+            $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
+
+            if (! $item->canTransitionTo($newStatus)) {
+                throw new InvalidStateTransitionException($item->status, $newStatus, 'order_item');
+            }
+
+            $item->update(['status' => $newStatus]);
+            if ($newStatus === 'dikirim' && $item->isSubSourced()) {
+                // Actual shipment of Sub-sourced goods: Sub physical -= qty, reservation consumed (once).
+                $this->subStockService->consume($item, $actor);
+            }
+
+            if ($proof && $newStatus === 'terkirim') {
+                $media = $this->mediaService->store($proof, 'shipment_proof', $shipment, $actor);
+                $shipment->update(['proof_media_id' => $media->id]);
+            }
+
+            $this->syncShipmentAggregate($shipment);
+
+            ActivityLogger::log($actor->id, $item, 'order_item.status_changed', null, [
+                'order_id' => $shipment->order_id, 'shipment_id' => $shipment->id,
+                'to' => $newStatus, 'actor_role' => $actor->role?->slug,
+            ]);
+
+            if ($newStatus === 'terkirim') {
+                // Idempotent per item (recordCommissionsForItems skips an item that already has a
+                // courier commission), so delivering siblings one by one never double-pays.
+                $selfDeliverer = $shipment->isSelfDelivery() ? $shipment->selfDeliveredBy : null;
+                $this->recordCommissionsForItems([$item->fresh()], $shipment->courier, $selfDeliverer);
+            }
+
+            $this->recomputeOrderStatus($shipment->order_id);
+
+            return $item->fresh();
         });
+    }
+
+    /**
+     * The Shipment's own `status`/`shipped_at`/`delivered_at` are a DERIVED aggregate over the items
+     * riding it — never a copy of whichever single item happened to move last.
+     *
+     * This is what makes the per-ITEM courier work unit (Human UAT) safe: acting on Item A must not
+     * tell the rest of the system that Item B has been delivered. Deriving from the mutated item's own
+     * new status (the previous behaviour) marked a whole canonical shipment `delivered` — and set
+     * `delivered_at` — after ONE of its items arrived. That had two real consequences:
+     *   - `DeliveryVerificationService` gates on `delivered_at`, so an Admin could append a permanent
+     *     "received" verification for a shipment whose sibling items were still sitting in `diproses`;
+     *   - picking up a sibling afterwards REGRESSED the shipment from `delivered` back to `in_transit`
+     *     while `delivered_at` stayed set, i.e. a unit simultaneously "in transit" and "delivered".
+     *
+     * The aggregate is monotonic: `delivered_at` is written once and never cleared, and a shipment that
+     * has already been delivered is never walked back (a later `pengembalian`/`kembali` is a return of
+     * goods that DID arrive, not an un-delivery).
+     */
+    public function syncShipmentAggregate(Shipment $shipment): void
+    {
+        // The caller already holds the canonical Order → Shipment → item boundary, so this is a plain
+        // read of rows already serialized by that boundary (REPEATABLE READ safe: no other writer can
+        // have committed a sibling item transition without the same Order lock first).
+        $items = OrderItem::query()->where('shipment_id', $shipment->id)->pluck('status');
+
+        if ($items->isEmpty()) {
+            return;
+        }
+
+        $arrived = ['terkirim', 'pengembalian', 'kembali'];
+        $left = ['dikirim', 'terkirim', 'pengembalian', 'kembali'];
+
+        if ($items->every(fn ($status) => in_array($status, $arrived, true))) {
+            $shipment->update([
+                'status' => 'delivered',
+                'delivered_at' => $shipment->delivered_at ?? now(),
+            ]);
+
+            return;
+        }
+
+        if ($items->contains(fn ($status) => in_array($status, $left, true))) {
+            // Partially delivered: the unit is on the road, but it is NOT delivered. A shipment that
+            // was already delivered stays delivered (returns do not un-deliver an arrival).
+            if ($shipment->delivered_at === null) {
+                $shipment->update([
+                    'status' => 'in_transit',
+                    'shipped_at' => $shipment->shipped_at ?? now(),
+                ]);
+            }
+        }
     }
 
     /**

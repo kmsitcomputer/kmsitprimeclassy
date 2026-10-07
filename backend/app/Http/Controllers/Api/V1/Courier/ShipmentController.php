@@ -10,6 +10,7 @@ use App\Http\Resources\OrderResource;
 use App\Http\Resources\ShipmentReceiptResource;
 use App\Models\ActivityLog;
 use App\Models\Courier;
+use App\Models\OrderItem;
 use App\Models\Shipment;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Order\CourierService;
@@ -29,7 +30,19 @@ class ShipmentController extends Controller
     {
         $this->authorize('assignCourier', $shipment);
 
-        $courier = Courier::query()->findOrFail($request->integer('courier_id'));
+        // A1-01: courier_id=0 is the Koordinator self-executor sentinel — resolve
+        // the actor's own Courier profile (created on first self-assignment) so
+        // the assignment records THEM as the executor. A genuine Courier row is
+        // used for every other call; the request validation guarantees existence.
+        if (! $request->wantsCourier()) {
+            $actor = $request->user();
+            if (! $actor->isRole('koordinator-kurir')) {
+                abort(403);
+            }
+            $courier = $this->courierService->ensureSelfExecutorProfile($actor);
+        } else {
+            $courier = Courier::query()->findOrFail($request->integer('courier_id'));
+        }
 
         $shipment = $this->courierService->assignCourier($shipment, $courier, $request->user());
 
@@ -47,11 +60,43 @@ class ShipmentController extends Controller
             $shipment, $request->string('status')->toString(), $request->user(), $request->file('proof')
         );
 
-        // R-04 / §C: a Kurir / Sales-Kurir-Sub must receive the courier projection (their own items
+        // R-04 / §C: a Kurir / Sales-Kurir-Sub / Koordinator-Kurir executor must receive the courier projection (their own items
         // only, no recipient/sibling/financial leakage) — never the generic OrderResource.
         $order = $shipment->order->load(['items.shipment.courier.user', 'items.shipment.proof', 'shipments.courier.user']);
 
-        $payload = $request->user()->isRole('kurir', 'sales-kurir-sub')
+        $payload = $request->user()->isRole('kurir', 'sales-kurir-sub', 'koordinator-kurir')
+            ? new CourierOrderResource($order)
+            : new OrderResource($order);
+
+        return $this->ok($payload, __('messages.order.status_updated'));
+    }
+
+    /**
+     * LOCKED courier work-unit model (Human UAT): courier progress is PER OrderItem.
+     * Transitions exactly ONE item; its shipment siblings keep their own state even though
+     * they share the order, the shipment, the date and the courier. Authorization is the
+     * same shipment-level executor rule as the bulk path (plus the service re-verifies the
+     * item still belongs to this order and shipment under lock), so a forged item id can
+     * never move another item or order.
+     */
+    public function updateItemStatus(UpdateShipmentStatusRequest $request, Shipment $shipment, OrderItem $orderItem)
+    {
+        $this->authorize('updateStatus', $shipment);
+
+        if ((int) $orderItem->order_id !== (int) $shipment->order_id
+            || (int) $orderItem->shipment_id !== (int) $shipment->id) {
+            abort(404);
+        }
+
+        $shipment = $shipment->fresh();
+        $this->courierService->updateOrderItemStatus(
+            $orderItem, $request->string('status')->toString(), $request->user(), $request->file('proof')
+        );
+
+        // Same projection contract as the bulk path: executors get the courier projection.
+        $order = $shipment->order->load(['items.shipment.courier.user', 'items.shipment.proof', 'shipments.courier.user']);
+
+        $payload = $request->user()->isRole('kurir', 'sales-kurir-sub', 'koordinator-kurir')
             ? new CourierOrderResource($order)
             : new OrderResource($order);
 

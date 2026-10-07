@@ -11,6 +11,7 @@ import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { getCourierReport } from '@/api/reports'
 import { recordDeliveryVerification } from '@/api/deliveries'
 import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem } from '@/api/orderAdjustments'
+import { downloadInvoice } from '@/api/invoice'
 import { listProducts } from '@/api/catalog'
 import {
   clearPendingAddLine,
@@ -62,9 +63,13 @@ onMounted(loadActiveCouriers)
 
 /* ---------- Payment verification/settlement — Keuangan's authority (separation of duties), super_admin override.
    Admin/agen may submit proof and view status but must never settle it (backend routes are super_admin,keuangan only). */
-const canVerifyBankTransfer = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.payment.verify'))
+/** IMP-001: Korsal/Sales may submit a proof on behalf of an in-scope konsumen — the backend (OrderPolicy::payOnBehalf) decides. */
+const canPayOnBehalf = computed(() => ['korsal', 'sales', 'sales-kurir-sub'].includes(auth.user?.role ?? ''))
+const canVerifyBankTransfer = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.payment.verify') || auth.can('orders.manage.payment.scoped'))
 const canSettleCod = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.cod.settle'))
-const canRequestDpSettlement = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.dp.settle'))
+/** UAT-008: COD proof approve/reject is part of the scoped verification path (unlike the direct paid/unpaid toggle above, which stays Keuangan-only). */
+const canConfirmCodProof = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.cod.settle') || auth.can('orders.manage.payment.scoped'))
+const canRequestDpSettlement = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.dp.settle') || auth.can('orders.manage.payment.scoped'))
 
 /**
  * "Minta Pelunasan" is only offered once the DP itself is actually
@@ -199,6 +204,7 @@ function isSelfSubGroup(group: { deliveryMode: string | null }): boolean {
 
 /** A kurir must never see another kurir's already-picked-up shipment rendered as actionable — office roles still can. */
 function shipmentActionableByViewer(group: { courierUserId: number | null }): boolean {
+  if (auth.user?.role === 'koordinator-kurir') return group.courierUserId === auth.user.id
   if (auth.user?.role !== 'kurir') return true
   return group.courierUserId === null || group.courierUserId === auth.user?.id
 }
@@ -228,7 +234,17 @@ const printableShipmentGroups = computed(() => {
   if (!order.value) return []
   const groups = new Map<
     number,
-    { shipmentId: number; productNames: string[]; courierUserId: number | null; deliveryMode: string | null; selfDeliveredByUserId: number | null }
+    {
+      shipmentId: number
+      productNames: string[]
+      courierUserId: number | null
+      deliveryMode: string | null
+      selfDeliveredByUserId: number | null
+      // UAT-005 LOCKED: the shipment IS the delivery-date unit, so its row must show the date.
+      // Read from the server-derived map (OrderResource.shipment_delivery_dates) — never computed
+      // here from the first item, so a shipment whose items disagree shows no date instead of a guess.
+      deliveryDate: string | null
+    }
   >()
   for (const item of order.value.items ?? []) {
     if (!item.shipment_id || ['diterima', 'dibatalkan'].includes(item.status)) continue
@@ -242,6 +258,7 @@ const printableShipmentGroups = computed(() => {
         courierUserId: item.courier?.user_id ?? null,
         deliveryMode: item.delivery_mode ?? null,
         selfDeliveredByUserId: item.self_delivered_by_user_id ?? null,
+        deliveryDate: order.value.shipment_delivery_dates?.[String(item.shipment_id)]?.delivery_date ?? null,
       })
     }
   }
@@ -253,13 +270,44 @@ const printableShipmentGroups = computed(() => {
       return isSubRole.value && auth.user?.id === g.selfDeliveredByUserId
     }
     if (isSubRole.value) return false
-    return auth.user?.role !== 'kurir' || shipmentActionableByViewer(g)
+    if (['kurir', 'koordinator-kurir'].includes(auth.user?.role ?? '')) return g.courierUserId === auth.user?.id
+    return true
   })
 })
 
 function openReceipt(shipmentId: number) {
   const target = router.resolve({ name: 'shipment-receipt-print', params: { id: shipmentId } })
   window.open(target.href, '_blank')
+}
+
+/* IMP-002 invoice — order-level PDF. Owner konsumen + same-branch financial
+ * roles (super_admin/agen/admin/keuangan) per the Order policy. The owner
+ * half uses the server-derived capability (A1-15): konsumen_id is never
+ * serialized, so previously the consumer button was permanently hidden. */
+const canDownloadInvoice = computed(() => {
+  if (!order.value) return false
+  const role = auth.user?.role
+  if (['super_admin', 'agen', 'admin', 'keuangan'].includes(role ?? '')) return true
+  return role === 'konsumen' && order.value.viewer_can_download_invoice === true
+})
+const invoiceBusy = ref(false)
+
+async function downloadInvoicePdf() {
+  if (!order.value) return
+  invoiceBusy.value = true
+  try {
+    const blob = await downloadInvoice(order.value.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `invoice-${order.value.order_no}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    shipmentError.value = e instanceof ApiError ? e.message : t('orders.errors.invoiceDownload')
+  } finally {
+    invoiceBusy.value = false
+  }
 }
 
 function onDeliveryProofSelected(shipmentId: number, e: Event) {
@@ -270,7 +318,9 @@ async function pickupShipment(shipmentId: number) {
   shipmentBusy.value = shipmentId
   shipmentError.value = null
   try {
-    order.value = await updateShipmentStatus(shipmentId, 'dikirim')
+    const updated = await updateShipmentStatus(shipmentId, 'dikirim')
+    if (auth.user?.role === 'koordinator-kurir') await load()
+    else order.value = updated
   } catch (e) {
     shipmentError.value = e instanceof ApiError ? e.message : t('orders.errors.shipmentStatus')
   } finally {
@@ -284,7 +334,9 @@ async function deliverShipment(shipmentId: number) {
   shipmentBusy.value = shipmentId
   shipmentError.value = null
   try {
-    order.value = await updateShipmentStatus(shipmentId, 'terkirim', proof)
+    const updated = await updateShipmentStatus(shipmentId, 'terkirim', proof)
+    if (auth.user?.role === 'koordinator-kurir') await load()
+    else order.value = updated
   } catch (e) {
     shipmentError.value = e instanceof ApiError ? e.message : t('orders.errors.delivered')
   } finally {
@@ -545,7 +597,8 @@ async function submitReschedule(item: OrderItem) {
 /* ---------- Package C / SC-03: ADMIN ONLY add a NEW product/variation line (only while 'diproses') ---------- */
 // Deliberately role === 'admin' (not auth.can(...)): the backend rule is Admin-only and narrower than
 // the shared fulfillment capability. Server remains authoritative; this only shows the control.
-const canAddLine = computed(() => auth.user?.role === 'admin' && order.value?.status === 'diproses')
+const canAddLine = computed(() => auth.user?.role === 'admin' && order.value?.status === 'diproses'
+  && !order.value.items.some((item) => item.courier || item.self_delivered_by_user_id != null))
 const showingAddForm = ref(false)
 const ADD_PAGE_SIZE = 30
 const addProducts = ref<Product[]>([])
@@ -881,8 +934,18 @@ async function submitReturn(item: OrderItem) {
               </div>
             </div>
 
-            <!-- Admin: reschedule requested delivery date, only while order is 'diproses' -->
-            <div v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment')" class="mt-1.5">
+            <!-- Admin: reschedule requested delivery date, only while order is 'diproses'.
+                 LOCKED rule (Human 2026-10-07): a requested delivery date may be changed for
+                 KURIR ONLINE and for SELF DELIVERY / Sub; Ekspedisi/RajaOngkir and Pickup/Ambil di
+                 Tempat may not. `reschedule_allowed` is the server-derived capability
+                 (OrderResource -> Shipment::isDeliveryDateReschedulable), so this gate never
+                 re-derives provider/mode logic and stays correct for self_delivery orders.
+                 Convenience only: OrderFulfillmentService::rescheduleItemDeliveryDate is
+                 authoritative and refuses forbidden methods server-side too. -->
+            <div
+              v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment') && order.reschedule_allowed"
+              class="mt-1.5"
+            >
               <button v-if="reschedulingItemId !== item.id" type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="openRescheduleForm(item)">
                 {{ t('orders.rescheduleItem') }}
               </button>
@@ -960,6 +1023,10 @@ async function submitReturn(item: OrderItem) {
           <div class="flex justify-between text-stone-500 dark:text-stone-400">
             <span>{{ t('orders.subtotal') }}</span><span>{{ formatRupiah(order.subtotal_amount) }}</span>
           </div>
+          <!-- A1-21: discount attribution — a discounted total can't reconcile without it. -->
+          <div v-if="Number(order.discount_amount) > 0" class="flex justify-between text-emerald-600 dark:text-emerald-400">
+            <span>{{ t('orders.discount') }}</span><span>- {{ formatRupiah(order.effective_discount_amount ?? order.discount_amount ?? '0') }}</span>
+          </div>
           <div class="flex justify-between text-stone-500 dark:text-stone-400">
             <span>{{ t('orders.shippingFee') }}</span><span>{{ formatRupiah(order.shipping_fee_amount) }}</span>
           </div>
@@ -976,6 +1043,8 @@ async function submitReturn(item: OrderItem) {
         <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.shippingAddress') }}</h2>
         <p class="text-sm text-stone-600 dark:text-stone-300">{{ order.recipient_name }} · {{ order.recipient_phone }}</p>
         <p class="text-sm text-stone-500 dark:text-stone-400">{{ order.address }}</p>
+        <!-- A1-21: persisted postal code renders in the shipment address. -->
+        <p v-if="order.postal_code" class="mt-0.5 text-xs text-stone-400">Kode Pos: {{ order.postal_code }}</p>
         <p v-if="order.konsumen" class="mt-1 text-xs text-stone-400">{{ t('orders.customer', { name: order.konsumen.name, phone: order.konsumen.phone }) }}</p>
         <p v-if="order.sales" class="mt-1 text-xs text-stone-400">Sales: {{ order.sales.name }}</p>
         <p v-if="order.korsal" class="mt-1 text-xs text-stone-400">Korsal: {{ order.korsal.name }}</p>
@@ -1103,10 +1172,30 @@ async function submitReturn(item: OrderItem) {
       <!-- Thermal receipt print — read-only, before/after pickup mode is derived server-side. Stays available after delivery for reprint. -->
       <div v-if="canManageShipment && printableShipmentGroups.length" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.printReceipt') }}</h2>
-        <div v-for="group in printableShipmentGroups" :key="group.shipmentId" class="mb-2 flex items-center justify-between gap-2 rounded-lg bg-stone-50 p-3 last:mb-0 dark:bg-stone-800/60">
-          <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
+        <!-- UAT-005 LOCKED: one row per canonical Shipment (delivery-date unit), each labelled with its
+             server-derived delivery date so the operator prints the RIGHT delivery. -->
+        <div
+          v-for="group in printableShipmentGroups"
+          :key="group.shipmentId"
+          class="mb-2 flex items-center justify-between gap-2 rounded-lg bg-stone-50 p-3 last:mb-0 dark:bg-stone-800/60"
+        >
+          <div class="min-w-0">
+            <p class="text-xs font-semibold text-stone-700 dark:text-stone-200">
+              {{ t('orders.shipmentDeliveryLabel', { date: group.deliveryDate ? formatDate(group.deliveryDate) : t('orders.anyDate') }) }}
+            </p>
+            <p class="text-xs text-stone-500 dark:text-stone-400">{{ group.productNames.join(', ') }}</p>
+          </div>
           <AppButton size="sm" variant="secondary" @click="openReceipt(group.shipmentId)">{{ t('orders.printReceipt') }}</AppButton>
         </div>
+      </div>
+
+      <!-- IMP-002 dynamic invoice (NOT Print Resi) — order-level PDF, owner + same-branch financial roles. -->
+      <div v-if="canDownloadInvoice" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+        <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.invoice') }}</h2>
+        <p class="mb-2 text-xs text-stone-500 dark:text-stone-400">{{ t('orders.invoiceHint') }}</p>
+        <AppButton size="sm" variant="secondary" :disabled="invoiceBusy" @click="downloadInvoicePdf">
+          {{ invoiceBusy ? t('orders.invoiceLoading') : t('orders.invoiceDownload') }}
+        </AppButton>
       </div>
 
       <div v-if="order.cancellation_reason" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">
@@ -1134,6 +1223,21 @@ async function submitReturn(item: OrderItem) {
             <div v-if="order.payment_summary.requested_dp > 0" class="flex justify-between">
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.dpPaid') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.verified_dp) }}</dd>
+            </div>
+            <!-- UAT-004: "DP Diajukan" — submitted-but-unverified nominal, rendered ONLY while that
+                 submission is still pending verification. Informational by construction: it is never
+                 added to DP Dibayar (verified_dp) or Total Dibayar (total_paid), and never subtracted
+                 from Sisa Pembayaran (remaining_balance) — only canonical verification through
+                 PaymentService::verifyBankTransfer may move it. -->
+            <div
+              v-if="(order.payment_summary.submitted_dp ?? 0) > 0 && order.payment_summary.pending_verification_status === 'pending'"
+              class="flex justify-between"
+            >
+              <dt class="text-amber-700 dark:text-amber-400">DP Diajukan</dt>
+              <dd class="text-right font-medium text-amber-700 dark:text-amber-400">
+                {{ formatRupiah(order.payment_summary.submitted_dp ?? 0) }}
+                <span class="block text-[11px] font-normal">Menunggu verifikasi — belum dihitung sebagai dibayar</span>
+              </dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.totalPaid') }}</dt>
@@ -1187,6 +1291,9 @@ async function submitReturn(item: OrderItem) {
             <p>
               {{ t('orders.verificationStatusLabel') }}
               <strong>{{ { pending: t('orders.verificationPending'), verified: t('orders.verificationVerified'), rejected: t('orders.verificationRejected') }[order.payment_transaction.bank_transfer_verification.status] }}</strong>
+            </p>
+            <p v-if="order.payment_transaction.bank_transfer_verification.submitted_on_behalf && order.payment_transaction.bank_transfer_verification.submitted_by" class="text-xs text-stone-500 dark:text-stone-400">
+              {{ t('orders.paidOnBehalfBy', { name: order.payment_transaction.bank_transfer_verification.submitted_by.name }) }}
             </p>
             <a
               v-if="order.payment_transaction.bank_transfer_verification.proof_url"
@@ -1243,7 +1350,7 @@ async function submitReturn(item: OrderItem) {
           </div>
 
           <!-- Konsumen: upload a photo of the cash handed to the kurir, request Admin mark it paid -->
-          <div v-if="auth.isKonsumen && order.payment_status !== 'paid'" class="mt-3">
+          <div v-if="(auth.isKonsumen || canPayOnBehalf) && order.payment_status !== 'paid'" class="mt-3">
             <template v-if="!order.payment_transaction?.cod_payment_proof || order.payment_transaction.cod_payment_proof.status === 'rejected'">
               <p v-if="order.payment_transaction?.cod_payment_proof?.status === 'rejected'" class="mb-2 text-xs text-red-600">
                 {{ t('orders.previousProofRejected', { reason: order.payment_transaction.cod_payment_proof.rejection_reason ? t('orders.rejectedSuffix', { reason: order.payment_transaction.cod_payment_proof.rejection_reason }) : '' }) }}
@@ -1259,9 +1366,11 @@ async function submitReturn(item: OrderItem) {
             </p>
           </div>
 
-          <!-- Keuangan: confirm or reject the konsumen's COD proof -->
+          <!-- Keuangan + UAT-008 in-scope Sales/Korsal: confirm or reject the konsumen's COD proof.
+               The direct paid/unpaid toggle above stays Keuangan-only; this proof-based
+               approve/reject reuses the canonical workflow (server re-checks scope). -->
           <div
-            v-if="canSettleCod && order.payment_transaction?.cod_payment_proof?.status === 'pending'"
+            v-if="canConfirmCodProof && order.payment_transaction?.cod_payment_proof?.status === 'pending'"
             class="mt-3 space-y-2 rounded-lg bg-stone-50 p-3 dark:bg-stone-800/60"
           >
             <p class="text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.confirmCodProof') }}</p>

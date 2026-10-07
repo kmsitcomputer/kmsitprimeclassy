@@ -111,7 +111,10 @@ class DsPbrFollowUpTest extends TestCase
         $stockRequest = StockRequest::withoutGlobalScopes()->create(['agent_id' => $b['agent']->id, 'order_id' => $order->id, 'request_number' => 'DSR-'.Str::uuid(), 'status' => 'pending']);
         $stockRequest->items()->create(['order_item_id' => $orderItem->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 2, 'fulfilled_qty' => 0, 'remaining_qty' => 2]);
 
-        $response = $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests/'.$stockRequest->id);
+        // §8: the standalone Stock Request GET detail is removed — the
+        // internal order-scoped endpoint serves the same resource (and still
+        // resolves the primary image / variant identity / agent scoping).
+        $response = $this->actingAs($b['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}/stock-request");
         $response->assertOk();
         $item = $response->json('data.items.0');
         $this->assertSame('DS-PBR Request Cake', $item['product_name']);
@@ -121,7 +124,7 @@ class DsPbrFollowUpTest extends TestCase
 
         DB::flushQueryLog();
         DB::enableQueryLog();
-        $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/stock-requests/'.$stockRequest->id)->assertOk();
+        $this->actingAs($b['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}/stock-request")->assertOk();
         $imageQueries = collect(DB::getQueryLog())->filter(fn ($q) => str_contains($q['query'], 'product_images'))->all();
         DB::disableQueryLog();
         $this->assertCount(1, $imageQueries);

@@ -30,20 +30,78 @@ class OrderPolicy
             return true;
         }
 
-        if ($user->isRole('agen', 'admin', 'keuangan')) {
+        if ($user->isRole('agen', 'admin', 'keuangan', 'koordinator-kurir')) {
             return $order->agent_id === $user->agent_id;
         }
 
         if ($user->isRole('korsal')) {
-            return $order->korsal_id === $user->id;
+            if ($order->korsal_id === $user->id) {
+                return true;
+            }
+
+            // IMP-004 symmetric korsal leg: when a SALES was audited-reassigned
+            // to a new korsal, the sales's konsumen carry their order snapshots
+            // (old korsal) but their CURRENT korsal_id now points at the NEW
+            // korsal. The new korsal gains view of those orders (same same-Agent
+            // guard); the old korsal keeps its historical snapshot access.
+            $konsumen = $order->konsumen;
+            if ($konsumen
+                && $konsumen->id !== $user->id
+                && $konsumen->isRole('konsumen')
+                && $order->agent_id === $user->agent_id
+                && $konsumen->agent_id === $user->agent_id
+                && $konsumen->korsal_id === $user->id) {
+                return true;
+            }
+
+            return false;
         }
 
         if ($user->isRole('sales', 'sales-kurir-sub')) {
-            return $order->sales_id === $user->id;
+            if ($order->sales_id === $user->id) {
+                return true;
+            }
+
+            // IMP-004 (deferred from IMP-001 §24): after an AUDITED konsumen
+            // reassignment the referral snapshot on the order is historical —
+            // the NEW sales may pay on behalf (payOnBehalf, current chain) but
+            // could not open the older order's detail. View now mirrors
+            // payOnBehalf: same Agent + the konsumen currently inside the
+            // actor's referral scope also grants read access. The snapshot
+            // owner above keeps their historical access — this only ADDS the
+            // reassigned-owner path, it never revokes.
+            $konsumen = $order->konsumen;
+            if ($konsumen
+                && $konsumen->id !== $user->id
+                && $konsumen->isRole('konsumen')
+                && $order->agent_id === $user->agent_id
+                && $konsumen->agent_id === $user->agent_id
+                && $konsumen->sales_id === $user->id) {
+                return true;
+            }
+
+            return false;
         }
 
         if ($user->isRole('konsumen')) {
             return $order->konsumen_id === $user->id;
+        }
+
+        // IMP-001 UAT remediation (Gap 2): Gudang may open an order ONLY while it
+        // is still in the warehouse work queue — status exactly 'diproses' AND no
+        // courier assigned yet (no shipment carries courier_id, and no self_sub
+        // shipment has a self-delivering Sales-Kurir-Sub). The moment either
+        // becomes false (status moved on, or any shipment got a courier/self-delivery
+        // owner) the order is out of Gudang's scope — the courier/office owns it now.
+        // Same-Agent is enforced here (the global BelongsToAgentScope is the first
+        // layer; this explicit re-check is the second, per-record independent one).
+        if ($user->isRole('gudang')) {
+            if ($order->status !== 'diproses' || $order->agent_id !== $user->agent_id) {
+                return false;
+            }
+
+            return ! $order->shipments()->whereNotNull('courier_id')->exists()
+                && ! $order->shipments()->whereNotNull('self_delivered_by_user_id')->exists();
         }
 
         // R-04 / §C: a normal Kurir must NOT use the generic order list/detail — the generic
@@ -169,5 +227,40 @@ class OrderPolicy
     public function addLine(User $user, Order $order): bool
     {
         return $user->isRole('admin') && $order->agent_id === $user->agent_id;
+    }
+
+/**
+     * IMP-001 / assisted consumer payment: Korsal and Sales (incl. Sales-Kurir-Sub) may submit a payment
+     * proof ON BEHALF of a konsumen who is currently inside their own referral scope. The scope is the
+     * konsumen's CURRENT referral chain (users.korsal_id / users.sales_id — kept in sync by the audited
+     * ReferralReassignmentService), never mere knowledge of an order id, and never crosses Agent branches.
+     * The order owner stays the konsumen.
+     *
+     * UAT-008: this same scoped rule is the ONLY scope gate for the proof-based verification
+     * actions (verify / DP-settlement request / COD-proof confirm) — see
+     * PaymentController::assertMayVerifyPayment. It grants scoped authority, never global
+     * access: unrelated and cross-Agent sales/korsal stay denied, the direct COD paid/unpaid
+     * toggle (markCod) remains keuangan-only, and PaymentService stays the single writer of
+     * paid_amount. See docs/06-review/HUMAN-UAT-REMEDIATION-004-008.md §8.
+     */
+    public function payOnBehalf(User $user, Order $order): bool
+    {
+        if (! $user->isRole('korsal', 'sales', 'sales-kurir-sub')) {
+            return false;
+        }
+
+        $konsumen = $order->konsumen;
+
+        if (! $konsumen || $konsumen->id === $user->id || ! $konsumen->isRole('konsumen')) {
+            return false;
+        }
+
+        if ($user->agent_id === null || $order->agent_id !== $user->agent_id || $konsumen->agent_id !== $user->agent_id) {
+            return false;
+        }
+
+        return $user->isRole('korsal')
+            ? $konsumen->korsal_id === $user->id
+            : $konsumen->sales_id === $user->id;
     }
 }

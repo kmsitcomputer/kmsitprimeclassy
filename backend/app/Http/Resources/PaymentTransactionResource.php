@@ -22,6 +22,7 @@ class PaymentTransactionResource extends JsonResource
             'bank_transfer_verification' => $this->whenLoaded(
                 'bankTransferVerification',
                 fn () => $this->bankTransferVerification ? [
+                    'id' => $this->bankTransferVerification->id,
                     'status' => $this->bankTransferVerification->status,
                     // The actual photo — an admin verifying a transfer must be
                     // able to look at it, not just know one was submitted.
@@ -29,6 +30,9 @@ class PaymentTransactionResource extends JsonResource
                         ? Storage::disk('public')->url($this->bankTransferVerification->proof_image_path)
                         : null,
                     'rejection_reason' => $this->bankTransferVerification->rejection_reason,
+                    // IMP-001: payer actor vs. order owner (the konsumen) — the owner is never rewritten.
+                    'submitted_on_behalf' => (bool) $this->bankTransferVerification->submitted_on_behalf,
+                    'submitted_by' => $this->payerSummary($this->bankTransferVerification->submittedBy),
                 ] : null
             ),
             'cod_payment_proof' => $this->whenLoaded(
@@ -38,8 +42,16 @@ class PaymentTransactionResource extends JsonResource
                     'status' => $this->codPaymentProof->status,
                     'proof_url' => $this->codPaymentProof->proof?->url(),
                     'rejection_reason' => $this->codPaymentProof->rejection_reason,
+                    'submitted_on_behalf' => (bool) $this->codPaymentProof->submitted_on_behalf,
+                    'submitted_by' => $this->payerSummary($this->codPaymentProof->submittedBy),
                 ] : null
             ),
         ];
+    }
+
+    /** @return array{id:int,name:string,role:?string}|null */
+    private function payerSummary(?\App\Models\User $payer): ?array
+    {
+        return $payer ? ['id' => $payer->id, 'name' => $payer->name, 'role' => $payer->role?->slug] : null;
     }
 }

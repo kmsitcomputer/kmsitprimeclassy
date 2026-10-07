@@ -103,7 +103,7 @@ class UserManagementTest extends TestCase
         $agen->update(['agent_id' => $agen->id]);
 
         $korsal = User::factory()->korsal()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
-        foreach (['korsal', 'sales', 'admin', 'keuangan', 'kurir'] as $allowedRole) {
+        foreach (['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'koordinator-kurir'] as $allowedRole) {
             $this->actingAs($agen)->postJson('/api/v1/users', $this->payload(['role' => $allowedRole, ...($allowedRole === 'sales' ? ['korsal_id' => $korsal->id] : [])]))
                 ->assertCreated();
         }
@@ -111,6 +111,35 @@ class UserManagementTest extends TestCase
         $this->actingAs($agen)
             ->postJson('/api/v1/users', $this->payload(['role' => 'agen']))
             ->assertStatus(403);
+    }
+
+    public function test_agen_can_create_koordinator_kurir_linked_to_own_branch_without_courier_profile(): void
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+
+        $response = $this->actingAs($agen)->postJson('/api/v1/users', $this->payload([
+            'role' => 'koordinator-kurir',
+        ]))->assertCreated();
+
+        $koordinator = User::query()->with('role')->findOrFail($response->json('data.id'));
+        $this->assertSame('koordinator-kurir', $koordinator->role->slug);
+        $this->assertSame($agen->id, $koordinator->agent_id);
+        $this->assertSame($agen->id, $koordinator->parent_id);
+        $this->assertNull($koordinator->korsal_id);
+        $this->assertNull($koordinator->sales_id);
+
+        // A koordinator is a dispatcher — it must NOT get a Courier profile
+        // (only kurir / sales-kurir-sub do).
+        $this->assertDatabaseMissing('couriers', ['user_id' => $koordinator->id]);
+
+        // Cross-agent tampering is rejected exactly like gudang.
+        $foreign = User::factory()->agen()->create();
+        $foreign->update(['agent_id' => $foreign->id]);
+        $this->actingAs($agen)->postJson('/api/v1/users', $this->payload([
+            'role' => 'koordinator-kurir',
+            'agent_id' => $foreign->id,
+        ]))->assertUnprocessable();
     }
 
     public function test_agen_created_admin_and_kurir_are_auto_linked_to_the_creators_own_branch_never_a_client_supplied_agent_id(): void
@@ -279,6 +308,29 @@ class UserManagementTest extends TestCase
         $agenNames = collect($ownAgenRow->json('data'))->pluck('name');
         $this->assertTrue($agenNames->contains('Toko Agen A'));
         $this->assertFalse($agenNames->contains('Toko Agen B'));
+    }
+
+    /* ------------- A1-20: Koordinator-Kurir appears in the roster ------------- */
+
+    public function test_koordinator_kurir_is_listable_through_the_normal_roster_but_only_in_its_own_branch(): void
+    {
+        $agenA = User::factory()->agen()->create(['name' => 'Toko A']);
+        $agenA->update(['agent_id' => $agenA->id]);
+        $koordA = User::factory()->koordinatorKurir()->create(['agent_id' => $agenA->id, 'name' => 'Koord A']);
+        $agenB = User::factory()->agen()->create(['name' => 'Toko B']);
+        $agenB->update(['agent_id' => $agenB->id]);
+        User::factory()->koordinatorKurir()->create(['agent_id' => $agenB->id, 'name' => 'Koord B']);
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        // Super Admin finds them via the roster (previously an empty list).
+        $all = collect($this->actingAs($superAdmin)->getJson('/api/v1/users?role=koordinator-kurir')->assertOk()->json('data'))->pluck('name');
+        $this->assertTrue($all->contains('Koord A'));
+        $this->assertTrue($all->contains('Koord B'));
+
+        // Agen A sees only its own branch's koordinator.
+        $own = collect($this->actingAs($agenA)->getJson('/api/v1/users?role=koordinator-kurir')->assertOk()->json('data'))->pluck('name');
+        $this->assertTrue($own->contains('Koord A'));
+        $this->assertFalse($own->contains('Koord B'));
     }
 
     public function test_agent_sales_requires_own_korsal_and_updates_closures(): void

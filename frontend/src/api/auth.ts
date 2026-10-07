@@ -76,3 +76,14 @@ export async function previewReferral(code: string) {
   )
   return data.data
 }
+
+/**
+ * IMP-001: browser-navigation URL that starts Google sign-in (top-level redirect, never XHR). `register`
+ * mode needs a referral code; the backend re-validates it and re-resolves the hierarchy itself.
+ */
+export function googleAuthUrl(mode: 'login' | 'register' | 'link', referralCode?: string): string {
+  const base = window.__APP_CONFIG__?.API_URL ?? import.meta.env.VITE_API_URL ?? ''
+  const params = new URLSearchParams({ mode })
+  if (mode === 'register' && referralCode) params.set('referral_code', referralCode.trim())
+  return `${base}/api/v1/auth/google/redirect?${params.toString()}`
+}

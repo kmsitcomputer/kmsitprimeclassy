@@ -62,7 +62,8 @@ class MigrationVerificationTest extends TestCase
 
     public function test_rollback_removes_everything_and_migrate_restores_it(): void
     {
-        Artisan::call('migrate:rollback', ['--step' => 5, '--force' => true]);
+        // Tail migrations now: 5 Package A/B/C + 4 IMP-001 + 4 IMP-002 + 1 IMP-003 = 14.
+        Artisan::call('migrate:rollback', ['--step' => 14, '--force' => true]);
 
         $this->assertFalse(Schema::hasTable('delivery_verifications'));
         $this->assertFalse(Schema::hasColumn('shipments', 'delivery_mode'));
@@ -71,6 +72,17 @@ class MigrationVerificationTest extends TestCase
         $this->assertFalse(Schema::hasColumn('order_items', 'idempotency_key'));
         $this->assertFalse(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertEmpty($this->selfSubTriggers(), 'rollback must drop the self_sub courier triggers');
+        $this->assertFalse(Schema::hasTable('user_social_identities'));
+        $this->assertFalse(Schema::hasColumn('bank_transfer_verifications', 'submitted_by_user_id'));
+        $this->assertFalse(Schema::hasColumn('cod_payment_proofs', 'submitted_on_behalf'));
+        // IMP-002 migrations (4 newest before IMP-003) must also be rolled back.
+        $this->assertFalse(Schema::hasTable('product_discounts'));
+        $this->assertFalse(Schema::hasTable('vouchers'));
+        $this->assertFalse(Schema::hasColumn('orders', 'village_id'));
+        $this->assertFalse(Schema::hasTable('invoice_configs'));
+        // IMP-003: the koordinator-kurir role row must be gone after rollback
+        // (no users reference it in a fresh test DB, so down() deletes it).
+        $this->assertDatabaseMissing('roles', ['slug' => 'koordinator-kurir']);
 
         Artisan::call('migrate', ['--force' => true]);
 
@@ -80,6 +92,15 @@ class MigrationVerificationTest extends TestCase
         $this->assertTrue(Schema::hasColumn('order_items', 'idempotency_key'));
         $this->assertTrue(Schema::hasColumn('order_items', 'request_fingerprint'));
         $this->assertNotEmpty($this->selfSubTriggers(), 're-migrate must recreate the triggers');
+        $this->assertTrue(Schema::hasTable('user_social_identities'));
+        $this->assertTrue(Schema::hasColumn('bank_transfer_verifications', 'submitted_by_user_id'));
+        $this->assertTrue(Schema::hasColumn('cod_payment_proofs', 'submitted_on_behalf'));
+        $this->assertTrue(Schema::hasTable('product_discounts'));
+        $this->assertTrue(Schema::hasTable('vouchers'));
+        $this->assertTrue(Schema::hasTable('invoice_configs'));
+        $this->assertTrue(Schema::hasColumn('orders', 'village_id'));
+        // IMP-003: the koordinator-kurir role row must be re-created by migrate.
+        $this->assertDatabaseHas('roles', ['slug' => 'koordinator-kurir']);
     }
 
     /** @return array{0: Order, 1: User, 2: Courier} */

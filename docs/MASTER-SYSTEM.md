@@ -41,7 +41,7 @@ Frontend and backend are separate deployables that run **same-origin** in DEV an
 
 ## 5. User and role hierarchy
 
-Exactly **10 roles** (rows in `roles`, no custom roles): `super_admin`, `agen`, `korsal`, `sales`, `sales-kurir-sub`, `konsumen`, `admin`, `keuangan`, `kurir`, `gudang`. The former role `sales-kurir` was **renamed in place** to `sales-kurir-sub`; there is no 11th role, and the legacy slug is only a compatibility alias.
+Exactly **11 roles** (rows in `roles`, no custom roles): `super_admin`, `agen`, `korsal`, `sales`, `sales-kurir-sub`, `konsumen`, `admin`, `keuangan`, `kurir`, `gudang`, `koordinator-kurir`. The former role `sales-kurir` was **renamed in place** to `sales-kurir-sub`; the legacy slug is only a compatibility alias. `koordinator-kurir` (IMP-003, Human-approved 2026-10-05) is a branch delivery dispatcher created by the Agen: it drives the dispatch workspace (`GET /dispatch`), assigns couriers, **creates/manages Kurir in its own branch (A1-02)**, and receives the operational (non-financial) order projection. When the Koordinator assigns a delivery to **itself** (A1-01) it becomes the actual recorded executor through its own Courier profile (lazily created): it then progresses that one shipment (pickup/proof/completion) and earns exactly the canonical courier fee on delivery — it never gains dispatch authority over another courier's assignment, and there is **no dispatcher fee**.
 
 ```mermaid
 graph TD
@@ -50,6 +50,8 @@ graph TD
   AG --> KE[keuangan]
   AG --> GU[gudang]
   AG --> KU[kurir]
+  AG --> KK[koordinator-kurir]
+  KK --> KU2[kurir]
   AG --> KO[korsal]
   AG --> SA2[sales]
   AG --> SK[sales-kurir-sub]
@@ -61,11 +63,11 @@ graph TD
   KO -.referral.-> KN
 ```
 
-Creation matrix (single source `HierarchyRules`): `super_admin` → `agen`; `agen` → `korsal`, `sales`, `admin`, `keuangan`, `kurir`, `gudang`, `sales-kurir-sub`; `korsal` → `sales`, `sales-kurir-sub`. Konsumen self-register (a referral code is optional; without one they are linked to an Agent later). Agent isolation is enforced in layers (route role gate, `BelongsToAgentScope` global scope, policies, services). Full authority matrix: [BUSINESS-RULES.md](BUSINESS-RULES.md#2-role-and-authority-matrix).
+Creation matrix (single source `HierarchyRules`): `super_admin` → `agen`; `agen` → `korsal`, `sales`, `admin`, `keuangan`, `kurir`, `gudang`, `sales-kurir-sub`, `koordinator-kurir`; `korsal` → `sales`, `sales-kurir-sub`; **`koordinator-kurir` → `kurir`** (own branch only, parent = the koordinator — A1-02). Konsumen self-register (a referral code is optional; without one they are linked to an Agent later). Agent isolation is enforced in layers (route role gate, `BelongsToAgentScope` global scope, policies, services). Full authority matrix: [BUSINESS-RULES.md](BUSINESS-RULES.md#2-role-and-authority-matrix).
 
 ## 6. Authentication
 
-Laravel Sanctum **SPA cookie** sessions with CSRF (no bearer tokens, nothing in localStorage). Login and registration are rate-limited. Every non-installer request passes `auth:sanctum` and `agent.linked` (non-super-admin users must be linked to an Agent). Role gating uses `EnsureRole` (`role:...`) and per-record Policies. The frontend `PermissionMap` capabilities are UI hints only. Cross-origin setups additionally need `FRONTEND_URLS` and `SANCTUM_STATEFUL_DOMAINS`.
+Laravel Sanctum **SPA cookie** sessions with CSRF (no bearer tokens, nothing in localStorage). Login and registration are rate-limited. Every non-installer request passes `auth:sanctum` and `agent.linked` (non-super-admin users must be linked to an Agent). Consumers may also sign in with **Google** (OAuth authorization-code + PKCE through `GoogleAuthController`, routes under `/api/v1/auth/google/*` in the `web` group so the session carries the OAuth state): login never creates an account and registration requires a valid referral — [BUSINESS-RULES.md §23](BUSINESS-RULES.md#23-google-sign-in-imp-001-konsumen-only). Role gating uses `EnsureRole` (`role:...`) and per-record Policies. The frontend `PermissionMap` capabilities are UI hints only. Cross-origin setups additionally need `FRONTEND_URLS` and `SANCTUM_STATEFUL_DOMAINS`.
 
 ## 7. Catalog and products
 
@@ -79,9 +81,13 @@ Agen, Korsal, Sales and Sales-Kurir-Sub own a unique `referral_code` (prefixes `
 
 `POST /checkout/quote` and `/checkout/courier-options` price a cart without side effects; `POST /orders` creates the order (requires an `Idempotency-Key`). Only product, variation and quantity come from the client — price, fees, SKU, weight, shipping and stock are resolved server-side. Delivery date is per item (`requested_delivery_date`, defaulting to the order's estimate). Shipping methods: **Kurir Online** (OpenRouteService road distance), **Ekspedisi** (RajaOngkir/Komerce V2; restricted to Manual Bank Transfer) and **Pickup** (Rp 0). Payment methods: COD, manual bank transfer, DP (down payment), Xendit, Tripay, Stripe (availability governed by global and per-Agent toggles). Checkout is throttled.
 
+**Promotions (IMP-002) — discounts & vouchers:** an Agen/Admin/Super Admin manages agent-scoped **product or variation discounts** (percentage, active-window) and **vouchers** (code, fixed/percentage, active-window, optional product/variation target, optional `max_uses`) via `/api/v1/promo/*`. Pricing is server-authoritative: `PricingService` computes the effective unit price (variation-targeted discount wins over product-targeted; only currently-valid rows participate), and `OrderService::voucherBudgetForLines` applies a voucher once per cart against its eligible subtotal (a fixed voucher has a single face-value budget, never per line — A1-07; a targeted voucher is accepted only when at least one eligible line exists — A1-06). The persisted order keeps `discount_amount`/`voucher_id` attribution; `OrderTotalCalculator` clamps the effective voucher to the billed subtotal during fulfillment reduction so totals stay nonnegative (A1-08). A super_admin promotion write requires an explicit validated `?agent_id=` (A1-18); a saved discount must target a product or variation (targetless “global” rows are rejected — A1-17).
+
+**Address & geocode (IMP-002):** checkout persists structured region ids (`province_id`/`regency_id`/`district_id`/`village_id`, widths 2/4/6/10, string) + `postal_code`, validated server-side against the region master. `POST /checkout/geocode` (authenticated, throttled) reverse-geocodes coordinates through the bound `ReverseGeocoder` and matches the result to canonical region ids. The Human-approved live default is `NominatimReverseGeocoder` (Nominatim/OSM, no API key), configured through `services.geocode`. The backend uses bounded timeouts, identifiable User-Agent, no retries, shared cache/atomic lock and at most one outbound request per second across users. Exact labels are matched against a unique canonical ancestor chain; unmatched, ambiguous or provider failures preserve manual selectors and coordinates. Frontend loads the matched canonical cascade and displays OSM attribution; it never contacts Nominatim directly.
+
 ## 10. Orders
 
-Statuses: `diterima → diproses → dikirim → terkirim → pengembalian → kembali`, plus `dibatalkan` (from `diterima`/`diproses`). COD orders start at `diproses`; all others start at `diterima` and may enter `diproses` only when payment is verified (paid, or DP partially paid). Each item has its own status mirroring the order's and its own Shipment. Every order and item stores immutable snapshots (product name, variation label, SKU, unit price, fees, address, recipient). Cancellation: COD while `diterima`/`diproses`; non-COD while `diterima` only. Cancelling releases reservations (and reverses shipped warehouse stock where applicable) exactly once.
+Statuses: `diterima → diproses → dikirim → terkirim → pengembalian → kembali`, plus `dibatalkan` (from `diterima`/`diproses`). COD orders start at `diproses`; all others start at `diterima` and may enter `diproses` only when payment is verified (paid, or DP partially paid). Each item has its own status and its own Shipment; under the per-item courier work unit an item's status may legitimately lag the order's (see §15). Every order and item stores immutable snapshots (product name, variation label, SKU, unit price, fees, address, recipient). Cancellation: COD while `diterima`/`diproses`; non-COD while `diterima` only. Cancelling releases reservations (and reverses shipped warehouse stock where applicable) exactly once.
 
 ## 11. Existing-order adjustments
 
@@ -89,23 +95,31 @@ Admin/Agen/Super Admin can: adjust an item's fulfilled quantity (only while the 
 
 ## 12. SC-03 add-line (Package C)
 
+**HUMAN BUSINESS DECISION — APPROVED (2026-10-06):** new additions require no courier/self-delivery executor anywhere on the Order. Order-first locking serializes eligibility with assignment; assignment-first rejects new SC-03 with 422. Identical replay after assignment remains valid. Gudang whole-order exclusion is unchanged. If SC-03 wins first, explicit courier assignment and implicit pickup assignment reject until the added demand is fulfilled, preserving Gudang access.
+
 `POST /orders/{order}/items` lets an **Admin only** (same Agent) add a **new** product/variation line to an existing order that is `diproses`. Server-authoritative price/fees/snapshot (shared with checkout); **Agent stock only** (Sub-sourced orders are rejected); one fresh `standard` shipment for the line; the order's one Stock Request gains one item (and is re-opened if it had been fully fulfilled); agent + sales commissions are recorded like checkout; order totals and payment status are reconciled canonically — a fully paid order gets exactly one pending additional payment, otherwise the remaining balance grows. A required `Idempotency-Key` plus an immutable request fingerprint makes replays safe. The response is the freshly persisted `OrderResource`. Rules: [BUSINESS-RULES.md §22](BUSINESS-RULES.md#22-sc-03--add-line-to-an-existing-order).
 
 ## 13. Payment
 
-Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amount`, `remaining_amount`, `payment_status`, written only by `OrderTotalCalculator` (totals) and `PaymentService` (money). `PaymentSummaryService` is the single canonical summary read by Order Detail, reports and Sheets. Flows: COD (photo proof + Finance confirmation), manual bank transfer (proof + Finance verification), DP (partial payment + separate settlement), gateways (signature-verified, idempotent webhooks). Payment verification, shipment/delivery and delivery verification are three separate concerns.
+Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amount`, `remaining_amount`, `payment_status`, written only by `OrderTotalCalculator` (totals) and `PaymentService` (money). `PaymentSummaryService` is the single canonical summary read by Order Detail, reports and Sheets. Flows: COD (photo proof + Finance confirmation), manual bank transfer (proof + Finance verification), DP (partial payment + separate settlement), gateways (signature-verified, idempotent webhooks). Korsal/Sales may submit a payment proof on behalf of a konsumen in their own referral scope (recorded payer actor, no verification authority — [§24](BUSINESS-RULES.md#24-assisted-consumer-payment-imp-001)). Payment verification, shipment/delivery and delivery verification are three separate concerns.
 
 ## 14. Fulfilment
 
 After an order reaches `diproses`, a one-per-order **Stock Request** is created (Agent-sourced items only). Gudang proposes quantities, **Admin approves**, and approval atomically moves stock Transit → Shipping and releases the matching reservation. Partial fulfilment stays on the same request. Direct Gudang fulfilment is disabled. Order-level adjustments, splits and add-line keep the Stock Request consistent. See [BUSINESS-RULES.md §10](BUSINESS-RULES.md#10-reservation-and-stock-movement-lifecycle-locked) and [§16](BUSINESS-RULES.md#16-warehouse-requests-and-fulfilment).
 
+**User-facing surface (IMP-001 Gap 2):** there is no standalone "Stock Request" feature/menu anymore. Gudang works the **"Order Diproses"** queue — an order is visible to Gudang **only while** `status === 'diproses'` **and** no courier is assigned (no shipment with `courier_id`, no `self_sub` shipment with `self_delivered_by_user_id`). Enforced server-side (queue listing, order detail via `OrderPolicy::view`, and proposal creation); the internal proposal/approval endpoints stay canonical.
+
 ## 15. Shipment
 
-Every item has a Shipment (`order_items.shipment_id`); one order can span several shipments and couriers. A shipment is `standard` (Kurir workflow) or `self_sub` (the owning Sales-Kurir-Sub). Office roles assign couriers; a Kurir may self-claim an unassigned `diproses` shipment, then marks it picked up and delivered **with photo proof**. A thermal receipt (58/80 mm, read-only, audited) is printed per shipment. Shipment provider data (route, rate, ETD, weight) is an immutable snapshot.
+The **Shipment is the delivery-date unit** (Human UAT-005, LOCKED): within one order, all compatible items sharing a `requested_delivery_date` ride ONE canonical shipment, so one physical delivery produces one dispatch card, one courier-assignment control and one thermal receipt — never a set of duplicates per item. Different dates, or a different Sub owner, are different shipments and may use different couriers.
+
+Every item still has a Shipment (`order_items.shipment_id`); a shipment is `standard` (Kurir workflow) or `self_sub` (the owning Sales-Kurir-Sub). Office roles assign couriers; a Kurir may self-claim an unassigned `diproses` shipment, then marks **each item** picked up and delivered **with photo proof** — courier progress is per `OrderItem`, so acting on one item never moves its shipment siblings. The shipment's own lifecycle state is derived from its items (`delivered` only once every item has arrived) and the order status summarizes all of its shipments. A thermal receipt (58/80 mm, read-only, audited) is printed per shipment. Shipment provider data (route, rate, ETD, weight) is an immutable snapshot.
+
+**Dispatch is per-SHIPMENT (A1-05):** the dispatch queue lists each unassigned standard shipment of a `diproses` order independently, so assigning one shipment (or a reschedule split/SC-03 line) never hides unassigned sibling shipments; the separate Gudang whole-order exclusion (`diproses` AND no courier anywhere) is preserved for the warehouse queue. The delivery-date filter is Shipment-level, so filtering one date never returns a sibling date of the same order. On their own delivery, a Koordinator-Kurir that self-assigned becomes the recorded executor and progresses that shipment exactly like a Kurir (A1-01).
 
 ## 16. Delivery and self-delivery
 
-Sub-sourced items are delivered only by the owning Sales-Kurir-Sub (`self_sub`, no Courier profile, never assignable to another courier); the Sub reservation is consumed only when that owner ships. After delivery the **Admin** records an append-only **delivery verification** (`received` / `not_received` / `return`) with a mandatory `Idempotency-Key`; the latest row is the current outcome. Delivery grouping is derived: `Order + requested_delivery_date`.
+Sub-sourced items are delivered only by the owning Sales-Kurir-Sub (`self_sub`, no Courier profile, never assignable to another courier); the Sub reservation is consumed only when that owner ships. A shipment becomes verifiable only once **every** item on it has arrived (the verdict is re-derived from the items, so a partially delivered shipment can never be recorded as received). After delivery the **Admin** records an append-only **delivery verification** (`received` / `not_received` / `return`) with a mandatory `Idempotency-Key`; the latest row is the current outcome. Delivery grouping is derived: `Order + requested_delivery_date` — the same grouping that decides the canonical Shipment (§15), never a second grouping system.
 
 ## 17. Returns
 
@@ -138,7 +152,7 @@ Agent: `quantity_reserved` on the stock row (reserve at order creation / increas
 ## 24. Stock requests
 
 Three different things share the name "request" — keep them apart:
-- **Order Stock Request** (`stock_requests`): one per order, created when the order first enters `diproses`; items per Agent-sourced order item; statuses `pending / partial / fulfilled / cancelled`; processed through **proposals** (Gudang) and **approval** (Admin).
+- **Order Stock Request** (`stock_requests`): one per order, created when the order first enters `diproses`; items per Agent-sourced order item; statuses `pending / partial / fulfilled / cancelled`; processed through **proposals** (Gudang) and **approval** (Admin). Internal only — Gudang reaches it through the "Order Diproses" queue (§14), never a standalone feature.
 - **Warehouse stock-addition request** (`warehouse_stock_requests`): Gudang asks to add stock to Transit/Factory Plan or adjust a Sub balance; Admin approves.
 - **Sub stock request** (`sub_stock_requests`): Sales-Kurir-Sub asks to replenish (Transit→Sub) or return (Sub→Transit); see §28.
 

@@ -94,6 +94,17 @@ $longOptions = [
     'order-race-order:',
     'order-race-actor:',
     'order-race-operation:',
+    'dispatch-race-ready:',
+    'dispatch-race-release:',
+    'dispatch-race-result:',
+    'dispatch-race-operation:',
+    'dispatch-race-actor:',
+    'dispatch-race-order:',
+    'dispatch-race-request:',
+    'dispatch-race-item:',
+    'dispatch-race-courier:',
+    'dispatch-race-quantity:',
+    'dispatch-race-date:',
 ];
 
 $options = getopt('', $longOptions);
@@ -125,6 +136,17 @@ require $autoload;
 
 $app = require __DIR__.'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
+
+// Independent fail-closed guard (does not rely on ConcurrencyHarness): runs
+// before the first query or model/service call. Exact equality only.
+$guardConnection = config('database.default');
+$guardDatabase = is_string($guardConnection) ? config("database.connections.{$guardConnection}.database") : null;
+if (app()->environment() !== 'testing'
+    || ! in_array($guardConnection, ['mysql', 'mariadb'], true)
+    || $guardDatabase !== 'primeclassy_testing') {
+    fwrite(STDERR, "REFUSED: concurrency actor requires APP_ENV=testing and database primeclassy_testing.\n");
+    exit(3);
+}
 
 $connectionId = DB::selectOne('SELECT CONNECTION_ID() AS connection_id')->connection_id;
 
@@ -318,6 +340,48 @@ if (str_starts_with($role, 'sr-')) {
 
     try {
         $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+        if (! empty($extra['capacity_race_side'])) {
+            $peerReady = (string) $options[$isA ? 'sr-ready-b' : 'sr-ready-a'];
+            $first = false;
+            $waitFor = function (string $path) {
+                $deadline = microtime(true) + 10;
+                while (! file_exists($path)) {
+                    if (microtime(true) > $deadline) throw new RuntimeException('Capacity barrier timed out');
+                    usleep(10000);
+                }
+            };
+            if ($extra['capacity_race_side'] === 'b') $waitFor($peerReady.'.first-capacity-lock');
+            DB::connection()->beforeExecuting(function ($query) use ($ready) {
+                if (str_contains(strtolower($query), '`product_stocks`') && str_contains(strtolower($query), 'for update')) {
+                    file_put_contents($ready.'.capacity-attempt', 'attempt');
+                }
+            });
+            DB::listen(function ($event) use ($ready, $peerReady, &$first, $waitFor, $extra) {
+                $query = strtolower($event->sql);
+                if (! $first && str_contains($query, 'for update') && (str_contains($query, '`product_stocks`') || str_contains($query, '`warehouse_stocks`'))) {
+                    $first = true;
+                    file_put_contents($ready.'.first-capacity-lock', 'locked');
+                    if ($extra['capacity_race_side'] === 'a') {
+                        $waitFor($peerReady.(str_contains($query, '`product_stocks`') ? '.capacity-attempt' : '.first-capacity-lock'));
+                    }
+                }
+            });
+        }
+        if (! empty($extra['order_read_barrier'])) {
+            $peerReady = (string) $options[$isA ? 'sr-ready-b' : 'sr-ready-a'];
+            $observed = false;
+            DB::listen(function ($event) use ($ready, $peerReady, &$observed) {
+                if (! $observed && str_contains(strtolower($event->sql), '`orders`') && str_starts_with(strtolower($event->sql), 'select') && ! str_contains(strtolower($event->sql), 'for update')) {
+                    $observed = true;
+                    file_put_contents($ready.'.order-read', 'read');
+                    $deadline = microtime(true) + 10;
+                    while (! file_exists($peerReady.'.order-read')) {
+                        if (microtime(true) > $deadline) throw new RuntimeException('Financial read barrier timed out');
+                        usleep(10000);
+                    }
+                }
+            });
+        }
         switch ($operation) {
             case 'transfer-approve':
                 $result = app(StockTransferService::class)->approve($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
@@ -495,6 +559,7 @@ if (str_starts_with($role, 'sr-')) {
                     null,
                     $extra['stock_source'] ?? null,
                     isset($extra['sub_location_id']) ? (int) $extra['sub_location_id'] : null,
+                    $extra['voucher_code'] ?? null,
                 );
                 break;
             case 'cancel-order':
@@ -503,6 +568,50 @@ if (str_starts_with($role, 'sr-')) {
                 $actor = User::withoutGlobalScopes()->findOrFail($actorId);
                 $order = Order::withoutGlobalScopes()->findOrFail((int) $extra['order_id']);
                 $result = app(OrderService::class)->cancel($order, $actor, (string) ($extra['reason'] ?? 'concurrency cancellation'));
+                break;
+            case 'verify-bank-transfer':
+                // Finding #2: two concurrent Keuangan verifications of the SAME payment proof.
+                // Locking re-read of the verification row serializes them: exactly one applies
+                // the money, the loser is refused with already_verified (ApiException 422).
+                $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+                $verification = \App\Models\BankTransferVerification::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(\App\Services\Payment\PaymentService::class)->verifyBankTransfer(
+                    $verification, $actor, (bool) ($extra['approved'] ?? true), null,
+                );
+                break;
+            case 'submit-bank-proof':
+                // Finding #3 (bank-transfer leg): a proof submission racing a concurrent
+                // cancellation. Both serialize on the ORDER row lock (same row OrderService::cancel
+                // locks); whichever wins second re-reads the persisted order status and refuses
+                // (proof_locked) if the order is already cancelled.
+                $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+                $transaction = \App\Models\PaymentTransaction::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(\App\Services\Payment\PaymentService::class)->submitBankTransferProof(
+                    $transaction,
+                    \Illuminate\Http\UploadedFile::fake()->image('race-proof.jpg'),
+                    $actor,
+                );
+                break;
+            case 'submit-cod-proof':
+                // Finding #3 (COD leg): proof submission racing a concurrent cancellation — same
+                // ORDER row lock as submit-bank-proof; the loser re-reads 'dibatalkan' and refuses.
+                $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+                $transaction = \App\Models\PaymentTransaction::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(\App\Services\Payment\PaymentService::class)->submitCodPaymentProof(
+                    $transaction,
+                    \Illuminate\Http\UploadedFile::fake()->image('race-cod-proof.jpg'),
+                    $actor,
+                );
+                break;
+            case 'confirm-cod-proof':
+                // Finding #2 (COD leg): two concurrent confirmations of the same COD proof — the
+                // proof row lock serializes them; the loser re-reads status != pending and refuses,
+                // so the order is marked paid exactly once.
+                $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+                $proof = \App\Models\CodPaymentProof::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(\App\Services\Payment\PaymentService::class)->confirmCodPayment(
+                    $proof, $actor, (bool) ($extra['confirmed'] ?? true), null,
+                );
                 break;
             case 'sub-reserve-order':
                 // MAJOR C: the real multi-target Sub reservation sequence OrderService uses — the
@@ -819,6 +928,130 @@ if ($role === 'actor-b') {
 
     @file_put_contents($actorBResult, json_encode($payload));
     exit($payload['success'] ? 0 : 1);
+}
+
+if (str_starts_with($role, 'dispatch-race-')) {
+    // A1-04 deterministic two-connection race: a Gudang fulfillment proposal
+    // racing a Koordinator dispatch assignment on the SAME order.
+    //
+    // Before the fix the proposal read order/shipments WITHOUT locks while the
+    // assignment locked only the Shipment — a paused proposal committed even
+    // after the assignment won. Canonical serialization now locks the ORDER
+    // row first on BOTH sides, so whichever transaction acquires it first is
+    // visible to the other before its eligibility re-check; the loser either
+    // fails cleanly (assignment already committed) or proceeds with the
+    // intended outcome (proposal committed first, then assignment — simply
+    // executed after).
+    $ready = trim((string) ($options['dispatch-race-ready'] ?? ''), " \t\n\r\0\x0B\"'");
+    $release = trim((string) ($options['dispatch-race-release'] ?? ''), " \t\n\r\0\x0B\"'");
+    $resultPath = trim((string) ($options['dispatch-race-result'] ?? ''), " \t\n\r\0\x0B\"'");
+    $operation = (string) ($options['dispatch-race-operation'] ?? '');
+    $actorId = (int) ($options['dispatch-race-actor'] ?? 0);
+    $orderId = (int) ($options['dispatch-race-order'] ?? 0);
+    $requestId = (int) ($options['dispatch-race-request'] ?? 0);
+    $itemId = (int) ($options['dispatch-race-item'] ?? 0);
+    $courierId = (int) ($options['dispatch-race-courier'] ?? 0);
+    $quantity = (int) ($options['dispatch-race-quantity'] ?? 1);
+    $raceDate = (string) ($options['dispatch-race-date'] ?? '');
+    $startedAt = microtime(true);
+
+    $isFirst = $role === 'dispatch-race-dr-a';
+    if ($isFirst) {
+        DB::beginTransaction();
+        Order::withoutGlobalScopes()->whereKey($orderId)->lockForUpdate()->firstOrFail();
+        @file_put_contents($ready, 'order-locked');
+        $deadline = microtime(true) + 25;
+        while (microtime(true) < $deadline && ! file_exists($release)) {
+            usleep(100000);
+        }
+    } else {
+        // Signal at the real competing lock attempt, while A still owns Order.
+        DB::connection()->beforeExecuting(function ($query) use ($ready) {
+            if (str_contains(strtolower($query), '`orders`') && str_contains(strtolower($query), 'for update')) {
+                @file_put_contents($ready, 'order-lock-attempt');
+            }
+        });
+    }
+
+    $payload = [
+        'connection_id' => $connectionId,
+        'started_at' => $startedAt,
+        'operation' => $operation,
+        'outcome' => 'failed',
+        'exit_code' => 1,
+    ];
+
+    try {
+        $actor = User::withoutGlobalScopes()->findOrFail($actorId);
+        if ($operation === 'propose') {
+            $request = StockRequest::withoutGlobalScopes()->findOrFail($requestId);
+            $proposal = app(StockRequestProposalService::class)->propose(
+                $actor,
+                $request,
+                [['item_id' => $itemId, 'quantity' => $quantity]],
+            );
+            $payload['proposal_id'] = $proposal->id;
+            $payload['proposal_status'] = $proposal->status;
+        } elseif ($operation === 'add-line') {
+            $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+            // Dispatch race item_id selects the product for this bounded SC-03 race.
+            [$item, $replay] = app(\App\Services\Order\OrderLineAdditionService::class)->addLine(
+                $order, ['product_id' => $itemId, 'quantity' => $quantity], $actor, null,
+                'SC-03 assignment race', 'cod', 'dispatch-add-'.$orderId,
+            );
+            $payload['created_item_id'] = $item->id;
+            $payload['was_replay'] = $replay;
+        } elseif ($operation === 'adjust') {
+            $item = OrderItem::where('order_id', $orderId)->firstOrFail();
+            $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, $quantity, $actor, 'delivery adjustment race');
+            $payload['fulfilled_quantity'] = $result->fulfilled_quantity;
+        } elseif ($operation === 'pickup') {
+            $shipment = \App\Models\Shipment::withoutGlobalScopes()->where('order_id', $orderId)->firstOrFail();
+            $result = app(\App\Services\Order\CourierService::class)->updateShipmentStatus($shipment, 'dikirim', $actor);
+            $payload['shipment_courier_id'] = $result->courier_id;
+        } elseif ($operation === 'settle') {
+            // Human decision: two CONCURRENT equivalent settlement requests for one DP order must
+            // converge to exactly ONE canonical pending settlement. requestSettlement takes the
+            // canonical Order-first lock, so actor B queues on the Order row and then re-reads
+            // actor A's committed settlement through a LOCKING read (never a pre-wait snapshot),
+            // returning the same transaction with replay = true instead of inserting a second one.
+            $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+            [$transaction, $wasReplay] = app(\App\Services\Payment\PaymentService::class)
+                ->requestSettlement($order, $actor);
+            $payload['transaction_id'] = $transaction->id;
+            $payload['amount'] = (float) $transaction->amount;
+            $payload['was_replay'] = $wasReplay;
+        } elseif ($operation === 'reschedule') {
+            // Z.11: concurrent compatible date changes into the same target date must serialize on
+            // the canonical Order lock and leave exactly one Y shipment. `item_id` selects the
+            // OrderItem, `date` is the requested delivery date (YYYY-MM-DD).
+            $item = OrderItem::query()->where('order_id', $orderId)->whereKey($itemId)->firstOrFail();
+            $result = app(OrderFulfillmentService::class)->rescheduleItemDeliveryDate(
+                $item, $raceDate, $actor, 'concurrent reschedule race'
+            );
+            $payload['shipment_id'] = $result->shipment_id;
+            $payload['requested_delivery_date'] = $result->requested_delivery_date->toDateString();
+        } else {
+            $shipment = \App\Models\Shipment::withoutGlobalScopes()->where('order_id', $orderId)->firstOrFail();
+            $courier = \App\Models\Courier::withoutGlobalScopes()->findOrFail($courierId);
+            $result = app(\App\Services\Order\CourierService::class)->assignCourier($shipment, $courier, $actor);
+            $payload['shipment_courier_id'] = $result->courier_id;
+        }
+        if ($isFirst) DB::commit();
+        $payload['outcome'] = 'success';
+        $payload['exit_code'] = 0;
+    } catch (Throwable $e) {
+        if ($isFirst && DB::transactionLevel() > 0) DB::rollBack();
+        $payload['exception'] = get_class($e);
+        $payload['message'] = $e->getMessage();
+        $payload['business_status'] = $e instanceof \App\Exceptions\ApiException ? $e->status() : null;
+        $payload['sql_state'] = $e instanceof QueryException ? $e->errorInfo[0] ?? null : null;
+        $payload['error_code'] = $e instanceof QueryException ? $e->errorInfo[1] ?? null : null;
+    }
+
+    $payload['completed_at'] = microtime(true);
+    @file_put_contents($resultPath, json_encode($payload));
+    exit($payload['exit_code']);
 }
 
 fwrite(STDERR, "Unknown role: {$role}\n");

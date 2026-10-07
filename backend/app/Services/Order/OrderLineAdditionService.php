@@ -5,6 +5,7 @@ namespace App\Services\Order;
 use App\Exceptions\ApiException;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Stock\StockRequestService;
@@ -80,6 +81,15 @@ class OrderLineAdditionService
                     throw new ApiException(__('messages.fulfillment.window_closed'), 422);
                 }
 
+                // Human-approved creation window: Order is the shared assignment/add-line lock.
+                // Locking reads see current committed executor state under REPEATABLE READ.
+                // Existing logical-request replay above remains valid after assignment.
+                if (Shipment::query()->where('order_id', $order->id)
+                    ->where(fn ($q) => $q->whereNotNull('courier_id')->orWhereNotNull('self_delivered_by_user_id'))
+                    ->lockForUpdate()->get(['id'])->isNotEmpty()) {
+                    throw new ApiException(__('messages.order.line_addition_executor_assigned'), 422);
+                }
+
                 if ($requestedDeliveryDate !== null && Carbon::parse($requestedDeliveryDate)->startOfDay()->lt(today())) {
                     throw new ApiException(
                         __('messages.order.line_addition_date_in_past'), 422, ['requested_delivery_date' => __('messages.order.line_addition_date_in_past')]
@@ -117,8 +127,24 @@ class OrderLineAdditionService
                 // Immutable original-request identity, written once with the line and never updated.
                 $item->forceFill(['request_fingerprint' => $fingerprint])->save();
 
-                // One fresh standard pending Shipment for the new line (reuses the canonical helper).
+                // One fresh standard pending Shipment for the new line (reuses the canonical helper),
+                // then the LOCKED UAT-005 canonical grouping (same order + same date + compatible
+                // mode => ONE canonical Shipment), applied through the SAME implementation the
+                // reschedule path uses.
+                //
+                // Without this, an added line whose requested date equals an existing line's (the
+                // DEFAULT: `requested_delivery_date` falls back to the order's own estimate) landed
+                // on a second shipment for the very same date — reintroducing the exact UAT-005
+                // symptom (duplicate dispatch cards, duplicate "Ambil & Kirim", duplicate resi rows)
+                // through the SC-03 door. SC-03 already guarantees there is no executor anywhere on
+                // the order, so joining the existing unassigned canonical unit can never attach the
+                // new line to someone else's delivery.
                 $this->fulfillmentService->assignFreshShipment($item, $order, $actor, 'shipment.added_for_line');
+
+                $addedDate = $item->requested_delivery_date?->toDateString();
+                if ($addedDate !== null) {
+                    $this->fulfillmentService->consolidateIntoShipmentForDate($item, $addedDate, $actor, 'line_addition');
+                }
 
                 // Reconcile the order's existing Stock Request with the new demand.
                 $this->stockRequestService->appendItemForOrderItem($order, $item);

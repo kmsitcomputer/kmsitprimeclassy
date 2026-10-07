@@ -34,7 +34,7 @@ class UserManagementService
             throw new ApiException(__('messages.user.role_not_authorized', ['role' => $creatorRoleSlug, 'target' => $targetRoleSlug]), 403);
         }
 
-        if ($creator->isRole('agen', 'korsal')) {
+        if ($creator->isRole('agen', 'korsal', 'koordinator-kurir')) {
             if (! $creator->agent_id || ($creator->isRole('agen') && $creator->agent_id !== $creator->id)) {
                 throw new ApiException('Network Agen tidak valid.', 422);
             }
@@ -43,6 +43,16 @@ class UserManagementService
             }
             if ($creator->isRole('korsal') && isset($data['korsal_id']) && (int) $data['korsal_id'] !== $creator->id) {
                 throw new ApiException('Korsal hanya dapat membuat Sales di bawah dirinya.', 422);
+            }
+            // A1-02: a Koordinator-Kurir creates Kurir under ITSELF (parent = koordinator), never
+            // under a forged parent in another branch.
+            if ($creator->isRole('koordinator-kurir')) {
+                if (isset($data['parent_id']) && (int) $data['parent_id'] !== $creator->id) {
+                    throw new ApiException('Tidak dapat membuat user di bawah parent lain.', 422);
+                }
+                if ($targetRoleSlug !== 'kurir') {
+                    throw new ApiException(__('messages.user.role_not_authorized', ['role' => $creatorRoleSlug, 'target' => $targetRoleSlug]), 403);
+                }
             }
         }
 
@@ -62,11 +72,17 @@ class UserManagementService
 
                 $targetRoleSlug === 'gudang' && $creatorRoleSlug === 'agen' => [$creator->id, $creator->agent_id, null],
 
-                // An agen-created admin/keuangan/kurir always belongs to the
-                // creator's own branch — never trust a client-supplied agent_id
-                // here, or an agen could spoof another agent's id (same reasoning
-                // as the sales+agen branch above).
-                in_array($targetRoleSlug, ['admin', 'keuangan', 'kurir'], true) && $creatorRoleSlug === 'agen' => [$creator->id, $creator->agent_id, null],
+                // An agen-created admin/keuangan/kurir/koordinator-kurir always belongs
+                // to the creator's own branch — never trust a client-supplied
+                // agent_id here, or an agen could spoof another agent's id
+                // (same reasoning as the sales+agen branch above).
+                in_array($targetRoleSlug, ['admin', 'keuangan', 'kurir', 'koordinator-kurir'], true) && $creatorRoleSlug === 'agen' => [$creator->id, $creator->agent_id, null],
+
+                // A1-02 — a Koordinator-Kurir may create Kurir in its own branch
+                // (armed by the A1-02 HTTPS/PATCH creation guard). Agent is
+                // derived canonically from the actor; a client-supplied agent_id
+                // is never honored (same anti-spoof rule as every agen branch).
+                $targetRoleSlug === 'kurir' && $creatorRoleSlug === 'koordinator-kurir' => [$creator->id, $creator->agent_id, null],
 
                 default => throw new ApiException(__('messages.user.unsupported_role_combination'), 422),
             };

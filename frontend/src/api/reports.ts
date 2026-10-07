@@ -149,9 +149,19 @@ export interface FinanceOrderRow {
   order_id: number
   order_no: string
   order_date: string | null
+  /** UAT-004: Finance triage identity — who owes. */
+  customer: string | null
   payment_method: string | null
+  /** UAT-004: raw method type (manual/cod/gateway) for triage. */
+  payment_method_type: string | null
   grand_total: number
   dp_paid: number
+  /** UAT-004: "DP Diajukan" — submitted-but-unverified nominal, never counted as paid. */
+  dp_submitted: number
+  /** UAT-004: 'pending' while a submitted proof awaits verification, otherwise null. */
+  verification_status: string | null
+  /** UAT-004: whether a pending proof photo is available for review. */
+  has_pending_proof: boolean
   total_paid: number
   remaining: number
   payment_status: string

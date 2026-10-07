@@ -4,6 +4,19 @@ import type { CheckoutQuote, CheckoutStepsResponse, CourierOption, CourierSelect
 import type { CheckoutDestination, OrderLine } from './orders'
 
 /**
+ * "Gunakan Lokasi Saya" — reverse-geocode + match against the canonical
+ * regional master. Returns { matched:false } when nothing confidently matches
+ * (manual fallback stays active).
+ */
+export async function locateByGps(latitude: number, longitude: number) {
+  const { data } = await http.post<ApiEnvelope<{ matched: boolean; result: CheckoutDestination | null }>>('/checkout/geocode', {
+    latitude,
+    longitude,
+  })
+  return data.data
+}
+
+/**
  * Dynamic step list the wizard renders from — never hard-coded in the
  * frontend. `shippingMethod` (once chosen) narrows `payment_methods` to
  * whatever is actually compatible (e.g. Ekspedisi -> Manual Transfer only) —
@@ -24,6 +37,7 @@ export async function quoteCheckout(
   shippingMethod?: string | null,
   konsumenId?: number,
   courier?: CourierSelection | null,
+  voucherCode?: string | null,
 ) {
   const { data } = await http.post<ApiEnvelope<CheckoutQuote>>('/checkout/quote', {
     items,
@@ -31,6 +45,7 @@ export async function quoteCheckout(
     shipping_method: shippingMethod ?? null,
     ...(konsumenId ? { konsumen_id: konsumenId } : {}),
     ...(courier ? { courier: courier.courier, service: courier.service } : {}),
+    ...(voucherCode ? { voucher_code: voucherCode } : {}),
   })
   return data.data
 }

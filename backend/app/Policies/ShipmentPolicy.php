@@ -14,6 +14,14 @@ class ShipmentPolicy
      * order_items.shipment_id), so kurir act per-shipment instead of
      * order-wide. WHICH specific transition and WHOSE delivery is enforced in
      * CourierService::updateShipmentStatus, not here.
+     *
+     * A1-01 (Koordinator self-executor): a Koordinator-Kurir may progress a
+     * standard shipment ONLY when it is assigned to their own executor
+     * profile (courier_id → Courier.user_id === themselves) — the recorded
+     * executor, never "any dispatchable delivery in my branch". The Courier
+     * profile exists for self-executors (created on first self-assignment in
+     * CourierService::ensureSelfExecutorProfile), so the ownership check is
+     * the same shape as a normal Kurir's own-shipment check.
      */
     public function updateStatus(User $user, Shipment $shipment): bool
     {
@@ -29,17 +37,26 @@ class ShipmentPolicy
                 && $shipment->order?->agent_id === $user->agent_id;
         }
 
+        if ($user->isRole('koordinator-kurir')) {
+            // Executor-only: the shipment must be recorded to their own Courier profile.
+            return $shipment->order?->agent_id === $user->agent_id
+                && ! $shipment->isSelfDelivery()
+                && $shipment->courier_id !== null
+                && $shipment->courier?->user_id !== null
+                && (int) $shipment->courier->user_id === (int) $user->id;
+        }
+
         return $user->isRole('agen', 'admin', 'kurir') && $shipment->order?->agent_id === $user->agent_id;
     }
 
-    /** Proactively assigning a courier to a shipment is an office decision — a kurir self-assigns instead, via updateStatus. */
+    /** Proactively assigning a courier to a shipment is an office/dispatch decision — a kurir self-assigns instead, via updateStatus. IMP-003: the Koordinator-Kurir (branch dispatcher) assigns too. */
     public function assignCourier(User $user, Shipment $shipment): bool
     {
         if ($user->isRole('super_admin')) {
             return true;
         }
 
-        return $user->isRole('agen', 'admin') && $shipment->order?->agent_id === $user->agent_id;
+        return $user->isRole('agen', 'admin', 'koordinator-kurir') && $shipment->order?->agent_id === $user->agent_id;
     }
 
     /**
@@ -75,11 +92,12 @@ class ShipmentPolicy
             return $shipment->order?->agent_id === $user->agent_id;
         }
 
-        if ($user->isRole('kurir', 'sales-kurir-sub')) {
+        if ($user->isRole('kurir', 'sales-kurir-sub', 'koordinator-kurir')) {
             // R-03: a self_sub shipment is the Sales-Kurir-Sub owner's own delivery — authority
             // follows self_delivered_by_user_id, not courier_id (which stays NULL for self_sub).
             if ($shipment->delivery_mode === Shipment::DELIVERY_MODE_SELF_SUB) {
-                return (int) $shipment->self_delivered_by_user_id === (int) $user->id;
+                return $user->isRole('sales-kurir-sub')
+                    && (int) $shipment->self_delivered_by_user_id === (int) $user->id;
             }
 
             return $shipment->courier_id !== null && $shipment->courier?->user_id === $user->id;

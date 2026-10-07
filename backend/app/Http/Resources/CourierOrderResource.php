@@ -18,6 +18,7 @@ class CourierOrderResource extends JsonResource
         $actor = $request->user();
         $viewerIsKurir = $actor?->isRole('kurir') ?? false;
         $viewerIsSubActor = $actor?->isRole('sales-kurir-sub') ?? false;
+        $viewerIsKoordinator = $actor?->isRole('koordinator-kurir') ?? false;
         $viewerCourierId = $actor?->courierProfile?->id;
         $viewerUserId = $actor?->id;
 
@@ -25,15 +26,17 @@ class CourierOrderResource extends JsonResource
         // pre-claim projection (no recipient contact / street address / coordinates) and expose the
         // full operational detail only once the shipment is assigned to THEM. A Sales-Kurir-Sub's
         // own self_sub shipments are already theirs, so they always get full detail.
+        // A1-01: a Koordinator-Kurir self-executor behaves exactly like a normal Kurir; the same
+        // minimal-until-assigned projection applies, driven by their own Courier profile.
         $assignedToViewer = false;
-        if ($viewerIsKurir) {
+        if ($viewerIsKurir || $viewerIsKoordinator) {
             $assignedToViewer = $this->relationLoaded('items') && $this->items->contains(
                 fn ($item) => $item->shipment
                     && $item->shipment->courier_id !== null
                     && $item->shipment->courier_id === $viewerCourierId
             );
         }
-        $minimal = $viewerIsKurir && ! $assignedToViewer;
+        $minimal = ($viewerIsKurir || $viewerIsKoordinator) && ! $assignedToViewer;
 
         $row = [
             'id' => $this->id,
@@ -54,7 +57,7 @@ class CourierOrderResource extends JsonResource
             // matching — filtered out here so 'dikirim'/'terkirim' items only ever
             // show to the kurir actually holding that shipment.
             'items' => $this->whenLoaded('items', fn () => $this->items
-                ->filter(fn ($item) => $this->itemVisibleToViewer($item, $viewerIsKurir, $viewerIsSubActor, $viewerCourierId, $viewerUserId))
+                ->filter(fn ($item) => $this->itemVisibleToViewer($item, $viewerIsKurir || $viewerIsKoordinator, $viewerIsSubActor, $viewerCourierId, $viewerUserId, $viewerIsKoordinator))
                 ->values()
                 ->map(fn ($item) => [
                     'id' => $item->id,
@@ -84,7 +87,7 @@ class CourierOrderResource extends JsonResource
         return $row;
     }
 
-    private function itemVisibleToViewer($item, bool $viewerIsKurir, bool $viewerIsSubActor, ?int $viewerCourierId, ?int $viewerUserId): bool
+    private function itemVisibleToViewer($item, bool $viewerIsKurir, bool $viewerIsSubActor, ?int $viewerCourierId, ?int $viewerUserId, bool $viewerIsKoordinator = false): bool
     {
         // R-03: a Sales-Kurir-Sub only ever sees items on their OWN self_sub shipment.
         if ($viewerIsSubActor) {
@@ -92,6 +95,15 @@ class CourierOrderResource extends JsonResource
                 && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId;
         }
 
+        if ($viewerIsKoordinator) {
+            return $item->shipment?->delivery_mode === 'standard'
+                && $viewerCourierId !== null
+                && $item->shipment?->courier_id === $viewerCourierId;
+        }
+
+        // A1-01: a koordinator-kurir self-executor is treated exactly like a normal kurir with a
+        // Courier profile — items on their own assigned shipment, and 'diproses' items (their
+        // dispatch queue remains visible pre-claim like any kurir's).
         if (! $viewerIsKurir) {
             return true;
         }

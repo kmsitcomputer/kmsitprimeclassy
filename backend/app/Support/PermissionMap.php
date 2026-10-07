@@ -28,9 +28,17 @@ class PermissionMap
             ],
             'korsal' => [
                 'users.view.network', 'orders.view.network', 'orders.create',
+                // UAT-008: scoped payment/pelunasan verification hint — the
+                // Sales/Korsal may verify ONLY orders inside their own
+                // legitimate scope (server: PaymentController::
+                // assertMayVerifyPayment via OrderPolicy::payOnBehalf).
+                // UI convenience only, never a security boundary.
+                'orders.manage.payment.scoped',
             ],
             'sales' => [
                 'users.view.network', 'orders.view.network', 'orders.create',
+                // UAT-008 scoped verification hint — same scope rule as korsal.
+                'orders.manage.payment.scoped',
             ],
             'konsumen' => [
                 'orders.view.own', 'orders.create',
@@ -54,11 +62,21 @@ class PermissionMap
             'kurir' => [
                 'orders.view.assigned', 'orders.manage.shipment',
             ],
+            // IMP-003: Koordinator-Kurir is the branch DISPATCHER (created by
+            // the Agen). It sorts the diproses queue and assigns couriers —
+            // same-branch order+sent views + shipment assignment only. It
+            // deliberately has NO fulfillment/status progression (that's the
+            // kurir executor's job), NO financial capabilities and no stock.
+            'koordinator-kurir' => [
+                'users.view.network', 'orders.view.network', 'orders.manage.shipment',
+            ],
             'gudang' => [
                 'stock.view.own', 'orders.view.assigned',
             ],
             'sales-kurir-sub' => [
                 'users.view.network', 'orders.create', 'orders.view.assigned', 'orders.manage.shipment',
+                // UAT-008 scoped verification hint — same scope rule as sales.
+                'orders.manage.payment.scoped',
             ],
             default => [],
         };

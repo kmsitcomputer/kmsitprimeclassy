@@ -3,6 +3,7 @@
 namespace App\Services\Stock;
 
 use App\Exceptions\ApiException;
+use App\Models\Order;
 use App\Models\ProductStock;
 use App\Models\ProductVariationStock;
 use App\Models\StockMovement;
@@ -25,10 +26,49 @@ class StockRequestProposalService
         }
 
         return DB::transaction(function () use ($actor, $request, $items) {
-            $locked = StockRequest::withoutGlobalScopes()->with('items')->whereKey($request->id)->where('agent_id', $actor->agent_id)->lockForUpdate()->firstOrFail();
+            // A1-04: canonical serialization boundary — lock the ORDER row
+            // first. CourierService::assignCourier locks the same Order row
+            // first too, so a Gudang proposal and a dispatch assignment can
+            // never interleave: whichever transaction wins the Order lock sees
+            // the other's committed result (assignment won → this recheck
+            // rejects a now-handled order; proposal won first → assignment
+            // simply targets an order whose fulfillment work is being
+            // proposed — the intended flow, no deadlock because we never lock
+            // the Shipment rows here and assignment never locks StockRequest).
+            $proposalOrder = Order::query()->whereKey($request->order_id)->lockForUpdate()->firstOrFail();
+            if ((int) $proposalOrder->agent_id !== (int) $actor->agent_id) {
+                throw new ApiException('Hanya Gudang dengan network valid.', 403);
+            }
+
+            $locked = StockRequest::withoutGlobalScopes()->with(['items'])->whereKey($request->id)
+                ->where('order_id', $proposalOrder->id)
+                ->lockForUpdate()->firstOrFail();
             if ($locked->status === 'cancelled' || $locked->status === 'fulfilled') {
                 throw new ApiException('Stock Request tidak dapat diusulkan lagi.', 422);
             }
+
+            // IMP-001 UAT remediation (Gap 2) — the exact visibility invariant,
+            // enforced server-side HERE too (in addition to OrderPolicy::view and
+            // the WarehouseOrderController query): a Gudang proposal is only valid
+            // while the order is still in the warehouse work queue, i.e. status is
+            // exactly 'diproses' AND no courier has been assigned yet (no shipment
+            // carries courier_id, and no self_sub shipment has a self-delivering
+            // Sales-Kurir-Sub). A stale/concurrent courier assignment or status
+            // change makes the proposal invalid — Gudang can never bypass the scope
+            // rule by calling the stock-request endpoint directly. Re-checked NOW
+            // under the Order lock just taken, so a concurrent assignment can no
+            // longer slip past (A1-04).
+            if ($proposalOrder->status !== 'diproses') {
+                throw new ApiException('Order tidak lagi diproses; tidak dapat mengusulkan fulfillment.', 422);
+            }
+            $hasCourier = DB::table('shipments')
+                ->where('order_id', $proposalOrder->id)
+                ->where(fn ($q) => $q->whereNotNull('courier_id')->orWhereNotNull('self_delivered_by_user_id'))
+                ->lockForUpdate()->get(['id'])->isNotEmpty();
+            if ($hasCourier) {
+                throw new ApiException('Order sudah memiliki kurir; tidak dapat mengusulkan fulfillment.', 422);
+            }
+
             $byId = $locked->items->keyBy('id');
             $seen = [];
             $proposal = StockRequestProposal::create([
@@ -77,11 +117,16 @@ class StockRequestProposalService
                 if (! $item || $item->stock_request_id !== $request->id || $proposalItem->quantity <= 0 || $proposalItem->quantity > $item->remaining_qty) {
                     throw new ApiException('Jumlah proposal melebihi sisa request.', 422);
                 }
-                $key = $item->product_variation_id ? 'v:'.$item->product_variation_id : 'p:'.$item->product_id;
+                $key = StockService::canonicalTargetKey($item->product_id, $item->product_variation_id);
                 $lines[] = [$proposalItem, $item, $key];
             }
-            $targetKeys = array_values(array_unique(array_map(fn ($line) => $line[2], $lines)));
-            sort($targetKeys);
+            $targets = StockService::canonicalReservationTargets(array_map(fn ($line) => [
+                'product_id' => $line[1]->product_id,
+                'product_variation_id' => $line[1]->product_variation_id,
+            ], $lines));
+            // Same Agent commitment → Transit/Plan order as checkout and SC-03.
+            app(StockService::class)->lockReservationTargets($request->agent_id, $targets);
+            $targetKeys = array_map(fn ($target) => StockService::canonicalTargetKey($target['product_id'], $target['product_variation_id']), $targets);
             $lockedBuckets = [];
             foreach ($targetKeys as $key) {
                 [, $item] = current(array_filter($lines, fn ($line) => $line[2] === $key));

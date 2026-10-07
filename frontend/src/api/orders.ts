@@ -17,6 +17,11 @@ export interface CheckoutDestination {
   village_id?: string | null
   latitude?: number | null
   longitude?: number | null
+  /** IMP-002 structured address additions */
+  postal_code?: string | null
+  province_id?: string | null
+  regency_id?: string | null
+  district_id?: string | null
 }
 
 export interface CreateOrderPayload {
@@ -31,6 +36,8 @@ export interface CreateOrderPayload {
   /** The specific courier+service picked under "Ekspedisi" (e.g. JNE REG) — only meaningful with shippingMethod: 'rajaongkir'. */
   courier?: CourierSelection | null
   konsumenId?: number | null
+  /** IMP-002 voucher code — server re-validates everything. */
+  voucherCode?: string | null
   /** Client-generated key (e.g. secureUuid() from @/utils/uuid) — a retried submission with the
    *  same key returns the original order instead of creating a duplicate. */
   idempotencyKey: string
@@ -48,6 +55,7 @@ export async function createOrder(payload: CreateOrderPayload) {
       ...(payload.courier ? { courier: payload.courier.courier, service: payload.courier.service } : {}),
       ...(payload.dpAmount ? { dp_amount: payload.dpAmount } : {}),
       ...(payload.konsumenId ? { konsumen_id: payload.konsumenId } : {}),
+      ...(payload.voucherCode ? { voucher_code: payload.voucherCode } : {}),
     },
     { headers: { 'Idempotency-Key': payload.idempotencyKey } },
   )

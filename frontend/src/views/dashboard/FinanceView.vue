@@ -88,21 +88,30 @@ onMounted(load)
       </div>
     </div>
 
-    <!-- R-04 / §G: per-order canonical finance projection (PaymentSummaryService truth, one row per order). -->
+    <!-- R-04 / §G: per-order canonical finance projection (PaymentSummaryService truth, one row per order).
+         UAT-004: "DP Diajukan" is the submitted-but-unverified nominal — informational triage only,
+         never added to DP Dibayar / Total Dibayar before canonical verification. -->
     <div v-if="!loading && orders.length" class="mt-8">
       <h2 class="mb-3 text-sm font-semibold text-stone-800 dark:text-stone-100">Rincian Per Order</h2>
+      <p class="mb-3 text-xs text-stone-500 dark:text-stone-400">
+        DP Diajukan = nominal yang sudah disubmit dan menunggu verifikasi — belum dihitung sebagai DP Dibayar / Total Dibayar.
+      </p>
       <div class="overflow-x-auto rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
         <table class="min-w-full text-sm">
           <thead class="bg-stone-50 text-left text-xs uppercase text-stone-500 dark:bg-stone-800 dark:text-stone-400">
             <tr>
               <th class="px-3 py-2">Order No</th>
+              <th class="px-3 py-2">Pelanggan</th>
               <th class="px-3 py-2">Tanggal</th>
               <th class="px-3 py-2">Metode Bayar</th>
               <th class="px-3 py-2 text-right">Grand Total</th>
+              <th class="px-3 py-2 text-right">DP Diajukan</th>
               <th class="px-3 py-2 text-right">DP Dibayar</th>
               <th class="px-3 py-2 text-right">Total Dibayar</th>
               <th class="px-3 py-2 text-right">Sisa</th>
               <th class="px-3 py-2">Status Pembayaran</th>
+              <th class="px-3 py-2">Status Verifikasi</th>
+              <th class="px-3 py-2">Bukti</th>
               <th class="px-3 py-2 text-right">Refund</th>
               <th class="px-3 py-2 text-right">Additional Payment</th>
               <th class="px-3 py-2 text-right">Fee</th>
@@ -111,13 +120,29 @@ onMounted(load)
           <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
             <tr v-for="row in orders" :key="row.order_id">
               <td class="px-3 py-2 font-medium text-stone-700 dark:text-stone-200">{{ row.order_no }}</td>
+              <td class="px-3 py-2 text-stone-500 dark:text-stone-400">{{ row.customer ?? '-' }}</td>
               <td class="px-3 py-2 text-stone-500 dark:text-stone-400">{{ row.order_date ?? '-' }}</td>
               <td class="px-3 py-2 text-stone-500 dark:text-stone-400">{{ row.payment_method ?? '-' }}</td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.grand_total) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">
+                <span :class="(row.dp_submitted ?? 0) > 0 ? 'font-semibold text-amber-700 dark:text-amber-400' : ''">
+                  {{ formatRupiah(row.dp_submitted ?? 0) }}
+                </span>
+              </td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.dp_paid) }}</td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.total_paid) }}</td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.remaining) }}</td>
               <td class="px-3 py-2">{{ row.payment_status }}</td>
+              <td class="px-3 py-2">
+                <span v-if="row.verification_status === 'pending'" class="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                  Menunggu verifikasi
+                </span>
+                <span v-else class="text-stone-400">—</span>
+              </td>
+              <td class="px-3 py-2">
+                <span v-if="row.verification_status === 'pending'">{{ row.has_pending_proof ? 'Ada' : 'Tidak ada' }}</span>
+                <span v-else class="text-stone-400">—</span>
+              </td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.refund) }}</td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(row.additional_payment) }}</td>
               <td class="px-3 py-2 text-right tabular-nums">{{ formatRupiah(feeTotal(row)) }}</td>

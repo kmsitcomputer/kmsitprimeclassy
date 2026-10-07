@@ -63,9 +63,18 @@ class DeliveryVerificationTest extends TestCase
 
         $shipment = OrderItem::where('order_id', $id)->firstOrFail()->shipment;
         // The courier's own delivery action already happened — this suite isolates Admin verification.
-        $shipment->update(['status' => 'delivered', 'delivered_at' => now()]);
+        // It is performed through the CANONICAL office delivery path (diproses -> dikirim -> terkirim,
+        // which transitions every item) so the shipment's aggregate lifecycle is DERIVED by the
+        // domain instead of being fabricated. Writing `status/delivered_at` straight onto the shipment
+        // used to leave its item still in `diproses` — an impossible state that bypassed exactly the
+        // invariant this suite is about (see ShipmentAggregateLifecycleTest).
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$id}/status", ['status' => 'dikirim'])->assertOk();
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$id}/status", ['status' => 'terkirim'])->assertOk();
 
-        return $shipment->fresh();
+        $shipment = $shipment->fresh();
+        $this->assertSame('delivered', $shipment->status, 'precondition: the shipment really is delivered');
+
+        return $shipment;
     }
 
     private function record(Shipment $shipment, User $actor, string $outcome, ?string $note = null, ?string $key = null)

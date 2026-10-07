@@ -66,6 +66,18 @@ class DeliveryDateGroupingTest extends TestCase
         return Order::withoutGlobalScopes()->findOrFail($id);
     }
 
+    /**
+     * Puts this order's shipments in the KURIR ONLINE canonical state
+     * (`shipping_provider_code = 'openroute'`). Changing a requested delivery date is LOCKED to
+     * Kurir Online (Human 2026-10-07); these fixtures place ordinary Agent orders but seed no
+     * shipping provider, so the quote resolves to the neutral 'free' fallback. Written on the
+     * canonical field directly because the rule under test reads exactly this field.
+     */
+    private function markCourierOnline(int $orderId): void
+    {
+        \App\Models\Shipment::query()->where('order_id', $orderId)->update(['shipping_provider_code' => 'openroute']);
+    }
+
     public function test_items_sharing_order_and_delivery_date_form_one_group(): void
     {
         $order = $this->placeOrder();
@@ -81,6 +93,7 @@ class DeliveryDateGroupingTest extends TestCase
     public function test_adjusting_an_items_delivery_date_splits_the_group_and_keeps_order_payment_truth(): void
     {
         $order = $this->placeOrder();
+        $this->markCourierOnline($order->id);
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $this->b['productA']->id)->firstOrFail();
         $grandTotalBefore = (float) $order->total_amount;
 

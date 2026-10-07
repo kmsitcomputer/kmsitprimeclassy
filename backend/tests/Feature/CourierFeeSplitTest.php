@@ -101,6 +101,17 @@ class CourierFeeSplitTest extends TestCase
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $actor, UploadedFile::fake()->image('proof.jpg'));
     }
 
+    /**
+     * Marks this order's shipments as a KURIR ONLINE delivery (canonical
+     * `shipments.shipping_provider_code = 'openroute'`) — the LOCKED Human 2026-10-07
+     * precondition for changing a requested delivery date. Written on the canonical field
+     * directly: this file seeds no shipping-provider infrastructure.
+     */
+    private function markCourierOnline(int $orderId): void
+    {
+        \App\Models\Shipment::query()->where('order_id', $orderId)->update(['shipping_provider_code' => 'openroute']);
+    }
+
     public function test_courier_fee_scales_with_active_quantity_on_reduce_and_increase(): void
     {
         $item = $this->placeAgentItem(3);
@@ -119,6 +130,7 @@ class CourierFeeSplitTest extends TestCase
     public function test_partial_split_allocates_courier_fee_proportionally_and_exactly(): void
     {
         $item = $this->placeAgentItem(3);
+        $this->markCourierOnline($item->order_id);
         $child = app(OrderFulfillmentService::class)->rescheduleItemDeliveryDate($item, '2026-12-20', $this->b['admin'], 'split', 2);
 
         $this->assertEquals(10, (float) $item->fresh()->courier_fee_amount, 'parent keeps the retained share');
@@ -129,6 +141,7 @@ class CourierFeeSplitTest extends TestCase
     public function test_two_couriers_each_earn_only_their_own_items_courier_fee(): void
     {
         $item = $this->placeAgentItem(3);
+        $this->markCourierOnline($item->order_id);
         $child = app(OrderFulfillmentService::class)->rescheduleItemDeliveryDate($item, '2026-12-20', $this->b['admin'], 'split', 2);
 
         app(CourierService::class)->assignCourier($item->shipment()->first(), $this->b['courierA'], $this->b['admin']);
@@ -158,6 +171,7 @@ class CourierFeeSplitTest extends TestCase
     public function test_self_sub_split_credits_the_owner_for_each_delivered_split_item(): void
     {
         $item = $this->placeSubItem(3);
+        $this->markCourierOnline($item->order_id);
         $child = app(OrderFulfillmentService::class)->rescheduleItemDeliveryDate($item, '2026-12-20', $this->b['admin'], 'split', 2);
 
         $this->assertEquals(10, (float) $item->fresh()->courier_fee_amount);

@@ -36,11 +36,42 @@ class OrderController extends Controller
         } elseif ($user->isRole('sales-kurir-sub')) {
             $query->where(fn ($scope) => $scope
                 ->where('sales_id', $user->id)
-                ->orWhere('konsumen_id', $user->id));
+                ->orWhere('konsumen_id', $user->id))
+                // IMP-004 (mirrors OrderPolicy::view): after an audited
+                // konsumen reassignment the new sales-kurir-sub may also see
+                // orders whose konsumen is CURRENTLY inside its scope (the
+                // order's referral snapshot is historical).
+                ->orWhereHas('konsumen', fn ($k) => $k
+                    ->where('sales_id', $user->id)
+                    ->where('agent_id', $user->agent_id));
         } elseif ($user->isRole('sales')) {
-            $query->where('sales_id', $user->id);
+            $query->where('sales_id', $user->id)
+                // IMP-004: same current-scope addition for the plain sales role.
+                ->orWhereHas('konsumen', fn ($k) => $k
+                    ->where('sales_id', $user->id)
+                    ->where('agent_id', $user->agent_id));
         } elseif ($user->isRole('korsal')) {
-            $query->where('korsal_id', $user->id);
+            $query->where('korsal_id', $user->id)
+                // IMP-004: korsal current-chain mirror (sales reassigned to
+                // this korsal → their konsumen's current korsal_id is ours).
+                ->orWhereHas('konsumen', fn ($k) => $k
+                    ->where('korsal_id', $user->id)
+                    ->where('agent_id', $user->agent_id));
+        }
+        // R-04 / §C: a normal Kurir must NOT use the generic order list — /kurir/orders is the only
+        // authorized (minimized) discovery surface (throws above).
+        //
+        // IMP-001 UAT remediation (Gap 2): Gudang may see an order ONLY while it is in the warehouse
+        // work queue — status exactly 'diproses' AND no courier assigned yet (no shipment carries
+        // courier_id, and no self_sub shipment has a self-delivering Sales-Kurir-Sub). This is
+        // enforced here too — NOT just in OrderPolicy::view — so a direct /orders API call can never
+        // bypass the scope rule. The moment status moves on or any courier is assigned, the order
+        // disappears from this list (server-side; frontend filtering alone would be insufficient).
+        elseif ($user->isRole('gudang')) {
+            $query->where('status', 'diproses')
+                ->whereDoesntHave('shipments', fn ($shipment) => $shipment
+                    ->whereNotNull('courier_id')
+                    ->orWhereNotNull('self_delivered_by_user_id'));
         }
         // agen/admin: BelongsToAgentScope already applies. super_admin sees
         // every branch by default, optionally narrowed to one via ?agent_id=.
@@ -88,6 +119,7 @@ class OrderController extends Controller
             $request->selectedCourierOption(),
             $request->input('stock_source'),
             $request->filled('sub_location_id') ? $request->integer('sub_location_id') : null,
+            $request->filled('voucher_code') ? $request->string('voucher_code')->toString() : null,
         );
 
         Log::info('order.created', [

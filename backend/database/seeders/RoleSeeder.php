@@ -24,6 +24,10 @@ class RoleSeeder extends Seeder
             ['slug' => 'keuangan', 'name' => 'Keuangan'],
             ['slug' => 'kurir', 'name' => 'Kurir'],
             ['slug' => 'gudang', 'name' => 'Gudang'],
+            // IMP-003: Agen-managed delivery dispatcher — same branch, never
+            // a separate hierarchy node (see HierarchyRules / Role::canonicalSlug
+            // for the role-based scoping).
+            ['slug' => 'koordinator-kurir', 'name' => 'Koordinator Kurir'],
             ['slug' => 'sales-kurir-sub', 'name' => 'Sales-Kurir-Sub'],
         ];
 

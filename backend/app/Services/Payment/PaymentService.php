@@ -49,6 +49,14 @@ class PaymentService
 
     private const PROOF_DIRECTORY = 'payments/bank-transfer-proofs';
 
+    /**
+     * Canonical persisted marker of a DP settlement request. Stored in the transaction's
+     * `raw_payload` exactly as the pre-existing settlement payload did, so historical rows keep
+     * identifying themselves; it is what distinguishes a settlement from the DP transaction and
+     * from an ordinary bank transfer on the same order.
+     */
+    private const SETTLEMENT_NOTE = 'dp_settlement';
+
     public function __construct(
         private readonly PaymentGatewayClientFactory $gatewayFactory,
         private readonly MediaService $mediaService,
@@ -210,20 +218,40 @@ class PaymentService
     }
 
     /**
-     * Konsumen-submitted proof of a completed bank transfer. Snapshots the
-     * destination bank details as they were on the transaction at initiate()
-     * time (raw_payload), not whatever the config holds now, since an admin
-     * could change the destination account between order and payment. Never
-     * pays the order itself — only verifyBankTransfer() (Admin/Agen) does.
+     * Proof of a completed bank transfer, submitted by the konsumen OR — IMP-001 — by an authorized payer
+     * acting on the konsumen's behalf (Korsal/Sales in scope, or branch staff). Snapshots the destination
+     * bank details as they were on the transaction at initiate() time (raw_payload), not whatever the
+     * config holds now. Never pays the order itself — only verifyBankTransfer() (Keuangan) does.
+     *
+     * `$submittedBy` is recorded as the payer actor (`submitted_by_user_id`); the order owner is never
+     * changed. Lock order: verification row → ORDER (row lock) → transaction. Taking the ORDER row lock
+     * (same row verifyBankTransfer and OrderService::cancel serialize on) closes the audit finding that
+     * a concurrent cancellation could land between the eligibility read and the proof write — the
+     * cancelled-order rejection now holds against a real concurrent cancel() (OrderService::cancel
+     * re-reads the Order with the same lockForUpdate before acting).
      */
-    public function submitBankTransferProof(PaymentTransaction $transaction, UploadedFile $proof): BankTransferVerification
+    public function submitBankTransferProof(PaymentTransaction $transaction, UploadedFile $proof, ?User $submittedBy = null): BankTransferVerification
     {
-        return DB::transaction(function () use ($transaction, $proof) {
+        return DB::transaction(function () use ($transaction, $proof, $submittedBy) {
+            $existing = BankTransferVerification::query()
+                ->where('payment_transaction_id', $transaction->id)->lockForUpdate()->first();
+            // Locking re-read: serialize against OrderService::cancel() and verifyBankTransfer()
+            // so the eligibility decision is made on the CURRENT persisted row, never a stale snapshot.
+            $current = PaymentTransaction::query()->findOrFail($transaction->id);
+            $order = Order::query()->whereKey($current->order_id)->lockForUpdate()->firstOrFail();
+
+            if ($order->status === 'dibatalkan'
+                || $current->status === PaymentTransactionStatus::PAID->value
+                || $existing?->status === 'verified') {
+                throw new ApiException(__('messages.payment.proof_locked'), 422);
+            }
+
+            $onBehalf = $submittedBy !== null && $submittedBy->id !== $order->konsumen_id;
             $path = $proof->store(self::PROOF_DIRECTORY, self::DISK);
-            $payload = $transaction->raw_payload ?? [];
+            $payload = $current->raw_payload ?? [];
 
             $verification = BankTransferVerification::updateOrCreate(
-                ['payment_transaction_id' => $transaction->id],
+                ['payment_transaction_id' => $current->id],
                 [
                     'bank_name' => $payload['bank_name'] ?? '-',
                     'account_name' => $payload['account_name'] ?? '-',
@@ -233,19 +261,52 @@ class PaymentService
                     'verified_by' => null,
                     'verified_at' => null,
                     'rejection_reason' => null,
+                    'submitted_by_user_id' => $submittedBy?->id,
+                    'submitted_on_behalf' => $onBehalf,
                 ]
             );
 
-            $transaction->order->update(['payment_status' => 'pending_verification']);
+            $order->update(['payment_status' => 'pending_verification']);
+
+            if ($submittedBy !== null) {
+                ActivityLogger::log($submittedBy->id, $order, 'payment.proof_submitted', null, [
+                    'actor_role' => $submittedBy->role?->slug,
+                    'on_behalf_of_konsumen_id' => $onBehalf ? $order->konsumen_id : null,
+                    'submitted_on_behalf' => $onBehalf,
+                    'payment_transaction_id' => $current->id,
+                    'amount' => (float) $current->amount,
+                    'payment_method' => $current->paymentMethod?->code,
+                    'order_payment_status' => 'pending_verification',
+                ]);
+            }
 
             return $verification;
         });
     }
 
-    /** Admin/Agen-only action (authorized in the controller) — the sole way a manual transfer ever becomes 'paid'. */
+    /**
+     * Admin/Agen-only action (authorized in the controller) — the sole way a manual transfer ever becomes 'paid'.
+     *
+     * Concurrency-hardened (audit finding): the verification row is LOCKED and re-read inside the
+     * transaction, and the order row lock is taken on the same row OrderService::cancel serializes on.
+     * Two requests that both passed the controller's pending check cannot both apply the money: the
+     * second one re-reads the (now non-pending) persisted row under the lock and refuses — the amount
+     * is applied exactly once.
+     */
     public function verifyBankTransfer(BankTransferVerification $verification, User $actor, bool $approved, ?string $rejectionReason = null): BankTransferVerification
     {
         return DB::transaction(function () use ($verification, $actor, $approved, $rejectionReason) {
+            // Locking re-read of the verification row: serialize on the SAME row the proof
+            // submission (and a concurrent verify) already locks, so a stale in-memory model
+            // can never be double-applied. Repeated processing of an already-finalized
+            // verification has no financial effect.
+            $verification = BankTransferVerification::query()
+                ->whereKey($verification->id)->lockForUpdate()->firstOrFail();
+
+            if ($verification->status !== 'pending') {
+                throw new ApiException(__('messages.payment.already_verified'), 422);
+            }
+
             $verification->update([
                 'status' => $approved ? 'verified' : 'rejected',
                 'verified_by' => $actor->id,
@@ -253,8 +314,10 @@ class PaymentService
                 'rejection_reason' => $approved ? null : $rejectionReason,
             ]);
 
-            $transaction = $verification->paymentTransaction;
-            $order = $transaction->order;
+            $transaction = PaymentTransaction::query()->findOrFail($verification->payment_transaction_id);
+            // Locking re-read of the ORDER too — same row cancel() locks — so a concurrent
+            // cancellation cannot race between the money application and its status write.
+            $order = Order::query()->whereKey($transaction->order_id)->lockForUpdate()->firstOrFail();
 
             $transaction->update([
                 'status' => $approved ? PaymentTransactionStatus::PAID->value : PaymentTransactionStatus::FAILED->value,
@@ -324,6 +387,19 @@ class PaymentService
     public function submitCodPaymentProof(PaymentTransaction $transaction, UploadedFile $proof, User $actor): CodPaymentProof
     {
         return DB::transaction(function () use ($transaction, $proof, $actor) {
+            // Same lock order as confirmCodPayment (proof row → order): a confirmed proof is never overwritten.
+            $existing = CodPaymentProof::query()
+                ->where('payment_transaction_id', $transaction->id)->lockForUpdate()->first();
+            // Locking re-read of the ORDER (the row OrderService::cancel serializes on) — the
+            // cancelled/paid eligibility decision must reflect the CURRENT persisted row, never a
+            // snapshot taken before a concurrent cancellation committed.
+            $order = Order::query()->whereKey($transaction->order_id)->lockForUpdate()->firstOrFail();
+
+            if ($order->status === 'dibatalkan' || $order->payment_status === 'paid' || $existing?->status === 'confirmed') {
+                throw new ApiException(__('messages.payment.proof_locked'), 422);
+            }
+
+            $onBehalf = $actor->id !== $order->konsumen_id;
             $media = $this->mediaService->store($proof, 'cod_payment_proof', $transaction, $actor);
 
             $codProof = CodPaymentProof::updateOrCreate(
@@ -331,11 +407,17 @@ class PaymentService
                 [
                     'proof_media_id' => $media->id, 'status' => 'pending',
                     'confirmed_by' => null, 'confirmed_at' => null, 'rejection_reason' => null,
+                    'submitted_by_user_id' => $actor->id, 'submitted_on_behalf' => $onBehalf,
                 ]
             );
 
-            ActivityLogger::log($actor->id, $transaction->order, 'payment.cod_proof_submitted', null, [
+            ActivityLogger::log($actor->id, $order, 'payment.cod_proof_submitted', null, [
                 'actor_role' => $actor->role?->slug, 'payment_transaction_id' => $transaction->id,
+                'on_behalf_of_konsumen_id' => $onBehalf ? $order->konsumen_id : null,
+                'submitted_on_behalf' => $onBehalf,
+                'amount' => (float) $transaction->amount,
+                'payment_method' => $transaction->paymentMethod?->code,
+                'order_payment_status' => $order->payment_status,
             ]);
 
             return $codProof;
@@ -346,14 +428,23 @@ class PaymentService
     public function confirmCodPayment(CodPaymentProof $proof, User $actor, bool $confirmed, ?string $rejectionReason = null): CodPaymentProof
     {
         return DB::transaction(function () use ($proof, $actor, $confirmed, $rejectionReason) {
+            // Locking re-reads: the proof row first (concurrent confirmations serialize here),
+            // then the ORDER row (the row OrderService::cancel serializes on) — a cancellation
+            // that lands between them cannot be overwritten by this confirmation.
+            $proof = CodPaymentProof::query()->whereKey($proof->id)->lockForUpdate()->firstOrFail();
+            $transaction = PaymentTransaction::query()->findOrFail($proof->payment_transaction_id);
+            $order = Order::query()->whereKey($transaction->order_id)->lockForUpdate()->firstOrFail();
+
+            if ($proof->status !== 'pending') {
+                throw new ApiException(__('messages.payment.already_verified'), 422);
+            }
+
             $proof->update([
                 'status' => $confirmed ? 'confirmed' : 'rejected',
                 'confirmed_by' => $actor->id,
                 'confirmed_at' => now(),
                 'rejection_reason' => $confirmed ? null : $rejectionReason,
             ]);
-
-            $order = $proof->paymentTransaction->order;
 
             if ($confirmed) {
                 $this->markCod($order, $actor, true);
@@ -367,16 +458,81 @@ class PaymentService
         });
     }
 
-    /**
-     * Keuangan requests settlement of a DP order's outstanding balance at the
-     * end of the transaction. Creates an ordinary bank_transfer transaction for
-     * exactly remaining_amount; the konsumen then uploads a second proof and
-     * Keuangan verifies it through the normal verifyBankTransfer() path.
-     */
-    public function requestSettlement(Order $order, User $actor): PaymentTransaction
-    {
-        if ((float) $order->remaining_amount <= 0) {
+/**
+ * Keuangan requests settlement of a DP order's outstanding balance at the
+ * end of the transaction. Creates an ordinary bank_transfer transaction for
+ * exactly remaining_amount; the konsumen then uploads a second proof and
+ * Keuangan verifies it through the normal verifyBankTransfer() path.
+ *
+ * IDEMPOTENT REPLAY (Human decision): a settlement is a request for a specific
+ * outstanding amount, so a second, equivalent request for the SAME canonical
+ * financial context (same order, same bank_transfer settlement transaction,
+ * same nominal as the order's CURRENT remaining balance) must NOT create a
+ * second transaction — the existing pending settlement is returned instead
+ * (HTTP 200, `replay = true`). It is money-safe by construction: the replay
+ * performs no insert, no ledger movement and no status write at all.
+ *
+ * CONCURRENCY: the whole decision runs inside one transaction that takes the
+ * canonical **Order-first** lock — the same boundary verifyBankTransfer /
+ * submitBankTransferProof / OrderService::cancel serialize on. Two simultaneous
+ * requests therefore queue on the Order row, and the loser re-reads the
+ * winner's committed settlement through a LOCKING read (ARCHITECTURE §7: never
+ * a plain read that would use the pre-wait snapshot) and converges to the same
+ * single pending settlement.
+ *
+ * MATERIAL MISMATCH: if the order's outstanding balance has MOVED since a
+ * settlement was requested, the pending one no longer represents what is owed.
+ * It is preserved untouched (never silently replaced — a proof may already
+ * exist against it) and the new request is refused with the existing
+ * duplicate-obligation rule `messages.payment.already_processed`, the same rule
+ * `verifyBankTransfer` / `confirmCodPayment` / `markAdditionalPaymentPaid` use
+ * when a pending financial row already occupies the record. Resolving it needs
+ * no new workflow: the existing reject/verify action settles the stale request.
+ *
+ * @return array{0: PaymentTransaction, 1: bool} [transaction, wasReplay]
+ */
+public function requestSettlement(Order $order, User $actor): array
+{
+    // A refusal THROWS from inside the transaction, so an audit row written there would be rolled
+    // back with it and the refusal would leave no trace. The conflict outcome is therefore decided
+    // inside the transaction and reported after it, exactly like the decision it records.
+    $conflict = null;
+
+    $result = DB::transaction(function () use ($order, $actor, &$conflict) {
+        // Canonical Order-first boundary. Never trust the route-bound model's remaining_amount:
+        // it can be arbitrarily stale relative to a concurrent payment or total change.
+        $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+        $remaining = round((float) $order->remaining_amount, 2);
+
+        if ($remaining <= 0) {
             throw new ApiException(__('messages.payment.nothing_to_settle'), 422);
+        }
+
+        $pending = $this->pendingSettlementFor($order->id);
+
+        if ($pending && round((float) $pending->amount, 2) === $remaining) {
+            // Equivalent request for the same canonical financial context: replay, no side effect.
+            ActivityLogger::log($actor->id, $order, 'payment.settlement_request_replayed', null, [
+                'payment_transaction_id' => $pending->id,
+                'amount' => $remaining,
+                'remaining_amount' => $remaining,
+                'idempotent_replay' => true,
+                'actor_role' => $actor->role?->slug,
+            ]);
+
+            return [$pending, true];
+        }
+
+        if ($pending) {
+            // Preserve the pending settlement untouched; refuse the materially different one.
+            $conflict = [
+                'pending' => $pending,
+                'pending_amount' => (float) $pending->amount,
+                'requested_amount' => $remaining,
+            ];
+
+            return [null, false];
         }
 
         $method = PaymentMethod::query()->where('code', 'bank_transfer')->firstOrFail();
@@ -386,26 +542,66 @@ class PaymentService
             'order_id' => $order->id,
             'payment_method_id' => $method->id,
             'type' => 'payment',
-            'amount' => $order->remaining_amount,
+            'amount' => $remaining,
             'status' => PaymentTransactionStatus::PENDING->value,
             'gateway_reference' => 'ST-'.strtoupper(Str::random(10)),
             'raw_payload' => [
                 'bank_name' => $config->config['bank_name'] ?? null,
                 'account_name' => $config->config['account_name'] ?? null,
                 'account_number' => $config->config['account_number'] ?? null,
-                'note' => 'dp_settlement',
+                'note' => self::SETTLEMENT_NOTE,
             ],
         ]);
 
         ActivityLogger::log($actor->id, $order, 'payment.settlement_requested', null, [
             'payment_transaction_id' => $transaction->id,
             'amount' => (float) $transaction->amount,
-            'remaining_amount' => (float) $order->remaining_amount,
+            'remaining_amount' => $remaining,
             'actor_role' => $actor->role?->slug,
         ]);
 
-        return $transaction;
+        return [$transaction, false];
+    });
+
+    if ($conflict !== null) {
+        ActivityLogger::log($actor->id, $order, 'payment.settlement_request_rejected', 'A settlement for a different outstanding amount is already pending', [
+            'pending_payment_transaction_id' => $conflict['pending']->id,
+            'pending_amount' => $conflict['pending_amount'],
+            'requested_amount' => $conflict['requested_amount'],
+            'actor_role' => $actor->role?->slug,
+        ]);
+
+        throw new ApiException(__('messages.payment.already_processed'), 422);
     }
+
+    return $result;
+}
+
+/**
+ * The order's currently pending settlement request, or null. A settlement is
+ * identified by its canonical persisted marker (`raw_payload.note`), not by the
+ * `ST-` reference prefix, so a DP transaction or an ordinary bank transfer can
+ * never be mistaken for a settlement. Locking read on `order_id` (indexed) —
+ * narrow per-order range, and never a pre-wait snapshot.
+ */
+private function pendingSettlementFor(int $orderId): ?PaymentTransaction
+{
+    $methodId = PaymentMethod::query()->where('code', 'bank_transfer')->value('id');
+
+    if ($methodId === null) {
+        return null;
+    }
+
+    return PaymentTransaction::query()
+        ->where('order_id', $orderId)
+        ->where('payment_method_id', $methodId)
+        ->where('type', 'payment')
+        ->where('status', PaymentTransactionStatus::PENDING->value)
+        ->where('raw_payload->note', self::SETTLEMENT_NOTE)
+        ->orderByDesc('id')
+        ->lockForUpdate()
+        ->first();
+}
 
     /**
      * Adds a verified payment amount onto the order's running paid_amount and

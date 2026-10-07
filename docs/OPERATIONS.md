@@ -59,7 +59,7 @@ php artisan primeclassy:reset-dev-transactions --confirm="RESET DEV TRANSACTIONS
 
 ## 4. TEST
 
-- Database `primeclassy_testing` only. `phpunit.xml` forces `APP_ENV=testing` and the DB name; `Tests\TestCase` throws if the database name does not match `_test`/`_testing`, protecting DEV and production data.
+- Database `primeclassy_testing` only. `phpunit.xml` forces `APP_ENV=testing` and the DB name; `Tests\TestCase` requires exactly `APP_ENV=testing`, MySQL/MariaDB and database `primeclassy_testing`, protecting DEV and production data.
 - Commands: `php artisan test`, `php artisan test --filter=Name`, and the serialized runner `php scripts/run-tests-serialized.php tests/Feature/Name.php` (lock-protected; refuses non-testing databases) for destructive refresh/migration suites.
 - Race suites spawn real second PHP processes (`.phpunit-concurrency-actor.php`); they need the same isolated DB and take ~10–20 s each. A full run takes roughly 12–15 minutes.
 - Last recorded full run: 855 passed / 6075 assertions / 0 failures (includes the 4 DEV reset-command tests; frontend type-check and build also pass). Always re-run for current numbers.
@@ -70,7 +70,7 @@ php artisan primeclassy:reset-dev-transactions --confirm="RESET DEV TRANSACTIONS
 Fresh environments can use the browser installer at `/install` (requirements → database → app URLs → first Super Admin → migrate + seed → finalize → lock). The lock file `backend/storage/app/installed.lock` permanently seals the installer endpoints (403). Manual alternative:
 
 ```bash
-php artisan migrate --seed       # roles (10), languages, settings, payment methods, shipping providers — no demo users
+php artisan migrate --seed       # roles (11), languages, settings, payment methods, shipping providers — no demo users
 php artisan tinker               # create the first super_admin (role slug 'super_admin', hashed password cast)
 php artisan storage:link         # non-single-domain layouts only (single-domain uses the public_html/storage symlink)
 ```
@@ -122,7 +122,7 @@ Also preserve `public_html/storage` (symlink to `../backend/storage/app/public`)
 3. **Maintenance mode ON** for any incompatible code/schema window: `php artisan down`.
 4. **Deploy backend by whitelist** (never copy DEV `.env`, `storage/`, uploads, sessions or logs); `composer install --no-dev --optimize-autoloader`.
 5. **Migrate:** confirm the migrations are *Pending*, run `php artisan migrate --force`, confirm they are *Ran*. Never `migrate:fresh`, `db:wipe`, truncate or disable FK checks.
-6. **Reconcile before going live:** row counts and FK/orphan checks on touched tables, historical defaults, business invariants (e.g. roles = 10; `order_items` count unchanged; new nullable columns NULL on historical rows; Sub Location ownership unchanged; warehouse stock/movement counts preserved).
+6. **Reconcile before going live:** row counts and FK/orphan checks on touched tables, historical defaults, business invariants (e.g. roles = 11 — the 10 pre-IMP-003 roles plus `koordinator-kurir`; `order_items` count unchanged; new nullable columns NULL on historical rows; Sub Location ownership unchanged; warehouse stock/movement counts preserved).
 7. **Caches:** `php artisan config:clear && php artisan config:cache`, same for `route` and `view`. (`config:cache` freezes `.env` — re-run after any env change.)
 8. **Deploy frontend** with the canonical command (§7.2).
 9. **Maintenance mode OFF:** `php artisan up`.
@@ -179,3 +179,11 @@ Never copy DEV `.env`/credentials to production · preserve production `.env`, u
 | RajaOngkir options 422 | Agent key/origin/courier codes, product weight, or incomplete buyer village hierarchy |
 | `MAC is invalid` in old logs | Historical `APP_KEY` change; not an active defect |
 | Stale config after editing `.env` | Run `php artisan config:clear` (and re-cache in production) |
+
+## GPS reverse geocoding — Human-approved Nominatim default
+
+**HUMAN BUSINESS DECISION — APPROVED (2026-10-06).** `GEOCODE_PROVIDER=nominatim` is the live default, no API key. `GEOCODE_BASE_URL` can switch to another Nominatim deployment without a code change. HTTPS only; `GEOCODE_TIMEOUT` (default 4 seconds, bounded 1–10), `GEOCODE_CONNECT_TIMEOUT` (default 2), `GEOCODE_USER_AGENT` (default PrimeClassy + APP_URL) and `GEOCODE_CACHE_STORE` are ordinary backend configuration. Set APP_URL to the public application address so identification is meaningful. No browser provider calls, background jobs, bulk queries, autocomplete or HTTP retries.
+
+Public Nominatim usage must follow [its usage policy](https://operations.osmfoundation.org/policies/nominatim/): application-wide maximum one outbound request per second, identifying User-Agent, cache and visible OSM attribution. The adapter defaults to shared file cache for this single-host deployment, caches successful coordinates for 24 hours and response failures/no-match for 60 seconds, and falls back immediately when its atomic global lock/rate gate is busy. `GEOCODE_MIN_INTERVAL` cannot lower the one-second floor. Multiple hosts must use one shared Redis/database cache store, not host-local file caches. Shared lock/rate storage failure is manual fallback. No credentials are required or written.
+
+Automated tests fake HTTP and use isolated cache; no live provider is called. Network outage, timeout, non-2xx, malformed/non-Indonesian response, no unique master chain and rate gating preserve manual entry. Canonical ids always come from PrimeClassy master regions; external OSM ids are not persisted. Reverse geocoding is approximate and regional coverage may produce no match; the user can edit the prefill. See [Nominatim reverse API](https://nominatim.org/release-docs/latest/api/Reverse/).

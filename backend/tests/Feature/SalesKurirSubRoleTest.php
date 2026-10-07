@@ -47,7 +47,7 @@ class SalesKurirSubRoleTest extends TestCase
         return [$agen, $korsal];
     }
 
-    public function test_migration_renames_the_existing_role_row_in_place_and_keeps_ten_roles(): void
+    public function test_migration_renames_the_existing_role_row_in_place(): void
     {
         [$agen, $korsal] = $this->branch();
         $roleId = $this->revertToLegacyRole();
@@ -56,7 +56,7 @@ class SalesKurirSubRoleTest extends TestCase
         $this->runRenameMigration();
         $this->runRenameMigration(); // idempotent
 
-        $this->assertSame(10, Role::query()->count());
+        $this->assertSame(11, Role::query()->count());
         $this->assertDatabaseMissing('roles', ['slug' => 'sales-kurir']);
         $this->assertDatabaseHas('roles', ['id' => $roleId, 'slug' => 'sales-kurir-sub', 'name' => 'Sales-Kurir-Sub']);
         $legacyUser->refresh();
@@ -74,7 +74,7 @@ class SalesKurirSubRoleTest extends TestCase
 
         $this->runRenameMigration();
 
-        $this->assertSame(10, Role::query()->count());
+        $this->assertSame(11, Role::query()->count());
         $this->assertSame($canonicalId, $user->fresh()->role_id);
     }
 
@@ -84,7 +84,7 @@ class SalesKurirSubRoleTest extends TestCase
 
         $this->seed(RoleSeeder::class);
 
-        $this->assertSame(10, Role::query()->count());
+        $this->assertSame(11, Role::query()->count());
         $this->assertDatabaseHas('roles', ['id' => $roleId, 'slug' => 'sales-kurir-sub']);
     }
 
@@ -146,10 +146,10 @@ class SalesKurirSubRoleTest extends TestCase
         $this->assertSame('SK-HIST01', $sk->fresh()->referral_code);
     }
 
-    public function test_role_taxonomy_is_exactly_the_ten_business_roles(): void
+    public function test_role_taxonomy_is_exactly_the_eleven_business_roles(): void
     {
         $this->assertSame(
-            ['admin', 'agen', 'gudang', 'keuangan', 'konsumen', 'korsal', 'kurir', 'sales', 'sales-kurir-sub', 'super_admin'],
+            ['admin', 'agen', 'gudang', 'keuangan', 'konsumen', 'koordinator-kurir', 'korsal', 'kurir', 'sales', 'sales-kurir-sub', 'super_admin'],
             Role::query()->pluck('slug')->sort()->values()->all()
         );
     }

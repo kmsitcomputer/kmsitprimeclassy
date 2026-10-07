@@ -5,7 +5,7 @@ import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { listOrders } from '@/api/orders'
 import type { Order, PaginationMeta } from '@/api/types'
-import { formatRupiah, formatDate, orderStatusLabel } from '@/utils/format'
+import { formatRupiah, formatDate, orderStatusLabel, paymentBadgeState, paymentBadgeLabel } from '@/utils/format'
 
 const { t } = useI18n()
 const orders = ref<Order[]>([])
@@ -31,6 +31,12 @@ const STATUS_STYLES: Record<string, string> = {
   pengembalian: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400',
   kembali: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400',
 }
+
+const PAYMENT_STYLES: Record<'paid' | 'pending' | 'unpaid', string> = {
+  paid: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400',
+  pending: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400',
+  unpaid: 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-400',
+}
 </script>
 
 <template>
@@ -55,6 +61,11 @@ const STATUS_STYLES: Record<string, string> = {
             <span class="text-sm font-semibold text-stone-800 dark:text-stone-100">{{ order.order_no }}</span>
             <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="STATUS_STYLES[order.status]">
               {{ orderStatusLabel(order.status) }}
+            </span>
+            <!-- UAT: order status and payment status are independent domains — both badges, each
+                 from canonical server state only (paymentBadgeLabel never recomputes the ledger). -->
+            <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="PAYMENT_STYLES[paymentBadgeState(order)]">
+              {{ paymentBadgeLabel(order) }}
             </span>
           </div>
           <p class="mt-1 text-xs text-stone-400">{{ formatDate(order.created_at) }}</p>

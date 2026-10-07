@@ -22,7 +22,7 @@ Historical specs, audits and checkpoints live in Git history only.
 
 ## Major modules
 
-Catalog & SKU registry · Referral hierarchy (10 roles) · Checkout & orders · Payment (COD, DP, manual transfer, gateways) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
+Catalog & SKU registry · Referral hierarchy (11 roles) · Checkout & orders · Payment (COD, DP, manual transfer, gateways) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
 
 ## Repository layout
 
@@ -73,7 +73,7 @@ npm run type-check                                # vue-tsc
 npm run build-only                                # vite build (npm run build = type-check + build)
 ```
 
-No automated frontend test suite exists; frontend verification is type-check, build and manual browser checks. Tests refuse any database whose name does not contain `_test` / `_testing`.
+No automated frontend test suite exists; frontend verification is type-check, build and manual browser checks. Tests require exactly `APP_ENV=testing`, MySQL/MariaDB and database `primeclassy_testing`; all other databases are refused.
 
 ## Build
 

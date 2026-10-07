@@ -49,8 +49,8 @@ class OrderFulfillmentService
         }
 
         return DB::transaction(function () use ($item, $newFulfilledQuantity, $actor, $reason, $additionalPaymentMethod) {
-            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
 
             if ($order->status !== 'diproses') {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
@@ -312,10 +312,42 @@ class OrderFulfillmentService
     public function rescheduleItemDeliveryDate(OrderItem $item, string $newDate, User $actor, string $reason, ?int $quantity = null): OrderItem
     {
         return DB::transaction(function () use ($item, $newDate, $actor, $reason, $quantity) {
+            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
             $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+
+            // FULFILLMENT WINDOW (BUSINESS-RULES §21 + this class's own contract): a reschedule is a
+            // fulfillment mutation and is only ever allowed before the order starts shipping.
+            //
+            // This guard used to be unnecessary: an item's status mirrored its order's, so the item
+            // check below was "sufficient and exact". The per-ITEM courier work unit (Human UAT:
+            // courier progress is per OrderItem) broke that mirror — one item can be delivered while
+            // a sibling stays in 'diproses', and CourierService::recomputeOrderStatus then moves the
+            // ORDER to 'dikirim'. Without this, an Admin could reschedule (and split onto a brand-new
+            // shipment) a sibling item of an order already physically in transit, while
+            // adjustItemQuantity on the very same item correctly refused — same service, same order,
+            // two different answers. The Order row is already locked above, so this is free.
+            if (in_array($order->status, ['dikirim', 'terkirim', 'pengembalian', 'kembali', 'dibatalkan'], true)) {
+                throw new ApiException(__('messages.fulfillment.window_closed'), 422);
+            }
 
             if (! in_array($item->status, ['diterima', 'diproses'], true)) {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
+            }
+
+            // LOCKED BUSINESS RULE (Human, final 2026-10-07): a requested delivery date is
+            // re-datable ONLY for (1) KURIR ONLINE and (2) SELF DELIVERY / Sub. Ekspedisi/RajaOngkir
+            // and Pickup/Ambil di Tempat are FORBIDDEN — their schedule belongs to their own
+            // workflow, and a Pickup order must never become a courier-online shipment. Enforced
+            // HERE, under the canonical Order lock, so a direct/API call is refused exactly like the
+            // hidden UI control (frontend gating is convenience only). Classification comes from the
+            // canonical persisted fields via Shipment::isDeliveryDateReschedulable() — never inferred
+            // from whether a date happens to be set — and it is an allowlist, so an unrecognised
+            // provider stays non-reschedulable.
+            $shipment = $this->shipmentForDeliveryMethod($item);
+            if (! $shipment?->isDeliveryDateReschedulable()) {
+                throw new ApiException(__('messages.fulfillment.reschedule_courier_online_only', [
+                    'method' => $shipment?->deliveryMethodLabel() ?? '—',
+                ]), 422);
             }
 
             if ($quantity !== null) {
@@ -332,13 +364,136 @@ class OrderFulfillmentService
 
             $previousDate = $item->requested_delivery_date?->toDateString();
             $item->update(['requested_delivery_date' => $newDate]);
+            $item->refresh();
+
+            // The new date decides which shipment the item now belongs to. Grouping is
+            // shipment-truth (see consolidateIntoShipmentForDate): a moved item JOINS an
+            // existing, still-lifecycle-eligible shipment for that date, otherwise its own
+            // shipment becomes the canonical shipment for the new date.
+            $this->consolidateIntoShipmentForDate($item, $newDate, $actor);
 
             ActivityLogger::log($actor->id, $item, 'order_item.delivery_rescheduled', $reason, [
                 'order_id' => $item->order_id, 'from' => $previousDate, 'to' => $newDate, 'actor_role' => $actor->role?->slug,
+                'delivery_method' => $item->shipment?->deliveryMethodLabel() ?? $this->shipmentForDeliveryMethod($item)?->deliveryMethodLabel(),
             ]);
 
             return $item->fresh();
         });
+    }
+
+    /**
+     * The shipment that decides this item's delivery method: the item's own shipment, otherwise
+     * the order's first one — a split/rescheduled item can sit on a shipment created after the
+     * original. Returns null when the order has no shipment at all, which is treated as
+     * non-reschedulable (allowlist).
+     */
+    private function shipmentForDeliveryMethod(OrderItem $item): ?Shipment
+    {
+        return $item->shipment
+            ?? Shipment::query()->where('order_id', $item->order_id)->orderBy('id')->first();
+    }
+
+    /**
+     * Generic in-transaction regroup (algorithm G): re-homes the just-re-dated item onto the
+     * correct shipment for $newDate AND canonicalizes the affected grouping keys, so every
+     * successful date change leaves the domain canonical without any manual reconcile.
+     *
+     * Runs inside rescheduleItemDeliveryDate's transaction, which already holds the canonical
+     * Order lock first — two concurrent date changes therefore serialize and the loser observes
+     * the winner's committed grouping rather than racing it.
+     *
+     * Rules (LOCKED):
+     *  - candidates are ALWAYS restricted to the SAME order (`order_id = $item->order_id`), so a
+     *    date change can never move an item into another order's shipment;
+     *  - compatibility follows the item's own delivery semantics: a self_sub item only ever joins
+     *    a self_sub shipment of the SAME owner; a standard item only a standard shipment. Modes
+     *    and owners never merge;
+     *  - only a shipment whose lifecycle still permits taking new items qualifies
+     *    (`ShipmentCanonicalizationService::mergeBlocker`). An already dispatched/delivered/
+     *    assigned shipment is never joined — existing courier-assignment rules stay authoritative;
+     *  - when several eligible shipments already carry the new date, the whole compatible group is
+     *    canonicalized inside this transaction (oldest wins) instead of leaving a second Y unit;
+     *  - otherwise the item keeps its own shipment, which now represents the new date (created by
+     *    splitShipmentIfShared when it had to leave a shared one), and an emptied source shipment
+     *    is removed only when the existing lifecycle semantics allow it.
+     *
+     * SHARED by every path that can put a NEW item on a shipment — the whole-line reschedule, the
+     * partial-quantity reschedule split and the SC-03 added line — so the LOCKED grouping rule is
+     * enforced by ONE implementation instead of being re-derived (and forgotten) per caller.
+     * Public for that reason; the canonical Order lock is the caller's responsibility and is
+     * already held by all three callers.
+     *
+     * @param  string  $context  audit description naming which flow triggered the regroup.
+     */
+    public function consolidateIntoShipmentForDate(OrderItem $item, string $newDate, User $actor, string $context = 'reschedule'): void
+    {
+        $currentShipmentId = $item->shipment_id;
+
+        if (! $currentShipmentId) {
+            return;
+        }
+
+        $canonicalizer = new ShipmentCanonicalizationService();
+
+        $current = Shipment::query()->whereKey($currentShipmentId)->lockForUpdate()->first();
+
+        if (! $current || $current->order_id !== $item->order_id) {
+            return;
+        }
+
+        // Compatibility follows the item's own delivery semantics, never the calendar alone.
+        $isSelfSub = $current->delivery_mode === Shipment::DELIVERY_MODE_SELF_SUB;
+        $ownerId = $isSelfSub ? $current->self_delivered_by_user_id : null;
+
+        $candidates = Shipment::query()
+            ->where('order_id', $item->order_id)
+            ->whereKeyNot($currentShipmentId)
+            ->where('delivery_mode', $current->delivery_mode)
+            ->when($isSelfSub, fn ($q) => $q->where('self_delivered_by_user_id', $ownerId))
+            ->whereHas('orderItems', fn ($q) => $q->whereDate('requested_delivery_date', $newDate))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        $joinedTarget = null;
+
+        foreach ($candidates as $candidate) {
+            if ($canonicalizer->mergeBlocker($candidate) !== null) {
+                continue;
+            }
+
+            $joinedTarget = $joinedTarget ?? $candidate;
+        }
+
+        if ($joinedTarget) {
+            // Join the oldest eligible Y shipment, then fold every OTHER still-eligible Y shipment
+            // into the oldest one as well — one date change must never leave two canonical units.
+            $group = $candidates
+                ->filter(fn (Shipment $s) => $canonicalizer->mergeBlocker($s) === null)
+                ->values();
+            $canonical = $group->sortBy('id')->firstOrFail();
+            $canonicalizer->mergeGroupInto($group->sortBy('id')->values(), $canonical);
+
+            $item->update(['shipment_id' => $canonical->id]);
+            $joinedTarget = $canonical;
+
+            ActivityLogger::log($actor->id, $joinedTarget, 'shipment.reused_for_reschedule', $context, [
+                'order_id' => $joinedTarget->order_id, 'order_item_id' => $item->id,
+                'requested_delivery_date' => $newDate, 'released_shipment_id' => $currentShipmentId,
+            ]);
+        }
+
+        // The shipment the item just left must not linger as an empty card in Dispatch /
+        // the receipt grouping. Only ever removed when it is genuinely empty, still
+        // unassigned and undelivered; anything with an executor, a status or items stays.
+        $orphan = Shipment::query()->whereKey($currentShipmentId)->lockForUpdate()->first();
+        if ($orphan
+            && $orphan->courier_id === null
+            && $orphan->self_delivered_by_user_id === null
+            && $orphan->status === 'pending'
+            && ! OrderItem::query()->where('shipment_id', $orphan->id)->exists()) {
+            $orphan->delete();
+        }
     }
 
     /**
@@ -400,6 +555,11 @@ class OrderFulfillmentService
         }
 
         $this->assignFreshShipment($newItem, $order, $actor);
+
+        // The child now has its own shipment, so it gets the same LOCKED canonical grouping the
+        // whole-line reschedule applies: if another shipment of this order already IS the canonical
+        // unit for the target date, the child joins it instead of becoming a duplicate.
+        $this->consolidateIntoShipmentForDate($newItem, $newDate, $actor, 'reschedule_split');
 
         // R-03 / decision E: Sub inventory reconciliation — the source reservation is reduced by the
         // moved quantity, then the child receives its own ACTIVE reservation for it. Physical Sub
@@ -562,14 +722,33 @@ class OrderFulfillmentService
      */
     public function markAdjustmentRefundStatus(OrderItemAdjustment $adjustment, User $actor, string $status): OrderItemAdjustment
     {
-        return DB::transaction(function () use ($adjustment, $actor, $status) {
+        // Resolve the owning ORDER id first so the canonical Order lock can be
+        // taken FIRST. This reads only the lineage foreign key — never payment
+        // state — and it is immutable for an existing adjustment row.
+        $orderId = OrderItem::query()->whereKey($adjustment->order_item_id)->value('order_id');
+
+        return DB::transaction(function () use ($adjustment, $actor, $status, $orderId) {
+            // Canonical Order-first lock order (AGENTS.md §11), matching
+            // adjustItemQuantity/applyFulfillment/reschedule in this same service.
+            //
+            // Reversing real money must re-read the CURRENT paid_amount under
+            // that lock. Locking only the adjustment row is NOT enough: two
+            // DIFFERENT refund rows of the same order are guarded by different
+            // locks, so both processors read one stale Order snapshot and the
+            // second write silently loses a money movement — Order.paid_amount
+            // then disagrees with the processed refund rows, i.e. a second
+            // payment truth. Regression: FinancialConcurrencyTest::
+            // test_distinct_refunds_on_same_order_preserve_both_money_movements.
+            $order = $orderId
+                ? Order::query()->whereKey($orderId)->lockForUpdate()->first()
+                : null;
+
             $adjustment = OrderItemAdjustment::query()->whereKey($adjustment->id)->lockForUpdate()->firstOrFail();
 
             if ($adjustment->refund_status !== 'pending') {
                 throw new ApiException(__('messages.payment.already_processed'), 422);
             }
 
-            $order = $adjustment->orderItem?->order;
             $adjustment->update(['refund_status' => $status]);
 
             if ($status === 'processed' && $order) {

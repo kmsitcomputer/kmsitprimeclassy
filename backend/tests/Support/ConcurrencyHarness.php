@@ -371,6 +371,86 @@ class ConcurrencyHarness
         }
     }
 
+    public function runDispatchRace(array $sideA, array $sideB): array
+    {
+        // A1-04: a Gudang fulfillment proposal racing a dispatch assignment on the same order.
+        // Both sides start simultaneously on separate connections; the canonical Order-first lock
+        // serializes them so neither can observe a stale eligibility state.
+        $this->ensureRuntimeDir();
+        $readyA = $this->runtimeDir.'/dr-a.ready';
+        $readyB = $this->runtimeDir.'/dr-b.ready';
+        $release = $this->runtimeDir.'/dr.release';
+        $resultA = $this->runtimeDir.'/dr-a.result.json';
+        $resultB = $this->runtimeDir.'/dr-b.result.json';
+        $paths = [$readyA, $readyB, $release, $resultA, $resultB];
+        $this->cleanupFiles($paths);
+
+        $aArgs = $this->dispatchRaceArgs('dr-a', $readyA, $release, $resultA, $sideA);
+        $aProcess = $this->startProcess($aArgs);
+
+        try {
+            $this->waitForSignal($readyA, 15);
+            $bArgs = $this->dispatchRaceArgs('dr-b', $readyB, $release, $resultB, $sideB);
+            $bProcess = $this->startProcess($bArgs);
+            try {
+                $this->waitForSignal($readyB, 15);
+            } catch (\RuntimeException $e) {
+                throw new \RuntimeException($e->getMessage().' actor B: '.substr($bProcess->getErrorOutput().$bProcess->getOutput().(is_file($resultB) ? file_get_contents($resultB) : ''), 0, 2000), previous: $e);
+            }
+            $this->writeFile($release, 'go');
+
+            $aProcess->wait();
+            $bProcess->wait();
+            $aResult = $this->readJson($resultA);
+            $bResult = $this->readJson($resultB);
+
+            if (($aResult['connection_id'] ?? null) === ($bResult['connection_id'] ?? null)) {
+                throw new \RuntimeException('Dispatch race actors did not use different MySQL connections.');
+            }
+
+            if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
+                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                throw new \RuntimeException('Dispatch race actors did not overlap in time.');
+            }
+
+            return [
+                'a' => $aResult,
+                'b' => $bResult,
+                'different_connections' => true,
+                'true_overlap' => true,
+            ];
+        } finally {
+            if (isset($bProcess)) {
+                $this->cleanupProcess($bProcess);
+            }
+            $this->cleanupProcess($aProcess);
+            $this->cleanupFiles($paths);
+            $this->cleanupBarrierDir();
+        }
+    }
+
+    protected function dispatchRaceArgs(string $role, string $ready, string $release, string $result, array $side): array
+    {
+        // The actor dispatches on `--role` prefix `dispatch-race-`; the harness
+        // passes a unique suffix per side (a/b).
+        $actorRole = 'dispatch-race-'.$role;
+        $args = [
+            '--role='.$actorRole, '--runtime-dir='.$this->runtimeDir,
+            '--dispatch-race-ready='.$ready, '--dispatch-race-release='.$release,
+            '--dispatch-race-result='.$result,
+            '--dispatch-race-operation='.(string) $side['op'],
+            '--dispatch-race-actor='.(int) $side['actor_id'],
+            '--dispatch-race-order='.(int) ($side['order_id'] ?? 0),
+            '--dispatch-race-request='.(int) ($side['request_id'] ?? 0),
+            '--dispatch-race-item='.(int) ($side['item_id'] ?? 0),
+            '--dispatch-race-courier='.(int) ($side['courier_id'] ?? 0),
+            '--dispatch-race-quantity='.(int) ($side['quantity'] ?? 1),
+            '--dispatch-race-date='.(string) ($side['date'] ?? ''),
+        ];
+
+        return $args;
+    }
+
     public function runOrderLockedStateRace(array $configuration, string $operation): array
     {
         $this->ensureRuntimeDir();
@@ -594,22 +674,25 @@ class ConcurrencyHarness
 
     protected function actorEnvironment(): array
     {
-        $database = getenv('DB_DATABASE') ?: ($_ENV['DB_DATABASE'] ?? $_SERVER['DB_DATABASE'] ?? null);
+        // Fail closed: the PHPUnit parent itself must already be running
+        // APP_ENV=testing against exactly primeclassy_testing. Never fall back.
+        TestDatabaseGuard::assertApplicationSafe(app());
 
-        if (! is_string($database) || ! preg_match('/_test(?:ing)?(?:_|$)/', $database)) {
-            throw new \RuntimeException('REFUSED: refusing to spawn a concurrency actor against a non-test database.');
-        }
+        $connection = (string) config('database.default');
+        $settings = config("database.connections.{$connection}");
 
-        $environment = ['APP_ENV' => 'testing'];
+        $environment = [
+            'APP_ENV' => TestDatabaseGuard::ENVIRONMENT,
+            'DB_CONNECTION' => $connection,
+            'DB_HOST' => (string) ($settings['host'] ?? ''),
+            'DB_PORT' => (string) ($settings['port'] ?? ''),
+            'DB_DATABASE' => TestDatabaseGuard::DATABASE,
+            'DB_USERNAME' => (string) ($settings['username'] ?? ''),
+            'DB_PASSWORD' => (string) ($settings['password'] ?? ''),
+        ];
 
-        foreach (['DB_CONNECTION', 'DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD', 'DB_SOCKET'] as $key) {
-            $value = getenv($key);
-            if ($value === false) {
-                $value = $_ENV[$key] ?? $_SERVER[$key] ?? false;
-            }
-            if ($value !== false && $value !== null && $value !== '') {
-                $environment[$key] = (string) $value;
-            }
+        if (! empty($settings['unix_socket'])) {
+            $environment['DB_SOCKET'] = (string) $settings['unix_socket'];
         }
 
         return $environment;

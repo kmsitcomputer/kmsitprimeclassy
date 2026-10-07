@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -8,7 +8,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import ImageUploader from '@/components/ui/ImageUploader.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
-import { updateProfile, updatePassword, updateReferralCode, regenerateReferralCode, deleteReferralCode } from '@/api/auth'
+import { googleAuthUrl, updateProfile, updatePassword, updateReferralCode, regenerateReferralCode, deleteReferralCode } from '@/api/auth'
 import { listOrders } from '@/api/orders'
 import type { Order } from '@/api/types'
 import { ApiError } from '@/api/client'
@@ -19,6 +19,18 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const ui = useUiStore()
 const router = useRouter()
+const route = useRoute()
+
+/* IMP-001: explicit Google linking (konsumen). Result of the callback arrives as ?google=linked / ?google_error=<code>. */
+const isKonsumen = computed(() => auth.user?.role === 'konsumen')
+const googleLinkedNow = route.query.google === 'linked'
+const googleLinkError = route.query.google_error
+  ? t(`auth.google.errors.${route.query.google_error as string}`, t('auth.google.errors.provider_error'))
+  : ''
+const googleLinked = computed(() => googleLinkedNow || auth.user?.google_linked === true)
+function linkGoogle() {
+  window.location.assign(googleAuthUrl('link'))
+}
 
 /** Lightweight "dashboard" widget for konsumen — total order count + the most recent one, at the top of their account hub. */
 const orderSummary = ref<{ total: number; latest: Order | null } | null>(null)
@@ -222,6 +234,18 @@ async function handleLogout() {
           </div>
         </form>
       </div>
+    </div>
+
+    <div v-if="isKonsumen" class="mt-4 rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900">
+      <h2 class="mb-2 font-display text-base font-semibold text-stone-800 dark:text-stone-100">{{ t('auth.google.accountTitle') }}</h2>
+      <p v-if="googleLinkError" class="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">{{ googleLinkError }}</p>
+      <p v-if="googleLinked" class="flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+        <AppIcon name="check" :size="14" /> {{ t('auth.google.linked') }}
+      </p>
+      <template v-else>
+        <p class="mb-2 text-xs text-stone-500 dark:text-stone-400">{{ t('auth.google.linkHint') }}</p>
+        <AppButton size="sm" variant="secondary" @click="linkGoogle">{{ t('auth.google.link') }}</AppButton>
+      </template>
     </div>
 
     <div v-if="canManageReferralCode" class="mt-4 rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900">

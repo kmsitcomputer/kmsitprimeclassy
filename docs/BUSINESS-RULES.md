@@ -15,7 +15,7 @@ Canonical business invariants of the system as implemented. Source of truth for 
 
 ## 2. Role and authority matrix
 
-**LOCKED: exactly 10 roles.** `sales-kurir` was renamed in place to `sales-kurir-sub`; there is no 11th role; the legacy slug is only a compatibility alias.
+**LOCKED: exactly 11 roles.** `sales-kurir` was renamed in place to `sales-kurir-sub`; the legacy slug is only a compatibility alias. IMP-003 added the 11th role `koordinator-kurir` (branch delivery dispatcher, Human-approved in the IMP-002→IMP-004 master plan, 2026-10-05).
 
 | Role | Position | Created by | Referral code | Data scope |
 |---|---|---|---|---|
@@ -24,33 +24,39 @@ Canonical business invariants of the system as implemented. Source of truth for 
 | `admin` | Branch office staff | `agen` | — | Own branch |
 | `keuangan` | Branch finance | `agen` | — | Own branch (financial surface only) |
 | `gudang` | Branch warehouse | `agen` | — | Own branch (operational projection, no money) |
-| `kurir` | Branch courier | `agen` | — | Assigned shipments only |
+| `kurir` | Branch courier | `agen` or `koordinator-kurir` | — | Assigned shipments only |
+| `koordinator-kurir` | Branch delivery dispatcher | `agen` | — | Own branch (dispatch queue + courier assignment; operational projection, no money, no fulfillment) |
 | `korsal` | Sales coordinator | `agen` | `KO-` | Own downline |
 | `sales` | Seller | `agen` (with a branch Korsal) or `korsal` | `SA-` | Own referred consumers |
 | `sales-kurir-sub` | Seller + owner-deliverer | `agen` or `korsal`; or Sales converted by the owning `agen` | `SS-` (new only) | Own / referral scope + own Sub Location |
-| `konsumen` | Buyer | self-registration (optional referral) | — | Own orders |
+| `konsumen` | Buyer | self-registration (optional referral) or Google registration (**mandatory** referral, §23) | — | Own orders |
 
-Who may create whom (**LOCKED**, `HierarchyRules`): `super_admin` → `agen`; `agen` → `korsal`, `sales`, `admin`, `keuangan`, `kurir`, `gudang`, `sales-kurir-sub`; `korsal` → `sales`, `sales-kurir-sub`. Nobody else creates users.
+Who may create whom (**LOCKED**, `HierarchyRules`): `super_admin` → `agen`; `agen` → `korsal`, `sales`, `admin`, `keuangan`, `kurir`, `gudang`, `sales-kurir-sub`, `koordinator-kurir`; `korsal` → `sales`, `sales-kurir-sub`; `koordinator-kurir` → `kurir` (same Agent, parent = actor; explicit Human A1-02 approval). Nobody else creates users.
 
 Authority by action (route role gate **and** a policy/service ownership check apply; "same Agent" is always enforced):
 
 | Action | Allowed roles |
 |---|---|
 | Place an order | `konsumen`, `agen`, `korsal`, `sales`, `sales-kurir-sub` (policy narrows to own network / self) |
-| View orders | `super_admin` all; `agen`/`admin`/`keuangan` branch; `korsal` own `korsal_id`; `sales`/`sales-kurir-sub` own `sales_id`; `konsumen` own; `gudang` list only (operational projection); `kurir` none (uses `/kurir/orders`) |
+| View orders | `super_admin` all; `agen`/`admin`/`keuangan`/`koordinator-kurir` branch; `korsal` own `korsal_id`; `sales`/`sales-kurir-sub` own `sales_id`; `konsumen` own; `gudang` list only (operational projection); `kurir` none (uses `/kurir/orders`) |
+| Manage courier accounts | `koordinator-kurir` may list/edit only its own child `kurir` accounts in the same Agent; cannot delete, reassign referrals or change roles/hierarchy |
+| Dispatch workspace (`GET /dispatch`, `GET /dispatch/couriers`) | `super_admin` (with `?agent_id=`), `agen`, `admin`, `koordinator-kurir` — operational rows only, never financial amounts |
+| Assign a courier to a shipment | `super_admin`; `agen`/`admin`/`koordinator-kurir` branch (kurir self-assigns via status); assignment locks Order→Shipment, rejects a different existing executor / terminal work, and is idempotent for the same executor (A1-03) |
+| Move shipment status (`diproses`→`dikirim`→`terkirim`) | `super_admin`, `agen`, `admin`, `kurir`, `sales-kurir-sub` (owner of `self_sub`), and `koordinator-kurir` **only as the recorded executor of their own shipment** (proof required `dikirim`→`terkirim`); dispatcher authority never covers another courier's work |
 | Move order status (`diproses` …) | `super_admin`, `agen`, `admin` |
 | Cancel an order | `super_admin`; `agen`/`admin` branch; `korsal`/`sales`/`sales-kurir-sub`/`konsumen` for their own (business rule §14 decides when) |
 | Adjust fulfilled quantity, reschedule/split | `super_admin`, `agen`, `admin` |
 | **Add a product line to an existing order (SC-03)** | **`admin` only**, same Agent |
-| Verify payment / mark COD / settle DP / confirm COD proof | `super_admin`, `keuangan` |
+| Verify payment proof / settle DP / confirm COD proof | `super_admin`, `keuangan`; **plus `korsal`/`sales`/`sales-kurir-sub` for orders whose konsumen is CURRENTLY in their own referral scope, same Agent (§24)** — UAT-008, Human-approved; still the canonical `PaymentService`, never a second ledger |
+| Mark COD paid/unpaid directly (no proof workflow) | `super_admin`, `keuangan` (unchanged — deliberately excluded from the UAT-008 scoped extension) |
 | Refund and additional-payment status; mark return refunded | `super_admin`, `keuangan` (lists also `agen`, `admin`) |
-| Assign a courier to a shipment | `super_admin`, `agen`, `admin` |
-| Operate a shipment (pickup/deliver, receipt) | `super_admin`, `agen`, `admin`, `kurir` (own/claimable), `sales-kurir-sub` (own `self_sub` only) |
+| Operate a shipment (pickup/deliver, receipt) | `super_admin`, `agen`, `admin`, `kurir` (own/claimable), `sales-kurir-sub` (own `self_sub` only), `koordinator-kurir` (own executor profile only) |
 | Delivery verification | `admin` (same Agent) and `super_admin` |
 | Return: request / review / inspect / finalize | `konsumen` / `super_admin`,`agen`,`admin` / `gudang` / `admin` (courier pickup+confirm by `kurir`) |
 | Product & Variation create/read/update | `super_admin`, `agen`, `admin` |
 | Product & Variation delete; fee write; category write | delete `super_admin`,`agen` (Admin **denied**); fees `super_admin`,`agen`; categories `super_admin` |
-| Warehouse stock reads, sellable, stock requests (read), transfers/opnames (read) | `super_admin`, `agen`, `admin`, `gudang` |
+| Warehouse stock reads, sellable, transfers/opnames (read) | `super_admin`, `agen`, `admin`, `gudang` |
+| Gudang "Order Diproses" queue + order/stock-request detail (only `diproses` AND no courier assigned) | `gudang` (own branch; server-side scope rule) |
 | Request stock addition / Sub adjustment | `gudang` (Admin approves/rejects) |
 | Create transfers; create/count/submit opnames; propose fulfilment | `gudang` |
 | Approve/reject transfers, opnames, fulfilment proposals, stock-addition requests; toggle Factory Plan | `admin` only |
@@ -65,6 +71,7 @@ Authority by action (route role gate **and** a policy/service ownership check ap
 | CMS, media library, languages, website settings, audit log, global gateway/shipping toggles, region import/export | `super_admin` |
 | Agent payment-method config / shipping-provider config & store profile | `agen`,`admin` / `agen` |
 | Referral-code management | `agen`, `korsal`, `sales`, `sales-kurir-sub` |
+| Submit a payment proof (bank transfer / DP / settlement / COD) | `konsumen` (own); `super_admin`, `agen`/`admin`/`keuangan` (branch); **`korsal`/`sales`/`sales-kurir-sub` on behalf of a konsumen currently in their own referral scope** (§24) |
 
 ## 3. Agent hierarchy and creation
 
@@ -134,11 +141,32 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 - Reserve/consume/release are idempotent per item; every movement writes an immutable `stock_movements` row with actor and reference.
 - Bucket rules: `shipping` changes only through approved fulfilment, cancellation or return reversal; `sales` is derived and never stored or edited; `factory_plan` is written only while active (via Admin-approved request).
 
-## 11. Shipment lifecycle
+## 11. Shipment lifecycle and the work-unit model (**LOCKED**)
 
-- One Shipment per order item at creation (`standard`, `pending`, no courier); reschedule/split and SC-03 lines get their own fresh shipment. One order may span several shipments/couriers; order status summarizes them.
+**LOCKED MODEL (Human, 2026-10-07).** A Shipment is **NOT** per OrderItem.
+
+One canonical Shipment represents the compatible delivery work of one **grouping key**:
+
+> `Order` + `requested_delivery_date` + compatible `delivery_mode` + compatible owner (the owning Sales-Kurir-Sub, for `self_sub`)
+
+Multiple OrderItems sharing that grouping key **MUST converge into ONE canonical Shipment**, and no path may mint a second same-key Shipment. Different dates ⇒ different shipments (a date is a real pickup); `self_sub` never merges with `standard` and two different Sub owners never merge. An order therefore spans several shipments/couriers through **dates or Sub owners, never item count**. Every path that can put a new item on a shipment — checkout, whole-line reschedule, partial-quantity reschedule split and SC-03 Add Product — converges on this rule through the single implementation `ShipmentCanonicalizationService` / `OrderFulfillmentService::consolidateIntoShipmentForDate`.
+
+Which work is done at which grain (**LOCKED**, deliberately different per concern):
+
+| Concern | Work unit |
+|---|---|
+| Gudang fulfillment proposal / warehouse queue | per **`OrderItem`** |
+| Courier pickup / delivery progress | per **`OrderItem`** |
+| Dispatch workspace (Koordinator) and courier assignment | per **canonical Shipment** |
+| Thermal receipt (Resi) | per **canonical Shipment** |
+| Shipment lifecycle (`status`/`shipped_at`/`delivered_at`) | **derived aggregate** over the canonical Shipment's own items |
+
+- A Shipment is created `standard`, `pending`, with no courier; its provider/route/rate/ETD/weight are immutable snapshots and the shipping fee snapshot lands on exactly one canonical shipment.
+- **Courier progress is PER `OrderItem`.** Acting on one item never moves its shipment siblings, even though they share the order, the shipment, the date and the courier. The Shipment stays the assignment/delivery container (executor authorization, delivery proof, aggregates); the Office per-shipment and per-order bulk paths remain available to `agen`/`admin`/`super_admin`.
+- A Shipment's `status` / `shipped_at` / `delivered_at` are a **derived aggregate over its own items**, never a copy of whichever item moved last: it is `delivered` (and `delivered_at` set) only when EVERY item has arrived, and it never walks backwards once delivered. A partially delivered shipment is `in_transit` and is **not** verifiable for delivery.
 - Kurir may claim an unassigned `diproses` shipment (becomes `dikirim`); another courier can then no longer see or act on it. `delivered` (`terkirim`) requires **photo proof**.
-- Shipment provider/route/rate/ETD/weight are immutable snapshots. Thermal receipt is per shipment (pre/post pickup derived from state), read-only, audited, never for a cancelled order.
+- Delivery verification is only possible for a shipment whose items have ALL arrived (it is append-only, so the verdict is re-derived from the items, never trusted from a stored column alone).
+- Thermal receipt is per shipment (pre/post pickup derived from state), read-only, audited, never for a cancelled order.
 
 ## 12. Delivery lifecycle, self-delivery and verification
 
@@ -153,6 +181,8 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 - `orders.total_amount` is recomputed only by `OrderTotalCalculator` (Σ `unit_price_snapshot × fulfilled_quantity` + shipping + admin − discount); `paid_amount`/`remaining_amount`/`payment_status` are written only through `PaymentService`.
 - `remaining > 0` always means not fully paid. **Additional payment** appears only when an order that was already fully paid (remaining ≤ 0) later owes more than was paid; unpaid/partial orders simply carry a larger remaining balance. **Refund** appears only for real overpayment, incrementally. A DP settlement is a `payment` transaction, not an `additional_payment`.
 - A pending obligation freezes further quantity increase/reduction on that item until settled. Settlement/refund processing is idempotent and never edits historical payment rows.
+- **"DP Diajukan" / "Menunggu Verifikasi" (UAT-004)** is a read-only triage projection, never money: submitted-but-unverified nominal is exposed as `submitted_dp` and is NEVER added to `verified_dp`/`total_paid` or subtracted from `remaining_balance`. It is read from the order's **current** manual/COD transaction — the same row the verification action applies to (`PaymentController::latestManualTransaction`) — so a verification row left behind on a superseded transaction can never make a settled order look like it is still awaiting verification.
+- **Settlement request idempotency (Human decision):** a DP settlement request asks for one specific outstanding amount. An equivalent request for the same canonical financial context (same order, same still-pending `dp_settlement` transaction, same nominal as the order's **current** `remaining_amount`) is an **idempotent replay**: no second transaction, no ledger movement, no duplicate financial side effect — the existing pending settlement is returned with HTTP 200. Two simultaneous requests converge on **one** canonical pending settlement (the decision runs under the canonical Order-first lock and re-reads through a locking read). If the outstanding balance has **moved** since a settlement was requested, that pending settlement is **preserved untouched** and the different request is refused by the existing duplicate-obligation rule (`messages.payment.already_processed`) instead of silently replacing it; resolving it uses the existing reject/verify action — no new workflow.
 - Verification roles: `super_admin`, `keuangan`. Gateway webhooks are signature-verified, amount-checked and idempotent.
 
 ## 14. Returns and cancellation
@@ -171,6 +201,7 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 ## 16. Warehouse requests and fulfilment
 
 - **LOCKED chain:** order enters `diproses` → one Stock Request (+ items for Agent-sourced order items) → **Gudang proposes** quantities (≤ remaining) → **Admin approves** → physical move + reservation release (§10). Direct Gudang fulfilment is disabled. Partial fulfilment keeps the remainder on the same request/item; status is derived `pending / partial / fulfilled`.
+- **IMP-001 Gap 2 (user-facing surface):** there is no standalone user-facing "Stock Request" menu/feature anymore. Gudang works the **"Order Diproses"** queue (`GET /warehouse/orders/diproses`): an order is visible to Gudang **only while** its status is exactly `diproses` **and** no courier has been assigned (no shipment with `courier_id`, and no `self_sub` shipment with `self_delivered_by_user_id`). This invariant is enforced **server-side** (queue query, `OrderPolicy::view` for the order detail, and `StockRequestProposalService::propose`) — the moment either becomes false the order disappears from Gudang's queue and direct API/detail access is refused. The internal `stock_requests` / `stock_request_proposals` tables and the proposal/approval endpoints remain the canonical persistence behind this workflow (Gudang proposes via `POST /warehouse/stock-requests/{request}/proposals`; Admin reviews via `GET /warehouse/fulfillment-proposals` + approve/reject) and are never exposed as a standalone feature.
 - Stock Request is created exactly once (idempotent); Sub-sourced items are excluded; an order made only of Sub items has none.
 - Gudang cannot change stock by itself: stock addition (Transit/Factory Plan) and Sub adjustments are **requests approved by Admin**; Super Admin and Agen are not inventory approvers.
 
@@ -199,27 +230,50 @@ Mixed-source orders and SC-03 additions to a Sub-sourced order are out of scope 
 
 ## 21. Existing-order adjustments
 
-- Quantity adjustment and reschedule: only while the order is `diproses`; `super_admin`/`agen`/`admin`. Sub-sourced adjustments reconcile the Sub reservation (reduce/increase/split preserving `sub_location_id`, `self_sub` actor and lineage); post-shipment quantities are never rewritten (use returns / additional items).
+- Quantity adjustment and reschedule: only while the order is still in the fulfillment window — order status `diproses` (and `diterima` for a reschedule), never once it has started shipping (`dikirim`/`terkirim`/… ) or been cancelled; `super_admin`/`agen`/`admin`. The window is enforced on the **Order** row under its lock, not only on the item, because per-item courier progress means an item's status no longer mirrors its order's. Sub-sourced adjustments reconcile the Sub reservation (reduce/increase/split preserving `sub_location_id`, `self_sub` actor and lineage); post-shipment quantities are never rewritten (use returns / additional items).
+- **LOCKED (Human, final 2026-10-07):** a requested delivery date is re-datable ONLY for KURIR ONLINE (`shipping_provider_code = 'openroute'`) and SELF DELIVERY / Sub (`delivery_mode = 'self_sub'`). EKSPEIDISI/RajaOngkir and PICKUP/Ambil di Tempat are **forbidden**. It is an allowlist decided by `Shipment::isDeliveryDateReschedulable()` from the canonical persisted fields, enforced server-side inside the Order lock (frontend gating is convenience only).
 - A partial split creates a child item (`split_from_order_item_id`) with its own shipment; for Agent items the Stock Request is split conservatively, or the split is rejected 422 if the request has progressed beyond what can be split deterministically.
 
 ## 22. SC-03 — add-line to an existing order
+
+**HUMAN BUSINESS DECISION — APPROVED (2026-10-06):** new additions are forbidden after any courier or self-delivery executor is assigned anywhere on the Order. No automatic unassignment or Gudang exception. If SC-03 wins before assignment, added demand must be fulfilled before explicit assignment or implicit pickup assignment can close Gudang access. Existing identical-request replay is preserved.
 
 **LOCKED (Human decision):** only the **`admin`** role, same Agent/branch, may add a **new** product/variation line to an existing order. `super_admin`, `agen` and every other role are denied; `OrderPolicy::manageFulfillment` is unchanged and is not reused.
 
 | Rule | Behaviour |
 |---|---|
-| Eligibility | Order status `diproses` only; Agent stock only; Sub-sourced orders are rejected 422 |
+| Eligibility | Order status `diproses` only; no shipment has `courier_id` or `self_delivered_by_user_id`; Agent stock only; Sub-sourced orders are rejected 422 |
 | Resolution | Shared `resolveLine`; server price/fees/SKU/snapshot (same code path as checkout); client price/stock-source fields rejected |
 | Quantity / date | `quantity` integer ≥ 1; `requested_delivery_date` optional (defaults to the order's estimate), must not be in the past for a **new** addition |
-| Fulfilment | One fresh `standard` pending shipment; the order's single Stock Request gains one item (and is re-opened to `pending`/`partial` if it was `fulfilled`; history preserved); missing/cancelled request ⇒ 422 |
+| Fulfilment | The added line MUST reuse/consolidate into the compatible existing **canonical Shipment** for its own grouping key (§11) instead of creating another same-key Shipment; a fresh `standard` pending Shipment is created only when no canonical unit for that key exists yet. SC-03 already requires that no executor exists anywhere on the order, so the joined unit is always unassigned and mutable. The order's single Stock Request gains one item (and is re-opened to `pending`/`partial` if it was `fulfilled`; history preserved); missing/cancelled request ⇒ 422 |
 | Money | Totals via `OrderTotalCalculator`, payment via `PaymentService::reconcileTotals`; unpaid/partial ⇒ remaining grows; fully paid ⇒ exactly one pending `OrderAdditionalPayment` for the delta linked to the new item; nothing is silently marked paid |
 | Commission | Agent + sales commission rows like checkout; courier fee on delivery |
 | Idempotency | `Idempotency-Key` required (non-blank, ≤ 100 chars); unique per order. Replay of the **same original request** (product, variation, quantity, requested date, payment method; `reason` excluded) returns `200` without any new side effect — even after the line was adjusted/split, the order moved on, or the date elapsed; a materially different request under the same key ⇒ `409` |
-| Concurrency | Lock order Order → Stock Request → inventory (§ARCHITECTURE 7); safe against warehouse approval, checkout and other additions |
+| Concurrency | Lock order Order → Stock Request → inventory (§ARCHITECTURE 7); executor eligibility checked by a current locking read inside the Order boundary; safe against courier assignment, warehouse approval, checkout and other additions |
 | Response | `201` (replay `200`) with the freshly persisted canonical `OrderResource` |
 | Audit | `order_item.added` activity log |
 
-## 23. Observations to confirm (not changed by documentation)
+## 23. Google sign-in (IMP-001, konsumen only)
+
+- Google is an **identity provider only**; it never bypasses referral rules. Email/password registration is unchanged (referral still optional there).
+- An already-linked Google identity simply logs in (the provider identity always wins over an email collision). A local account is **auto-linked only if its own email is verified** (`email_verified_at` set) and equals the verified Google email; local registration does not verify email, so an **unverified local account is never auto-linked** (`local_account_exists`, nothing created or linked) — otherwise a pre-registered victim email would hand the account to whoever signs in with it.
+- **Secure explicit linking:** an authenticated konsumen may link a Google account from *My Account* (`mode=link`, requires the web session; Google email need not match). A Google identity owned by anyone else (`identity_in_use`) or a second identity on the same user (`already_linked`) is refused. Linking never touches referral/ownership.
+- Whatever path is used, an existing account's referral/ownership fields (`agent_id`, `korsal_id`, `sales_id`, `parent_id`) are **never** written; a referral link opened alongside is recorded as ignored in the audit log. Reassignment stays exclusively `ReferralReassignmentService`.
+- Google **login never creates** a konsumen. A **new** konsumen is created only from `register` mode with a valid referral code that is re-validated and re-resolved server-side at callback time (`ReferralService::resolveChainByCode`); no valid referral ⇒ no account.
+- An email that belongs to a non-konsumen, inactive or soft-deleted account is refused (`email_in_use`) — never linked, never duplicated.
+- OAuth state: server-side session (`state`, `nonce`, PKCE verifier, mode, referral *code*), one-time use, 10-minute TTL; `state`/`nonce`/`aud`/`iss`/`exp`/`email_verified` are checked. No Google token is stored or logged; only `provider`, `provider_user_id`, `provider_email`, `last_login_at` are kept (`user_social_identities`, UNIQUE `(provider, provider_user_id)` and `(user_id, provider)`).
+
+## 24. Assisted consumer payment (IMP-001)
+
+- `korsal`, `sales` and `sales-kurir-sub` may submit a payment **proof** for an order of a konsumen who is **currently** inside their own referral scope (`OrderPolicy::payOnBehalf`: same Agent; Korsal ⇒ `konsumen.korsal_id = actor`, Sales/Sales-Kurir-Sub ⇒ `konsumen.sales_id = actor`). Knowing an order id grants nothing; cross-Agent and cross-referral access is denied; after an audited reassignment the scope follows the konsumen's current chain.
+- Order owner (`orders.konsumen_id`) is never rewritten. The payer actor is recorded on the proof (`submitted_by_user_id`, `submitted_on_behalf`) and in the audit log (`payment.proof_submitted` / `payment.cod_proof_submitted`, with `on_behalf_of_konsumen_id`). Historical proofs keep `NULL` (unknown, not backfilled).
+- The payer **cannot** mark anything paid on their own: `PaymentService` remains the only writer of paid/remaining/status. **UAT-008 (Human-approved 2026-10-06):** the proof-based approve/reject actions (`verify`, DP-settlement request, COD-proof confirm) are additionally available to an in-scope `korsal`/`sales`/`sales-kurir-sub`, using the *same* `payOnBehalf` scope rule and the same canonical `PaymentService`; the direct COD paid/unpaid toggle stays `super_admin`/`keuangan` only. Scope, never a global grant.
+- **Hardened invariant (applies to every submitter, including the konsumen):** a proof is refused (422) once the transfer is verified/paid, the COD proof is confirmed, or the order is cancelled. Previously a re-upload silently reset a *verified* proof to `pending` while `paid_amount` stayed applied, so a second verification would add the same amount again (double count). No authoritative rule permits replacing verified evidence, so this is kept deliberately; a *rejected* proof can still be re-submitted. Writers lock verification (or COD proof) row → transaction → order.
+- **Resolved in IMP-004 (2026-10-05):** the deferred gap above is closed — `OrderPolicy::view` now ALSO grants read access to the Sales whose konsumen is **currently** in its referral scope (mirroring `payOnBehalf`; same Agent), so the new Sales can open the older order's detail after an audited reassignment. The order's historical `sales_id` snapshot is never rewritten (audit continuity, AGENTS.md §9) — the old Sales keeps its snapshot access, and a Sales that is neither snapshot owner nor current scope is still denied.
+- Ordinary email/password registration is unchanged in IMP-001 (referral remains optional there); only Google registration requires a referral.
+- A proof is refused (422) when the above conditions hold. Gateway methods (Xendit/Tripay/Stripe) have no proof step and remain webhook-only.
+
+## 25. Observations to confirm (not changed by documentation)
 
 - **Self-purchase sales fee for Sales-Kurir-Sub:** the beneficiary rule (§15) treats `agen`/`korsal`/`sales` buyers as self-referrers but not `sales-kurir-sub`, so a Sales-Kurir-Sub buying for itself routes the sales fee to its Korsal (or the Agent) rather than itself. Confirm with the business whether this is intended before relying on or changing it.
 - **Legacy stock fallback:** warehouse-authoritative mode is the default, but a target with no warehouse rows still falls back to legacy on-hand (§8).

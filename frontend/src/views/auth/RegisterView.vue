@@ -7,7 +7,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import PasswordInput from '@/components/ui/PasswordInput.vue'
 import { useAuthStore } from '@/stores/auth'
-import { previewReferral } from '@/api/auth'
+import { previewReferral, googleAuthUrl } from '@/api/auth'
 import { ApiError } from '@/api/client'
 import { getPersistedReferralCode, clearPersistedReferral } from '@/utils/referral'
 
@@ -35,25 +35,56 @@ const referralPreview = ref<{ referrer_name: string; agent_store_name: string | 
 const referralChecking = ref(false)
 
 let debounceHandle: ReturnType<typeof setTimeout> | undefined
+let activeCheck = 0
+
+/** Validate a code against the canonical endpoint, ignoring stale results. */
+async function checkReferral(code: string) {
+  const checkId = ++activeCheck
+  referralChecking.value = true
+  try {
+    const preview = await previewReferral(code)
+    if (checkId === activeCheck) referralPreview.value = preview
+  } catch {
+    if (checkId === activeCheck) referralPreview.value = null
+  } finally {
+    if (checkId === activeCheck) referralChecking.value = false
+  }
+}
+
+function scheduleReferralCheck(code: string) {
+  referralPreview.value = null
+  clearTimeout(debounceHandle)
+  if (!code) {
+    referralChecking.value = false
+    return
+  }
+  referralChecking.value = true
+  debounceHandle = setTimeout(() => void checkReferral(code), 400)
+}
 
 watch(
   () => form.referral_code,
   (code) => {
-    referralPreview.value = null
-    clearTimeout(debounceHandle)
-    if (!code) return
-    debounceHandle = setTimeout(async () => {
-      referralChecking.value = true
-      try {
-        referralPreview.value = await previewReferral(code)
-      } catch {
-        referralPreview.value = null
-      } finally {
-        referralChecking.value = false
-      }
-    }, 400)
+    activeCheck++ // invalidate any in-flight preview for a changed code
+    scheduleReferralCheck(code)
   },
 )
+
+// A pre-filled referral (from ?ref= or the session-persisted code) must be
+// validated too — the watcher only fires on changes after mount, so an
+// untouched prefill would otherwise leave the Google button disabled.
+if ((route.query.ref as string | undefined) || getPersistedReferralCode()) {
+  scheduleReferralCheck(form.referral_code)
+}
+
+const googleError = route.query.google_error as string | undefined
+if (googleError) generalError.value = t(`auth.google.errors.${googleError}`, t('auth.google.errors.provider_error'))
+
+/** Google registration is only offered once the typed code resolves to a real referrer; the backend re-validates it anyway. */
+function registerWithGoogle() {
+  if (!referralPreview.value) return
+  window.location.assign(googleAuthUrl('register', form.referral_code))
+}
 
 async function submit() {
   submitting.value = true
@@ -97,7 +128,8 @@ async function submit() {
           {{ t('auth.register.referredBy', { name: referralPreview.referrer_name }) }}
           <template v-if="referralPreview.agent_store_name">· {{ referralPreview.agent_store_name }}</template>
         </p>
-        <p v-else-if="!form.referral_code" class="mt-1 text-xs text-stone-400">
+        <p v-else-if="form.referral_code" class="mt-1 text-xs text-red-600">{{ t('auth.register.invalidCode') }}</p>
+        <p v-else class="mt-1 text-xs text-stone-400">
           {{ t('auth.register.noReferralCode') }}
           <RouterLink :to="{ name: 'store-locator' }" class="font-medium text-brand-600 dark:text-brand-400">{{ t('auth.register.viewAgentDirectory') }}</RouterLink>
         </p>
@@ -134,6 +166,11 @@ async function submit() {
 
       <AppButton type="submit" size="lg" block :disabled="submitting">{{ submitting ? t('auth.register.submitting') : t('auth.register.submit') }}</AppButton>
     </form>
+
+    <div class="mt-3">
+      <AppButton type="button" variant="secondary" size="lg" block :disabled="!referralPreview" @click="registerWithGoogle">{{ t('auth.google.register') }}</AppButton>
+      <p v-if="!referralPreview" class="mt-1 text-center text-xs text-stone-400">{{ t('auth.google.needReferral') }}</p>
+    </div>
 
     <p class="mt-5 text-center text-sm text-stone-500 dark:text-stone-400">
       {{ t('auth.register.haveAccount') }}

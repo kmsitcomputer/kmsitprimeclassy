@@ -17,12 +17,15 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingProvider;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Models\WarehouseSubLocation;
 use App\Models\Village;
 use App\Services\Fee\FeeService;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Payment\AvailablePaymentMethodService;
 use App\Services\Payment\PaymentService;
+use App\Services\Pricing\PricingService;
+use App\Services\Pricing\VoucherService;
 use App\Services\Shipping\ShippingQuoteService;
 use App\Services\Stock\StockRequestService;
 use App\Services\Stock\StockSourceResolver;
@@ -54,6 +57,8 @@ class OrderService
         private readonly AvailablePaymentMethodService $availablePaymentMethodService,
         private readonly SubStockService $subStockService,
         private readonly StockSourceResolver $stockSourceResolver,
+        private readonly PricingService $pricingService,
+        private readonly VoucherService $voucherService,
     ) {}
 
     /**
@@ -80,6 +85,7 @@ class OrderService
         ?array $selectedCourierOption = null,
         ?string $stockSource = null,
         ?int $subLocationId = null,
+        ?string $voucherCode = null,
     ): Order {
         $actor ??= $konsumen;
 
@@ -109,7 +115,7 @@ class OrderService
         $subLocation = $this->stockSourceResolver->resolve($actor, $konsumen, $stockSource, $subLocationId)['sub_location'];
 
         try {
-            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption, $subLocation) {
+            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption, $subLocation, $voucherCode) {
                 $agentId = $konsumen->agent_id;
 
                 $agentProfile = AgentProfile::query()->where('user_id', $agentId)->first();
@@ -128,7 +134,8 @@ class OrderService
 
                 // Placeholder order — totals are filled in after items are priced below.
                 $order = Order::create([
-                    'order_no' => 'TEMP',
+                    // A shared unique placeholder can deadlock concurrent inserts.
+                    'order_no' => 'TEMP-'.bin2hex(random_bytes(12)),
                     'idempotency_key' => $idempotencyKey,
                     'konsumen_id' => $konsumen->id,
                     'sales_id' => $konsumen->sales_id,
@@ -151,6 +158,14 @@ class OrderService
                     'province_snapshot' => $destinationSnapshot['province_name'],
                     'latitude_snapshot' => $destinationSnapshot['latitude'],
                     'longitude_snapshot' => $destinationSnapshot['longitude'],
+                    // IMP-002: canonical structured region ids persisted with
+                    // the order (stable filtering/grouping keys), alongside the
+                    // legacy name snapshots above.
+                    'province_id' => $destinationSnapshot['province_id'],
+                    'regency_id' => $destinationSnapshot['regency_id'],
+                    'district_id' => $destinationSnapshot['district_id'],
+                    'village_id' => $destinationSnapshot['village_id'],
+                    'postal_code' => $destinationSnapshot['postal_code'],
                     'delivery_date_estimate' => $deliveryDate,
                 ]);
 
@@ -221,13 +236,39 @@ class OrderService
                 }
 
                 $shippingFee = $quote->cost;
-                $total = $subtotal + $shippingFee + $adminFee;
+
+                // IMP-002 voucher: validate + apply against the SUBTOTAL only
+                // (discounts never offset shipping/admin fees). The server
+                // recomputes everything; the client only supplied the code.
+                $voucherId = null;
+                $voucherDiscount = 0.0;
+                if ($voucherCode) {
+                    $voucher = $this->voucherService->resolve($agentId, $voucherCode);
+                    // Consume a redemption under the voucher row lock BEFORE
+                    // persisting the order: an overspent/raced voucher aborts
+                    // the whole checkout (rolls back everything above).
+                    if (! $this->voucherService->consume($agentId, $voucher->id)) {
+                        throw new ApiException(__('messages.voucher.invalid'), 422, ['voucher_code' => __('messages.voucher.invalid')]);
+                    }
+
+                    $voucherId = $voucher->id;
+                    $voucherDiscount = $this->voucherBudgetForLines($agentId, $voucher, collect($resolvedLines));
+                }
+
+                // total = subtotal − voucher discount + shipping + admin fee,
+                // exactly the canonical OrderTotalCalculator formula
+                // (subtotal − discount_amount + shipping + admin). subtotal_amount
+                // stays the sum of effective (product-discounted) line prices, so
+                // a later OrderTotalCalculator::recalculate keeps the same total.
+                $total = round($subtotal - $voucherDiscount + $shippingFee + $adminFee, 2);
 
                 $order->update([
                     'order_no' => 'PC-'.now()->format('ymd').'-'.str_pad((string) $order->id, 6, '0', STR_PAD_LEFT),
                     'subtotal_amount' => $subtotal,
                     'shipping_fee_amount' => $shippingFee,
                     'admin_fee_amount' => $adminFee,
+                    'discount_amount' => round($voucherDiscount, 2),
+                    'voucher_id' => $voucherId,
                     'total_amount' => $total,
                 ]);
 
@@ -254,40 +295,64 @@ class OrderService
                     ? ShippingProvider::query()->where('code', $quote->providerCode)->first()
                     : null;
 
-                // Every item gets its OWN Shipment from the start — never a
-                // shared one — so a kurir's pickup/deliver action on one
-                // product never touches its siblings (Blueprint: "satu order
-                // bisa beberapa kurir"; this is the same split this order
-                // would otherwise only reach via a later reschedule, see
-                // OrderFulfillmentService::rescheduleItemDeliveryDate).
-                // The real shipping_fee_snapshot/rate_per_km live on exactly
-                // one (the first) shipment — Order.shipping_fee_amount is
-                // already the authoritative order-level total; duplicating
-                // the fee onto every per-item shipment would only make it
-                // look like the order was charged shipping N times.
+                // LOCKED GROUPING RULE (Human UAT-005): within ONE order, compatible delivery items for the SAME
+                // requested delivery date share ONE canonical Shipment. Previously every item got its own
+                // shipment unconditionally, so one order with four same-date items produced four shipment ids —
+                // and therefore four dispatch cards, four "Ambil & Kirim" buttons, four courier-assignment
+                // controls and four Print Resi rows for what is physically a single delivery.
+                //
+                // The grouping key is (requested_delivery_date, fulfillment mode/provider semantics):
+                //   - identical dates in the same order  -> ONE shipment reused by all those items
+                //   - different dates                   -> separate shipments (a date is a real pickup)
+                //   - Sub (self_sub) never merges into a standard shipment, nor the reverse
+                // An order still legitimately spans several couriers/shipments — that now comes from
+                // different dates or different Sub owners, not from the item count (Blueprint: "satu order
+                // bisa beberapa kurir").
+                //
+                // The real shipping_fee_snapshot/rate_per_km live on exactly one (the first) created
+                // shipment — Order.shipping_fee_amount is already the authoritative order-level total;
+                // duplicating the fee onto every shipment would only make it look like the order was
+                // charged shipping N times.
                 $orderItems = OrderItem::query()->where('order_id', $order->id)->get();
 
-                foreach ($orderItems as $index => $item) {
-                    $shipment = Shipment::create([
-                        'order_id' => $order->id,
-                        'shipping_provider_id' => $providerRow?->id,
-                        'shipping_provider_code' => $quote->providerCode,
-                        'origin_latitude' => $agentProfile->latitude,
-                        'origin_longitude' => $agentProfile->longitude,
-                        'destination_latitude' => $destinationSnapshot['latitude'],
-                        'destination_longitude' => $destinationSnapshot['longitude'],
-                        'distance_km' => $quote->distanceKm,
-                        'provider_meta' => $quote->meta,
-                        'status' => 'pending',
-                        // R-03: a Sub-sourced order is delivered by its owning Sales-Kurir-Sub, never a
-                        // Kurir — the shipment is created as self_sub with that stable user reference
-                        // (courier_id stays NULL). Agent-sourced orders keep the standard Kurir path.
-                        'delivery_mode' => $subLocation ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD,
-                        'self_delivered_by_user_id' => $subLocation?->owner_user_id,
-                        ...($index === 0 ? ['rate_per_km' => $quote->ratePerKm, 'shipping_fee_snapshot' => $shippingFee] : []),
+                $deliveryMode = $subLocation ? Shipment::DELIVERY_MODE_SELF_SUB : Shipment::DELIVERY_MODE_STANDARD;
+                $shipmentByGroupKey = [];
+                $shipmentIndex = 0;
+
+                foreach ($orderItems as $item) {
+                    // Same date + same delivery semantics => the same canonical shipment. A Sub owner is
+                    // part of the key so two different Sub owners are never merged into one delivery.
+                    $groupKey = implode('|', [
+                        $item->requested_delivery_date?->toDateString() ?? '',
+                        $deliveryMode,
+                        $subLocation?->owner_user_id ?? '',
                     ]);
 
-                    $item->update(['shipment_id' => $shipment->id]);
+                    if (! isset($shipmentByGroupKey[$groupKey])) {
+                        $shipment = Shipment::create([
+                            'order_id' => $order->id,
+                            'shipping_provider_id' => $providerRow?->id,
+                            'shipping_provider_code' => $quote->providerCode,
+                            'origin_latitude' => $agentProfile->latitude,
+                            'origin_longitude' => $agentProfile->longitude,
+                            'destination_latitude' => $destinationSnapshot['latitude'],
+                            'destination_longitude' => $destinationSnapshot['longitude'],
+                            'distance_km' => $quote->distanceKm,
+                            'provider_meta' => $quote->meta,
+                            'status' => 'pending',
+                            // R-03: a Sub-sourced order is delivered by its owning Sales-Kurir-Sub, never a
+                            // Kurir — the shipment is created as self_sub with that stable user reference
+                            // (courier_id stays NULL). Agent-sourced orders keep the standard Kurir path.
+                            'delivery_mode' => $deliveryMode,
+                            'self_delivered_by_user_id' => $subLocation?->owner_user_id,
+                            ...($shipmentIndex === 0 ? ['rate_per_km' => $quote->ratePerKm, 'shipping_fee_snapshot' => $shippingFee] : []),
+                        ]);
+
+                        $shipmentByGroupKey[$groupKey] = $shipment;
+                        $shipmentIndex++;
+                    }
+
+                    $item->update(['shipment_id' => $shipmentByGroupKey[$groupKey]->id]);
                 }
 
                 if ($initialStatus === 'diproses') {
@@ -337,6 +402,70 @@ class OrderService
     }
 
     /**
+     * Canonical voucher→line budget calculation shared by quote() and
+     * createOrder() so the preview and the persisted order can never diverge.
+     *
+     * A1-06: resolution of the target happens over the ACTUAL resolved cart
+     * lines (not default-NULL ids), so product/variation-targeted vouchers
+     * work. The calculation uses the effective (discounted) line subtotal —
+     * the same PricingService figure the order persists — and rejects only
+     * when NO eligible line exists.
+     *
+     * A1-07: a FIXED voucher has ONE transaction-level face-value budget; it
+     * is allocated at most ONCE across the eligible lines (never per line),
+     * capped by the eligible subtotal. Percentage vouchers keep separate
+     * per-line percentage semantics, both capped by the same eligible
+     * subtotal and never driving the total negative.
+     *
+     * @param  \Illuminate\Support\Collection<int, array>  $resolvedLines
+     */
+    private function voucherBudgetForLines(int $agentId, Voucher $voucher, $resolvedLines): float
+    {
+        $applicableLines = collect($resolvedLines)->filter(
+            fn (array $resolved) => $this->voucherService->isApplicableTo(
+                $voucher,
+                $resolved['product']->id,
+                $resolved['variation']?->id
+            )
+        )->values();
+
+        if ($applicableLines->isEmpty()) {
+            throw new ApiException(__('messages.voucher.not_applicable'), 422, ['voucher_code' => __('messages.voucher.not_applicable')]);
+        }
+
+        $eligibleSubtotal = 0.0;
+        $lineAmounts = [];
+        foreach ($applicableLines as $resolved) {
+            $pricing = $this->pricingService->effectiveUnitPrice(
+                $agentId, $resolved['product']->id, $resolved['variation']?->id,
+                $resolved['variation'] ? (float) $resolved['variation']->price : (float) $resolved['product']->base_price
+            );
+            $amount = round($pricing['unit_price'] * $resolved['quantity'], 2);
+            $eligibleSubtotal += $amount;
+            $lineAmounts[] = [$resolved, $amount];
+        }
+
+        // Single transaction-level face-value budget (fixed) or percentage-of-
+        // eligible-subtotal, both hard-capped by the eligible subtotal.
+        $remainingBudget = min(
+            $voucher->type === 'fixed' ? (float) $voucher->value : $eligibleSubtotal,
+            $eligibleSubtotal
+        );
+        $remainingEligible = $eligibleSubtotal;
+
+        $discount = 0.0;
+        foreach ($lineAmounts as [$resolved, $amount]) {
+            [$lineDiscount, $remainingBudget] = $this->pricingService->voucherLineDiscount(
+                $voucher, $amount, $remainingBudget, $remainingEligible
+            );
+            $remainingEligible = max(0.0, round($remainingEligible - $lineDiscount, 2));
+            $discount += $lineDiscount;
+        }
+
+        return round($discount, 2);
+    }
+
+    /**
      * Read-only preview for the checkout "Review" step — re-derives the same
      * subtotal/shipping/admin-fee/total createOrder() would charge, without
      * reserving stock or writing anything. The frontend renders this
@@ -346,7 +475,7 @@ class OrderService
      * @param  array{address_id:?int, recipient_name:?string, recipient_phone:?string, address_line:?string, village_id:?string, latitude:?float, longitude:?float}  $destination
      * @return array{subtotal_amount:float, shipping_fee_amount:float, admin_fee_amount:float, total_amount:float, distance_km:?float, shipping_provider:string, shipping_enabled:bool, warnings: array<int, array{product_id:int, product_variation_id:?int, message:string}>}
      */
-    public function quote(User $konsumen, array $lines, array $destination, ?string $shippingMethod = null, ?array $selectedCourierOption = null): array
+    public function quote(User $konsumen, array $lines, array $destination, ?string $shippingMethod = null, ?array $selectedCourierOption = null, ?string $voucherCode = null): array
     {
         if (! $konsumen->agent_id) {
             throw new ApiException(__('messages.order.no_agent_branch'), 422);
@@ -395,11 +524,25 @@ class OrderService
             selectedCourierOption: $selectedCourierOption,
         ));
 
+        // IMP-002 voucher preview: same validation + line-applicability logic as
+        // createOrder (minus the redemption increment — this is read-only).
+        // A1-06/A1-07: identical canonical calculation (targeted over real lines;
+        // fixed budget once).
+        $voucherDiscount = 0.0;
+        $voucherId = null;
+        if ($voucherCode) {
+            $voucher = $this->voucherService->resolve($agentId, $voucherCode);
+            $voucherId = $voucher->id;
+            $voucherDiscount = $this->voucherBudgetForLines($agentId, $voucher, collect($lines)->map(fn ($line) => $this->resolveLine($line))->values());
+        }
+
         return [
             'subtotal_amount' => round($subtotal, 2),
             'shipping_fee_amount' => $quote->cost,
             'admin_fee_amount' => $adminFee,
-            'total_amount' => round($subtotal + $quote->cost + $adminFee, 2),
+            'discount_amount' => $voucherDiscount,
+            'voucher_id' => $voucherId,
+            'total_amount' => round($subtotal - $voucherDiscount + $quote->cost + $adminFee, 2),
             'distance_km' => $quote->distanceKm,
             'shipping_provider' => $quote->providerCode,
             'shipping_enabled' => $this->shippingQuoteService->isShippingSelectionAvailable($agentId),
@@ -539,16 +682,22 @@ class OrderService
         $qty = max(1, $resolved['quantity']);
 
         if ($variation) {
-            $unitPrice = (float) $variation->price;
+            $basePrice = (float) $variation->price;
             $unitWeight = (int) ($variation->weight_grams ?: $product->weight_grams);
         } else {
-            $unitPrice = (float) $product->base_price;
+            $basePrice = (float) $product->base_price;
             $unitWeight = (int) $product->weight_grams;
         }
 
         if ($unitWeight < 1) {
             throw new ApiException('Berat produk belum dikonfigurasi.', 422, ['items' => 'Berat produk wajib minimal 1 gram.']);
         }
+
+        // IMP-002: canonical discount pricing — preview and creation both run
+        // through PricingService so the Review step total always matches the
+        // persisted order.
+        $pricing = $this->pricingService->effectiveUnitPrice($agentId, $product->id, $variation?->id, $basePrice);
+        $unitPrice = $pricing['unit_price'];
 
         $available = $variation
             ? $this->warehouseStockService->sellableForVariation($agentId, $variation->id)['available']
@@ -580,16 +729,22 @@ class OrderService
         }
 
         if ($variation) {
-            $unitPrice = (float) $variation->price;
+            $basePrice = (float) $variation->price;
             $unitWeight = (int) ($variation->weight_grams ?: $product->weight_grams);
         } else {
-            $unitPrice = (float) $product->base_price;
+            $basePrice = (float) $product->base_price;
             $unitWeight = (int) $product->weight_grams;
         }
 
         if ($unitWeight < 1) {
             throw new ApiException('Berat produk belum dikonfigurasi.', 422, ['items' => 'Berat produk wajib minimal 1 gram.']);
         }
+
+        // IMP-002: canonical discount pricing — SAME PricingService both the
+        // quote preview and this actual-reserve path use, so the persisted
+        // unit_price_snapshot is exactly what the Review step showed.
+        $pricing = $this->pricingService->effectiveUnitPrice($agentId, $product->id, $variation?->id, $basePrice);
+        $unitPrice = $pricing['unit_price'];
 
         // Agent stock is reserved only for Agent-sourced lines. A Sub-sourced line reserves in the Sub
         // ledger instead (below, once the item row exists) and never touches Agent Reserved.
@@ -711,7 +866,8 @@ class OrderService
     /**
      * @return array{address_id:?int, recipient_name:string, recipient_phone:string,
      *     address_line:string, latitude:float, longitude:float, regency_id:?string,
-     *     village_name:?string, district_name:?string, regency_name:?string, province_name:?string}
+     *     district_id:?string, province_id:?string, postal_code:?string,
+     *     village_id:?string, village_name:?string, district_name:?string, regency_name:?string, province_name:?string}
      */
     private function resolveDestination(User $konsumen, array $destination): array
     {
@@ -729,6 +885,9 @@ class OrderService
                 'latitude' => (float) $address->latitude,
                 'longitude' => (float) $address->longitude,
                 'regency_id' => $address->regency_id,
+                'district_id' => $address->district_id,
+                'province_id' => $address->province_id,
+                'postal_code' => $address->postal_code ?? null,
                 'village_id' => $address->village_id,
                 'village_name' => $address->village?->name,
                 'district_name' => $address->district?->name,
@@ -745,6 +904,27 @@ class OrderService
             throw new ApiException(__('messages.order.invalid_village'), 422, ['village_id' => __('messages.system.field_invalid')]);
         }
 
+        // IMP-002 structured-address hierarchy validation: when the client
+        // supplies a village PLUS any of district/regency/province ids, every
+        // supplied id must actually match the canonical chain of that village.
+        // (The village lookup above is the authoritative source; the extras are
+        // only accepted to catch wrong-dropdown selection early.)
+        $district = $village?->district;
+        $regency = $district?->regency;
+        $province = $regency?->province;
+
+        if ($village) {
+            if (! empty($destination['district_id']) && (string) $destination['district_id'] !== (string) $district?->id) {
+                throw new ApiException(__('messages.order.invalid_region_hierarchy'), 422, ['district_id' => __('messages.system.field_invalid')]);
+            }
+            if (! empty($destination['regency_id']) && (string) $destination['regency_id'] !== (string) $regency?->id) {
+                throw new ApiException(__('messages.order.invalid_region_hierarchy'), 422, ['regency_id' => __('messages.system.field_invalid')]);
+            }
+            if (! empty($destination['province_id']) && (string) $destination['province_id'] !== (string) $province?->id) {
+                throw new ApiException(__('messages.order.invalid_region_hierarchy'), 422, ['province_id' => __('messages.system.field_invalid')]);
+            }
+        }
+
         return [
             'address_id' => null,
             'recipient_name' => $destination['recipient_name'],
@@ -753,6 +933,9 @@ class OrderService
             'latitude' => (float) $destination['latitude'],
             'longitude' => (float) $destination['longitude'],
             'regency_id' => $village?->district?->regency_id,
+            'district_id' => $village?->district_id,
+            'province_id' => $village?->district?->regency?->province_id,
+            'postal_code' => $destination['postal_code'] ?? null,
             'village_id' => $village?->id,
             'village_name' => $village?->name,
             'district_name' => $village?->district?->name,
@@ -830,11 +1013,13 @@ class OrderService
             }
 
             if (in_array($newStatus, ['dikirim', 'terkirim'], true)) {
+                // The shipment lifecycle is DERIVED from its own items (CourierService::
+                // syncShipmentAggregate), never copied from the order-wide status being applied.
+                // A bulk 'terkirim' only transitions the items that were already 'dikirim' (an item
+                // still in 'diproses' cannot jump the step), so writing 'delivered' here would
+                // complete a shipment whose remaining items never left the warehouse.
                 foreach (Shipment::query()->whereIn('id', array_keys($shipmentIds))->get() as $shipment) {
-                    $shipment->update(match ($newStatus) {
-                        'dikirim' => ['status' => 'in_transit', 'shipped_at' => $shipment->shipped_at ?? now()],
-                        'terkirim' => ['status' => 'delivered', 'delivered_at' => now()],
-                    });
+                    $this->courierService->syncShipmentAggregate($shipment);
                 }
             }
 

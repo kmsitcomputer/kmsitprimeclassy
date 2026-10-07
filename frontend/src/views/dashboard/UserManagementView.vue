@@ -22,8 +22,11 @@ const { t } = useI18n()
 
 const ALLOWED_CREATIONS: Record<string, CreateUserPayload['role'][]> = {
   super_admin: ['agen'],
-  agen: ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub'],
+  agen: ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub', 'koordinator-kurir'],
   korsal: ['sales', 'sales-kurir-sub'],
+  // A1-02 — the Human-approved Agen → Koordinator Kurir → Kurir leg: a Koordinator
+  // may create/manage Kurir in its own branch (backend HierarchyRules mirrors this).
+  'koordinator-kurir': ['kurir'],
 }
 
 /** Mirrors UserPolicy::delete — super_admin deletes any non-self, non-super-admin, non-agent account; an agen may delete every role beneath it (anything except another agen/super_admin) within its own branch. */
@@ -46,6 +49,9 @@ function canDelete(user: AuthUser): boolean {
 
 /** Mirrors UserPolicy::update — keuangan may view the branch roster but is not an account manager, so it can only ever edit itself. */
 function canEdit(user: AuthUser): boolean {
+  if (auth.user?.role === 'koordinator-kurir') {
+    return user.role === 'kurir' && user.agent_id === auth.user.agent_id && user.parent_id === auth.user.id
+  }
   return auth.user?.role !== 'keuangan' || user.id === auth.user?.id
 }
 
@@ -68,6 +74,7 @@ const ROLE_LABELS: Record<string, string> = {
   kurir: 'Kurir',
   gudang: t('roles.gudang'),
   'sales-kurir-sub': t('roles.salesKurir'),
+  'koordinator-kurir': t('roles.koordinatorKurir'),
   konsumen: 'Konsumen',
 }
 

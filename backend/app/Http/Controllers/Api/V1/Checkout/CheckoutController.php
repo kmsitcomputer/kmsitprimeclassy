@@ -46,6 +46,7 @@ class CheckoutController extends Controller
         $quote = $this->orderService->quote(
             $konsumen, $request->array('items'), $request->destinationInput(),
             $request->input('shipping_method'), $request->selectedCourierOption(),
+            $request->filled('voucher_code') ? $request->string('voucher_code')->toString() : null,
         );
 
         return $this->ok($quote);

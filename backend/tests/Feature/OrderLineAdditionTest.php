@@ -735,4 +735,51 @@ class OrderLineAdditionTest extends TestCase
         $this->addLine($order, $admin, $payload, str_repeat('k', 100))->assertCreated();
         $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
     }
+    public function test_assigned_executors_reject_new_lines_without_any_partial_persistence(): void
+    {
+        foreach (['courier', 'self_delivery'] as $executorType) {
+            ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+            $productA = $this->makeProduct($agen, 'Executor A', 10000, 10);
+            $productB = $this->makeProduct($agen, 'Executor B', 25000, 10);
+            $order = $this->placeOrder($konsumen, [['product_id' => $productA->id, 'quantity' => 1]]);
+            $shipment = Shipment::where('order_id', $order->id)->firstOrFail();
+            if ($executorType === 'courier') {
+                $courierUser = User::factory()->kurir()->create(['agent_id' => $agen->id]);
+                $courier = \App\Models\Courier::create(['type' => 'internal', 'user_id' => $courierUser->id, 'agent_id' => $agen->id, 'name' => 'Executor', 'is_active' => true]);
+                $shipment->update(['courier_id' => $courier->id]);
+            } else {
+                $shipment->update(['delivery_mode' => 'self_sub', 'self_delivered_by_user_id' => $admin->id]);
+            }
+            $tables = ['orders', 'order_items', 'shipments', 'stock_requests', 'stock_request_items', 'commissions', 'order_additional_payments', 'activity_logs'];
+            $before = [];
+            foreach ($tables as $table) $before[$table] = \Illuminate\Support\Facades\DB::table($table)->count();
+            $financialBefore = $order->fresh()->only(['total_amount', 'paid_amount', 'remaining_amount', 'payment_status']);
+            $key = (string) Str::uuid();
+            $this->addLine($order, $admin, ['product_id' => $productB->id, 'quantity' => 1, 'reason' => 'Late addition'], $key)
+                ->assertUnprocessable()->assertJsonPath('message', __('messages.order.line_addition_executor_assigned'));
+            foreach ($tables as $table) $this->assertSame($before[$table], \Illuminate\Support\Facades\DB::table($table)->count(), $table);
+            $this->assertSame(0, (int) ProductStock::where('agent_id', $agen->id)->where('product_id', $productB->id)->value('quantity_reserved'));
+            $this->assertSame($financialBefore, $order->fresh()->only(['total_amount', 'paid_amount', 'remaining_amount', 'payment_status']));
+            $this->assertSame($shipment->courier_id, $shipment->fresh()->courier_id);
+            $this->assertSame($shipment->self_delivered_by_user_id, $shipment->fresh()->self_delivered_by_user_id);
+        }
+    }
+
+    public function test_identical_replay_after_assignment_is_valid_but_new_key_is_rejected(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $a = $this->makeProduct($agen, 'Replay A', 10000, 10);
+        $b = $this->makeProduct($agen, 'Replay B', 25000, 10);
+        $order = $this->placeOrder($konsumen, [['product_id' => $a->id, 'quantity' => 1]]);
+        $payload = ['product_id' => $b->id, 'quantity' => 1, 'reason' => 'Before assignment'];
+        $key = (string) Str::uuid();
+        $this->addLine($order, $admin, $payload, $key)->assertCreated();
+        Shipment::where('order_id', $order->id)->firstOrFail()->update(['delivery_mode' => 'self_sub', 'self_delivered_by_user_id' => $admin->id]);
+        $this->addLine($order, $admin, $payload, $key)->assertOk();
+        $this->addLine($order, $admin, array_replace($payload, ['quantity' => 2]), $key)->assertStatus(409);
+        $this->addLine($order, $admin, $payload, (string) Str::uuid())->assertUnprocessable();
+        $this->assertSame(2, OrderItem::where('order_id', $order->id)->count());
+        $this->assertSame(1, (int) ProductStock::where('agent_id', $agen->id)->where('product_id', $b->id)->value('quantity_reserved'));
+    }
+
 }

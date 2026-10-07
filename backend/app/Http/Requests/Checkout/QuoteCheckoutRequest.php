@@ -33,6 +33,7 @@ class QuoteCheckoutRequest extends BaseFormRequest
             'village_id' => ['required_without:address_id', 'nullable', 'string', 'exists:villages,id'],
             'latitude' => ['required_without:address_id', 'numeric', 'between:-90,90'],
             'longitude' => ['required_without:address_id', 'numeric', 'between:-180,180'],
+            'postal_code' => ['nullable', 'string', 'max:10'],
             'shipping_method' => ['nullable', 'string', 'in:rajaongkir,openroute,pickup'],
             // Which courier/service under "Ekspedisi" (RajaOngkir) the
             // konsumen picked — only meaningful with shipping_method=rajaongkir.
@@ -40,6 +41,9 @@ class QuoteCheckoutRequest extends BaseFormRequest
             // from a fresh RajaOngkir quote for this exact courier+service.
             'courier' => ['nullable', 'required_with:service', 'string', 'max:50'],
             'service' => ['nullable', 'required_with:courier', 'string', 'max:50'],
+
+            // IMP-002 voucher: code only, re-validated server-side in OrderService.
+            'voucher_code' => ['nullable', 'string', 'max:60'],
         ];
     }
 
@@ -60,6 +64,10 @@ class QuoteCheckoutRequest extends BaseFormRequest
             'village_id' => $this->input('village_id'),
             'latitude' => $this->input('latitude'),
             'longitude' => $this->input('longitude'),
+            'postal_code' => $this->input('postal_code'),
+            'province_id' => $this->input('province_id'),
+            'regency_id' => $this->input('regency_id'),
+            'district_id' => $this->input('district_id'),
         ];
     }
 }

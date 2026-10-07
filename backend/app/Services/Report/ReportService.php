@@ -77,7 +77,7 @@ class ReportService
             ? ['agent', 'sales', 'courier']
             : ['sales', 'courier'];
 
-        $query = Order::withoutGlobalScopes()->with('paymentMethod');
+        $query = Order::withoutGlobalScopes()->with(['paymentMethod', 'konsumen']);
         $this->scopeToActor($query, $actor, 'agent_id', null, $filters);
 
         if (! empty($filters['from'])) {
@@ -108,9 +108,18 @@ class ReportService
                 'order_id' => $order->id,
                 'order_no' => $order->order_no,
                 'order_date' => $order->created_at?->toDateString(),
+                // UAT-004: Finance triage identity — who owes, how they pay.
+                'customer' => $order->konsumen?->name,
                 'payment_method' => $order->paymentMethod?->name,
+                'payment_method_type' => $order->paymentMethod?->type,
                 'grand_total' => $summary['grand_total'],
                 'dp_paid' => $summary['verified_dp'],
+                // UAT-004: "DP Diajukan" — submitted-but-unverified nominal.
+                // Informational only: never added to dp_paid/total_paid
+                // before canonical verification (see PaymentSummaryService).
+                'dp_submitted' => $summary['submitted_dp'],
+                'verification_status' => $summary['pending_verification_status'],
+                'has_pending_proof' => $summary['has_pending_proof'],
                 'total_paid' => $summary['total_paid'],
                 'remaining' => $summary['remaining_balance'],
                 'payment_status' => $summary['payment_status'],

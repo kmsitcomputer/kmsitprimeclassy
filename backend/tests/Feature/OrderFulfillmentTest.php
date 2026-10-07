@@ -8,6 +8,7 @@ use App\Models\Commission;
 use App\Models\Courier;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Shipment;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
@@ -60,8 +61,15 @@ class OrderFulfillmentTest extends TestCase
         return $product;
     }
 
-    /** @return array{order: Order, itemA: OrderItem, itemB: OrderItem} */
-    private function placeTwoProductOrder(User $agen, User $konsumen, Product $productA, int $qtyA, Product $productB, int $qtyB, string $paymentMethodCode = 'cod'): array
+    /**
+     * @return array{order: Order, itemA: OrderItem, itemB: OrderItem}
+     *
+     * $splitDeliveryDates gives the two lines DIFFERENT requested delivery dates. Under the LOCKED
+     * grouping rule (Human UAT-005) two same-date lines in one order now share ONE canonical
+     * shipment; a test that needs two independently assignable shipments (two couriers, per-shipment
+     * pickup) must opt into two real deliveries rather than rely on one item per shipment.
+     */
+    private function placeTwoProductOrder(User $agen, User $konsumen, Product $productA, int $qtyA, Product $productB, int $qtyB, string $paymentMethodCode = 'cod', bool $splitDeliveryDates = false): array
     {
         $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
             'payment_method_code' => $paymentMethodCode,
@@ -78,6 +86,19 @@ class OrderFulfillmentTest extends TestCase
         $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        if ($splitDeliveryDates) {
+            // Two real deliveries: move B onto its own date through the canonical reschedule path.
+            Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'openroute']);
+            app(\App\Services\Order\OrderFulfillmentService::class)->rescheduleItemDeliveryDate(
+                $itemB->fresh(),
+                now()->addDays(7)->toDateString(),
+                User::factory()->admin()->create(['agent_id' => $agen->id]),
+                'Separate delivery',
+            );
+            $itemA = $itemA->fresh();
+            $itemB = $itemB->fresh();
+        }
 
         return compact('order', 'itemA', 'itemB');
     }
@@ -730,7 +751,9 @@ class OrderFulfillmentTest extends TestCase
 
         $productA = $this->makeProduct($agen, 'Produk A', 100000, 10);
         $productB = $this->makeProduct($agen, 'Produk B', 50000, 10);
-        ['order' => $order, 'itemA' => $itemA, 'itemB' => $itemB] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $productB, 3);
+        // Two different dates => two canonical shipments => two independent courier assignments.
+        ['order' => $order, 'itemA' => $itemA, 'itemB' => $itemB] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $productB, 3, splitDeliveryDates: true);
+        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
 
         $courierBudiId = Courier::where('user_id', $kurirBudi->id)->value('id');
         $courierAndiId = Courier::where('user_id', $kurirAndi->id)->value('id');

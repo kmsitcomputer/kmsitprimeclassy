@@ -49,6 +49,11 @@ class StoreOrderRequest extends BaseFormRequest
             'village_id' => ['required_without:address_id', 'nullable', 'string', 'exists:villages,id'],
             'latitude' => ['required_without:address_id', 'numeric', 'between:-90,90'],
             'longitude' => ['required_without:address_id', 'numeric', 'between:-180,180'],
+            // IMP-002: optional postal code on the structured address.
+            'postal_code' => ['nullable', 'string', 'max:10'],
+            'province_id' => ['nullable', 'string', 'exists:provinces,id'],
+            'regency_id' => ['nullable', 'string', 'exists:regencies,id'],
+            'district_id' => ['nullable', 'string', 'exists:districts,id'],
 
             'payment_method_code' => ['required', 'string', 'exists:payment_methods,code'],
             // DP / down payment only: the partial nominal the konsumen pays
@@ -65,6 +70,10 @@ class StoreOrderRequest extends BaseFormRequest
             // konsumen picked — see QuoteCheckoutRequest for the same field.
             'courier' => ['nullable', 'required_with:service', 'string', 'max:50'],
             'service' => ['nullable', 'required_with:courier', 'string', 'max:50'],
+
+            // IMP-002 voucher: the client only ever submits the CODE. Value/
+            // applicability is re-validated server-side in OrderService.
+            'voucher_code' => ['nullable', 'string', 'max:60'],
         ];
     }
 
@@ -85,6 +94,10 @@ class StoreOrderRequest extends BaseFormRequest
             'village_id' => $this->input('village_id'),
             'latitude' => $this->input('latitude'),
             'longitude' => $this->input('longitude'),
+            'postal_code' => $this->input('postal_code'),
+            'province_id' => $this->input('province_id'),
+            'regency_id' => $this->input('regency_id'),
+            'district_id' => $this->input('district_id'),
         ];
     }
 }

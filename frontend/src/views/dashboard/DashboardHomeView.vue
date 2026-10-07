@@ -17,6 +17,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   keuangan: 'Keuangan',
   kurir: 'Kurir',
+  'koordinator-kurir': 'Koordinator Kurir',
   konsumen: 'Konsumen',
 }
 

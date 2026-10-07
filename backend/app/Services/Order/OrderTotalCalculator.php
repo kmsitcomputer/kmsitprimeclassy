@@ -32,10 +32,31 @@ class OrderTotalCalculator
             2
         );
 
+        // A1-08: the voucher discount is a HISTORICAL attribution — it is never
+        // re-computed against live promotions, and it stays immutable on the
+        // order (Order::discount_amount). But the EFFECTIVE voucher reduction on
+        // the currently-billed subtotal must never exceed that subtotal: when an
+        // authorized fulfillment reduction (or full item cancellation) shrinks
+        // `subtotal_amount` below the original discount, the amount actually
+        // applied to the live total is clamped to the live billed subtotal.
+        //
+        // This keeps `discount_amount` (historical attribution) intact while the
+        // recomputed `total_amount = billed subtotal − (effective voucher) +
+        // shipping + admin` can never go negative, never trips the unsigned
+        // MariaDB column, and never fabricates refund value unsupported by real
+        // payment (the ledger rows are only ever created by the fulfillment
+        // service against the real paid amounts).
+        $effectiveVoucher = $order->effectiveDiscountAmount($subtotal);
+
         $total = round(
-            $subtotal - (float) $order->discount_amount + (float) $order->shipping_fee_amount + (float) $order->admin_fee_amount,
+            $subtotal - $effectiveVoucher + (float) $order->shipping_fee_amount + (float) $order->admin_fee_amount,
             2
         );
+
+        // Defensive clamp — a total can never be negative (unsigned DB column).
+        if ($total < 0) {
+            $total = 0.0;
+        }
 
         $order->update(['subtotal_amount' => $subtotal, 'total_amount' => $total]);
 

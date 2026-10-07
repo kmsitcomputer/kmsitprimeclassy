@@ -18,7 +18,7 @@ class CreateUserRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'role' => ['required', 'string', 'in:agen,korsal,sales,admin,keuangan,kurir,gudang,sales-kurir-sub,sales-kurir'],
+            'role' => ['required', 'string', 'in:agen,korsal,sales,admin,keuangan,kurir,gudang,sales-kurir-sub,sales-kurir,koordinator-kurir'],
             'name' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'phone' => ['required', 'string', 'max:20'],

@@ -25,6 +25,8 @@ class Order extends Model
         'recipient_name_snapshot', 'recipient_phone_snapshot', 'address_snapshot',
         'village_snapshot', 'district_snapshot', 'regency_snapshot', 'province_snapshot',
         'latitude_snapshot', 'longitude_snapshot',
+        // IMP-002: canonical region ids + postal code + voucher attribution.
+        'province_id', 'regency_id', 'district_id', 'village_id', 'postal_code', 'voucher_id',
         'delivery_date_estimate', 'delivery_date_actual',
         'cancelled_at', 'cancelled_by', 'cancellation_reason', 'notes',
     ];
@@ -64,6 +66,11 @@ class Order extends Model
             'delivery_date_actual' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
+    }
+
+    public function effectiveDiscountAmount(?float $subtotal = null): float
+    {
+        return round(min((float) $this->discount_amount, max(0.0, $subtotal ?? (float) $this->subtotal_amount)), 2);
     }
 
     public function konsumen(): BelongsTo

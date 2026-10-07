@@ -30,6 +30,11 @@ class CourierDashboardController extends Controller
      * ("semua order diproses bisa dilihat semua kurir"); once picked up ('dikirim') an item is
      * exclusive to the kurir holding that shipment.
      *
+     * A1-01: a Koordinator-Kurir that self-assigned a delivery becomes the actual executor with
+     * THEIR OWN Courier profile. They see exactly the same queue shape as a normal Kurir (their
+     * own assigned 'dikirim'/'terkirim' — never another courier's), and they can never see a
+     * self_sub shipment (that belongs to the owning Sales-Kurir-Sub).
+     *
      * R-03: a Sales-Kurir-Sub is NOT a normal Kurir — they may only ever see orders containing
      * their OWN self_sub shipment (delivery_mode = self_sub AND self_delivered_by_user_id = self),
      * for both 'diproses' and 'dikirim'. They must never see Agent-sourced standard shipments or
@@ -40,15 +45,16 @@ class CourierDashboardController extends Controller
         $actor = $request->user();
         $courierId = $actor->courierProfile?->id;
         $isSubActor = $actor->isRole('sales-kurir-sub');
+        $isKoordinator = $actor->isRole('koordinator-kurir');
         $status = $request->string('status')->toString();
         $validStatuses = ['diproses', 'dikirim', 'terkirim'];
 
         $orders = Order::query()
             ->where('agent_id', $actor->agent_id)
-            ->whereHas('items', function ($q) use ($courierId, $actor, $isSubActor, $status, $validStatuses) {
+            ->whereHas('items', function ($q) use ($courierId, $actor, $isSubActor, $isKoordinator, $status, $validStatuses) {
                 // Grouped in its own closure — an ungrouped top-level orWhere()
                 // here would escape whereHas's own order_id correlation constraint.
-                $q->where(function ($sq) use ($courierId, $actor, $isSubActor, $status, $validStatuses) {
+                $q->where(function ($sq) use ($courierId, $actor, $isSubActor, $isKoordinator, $status, $validStatuses) {
                     if ($isSubActor) {
                         // Sales-Kurir-Sub: ONLY their own self_sub shipments, for every status
                         // (their "Selesai" history is status=terkirim). Never an Agent-source
@@ -63,8 +69,18 @@ class CourierDashboardController extends Controller
                         return;
                     }
 
-                    // Normal Kurir never sees (or can claim) a Sales-Kurir-Sub self-delivery shipment —
-                    // that goods sit in the Sub's own Sub Location and ship only through its owner.
+                    if ($isKoordinator) {
+                        $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
+                        $sq->whereIn('status', $statuses)->whereHas('shipment', fn ($ssq) => $ssq
+                            ->where('delivery_mode', Shipment::DELIVERY_MODE_STANDARD)
+                            ->where('courier_id', $courierId ?? 0));
+
+                        return;
+                    }
+
+                    // A1-01: a koordinator-kurir executor behaves like a normal kurir for its own
+                    // profile — standard shipments only, 'diproses' queue visible, 'dikirim'/
+                    // 'terkirim' exclusive to their own Courier profile. Never a self_sub shipment.
                     $sq->whereDoesntHave('shipment', fn ($ssq) => $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB));
 
                     // Normal Kurir — a requested status narrows the queue; ownership stays the same.

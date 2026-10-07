@@ -96,6 +96,18 @@ class CourierSystemTest extends TestCase
         return Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
     }
 
+    /**
+     * Marks this order's shipments as a KURIR ONLINE delivery (canonical
+     * `shipments.shipping_provider_code = 'openroute'`). Changing a requested delivery date is
+     * LOCKED to Kurir Online (Human 2026-10-07), so every reschedule-subject test needs an order
+     * in that state. The canonical field is written directly here because this file does not seed
+     * shipping-provider infrastructure, and the rule under test reads exactly this field.
+     */
+    private function markCourierOnline(int $orderId): void
+    {
+        Shipment::query()->where('order_id', $orderId)->update(['shipping_provider_code' => 'openroute']);
+    }
+
     /** Every order starts with exactly one shipment shared by all its items — see the OrderService::createOrder wiring. */
     private function shipmentIdFor(Order $order): int
     {
@@ -244,6 +256,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Reschedule', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         $newDate = now()->addDays(5)->toDateString();
@@ -266,6 +279,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Split', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 3);
+        $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
         $originalShipmentId = $item->shipment_id;
 
@@ -304,6 +318,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Full Qty', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 2);
+        $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         $newDate = now()->addDays(4)->toDateString();
@@ -320,6 +335,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Overflow', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 2);
+        $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
@@ -332,6 +348,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Terlambat', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
@@ -346,6 +363,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Otorisasi', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
         foreach (['kurir', 'sales', 'konsumen', 'korsal'] as $role) {
@@ -676,25 +694,24 @@ class CourierSystemTest extends TestCase
         ]);
         $response->assertCreated();
         $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+        $this->markCourierOnline($order->id);
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
 
-        // Each item already has its own distinct shipment — never shared.
+        // LOCKED grouping rule (Human UAT-005): both lines share the order's delivery date, so they
+        // start on ONE canonical shipment — that is what yields a single dispatch card / resi.
         $this->assertNotNull($itemA->shipment_id);
-        $this->assertNotNull($itemB->shipment_id);
-        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
-        $originalShipmentId = $itemA->fresh()->shipment_id;
+        $this->assertSame($itemA->shipment_id, $itemB->shipment_id, 'same-date items share one canonical shipment');
 
-        // Rescheduling A never needs to split anything off (nothing was shared) — its shipment stays the same.
+        // Moving A onto another date splits it onto its OWN canonical shipment, leaving B's intact.
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
             'requested_delivery_date' => now()->addDays(5)->toDateString(), 'reason' => 'Konsumen minta diundur',
         ])->assertOk();
 
         $itemA->refresh();
         $itemB->refresh();
-        $this->assertSame($originalShipmentId, $itemA->shipment_id);
-        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
-        $this->assertDatabaseMissing('activity_logs', ['event' => 'shipment.split_for_reschedule']);
+        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id, 'different dates are different shipments');
+        $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
 
         // A second kurir picks up A's shipment; the original kurir carries B — two different couriers, one order,
         // and — the point of this whole test — picking up/delivering one product never touches the other.
@@ -746,6 +763,7 @@ class CourierSystemTest extends TestCase
         ]);
         $response->assertCreated();
         $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
+        $this->markCourierOnline($order->id);
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
 
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
@@ -832,6 +850,17 @@ class CourierSystemTest extends TestCase
 
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
+
+        // Two deliveries on purpose: under the LOCKED grouping rule two same-date lines share ONE
+        // shipment, so a test about two couriers claiming different items must give them two
+        // different requested delivery dates.
+        $this->markCourierOnline($order->id);
+        app(\App\Services\Order\OrderFulfillmentService::class)->rescheduleItemDeliveryDate(
+            $itemB->fresh(), now()->addDays(4)->toDateString(), $branch['admin'], 'Separate delivery',
+        );
+        $itemA = $itemA->fresh();
+        $itemB = $itemB->fresh();
+        $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
 
         // First kurir picks up product A only — product B stays 'diproses', untouched.
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();

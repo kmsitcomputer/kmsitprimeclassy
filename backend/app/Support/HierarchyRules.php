@@ -15,8 +15,11 @@ class HierarchyRules
     /** @var array<string, list<string>> creator role slug => roles it may create */
     public const ALLOWED_CREATIONS = [
         'super_admin' => ['agen'],
-        'agen' => ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub'],
+        'agen' => ['korsal', 'sales', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub', 'koordinator-kurir'],
         'korsal' => ['sales', 'sales-kurir-sub'],
+        // A1-02 — the Human-approved Agen → Koordinator Kurir → Kurir leg: a
+        // Koordinator-Kurir manages ONLY eligible Kurir within its own branch.
+        'koordinator-kurir' => ['kurir'],
     ];
 
     /** Roles that own a referral_code. */
@@ -33,7 +36,7 @@ class HierarchyRules
     ];
 
     /** Roles that must always have a non-null agent_id ("wajib terhubung ke agen"). */
-    public const ROLES_REQUIRING_AGENT_LINK = ['korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub'];
+    public const ROLES_REQUIRING_AGENT_LINK = ['korsal', 'sales', 'konsumen', 'admin', 'keuangan', 'kurir', 'gudang', 'sales-kurir-sub', 'koordinator-kurir'];
 
     public static function canCreate(string $creatorRoleSlug, string $targetRoleSlug): bool
     {

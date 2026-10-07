@@ -49,8 +49,11 @@ class StockRequestTest extends TestCase
         $f = $this->fixture();
         $this->actingAs($f['admin'])->patchJson("/api/v1/orders/{$f['order']->id}/status", ['status' => 'diproses'])->assertOk();
         $this->assertDatabaseCount('stock_requests', 1);
-        $this->actingAs($f['gudang'])->getJson('/api/v1/warehouse/stock-requests')->assertOk();
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
+        // The standalone "Stock Request" list surface is removed (§8) — the
+        // internal one-per-order request is reachable through the order-scoped
+        // warehouse-queue endpoint, never a user-facing list.
+        $this->actingAs($f['gudang'])->getJson("/api/v1/warehouse/orders/{$f['order']->id}/stock-request")->assertOk();
         $this->assertSame(10, $request->items()->firstOrFail()->requested_qty);
         $this->assertDatabaseCount('stock_requests', 1);
     }

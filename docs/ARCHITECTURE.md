@@ -42,7 +42,7 @@ Request path: **route role gate → FormRequest shape validation → controller 
 | Models | `app/Models/*` (~80) | Snapshots, enums, relations; `SoftDeletes` on users/products/variations |
 | Support | `app/Support/*` | `ApiResponse`, `HierarchyRules`, `PermissionMap` (UI hints), `InstallLock`, `SafeSchema` |
 | Exceptions | `app/Exceptions/*` | `ApiException(message, status, errors)` → envelope; `InsufficientStockException`, `InvalidStateTransitionException`, `ShippingQuoteException` |
-| Console | `app/Console/Commands/*` | `regions:import`, `products:backfill-sku`, `system:audit-catalog-hierarchy`, `warehouse:reconcile`, `warehouse:migrate-legacy-stock`, `transactions:reset` (legacy), `primeclassy:reset-dev-transactions` (DEV only) |
+| Console | `app/Console/Commands/*` | `regions:import`, `products:backfill-sku`, `system:audit-catalog-hierarchy`, `warehouse:reconcile`, `warehouse:migrate-legacy-stock`, `transactions:reset` (legacy), `primeclassy:reset-dev-transactions` (DEV only), `primeclassy:reconcile-order-shipments` (DEV only; legacy duplicate-shipment consolidation — refuses non-DEV databases and refuses the whole order on any unsafe candidate) |
 
 ## 3. Canonical services
 
@@ -51,11 +51,16 @@ Request path: **route role gate → FormRequest shape validation → controller 
 | Concern | Owner |
 |---|---|
 | Order totals after creation | `OrderTotalCalculator::recalculate` (only writer of `subtotal_amount`/`total_amount`) |
-| `paid_amount`, `remaining_amount`, `payment_status` | `PaymentService` (`applyPaymentToOrder`, `reverseAppliedPayment`, `reconcileTotals`, `initiateAdditionalPayment`) |
+| `paid_amount`, `remaining_amount`, `payment_status` | `PaymentService` (`applyPaymentToOrder`, `reverseAppliedPayment` re-read the Order with `FOR UPDATE` before each increment/refund; `reconcileTotals`, `initiateAdditionalPayment`) |
 | Payment summary shown anywhere | `PaymentSummaryService::summarize` |
+| Proof submission (konsumen / branch staff / Korsal-Sales on behalf) | `PaymentService::submitBankTransferProof` / `submitCodPaymentProof` — lock order verification (or COD proof) row → transaction → order, same as verify/confirm; authority `OrderPolicy::payOnBehalf` + `PaymentController::authorizeProofSubmission` |
+| DP settlement request (pelunasan) | `PaymentService::requestSettlement` — **Order-first** transaction; idempotent replay returns the one existing pending `dp_settlement` transaction (HTTP 200, `replay=true`) instead of a second one; a request whose nominal no longer matches a pending settlement is refused with `messages.payment.already_processed` and the pending one is preserved |
 | Fees snapshot | `FeeService::resolveForLine` → `OrderService::priceAndReserveLine` |
 | Commission rows | `OrderService::recordCommission` (agent/sales), `CourierService::recordCommissionsForItems` (courier) |
 | Additional-payment obligation rule | `OrderFulfillmentService::reconcileAdditionalObligation` (shared by fulfilment increase and SC-03) |
+| Effective unit price (discounts) | `PricingService::activeDiscount` / `effectiveUnitPrice` — variation-targeted > product-targeted, only currently-valid rows (A1-09); `ProductDiscountController`/`VoucherController` (agent-scoped, `role:super_admin,agen,admin`) |
+| Voucher resolution + applicability | `VoucherService::resolve`/`isApplicableTo`/`consume` (row-locked), `OrderService::voucherBudgetForLines` (single fixed face-value budget — A1-06/07) |
+| Dynamic invoice PDF | `InvoiceConfigService::resolved` (agent → global → defaults), `InvoicePdfService::render` (Barryvdh dompdf, viewer-aware A1-13/22), `InvoiceController` (owner + same-branch financial roles) |
 
 **Inventory**
 
@@ -68,12 +73,16 @@ Request path: **route role gate → FormRequest shape validation → controller 
 | Sub Location ownership | `SubLocationOwnershipService` |
 | Order Stock Request | `StockRequestService` (create on `diproses`, `lockActiveRequestForOrder`, `appendItemForOrderItem`) |
 | Proposal / approval (Agent physical move) | `StockRequestProposalService`; `StockRequestFulfillmentService` is a disabled stub (direct fulfilment returns 422) |
+| Gudang "Order Diproses" queue | `WarehouseOrderController` (queue listing + per-order internal stock request), scoped server-side to `status = 'diproses'` AND no courier assigned |
 | Transfers / handovers | `StockTransferService` |
 | Warehouse requests / opname | `WarehouseStockRequestService`, `StockOpnameService` |
 | Sub requests | `SubStockRequestService` |
 | Cancellation reversal | `InventoryCancellationService` |
 | Returns | `ReturnService` (`requestReturn`, `review`, `inspectReturn`, `finalizeInspection`, pickup/confirm, `markItemRefunded`) |
-| Order lifecycle | `OrderService` (create, status, cancel), `OrderFulfillmentService` (quantity/reschedule/split), `OrderLineAdditionService` (SC-03), `CourierService`, `DeliveryVerificationService` |
+| Order lifecycle | `OrderService` (create, status, cancel), `OrderFulfillmentService` (quantity/reschedule/split + the canonical delivery-date regroup), `OrderLineAdditionService` (SC-03), `CourierService`, `DeliveryVerificationService` |
+| Canonical Shipment grouping (one Shipment per order + date) | `ShipmentCanonicalizationService` (eligibility `mergeBlocker`, plan/apply, in-transaction `mergeGroupInto`), driven by `OrderFulfillmentService::consolidateIntoShipmentForDate`; shared by checkout, whole-line reschedule, reschedule split and SC-03 |
+| Shipment lifecycle aggregate (`status`/`shipped_at`/`delivered_at`) | `CourierService::syncShipmentAggregate` — derived from the shipment's OWN items and monotonic; shared by the per-item, per-shipment and office bulk paths |
+| Region lookup / reverse geocode | `RegionController`, `GeocodeService` + `ReverseGeocoder` interface (`NominatimReverseGeocoder` is the configurable live default; shared cache/atomic rate gate, exact unique master-chain matching and safe manual fallback; `POST /checkout/geocode`) |
 
 ## 4. Stock and reservation representation
 
@@ -126,7 +135,7 @@ sequenceDiagram
   C-->>A: OrderResource (persisted truth)
 ```
 
-Checkout (`OrderService::createOrder`) follows the same discipline: resolve lines once (`resolveLine` → effective inventory target), take the canonical locks, snapshot + reserve + commission per line, create one Shipment per item, and create the Stock Request when the order starts in `diproses`. `priceAndReserveLine` is shared with SC-03 (`addReservedLine`).
+Checkout (`OrderService::createOrder`) follows the same discipline: resolve lines once (`resolveLine` → effective inventory target), take the canonical locks, snapshot + reserve + commission per line, create one Shipment per **delivery-date group** (Human UAT-005 LOCKED: same `requested_delivery_date` + compatible mode/owner → ONE canonical Shipment, the shipping-fee snapshot landing on exactly one of them), and create the Stock Request when the order starts in `diproses`. `priceAndReserveLine` is shared with SC-03 (`addReservedLine`).
 
 ## 7. Locking and deadlock prevention
 
@@ -137,9 +146,10 @@ Locks are always acquired in these orders. **Do not introduce a second ordering 
 | Agent capacity (checkout, cancellation, Transit→Sub approval/execution) | targets sorted by `StockService::canonicalTargetKey` (`p:{id}` / `v:{id}`); per target: Agent commitment row → warehouse Transit/Plan rows (`lockReservationTargets`) |
 | Sub-domain | `WarehouseSubLocation` parent → Sub `WarehouseStock` target rows (canonical order) → Sub reservation rows |
 | Sub checkout | **shared** lock on the Sub Location (re-validated: active, same Agent, still owned) → Sub stock targets → reservations; the Gudang executor takes the location **exclusively** first, so no cycle |
-| Warehouse proposal approval | Proposal → Stock Request → per sorted target: Transit → Shipping → Agent commitment row |
-| **SC-03 add-line** | Order → **Stock Request** → Agent targets (canonical) → items/shipment. Stock Request precedes inventory so it matches proposal approval and cannot deadlock against it |
-| Quantity adjustment / Keuangan settlement | Adjustments lock `OrderItem`/`Order` and use plain (non-locking) reads for pending-obligation guards; settlement locks the financial row first — the two orders were deliberately kept cycle-free |
+| Warehouse proposal approval | Proposal → Stock Request → shared `StockService::canonicalReservationTargets` capacity prelock (Agent commitment → Transit/Plan) → Shipping |
+| **SC-03 add-line** | Order → current locking executor read (new additions only) → **Stock Request** → Agent targets (canonical) → items/shipment. Stock Request precedes inventory so it matches proposal approval and cannot deadlock against it |
+| **Courier assignment (A1-03/A1-04)** | **Order → Shipment** (delivery status uses this same boundary and checks executor ownership inside the transaction; re-check `diproses` + no different executor + terminal under lock; courier row re-read) — the same first lock as **proposal creation** (Order → Stock Request) so a dispatch assignment and a Gudang proposal serialize on the Order and can never interleave |
+| Quantity adjustment / reschedule / SC-03 / DP settlement request / Keuangan additional-payment settlement | Adjustments/reschedules lock `Order` → `OrderItem` → the order's Shipments (canonical regroup) and use plain (non-locking) reads for pending-obligation guards. `rescheduleItemDeliveryDate` additionally re-reads the already-locked **Order** to close the fulfillment window, so a date change can never happen once the order has started shipping. `PaymentService::requestSettlement` is **Order-first** (it re-reads `remaining_amount` and converges idempotently on the one pending `dp_settlement` row through a *locking* read on the indexed `payment_transactions.order_id`), and `markAdditionalPaymentPaid` still locks its financial row first — the two orders were deliberately kept cycle-free because neither ever needs a row the other holds first |
 
 Reconciliation rule (REPEATABLE READ): when a status or total is derived from rows that another transaction may have just committed while this one waited for a lock, use **locking reads** (`lockForUpdate()->get()` then sum in PHP), never a plain `sum()` that would use the pre-wait snapshot. `StockRequestService::appendItemForOrderItem` and `StockRequestProposalService::approve` follow this. Deadlocks are fixed by ordering, not by sleeps or catching 1213.
 
@@ -201,6 +211,7 @@ The backend 409 is the final guard if a key ever meets a changed payload.
 | Payment gateways | `Services/Payment/Gateways/*` | Per-Agent encrypted config (`agent_payment_gateway_configs`); webhook `POST /webhooks/payment/{method}` |
 | Google Sheets | `Services/GoogleSheets/{DatasetRegistry,SyncService,SheetsClient}` | Whitelisted dataset/column registry; server-side service account; one-way |
 | Google Maps | frontend only | Public key; private provider keys never reach the browser |
+| Google sign-in (IMP-001) | `Services/Auth/GoogleAuthService`, `Controllers/Api/V1/Auth/GoogleAuthController`, `user_social_identities` | `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` env (empty = disabled, 503); routes in `routes/web.php` under `api/v1/auth/google` (web group = session for OAuth state, still reachable through the production `/api` bridge); back-channel code exchange with PKCE, ID-token claims validated, nothing persisted but the identity link |
 
 ## 13. Security boundaries
 
@@ -208,8 +219,10 @@ Route role → Policy → `BelongsToAgentScope` → service re-checks. Server-de
 
 ## 14. Testing architecture
 
-- PHPUnit `tests/Feature` (real DB, policies, services, migrations) and `tests/Unit`. `Tests\TestCase` refuses any database whose name does not match `_test(ing)`; the DB is `primeclassy_testing`.
+- PHPUnit `tests/Feature` (real DB, policies, services, migrations) and `tests/Unit`. `Tests\TestCase` applies the fail-closed `TestDatabaseGuard`: exact equality only — `APP_ENV=testing` + MySQL/MariaDB + database exactly `primeclassy_testing`; no regex/suffix acceptance (`foo_testing`, `primeclassy_dev`, `sql_prime` are all refused).
 - Most suites use `RefreshDatabase`. Race suites use `RestoresIsolatedTestDatabase` (committed fixtures + rebuild) with `Tests\Support\ConcurrencyHarness`, which spawns real second PHP processes (`.phpunit-concurrency-actor.php`, whitelisted operations such as `add-line`, `proposal-approve`, `agent-reserve`, `checkout-order`) to produce **true two-connection overlap** and assert no deadlock (1213), no oversell and conserved inventory.
 - `scripts/run-tests-serialized.php` serializes destructive migration/refresh suites with a lock and refuses non-testing databases.
 - Deterministic lock-order assertions (query-log inspection) complement races where timing alone cannot prove ordering.
 - No frontend test framework; verification is `vue-tsc`, the Vite build and manual browser checks.
+
+SC-03/assignment boundary (Human-approved no-inaccessible-demand sequence): SC-03 takes Order first and checks executor state with a current locking Shipment read, after original-request replay. Assignment/pickup also owns Order; before adding an executor it locks Stock Request, reads added item ids and their request demand with current locks, and refuses pending SC-03 demand. Thus assignment-first rejects new addition; SC-03-first preserves Gudang access until added stock is fulfilled. No new inventory lock order, sleep or retry is introduced.

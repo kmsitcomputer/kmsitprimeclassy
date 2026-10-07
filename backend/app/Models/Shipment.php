@@ -55,6 +55,55 @@ class Shipment extends Model
         return $this->delivery_mode === self::DELIVERY_MODE_SELF_SUB;
     }
 
+    /** KURIR ONLINE (OpenRoute) — canonical `shipping_provider_code`. */
+    public const PROVIDER_COURIER_ONLINE = 'openroute';
+
+    /** EKSPEIDISI (RajaOngkir) — canonical `shipping_provider_code`. */
+    public const PROVIDER_EXPEDITION = 'rajaongkir';
+
+    /** PICKUP / AMBIL DI TEMPAT — canonical `shipping_provider_code`. */
+    public const PROVIDER_PICKUP = 'pickup';
+
+    /**
+     * LOCKED BUSINESS RULE (Human 2026-10-07) — is this shipment's requested delivery date
+     * re-datable?
+     *
+     * Allowed:
+     *   1. KURIR ONLINE  — `shipping_provider_code = 'openroute'`
+     *   2. SELF DELIVERY / SUB — `delivery_mode = 'self_sub'` (the owning Sales-Kurir-Sub delivers
+     *      it; provider code may be the neutral 'free' fallback, so the canonical MODE decides)
+     *
+     * Forbidden:
+     *   3. EKSPEIDISI / RajaOngkir — its schedule belongs to the carrier workflow
+     *   4. PICKUP / Ambil di Tempat — customer collection flow, and must never be turned into a
+     *      courier-online shipment
+     *
+     * Classification reads the canonical persisted fields only. It is never inferred from whether a
+     * requested date happens to be set, and it is an ALLOWLIST, so anything unrecognised (a neutral
+     * 'free'/internal provider on a standard shipment) stays non-reschedulable. This is the single
+     * source of truth: the fulfillment service enforces it and OrderResource mirrors it for the UI.
+     */
+    public function isDeliveryDateReschedulable(): bool
+    {
+        if ($this->isSelfDelivery()) {
+            return true;
+        }
+
+        return $this->shipping_provider_code === self::PROVIDER_COURIER_ONLINE;
+    }
+
+    /** Human-facing delivery-method label used in the business error message. */
+    public function deliveryMethodLabel(): string
+    {
+        return match (true) {
+            $this->isSelfDelivery() => 'self_delivery',
+            $this->shipping_provider_code === self::PROVIDER_COURIER_ONLINE => 'courier_online',
+            $this->shipping_provider_code === self::PROVIDER_EXPEDITION => 'expedition',
+            $this->shipping_provider_code === self::PROVIDER_PICKUP => 'pickup',
+            default => $this->shipping_provider_code ?? '—',
+        };
+    }
+
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);

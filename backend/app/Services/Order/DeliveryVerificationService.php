@@ -4,6 +4,7 @@ namespace App\Services\Order;
 
 use App\Exceptions\ApiException;
 use App\Models\DeliveryVerification;
+use App\Models\OrderItem;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
@@ -46,6 +47,18 @@ class DeliveryVerificationService
                 // A verification is only meaningful once the shipment has actually been delivered;
                 // the delivery proof itself lives on the shipment (proof_media_id).
                 if ($shipment->delivered_at === null) {
+                    throw new ApiException(__('messages.delivery_verification.not_delivered'), 422);
+                }
+
+                // `delivered_at` is a derived aggregate (CourierService::syncShipmentAggregate), but this
+                // record is APPEND-ONLY and can never be corrected, so re-derive the verdict from the
+                // shipment's own items rather than trusting a stored column alone. A shipment whose
+                // goods did not all arrive has no delivery to verify — recording "received" for it
+                // would assert receipt of goods that never came.
+                $unarrived = OrderItem::query()->where('shipment_id', $shipment->id)
+                    ->whereNotIn('status', ['terkirim', 'pengembalian', 'kembali'])
+                    ->exists();
+                if ($unarrived) {
                     throw new ApiException(__('messages.delivery_verification.not_delivered'), 422);
                 }
 

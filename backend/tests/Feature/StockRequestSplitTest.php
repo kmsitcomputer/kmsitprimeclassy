@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductStock;
+use App\Models\Shipment;
 use App\Models\StockRequest;
 use App\Models\StockRequestItem;
 use App\Models\User;
@@ -64,6 +65,15 @@ class StockRequestSplitTest extends TestCase
         ]);
         $request = StockRequest::create(['agent_id' => $agen->id, 'order_id' => $order->id, 'request_number' => 'SR-'.Str::uuid(), 'status' => $fulfilled > 0 ? 'partial' : 'pending']);
         $requestItem = StockRequestItem::create(['stock_request_id' => $request->id, 'order_item_id' => $item->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 10, 'fulfilled_qty' => $fulfilled, 'remaining_qty' => $remaining]);
+
+        // The split is driven through the reschedule service, which the Human's LOCKED rule
+        // (2026-10-07) allows ONLY for Kurir Online. This fixture creates the order row directly
+        // and seeds no shipping provider, so the canonical field is set here explicitly.
+        Shipment::create([
+            'order_id' => $order->id, 'shipping_provider_code' => 'openroute', 'status' => 'pending',
+            'delivery_mode' => \App\Models\Shipment::DELIVERY_MODE_STANDARD,
+        ]);
+        $item->update(['shipment_id' => Shipment::query()->where('order_id', $order->id)->value('id')]);
 
         return compact('agen', 'admin', 'konsumen', 'product', 'order', 'item', 'request', 'requestItem');
     }

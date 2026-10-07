@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\Api\V1\Address\KonsumenAddressController;
 use App\Http\Controllers\Api\V1\Admin\AuditLogController;
+use App\Http\Controllers\Api\V1\Admin\GoogleAuthSettingController;
 use App\Http\Controllers\Api\V1\Admin\OrderAdjustmentController;
 use App\Http\Controllers\Api\V1\Admin\PaymentGatewayController;
 use App\Http\Controllers\Api\V1\Admin\RegionImportExportController;
 use App\Http\Controllers\Api\V1\Admin\ShippingCourierController;
 use App\Http\Controllers\Api\V1\Admin\ShippingProviderController;
 use App\Http\Controllers\Api\V1\Agent\AgentContactController;
+use App\Http\Controllers\Api\V1\Agent\AgentGoogleAuthConfigController;
 use App\Http\Controllers\Api\V1\Agent\AgentPaymentMethodController;
 use App\Http\Controllers\Api\V1\Agent\AgentShippingProviderController;
 use App\Http\Controllers\Api\V1\Agent\AgentStoreProfileController;
@@ -18,6 +20,7 @@ use App\Http\Controllers\Api\V1\Catalog\ProductController;
 use App\Http\Controllers\Api\V1\Catalog\ProductImageController;
 use App\Http\Controllers\Api\V1\Catalog\ProductVariationController;
 use App\Http\Controllers\Api\V1\Checkout\CheckoutController;
+use App\Http\Controllers\Api\V1\Checkout\GeocodeController;
 use App\Http\Controllers\Api\V1\Cms\ArticleController;
 use App\Http\Controllers\Api\V1\Cms\HomepageBlockController;
 use App\Http\Controllers\Api\V1\Cms\HomepageController;
@@ -28,12 +31,17 @@ use App\Http\Controllers\Api\V1\Fee\CommissionController;
 use App\Http\Controllers\Api\V1\Fee\FeeController;
 use App\Http\Controllers\Api\V1\Fulfillment\OrderFulfillmentController;
 use App\Http\Controllers\Api\V1\Install\InstallController;
+use App\Http\Controllers\Api\V1\Dispatch\DispatchController;
 use App\Http\Controllers\Api\V1\Integration\SheetsController;
+use App\Http\Controllers\Api\V1\Invoice\InvoiceConfigController;
+use App\Http\Controllers\Api\V1\Invoice\InvoiceController;
 use App\Http\Controllers\Api\V1\Language\LanguageController;
 use App\Http\Controllers\Api\V1\Media\MediaController;
 use App\Http\Controllers\Api\V1\Order\DeliveryVerificationController;
 use App\Http\Controllers\Api\V1\Order\OrderController;
 use App\Http\Controllers\Api\V1\Payment\PaymentController;
+use App\Http\Controllers\Api\V1\Promo\ProductDiscountController;
+use App\Http\Controllers\Api\V1\Promo\VoucherController;
 use App\Http\Controllers\Api\V1\Referral\ReferralController;
 use App\Http\Controllers\Api\V1\Region\RegionController;
 use App\Http\Controllers\Api\V1\Report\ReportController;
@@ -46,6 +54,7 @@ use App\Http\Controllers\Api\V1\Stock\StockRequestProposalController;
 use App\Http\Controllers\Api\V1\Stock\StockTransferController;
 use App\Http\Controllers\Api\V1\Stock\SubStockRequestController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseController;
+use App\Http\Controllers\Api\V1\Stock\WarehouseOrderController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseSettingsController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseStockRequestController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseSubLocationController;
@@ -159,11 +168,13 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
 
     // Hierarchical account provisioning — WHO may create WHICH role is
     // enforced by UserPolicy::create/HierarchyRules, not by this middleware.
-    Route::middleware('role:super_admin,agen,korsal')->group(function () {
+    // A1-02: a Koordinator-Kurir may create Kurir in its own branch (the
+    // service + policy stay the authority on WHICH role).
+    Route::middleware('role:super_admin,agen,korsal,koordinator-kurir')->group(function () {
         Route::post('/users', [UserController::class, 'store']);
     });
 
-    Route::middleware('role:super_admin,agen,korsal,sales,sales-kurir-sub,admin,keuangan,kurir')->group(function () {
+    Route::middleware('role:super_admin,agen,korsal,sales,sales-kurir-sub,admin,keuangan,kurir,koordinator-kurir')->group(function () {
         Route::get('/users', [UserController::class, 'index']);
         Route::get('/users/{user}', [UserController::class, 'show']);
         Route::patch('/users/{user}', [UserController::class, 'update']);
@@ -181,6 +192,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware(['role:konsumen,agen,korsal,sales,sales-kurir-sub', 'throttle:30,1'])->group(function () {
         Route::post('/checkout/quote', [CheckoutController::class, 'quote']);
         Route::post('/checkout/courier-options', [CheckoutController::class, 'courierOptions']);
+        // IMP-002 "Gunakan Lokasi Saya" — reverse-geocode + regional-master match.
+        Route::post('/checkout/geocode', [GeocodeController::class, 'locate']);
         Route::post('/orders', [OrderController::class, 'store']);
     });
 
@@ -193,9 +206,17 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Payment verification/settlement is KEUANGAN's authority — never ADMIN's
     // (separation of duties: Admin owns transaction operations, Keuangan owns
     // financial operations). super_admin keeps platform-wide override.
+    // UAT-008: in-scope Sales/Korsal/Sales-Kurir-Sub additionally reach the
+    // proof-based approve/reject + pelunasan-request actions for orders
+    // inside their own legitimate scope — PaymentController::
+    // assertMayVerifyPayment re-checks that scope server-side (route gate
+    // is never the authority). The direct COD paid/unpaid toggle (markCod)
+    // stays keuangan-only: it flips payment state with no proof workflow.
     Route::middleware('role:super_admin,keuangan')->group(function () {
-        Route::post('/orders/{order}/payment/verify', [PaymentController::class, 'verify']);
         Route::patch('/orders/{order}/payment/cod', [PaymentController::class, 'markCod']);
+    });
+    Route::middleware('role:super_admin,keuangan,sales,korsal,sales-kurir-sub')->group(function () {
+        Route::post('/orders/{order}/payment/verify', [PaymentController::class, 'verify']);
         // DP pelunasan: Keuangan requests settlement of the outstanding balance.
         Route::post('/orders/{order}/payment/settle', [PaymentController::class, 'settle']);
         Route::patch('/admin/cod-payment-proofs/{codPaymentProof}/confirm', [PaymentController::class, 'confirmCodProof']);
@@ -212,17 +233,40 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Per-shipment courier assignment + diproses->dikirim->terkirim — the
     // counterpart of the order-wide route above, scoped to one courier's own
     // batch of items (ShipmentPolicy/CourierService enforce WHOSE delivery
-    // and WHICH transitions).
-    Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir-sub')->group(function () {
+    // and WHICH transitions). Status progression stays with the executor
+    // (kurir / sales-kurir-sub / koordinator-kurir self-executor) + office.
+    // A1-01: a Koordinator-Kurir may progress a standard shipment ONLY as the
+    // recorded executor of that shipment (own Courier profile) — never
+    // dispatcher authority over other couriers' work; ShipmentPolicy enforces
+    // the ownership shape.
+    Route::middleware('role:super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir')->group(function () {
         Route::patch('/shipments/{shipment}/status', [ShipmentController::class, 'updateStatus']);
+        // LOCKED courier work-unit model (Human UAT): per-ITEM progress. Same role gate and
+        // the same ShipmentPolicy::updateStatus executor rule as the bulk path; the service
+        // additionally verifies the item still belongs to this order and shipment under lock.
+        Route::patch('/shipments/{shipment}/items/{orderItem}/status', [ShipmentController::class, 'updateItemStatus']);
         // Thermal shipping receipt — read-only, before/after pickup mode is
         // derived server-side (ShipmentReceiptResource), never picked by the
         // caller. keuangan/korsal/sales/konsumen deliberately excluded from
         // this middleware group (ShipmentPolicy::printReceipt).
         Route::get('/shipments/{shipment}/receipt', [ShipmentController::class, 'receipt']);
     });
-    Route::middleware('role:super_admin,agen,admin')->group(function () {
+    // IMP-003: Koordinator-Kurir (branch dispatcher) assigns couriers; the
+    // kurir that executes the delivery then progresses it. Both assignment
+    // and dispatch read are same-agent, server-authoritative routes.
+    Route::middleware('role:super_admin,agen,admin,koordinator-kurir')->group(function () {
         Route::patch('/shipments/{shipment}/courier', [ShipmentController::class, 'assign']);
+    });
+
+    // IMP-003: Koordinator-Kurir dispatch workspace — the same
+    // diproses/no-courier invariant as Gudang's queue (the ONLY surface
+    // that can ever show these rows), plus courier assignments via the
+    // canonical /shipments/{shipment}/courier route above. koordinator-kurir
+    // sees only its own branch; super_admin may pass ?agent_id=.
+    Route::middleware('role:super_admin,agen,admin,koordinator-kurir')->group(function () {
+        Route::get('/dispatch', [DispatchController::class, 'index']);
+        Route::get('/dispatch/couriers', [DispatchController::class, 'couriers']);
+        Route::get('/dispatch/regions', [DispatchController::class, 'regions']);
     });
 
     // R-03: Admin final delivery verification — append-only operational outcome (received /
@@ -288,7 +332,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // R-03: Sales-Kurir-Sub is NOT a normal Kurir. They may use the delivery queue (scoped
     // server-side to their own self_sub shipments) but NOT the normal-Kurir return pickup/confirm
     // actions, which require a Courier profile they deliberately do not have.
-    Route::middleware('role:kurir,sales-kurir-sub')->group(function () {
+    // A1-01: a Koordinator-Kurir that assigned a delivery to ITSELF becomes the actual never
+    // executor — it reaches the same delivery queue via its own Courier profile (created on
+    // first self-assignment), exactly like a normal Kurir.
+    Route::middleware('role:kurir,sales-kurir-sub,koordinator-kurir')->group(function () {
         Route::get('/kurir/orders', [CourierDashboardController::class, 'orders']);
     });
     Route::middleware('role:kurir')->group(function () {
@@ -311,6 +358,16 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::get('/orders', [OrderController::class, 'index']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
     Route::post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+
+    // IMP-002: dynamic invoice — order-level PDF, NOT Print Resi. Authorized
+    // by the Order policy (owner konsumen or same-branch financial roles).
+    Route::get('/orders/{order}/invoice', [InvoiceController::class, 'show']);
+    // Invoice configuration: super_admin manages the global row, agen its
+    // own branch row (InvoiceConfigController enforces both sides).
+    Route::middleware('role:super_admin,agen')->group(function () {
+        Route::get('/invoice/config', [InvoiceConfigController::class, 'show']);
+        Route::put('/invoice/config', [InvoiceConfigController::class, 'update']);
+    });
 
     // Category taxonomy — super_admin only (ProductCategoryPolicy); structural,
     // never opened to agen the way product CRUD itself now is.
@@ -343,6 +400,22 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:super_admin,agen')->group(function () {
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
         Route::delete('/products/{product}/variations/{variation}', [ProductVariationController::class, 'destroy']);
+    });
+
+    // IMP-002: Promotions — product/variation discounts + vouchers. Agen/Admin
+    // manage their own branch (agent_id from session); super_admin may manage
+    // any branch via ?agent_id= on index. The server remains authoritative for
+    // every price/eligibility decision at checkout (PricingService/VoucherService).
+    Route::middleware('role:super_admin,agen,admin')->group(function () {
+        Route::get('/promo/discounts', [ProductDiscountController::class, 'index']);
+        Route::post('/promo/discounts', [ProductDiscountController::class, 'store']);
+        Route::patch('/promo/discounts/{discount}', [ProductDiscountController::class, 'update']);
+        Route::delete('/promo/discounts/{discount}', [ProductDiscountController::class, 'destroy']);
+
+        Route::get('/promo/vouchers', [VoucherController::class, 'index']);
+        Route::post('/promo/vouchers', [VoucherController::class, 'store']);
+        Route::patch('/promo/vouchers/{voucher}', [VoucherController::class, 'update']);
+        Route::delete('/promo/vouchers/{voucher}', [VoucherController::class, 'destroy']);
     });
 
     // Agent stock — read/browse (including cross-agent oversight via
@@ -435,10 +508,31 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/warehouse/transfers/{transfer}/approve', [StockTransferController::class, 'approve']);
         Route::post('/warehouse/transfers/{transfer}/reject', [StockTransferController::class, 'reject']);
     });
-    Route::middleware('role:super_admin,agen,admin,gudang')->group(function () {
-        Route::get('/warehouse/stock-requests', [StockRequestController::class, 'index']);
-        Route::get('/warehouse/stock-requests/{stockRequest}', [StockRequestController::class, 'show']);
+
+    // IMP-001 UAT remediation (Gap 2): Gudang's "Order Diproses" work queue.
+    // The user-facing "Stock Request" feature is removed; Gudang now works
+    // orders that are 'diproses' AND have no assigned courier (the ONLY
+    // surface that can ever show them — server-side scope rule, see
+    // WarehouseOrderController + OrderPolicy::view). The internal
+    // /warehouse/stock-requests + /warehouse/fulfillment-proposals endpoints
+    // below remain the canonical persistence for proposal -> approval ->
+    // fulfillment and are never exposed as a standalone user feature.
+    Route::middleware('role:gudang')->group(function () {
+        Route::get('/warehouse/orders/diproses', [WarehouseOrderController::class, 'diproses']);
+        // The internal one-per-order stock request behind an eligible order
+        // (what Gudang fills against) — canonical persistence, scoped to the
+        // warehouse-queue invariant server-side (see controller).
+        Route::get('/warehouse/orders/{order}/stock-request', [WarehouseOrderController::class, 'stockRequest']);
     });
+
+    // NOTE: the standalone GET list/detail of /warehouse/stock-requests
+    // (previously StockRequestController::index/shared under
+    // role:super_admin,agen,admin,gudang) is REMOVED — the "Stock Request"
+    // standalone user-facing feature no longer exists for any role (Human
+    // UAT, §8). Only the internal writes below (proposals/fulfill) and the
+    // order-scoped internal read above survive; the canonical proposal read/
+    // approval surface is /warehouse/fulfillment-proposals (below), which
+    // Gudang/Admin use for the fulfillment workflow.
     Route::middleware('role:gudang')->group(function () {
         Route::post('/warehouse/stock-requests/{stockRequest}/fulfill', [StockRequestController::class, 'fulfill']);
         Route::post('/warehouse/stock-requests/{stockRequest}/proposals', [StockRequestProposalController::class, 'store']);
@@ -465,6 +559,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/agent/payment-methods/{method}/toggle', [AgentPaymentMethodController::class, 'toggle']);
         Route::patch('/agent/payment-methods/{method}/environment', [AgentPaymentMethodController::class, 'setEnvironment']);
         Route::put('/agent/payment-methods/{method}/config', [AgentPaymentMethodController::class, 'updateConfig']);
+
+        // Google Auth — the agen's OWN branch config (never another's).
+        Route::get('/agent/google-auth', [AgentGoogleAuthConfigController::class, 'show']);
+        Route::put('/agent/google-auth', [AgentGoogleAuthConfigController::class, 'update']);
     });
 
     // Agen's own scoped shipping settings + store profile — on/off for the
@@ -599,6 +697,12 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         // Website Settings (Blueprint §Website Settings).
         Route::get('/admin/settings', [WebsiteSettingController::class, 'adminShow']);
         Route::put('/admin/settings', [WebsiteSettingController::class, 'update']);
+
+        // Google Auth — GLOBAL config (Super Admin). Credentials are also
+        // configurable per-agen (see Agent\AgentGoogleAuthConfigController);
+        // .env stays bootstrap/fallback only.
+        Route::get('/admin/google-auth', [GoogleAuthSettingController::class, 'show']);
+        Route::put('/admin/google-auth', [GoogleAuthSettingController::class, 'update']);
 
         // Kontak Agen — manages the AgentProfile contact/location record for
         // an existing agen user; never creates the user account itself

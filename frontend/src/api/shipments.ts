@@ -21,6 +21,29 @@ export async function updateShipmentStatus(shipmentId: number, status: 'dikirim'
   return data.data
 }
 
+/**
+ * LOCKED courier work-unit model (Human UAT): per-ITEM progress. Transitions exactly ONE
+ * canonical OrderItem — its shipment siblings keep their own state. Same role gate and executor
+ * authorization as the bulk path; the backend additionally verifies the item still belongs to
+ * this order and shipment under lock.
+ */
+export async function updateShipmentItemStatus(
+  shipmentId: number,
+  itemId: number,
+  status: 'dikirim' | 'terkirim',
+  proof?: File,
+) {
+  const form = new FormData()
+  form.append('status', status)
+  if (proof) form.append('proof', proof)
+  form.append('_method', 'PATCH')
+
+  const { data } = await http.post<ApiEnvelope<Order>>(`/shipments/${shipmentId}/items/${itemId}/status`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data.data
+}
+
 /** Office-only (admin/agen/super_admin) proactive assignment — a kurir self-assigns instead by marking 'dikirim'. */
 export async function assignCourier(shipmentId: number, courierId: number) {
   const { data } = await http.patch<ApiEnvelope<Order>>(`/shipments/${shipmentId}/courier`, { courier_id: courierId })

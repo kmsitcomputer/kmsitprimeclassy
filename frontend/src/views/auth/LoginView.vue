@@ -7,6 +7,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import PasswordInput from '@/components/ui/PasswordInput.vue'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/client'
+import { googleAuthUrl } from '@/api/auth'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -17,6 +18,14 @@ const email = ref('')
 const password = ref('')
 const submitting = ref(false)
 const errorMessage = ref<string | null>(null)
+
+// Google callback failures come back as ?google_error=<code> (see GoogleAuthController).
+const googleError = route.query.google_error as string | undefined
+if (googleError) errorMessage.value = t(`auth.google.errors.${googleError}`, t('auth.google.errors.provider_error'))
+
+function continueWithGoogle() {
+  window.location.assign(googleAuthUrl('login'))
+}
 
 async function submit() {
   submitting.value = true
@@ -52,6 +61,8 @@ async function submit() {
 
       <AppButton type="submit" size="lg" block :disabled="submitting">{{ submitting ? t('auth.login.submitting') : t('auth.login.submit') }}</AppButton>
     </form>
+
+    <AppButton type="button" variant="secondary" size="lg" block class="mt-3" @click="continueWithGoogle">{{ t('auth.google.continue') }}</AppButton>
 
     <p class="mt-5 text-center text-sm text-stone-500 dark:text-stone-400">
       {{ t('auth.login.noAccount') }}

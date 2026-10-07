@@ -11,6 +11,8 @@ node_modules
 .DS_Store
 dist
 dist-ssr
+# Safe build-staging dir (never the served `dist`; see AGENTS.md §7)
+dist-tmp
 coverage
 *.local
 

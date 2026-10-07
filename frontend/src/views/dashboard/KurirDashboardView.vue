@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { useAuthStore } from '@/stores/auth'
-import { updateShipmentStatus } from '@/api/shipments'
+import { updateShipmentItemStatus } from '@/api/shipments'
 import {
   listCourierOrders,
   listCourierReturns,
@@ -21,6 +21,8 @@ const tab = ref<'orders' | 'returns' | 'selesai'>('orders')
 const auth = useAuthStore()
 
 /* Sales-Kurir referral visibility (PBR-001) — same code/link/copy UX as ProfileView. */
+const isKoordinator = computed(() => auth.user?.role === 'koordinator-kurir')
+const isExecutorOnly = computed(() => isSalesKurir.value || isKoordinator.value)
 const isSalesKurir = computed(() => auth.user?.role === 'sales-kurir-sub')
 const referralLink = computed(() => (auth.user?.referral_code ? `${window.location.origin}/?ref=${auth.user.referral_code}` : ''))
 const referralCopied = ref(false)
@@ -50,7 +52,7 @@ const deliveredPage = ref(1)
 const deliveredLastPage = ref(1)
 const deliveredFrom = ref('')
 const deliveredTo = ref('')
-const busyShipmentId = ref<number | null>(null)
+const busyItemId = ref<number | null>(null)
 const busyReturnItemId = ref<number | null>(null)
 const pickupNoteDraft = ref<Record<number, string>>({})
 const pickingUpItemId = ref<number | null>(null)
@@ -93,7 +95,7 @@ async function loadDelivered(page = deliveredPage.value) {
   try {
     // R-03 / UAT-R03-01: a Sales-Kurir-Sub has no access to the normal-Kurir delivered report;
     // their completed self_sub history comes from the role-scoped /kurir/orders?status=terkirim.
-    const { orders: rows, meta } = isSalesKurir.value
+    const { orders: rows, meta } = isExecutorOnly.value
       ? await listCourierOrders(page, 'terkirim')
       : await courierDeliveredReport(page, deliveredFrom.value || undefined, deliveredTo.value || undefined)
     delivered.value = rows
@@ -108,44 +110,49 @@ async function loadDelivered(page = deliveredPage.value) {
 
 function switchTab(next: 'orders' | 'returns' | 'selesai') {
   // Sales-Kurir-Sub has no normal-Kurir return workflow — never call /kurir/returns for them.
-  if (next === 'returns' && isSalesKurir.value) return
+  if (next === 'returns' && isExecutorOnly.value) return
   tab.value = next
   if (next === 'orders') loadOrders(1)
   else if (next === 'returns') loadReturns(1)
   else loadDelivered(1)
 }
 
-async function pickup(shipmentId: number | null) {
-  if (shipmentId === null) return
-  busyShipmentId.value = shipmentId
+/**
+ * LOCKED courier work-unit model (Human UAT): every action targets exactly ONE canonical
+ * OrderItem. `updateShipmentItemStatus` transitions only that item — its shipment siblings keep
+ * their own state. Busy state and proof inputs are keyed by item id for the same reason.
+ */
+async function pickup(item: { id: number; shipment_id: number | null }) {
+  if (item.shipment_id === null) return
+  busyItemId.value = item.id
   try {
-    await updateShipmentStatus(shipmentId, 'dikirim')
+    await updateShipmentItemStatus(item.shipment_id, item.id, 'dikirim')
     await loadOrders()
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengambil order ini.'
   } finally {
-    busyShipmentId.value = null
+    busyItemId.value = null
   }
 }
 
-function triggerProofPicker(shipmentId: number | null) {
-  if (shipmentId === null) return
-  proofInputs.value[shipmentId]?.click()
+function triggerProofPicker(itemId: number | null) {
+  if (itemId === null) return
+  proofInputs.value[itemId]?.click()
 }
 
-async function markDelivered(shipmentId: number | null, event: Event) {
-  if (shipmentId === null) return
+async function markDelivered(item: { id: number; shipment_id: number | null }, event: Event) {
+  if (item.shipment_id === null) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  busyShipmentId.value = shipmentId
+  busyItemId.value = item.id
   try {
-    await updateShipmentStatus(shipmentId, 'terkirim', file)
+    await updateShipmentItemStatus(item.shipment_id, item.id, 'terkirim', file)
     await loadOrders()
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menandai order terkirim. Pastikan foto bukti terlampir.'
   } finally {
-    busyShipmentId.value = null
+    busyItemId.value = null
     input.value = ''
   }
 }
@@ -190,6 +197,21 @@ onMounted(() => loadOrders(1))
       Ambil order untuk dikirim, tandai terkirim dengan foto bukti, dan kelola pengambilan retur.
     </p>
 
+    <!-- UAT-007: Koordinator Kurir holds both responsibilities — Dispatch (coordinate/assign) and
+         Pengiriman Saya (execute own assigned shipments). This view reuses the existing courier
+         dashboard queue (no duplicate dashboard); the hint below keeps the Dispatch entry
+         discoverable when the own-delivery queue is still empty. -->
+    <div
+      v-if="isKoordinator"
+      class="mb-5 rounded-2xl border border-brand-200 bg-brand-50 p-4 text-sm dark:border-brand-900 dark:bg-brand-950/40"
+    >
+      <p class="font-medium text-stone-700 dark:text-stone-200">
+        Anda masuk sebagai Koordinator Kurir — kelola antrean cabang di
+        <RouterLink :to="{ name: 'dispatch' }" class="font-semibold text-brand-700 hover:underline dark:text-brand-300">Dispatch</RouterLink>
+        (termasuk <em>Ambil Pengiriman</em> untuk mengantar sendiri), lalu kerjakan pengiriman Anda di sini.
+      </p>
+    </div>
+
     <div
       v-if="isSalesKurir && auth.user?.referral_code"
       class="mb-5 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900"
@@ -220,7 +242,7 @@ onMounted(() => loadOrders(1))
         Order
       </button>
       <button
-        v-if="!isSalesKurir"
+        v-if="!isExecutorOnly"
         type="button"
         class="border-b-2 px-3 py-2 text-sm font-medium"
         :class="tab === 'returns' ? 'border-brand-600 text-brand-700 dark:border-brand-400 dark:text-brand-300' : 'border-transparent text-stone-500 dark:text-stone-400'"
@@ -245,7 +267,14 @@ onMounted(() => loadOrders(1))
     <p v-if="loading" class="text-sm text-stone-500 dark:text-stone-400">Memuat...</p>
 
     <template v-else-if="tab === 'orders'">
-      <p v-if="orders.length === 0" class="text-sm text-stone-500 dark:text-stone-400">Tidak ada order saat ini.</p>
+      <p v-if="orders.length === 0" class="text-sm text-stone-500 dark:text-stone-400">
+        Tidak ada order saat ini.
+        <template v-if="isKoordinator">
+          Pengiriman yang Anda ambil di
+          <RouterLink :to="{ name: 'dispatch' }" class="font-medium text-brand-700 hover:underline dark:text-brand-300">Dispatch</RouterLink>
+          akan muncul di sini.
+        </template>
+      </p>
       <div v-else class="space-y-3">
         <div
           v-for="order in orders"
@@ -285,25 +314,25 @@ onMounted(() => loadOrders(1))
                   v-if="item.shipment_id && item.status === 'diproses'"
                   type="button"
                   class="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                  :disabled="busyShipmentId === item.shipment_id"
-                  @click="pickup(item.shipment_id)"
+                  :disabled="busyItemId === item.id"
+                  @click="pickup(item)"
                 >
                   Ambil
                 </button>
                 <template v-else-if="item.shipment_id && item.status === 'dikirim'">
                   <input
-                    :ref="(el) => (proofInputs[item.shipment_id as number] = el as HTMLInputElement)"
+                    :ref="(el) => (proofInputs[item.id as number] = el as HTMLInputElement)"
                     type="file"
                     accept="image/*"
                     capture="environment"
                     class="hidden"
-                    @change="markDelivered(item.shipment_id, $event)"
+                    @change="markDelivered(item, $event)"
                   />
                   <button
                     type="button"
                     class="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                    :disabled="busyShipmentId === item.shipment_id"
-                    @click="triggerProofPicker(item.shipment_id)"
+                    :disabled="busyItemId === item.id"
+                    @click="triggerProofPicker(item.id)"
                   >
                     <AppIcon name="upload" :size="14" /> Terkirim
                   </button>
@@ -433,7 +462,7 @@ onMounted(() => loadOrders(1))
     </template>
 
     <template v-else>
-      <div v-if="!isSalesKurir" class="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
+      <div v-if="!isExecutorOnly" class="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
         <label class="text-sm text-stone-600 dark:text-stone-300">
           Dari
           <input v-model="deliveredFrom" type="date" class="mt-1 block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />

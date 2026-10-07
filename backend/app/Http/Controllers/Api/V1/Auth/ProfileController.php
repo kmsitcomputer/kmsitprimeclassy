@@ -37,10 +37,21 @@ class ProfileController extends Controller
         ]);
 
         $before = $user->only(['name', 'phone', 'email']);
+
+        // IMP-001 audit hunting: email verification authenticates the ADDRESS, not the person.
+        // A changed address is a new, unverified address — retaining an old email_verified_at
+        // would let Google auto-linking (or any future email-verified check) treat a never-
+        // verified current address as verified (account-confusion/pre-hijacking). Resetting
+        // it here means auto-link eligibility always proves the CURRENT address.
+        if (isset($data['email']) && strtolower($data['email']) !== strtolower((string) $user->email)) {
+            $data['email_verified_at'] = null;
+        }
+
         $user->update($data);
 
         ActivityLogger::log($user->id, $user, 'profile.updated', null, [
             'old' => $before, 'new' => $user->only(array_keys($before)),
+            'email_changed' => isset($data['email']) && strtolower($data['email']) !== strtolower((string) $before['email']),
         ]);
 
         return $this->ok(new UserResource($user));

@@ -94,6 +94,27 @@ class CheckoutConcurrencyTest extends TestCase
         }
     }
 
+    public function test_concurrent_checkouts_cannot_both_redeem_the_final_voucher_use(): void
+    {
+        $this->createFixture();
+        $f = $this->fixture;
+        WarehouseStock::where('agent_id', $f['agent']->id)->where('product_id', $f['product']->id)->update(['quantity' => 10]);
+        $voucher = \App\Models\Voucher::create(['agent_id' => $f['agent']->id, 'code' => 'FINAL-USE', 'name' => 'Last use', 'type' => 'fixed', 'value' => 10000, 'is_active' => true, 'max_uses' => 1]);
+        $extra = ['lines' => [['product_id' => $f['product']->id, 'quantity' => 1]], 'voucher_code' => $voucher->code, 'destination' => ['recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Race', 'village_id' => null, 'latitude' => -6.2, 'longitude' => 106.8]];
+        $report = (new ConcurrencyHarness)->runServiceRace(
+            ['op' => 'checkout-order', 'actor_id' => $f['buyer_a']->id, 'extra' => $extra + ['buyer_id' => $f['buyer_a']->id]],
+            ['op' => 'checkout-order', 'actor_id' => $f['buyer_b']->id, 'extra' => $extra + ['buyer_id' => $f['buyer_b']->id]],
+        );
+        $this->assertTrue($report['different_connections']);
+        $this->assertSame(1, collect([$report['a'], $report['b']])->where('outcome', 'success')->count(), json_encode($report));
+        foreach (['a', 'b'] as $side) {
+            $this->assertNotContains((int) ($report[$side]['error_code'] ?? 0), [1213, 1205], json_encode($report));
+        }
+        $this->assertSame(1, $voucher->fresh()->used_count);
+        $this->assertSame(1, \App\Models\Order::where('voucher_id', $voucher->id)->count());
+        $this->assertSame(1, (int) ProductStock::where('agent_id', $f['agent']->id)->sum('quantity_reserved'));
+    }
+
     private function createFixture(): void
     {
         $agent = User::factory()->agen()->create();

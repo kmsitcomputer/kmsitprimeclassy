@@ -23,8 +23,8 @@ use Symfony\Component\Process\Process;
  * regression could not be trusted.
  *
  * These helpers therefore rebuild the isolated schema between such tests.
- * The database name is re-validated here (defense in depth, same guard as
- * Tests\TestCase) so a misconfigured connection can never be dropped.
+ * The environment and database name are re-validated here (defense in depth,
+ * same TestDatabaseGuard as Tests\TestCase, exact equality) so a misconfigured connection can never be dropped.
  */
 trait RestoresIsolatedTestDatabase
 {
@@ -53,15 +53,15 @@ trait RestoresIsolatedTestDatabase
     /** Rebuild the isolated test schema from zero (migrations + migration-seeded reference data). */
     protected function restoreIsolatedTestDatabase(): void
     {
-        $connection = config('database.default');
-        $database = config('database.connections.'.$connection.'.database');
+        // Exact-match guard: only APP_ENV=testing + primeclassy_testing may be rebuilt.
+        TestDatabaseGuard::assertApplicationSafe(app());
 
-        if (! in_array($connection, ['mysql', 'mariadb'], true)
-            || ! is_string($database)
-            || ! preg_match('/_test(?:ing)?(?:_|$)/', $database)) {
-            throw new RuntimeException('REFUSED: refusing to rebuild a database that is not an isolated test database (connection: '.$connection.', database: '.var_export($database, true).').');
-        }
-
+        // A previous test file may have cached RefreshDatabaseState::$migrated
+        // (Laravel then skips migrate:fresh entirely). The isolated rebuild
+        // must ALWAYS produce the complete schema — including the newest
+        // migrations that may still be pending — so clear the cache flag
+        // before running.
+        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
         Artisan::call('migrate:fresh', ['--force' => true]);
     }
 
