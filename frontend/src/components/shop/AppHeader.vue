@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/ui'
 import { useSiteStore } from '@/stores/site'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
+import PwaInstallButton from '@/components/pwa/PwaInstallButton.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -67,6 +68,8 @@ function submitSearch() {
         >
           <AppIcon :name="ui.theme === 'dark' ? 'moon' : 'sun'" :size="19" />
         </button>
+
+        <PwaInstallButton />
 
         <RouterLink
           :to="{ name: 'wishlist' }"

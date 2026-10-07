@@ -10,9 +10,24 @@ const router = createRouter({
   },
   routes: [
     {
-      path: '/install',
+      // First-run backend installer wizard (fresh database only — the
+      // global guard redirects here by NAME while the backend reports
+      // uninstalled). Path is /setup: /install is the permanent public
+      // PWA installation landing page (see 'pwa-install' below).
+      path: '/setup',
       name: 'installer',
       component: () => import('@/views/InstallerView.vue'),
+    },
+    {
+      // Permanent public PWA installation landing page. Shareable as
+      // https://dev.primeccookies.com/install (DEV) and
+      // https://primeccookies.com/install (production). Pure SPA route:
+      // served through the existing history-mode fallback, no backend,
+      // no special service-worker caching. Uses the central install
+      // engine in src/pwa/installPrompt.ts — never an APK/download.
+      path: '/install',
+      name: 'pwa-install',
+      component: () => import('@/views/PwaInstallView.vue'),
     },
     {
       path: '/',

@@ -580,5 +580,13 @@ export default {
     retry: 'Try again',
     mutationBlocked:
       'No connection to the server. This operation requires a connection — nothing was sent.',
+    installApp: 'Install App',
+    installGuideTitle: 'Install PrimeClassy',
+    installGuideMessage: 'To install on iPhone/iPad: tap Share → Add to Home Screen.',
+    installPageSubtitle: 'Install PrimeClassy Cake & Cookies on your device.',
+    installUnavailableNote:
+      'Installation is offered through your browser when supported — there is no separate download.',
+    installAlreadyInstalled: 'The PrimeClassy app is already installed.',
+    installBackHome: 'Back to PrimeClassy',
   },
 } satisfies typeof id

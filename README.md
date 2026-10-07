@@ -59,7 +59,7 @@ cp .env.example .env                # VITE_API_URL (empty = same origin)
 npm run dev                         # http://localhost:5173
 ```
 
-A first Super Admin is created by the browser installer (`/install`) on a fresh install, or via `php artisan tinker` — see [docs/OPERATIONS.md](docs/OPERATIONS.md). Sanctum needs both `FRONTEND_URLS` (with scheme) and `SANCTUM_STATEFUL_DOMAINS` (host:port, no scheme) in `backend/.env`.
+A first Super Admin is created by the browser installer (`/setup`) on a fresh install, or via `php artisan tinker` — see [docs/OPERATIONS.md](docs/OPERATIONS.md). (`/install` is the public PWA installation landing page.) Sanctum needs both `FRONTEND_URLS` (with scheme) and `SANCTUM_STATEFUL_DOMAINS` (host:port, no scheme) in `backend/.env`.
 
 ## DEV / test commands
 

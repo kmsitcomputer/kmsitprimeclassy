@@ -578,5 +578,12 @@ export default {
     offlineMessage: 'PrimeClassy 需要连接服务器才能加载最新数据。订单、支付、库存和配送操作只能在联网时处理。',
     retry: '重试',
     mutationBlocked: '无法连接到服务器。此操作需要网络连接——没有任何内容被发送。',
+    installApp: '安装应用',
+    installGuideTitle: '安装 PrimeClassy',
+    installGuideMessage: '在 iPhone/iPad 上安装：点击“分享”→“添加到主屏幕”。',
+    installPageSubtitle: '在您的设备上安装 PrimeClassy Cake & Cookies。',
+    installUnavailableNote: '受支持时可通过浏览器安装——无需单独下载。',
+    installAlreadyInstalled: 'PrimeClassy 应用已安装。',
+    installBackHome: '返回 PrimeClassy',
   },
 } satisfies typeof id

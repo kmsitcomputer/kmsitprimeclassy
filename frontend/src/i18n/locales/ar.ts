@@ -579,5 +579,12 @@ export default {
       'يحتاج PrimeClassy إلى اتصال بالخادم لتحميل أحدث البيانات. لا يمكن معالجة إجراءات الطلبات والمدفوعات والمخزون والتسليم إلا أثناء الاتصال.',
     retry: 'حاول مجددًا',
     mutationBlocked: 'لا يوجد اتصال بالخادم. تتطلب هذه العملية اتصالًا — لم يتم إرسال أي شيء.',
+    installApp: 'تثبيت التطبيق',
+    installGuideTitle: 'تثبيت PrimeClassy',
+    installGuideMessage: 'للتثبيت على iPhone/iPad: اضغط زر المشاركة ثم "إضافة إلى الشاشة الرئيسية".',
+    installPageSubtitle: 'ثبّت PrimeClassy Cake & Cookies على جهازك.',
+    installUnavailableNote: 'يتوفر التثبيت عبر متصفحك عند دعمه — لا يوجد تنزيل منفصل.',
+    installAlreadyInstalled: 'تطبيق PrimeClassy مثبّت بالفعل.',
+    installBackHome: 'العودة إلى PrimeClassy',
   },
 } satisfies typeof id

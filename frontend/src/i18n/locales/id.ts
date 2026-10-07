@@ -578,5 +578,14 @@ export default {
     retry: 'Coba lagi',
     mutationBlocked:
       'Tidak ada koneksi ke server. Operasi ini memerlukan koneksi — tidak ada perubahan yang dikirim.',
+    installApp: 'Install Aplikasi',
+    installGuideTitle: 'Install PrimeClassy',
+    installGuideMessage:
+      'Untuk memasang di iPhone/iPad: ketuk Bagikan → Tambah ke Layar Utama.',
+    installPageSubtitle: 'Pasang PrimeClassy Cake & Cookies di perangkat Anda.',
+    installUnavailableNote:
+      'Instalasi tersedia melalui browser Anda saat didukung — tidak ada unduhan terpisah.',
+    installAlreadyInstalled: 'Aplikasi PrimeClassy sudah terpasang.',
+    installBackHome: 'Kembali ke PrimeClassy',
   },
 }

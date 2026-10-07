@@ -67,7 +67,7 @@ php artisan primeclassy:reset-dev-transactions --confirm="RESET DEV TRANSACTIONS
 
 ## 5. First install and first Super Admin
 
-Fresh environments can use the browser installer at `/install` (requirements → database → app URLs → first Super Admin → migrate + seed → finalize → lock). The lock file `backend/storage/app/installed.lock` permanently seals the installer endpoints (403). Manual alternative:
+Fresh environments can use the browser installer at `/setup` (requirements → database → app URLs → first Super Admin → migrate + seed → finalize → lock). (`/install` is the public PWA installation landing page, not the backend installer.) The lock file `backend/storage/app/installed.lock` permanently seals the installer endpoints (403). Manual alternative:
 
 ```bash
 php artisan migrate --seed       # roles (11), languages, settings, payment methods, shipping providers — no demo users
