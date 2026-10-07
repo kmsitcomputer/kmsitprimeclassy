@@ -108,12 +108,16 @@ Canonical frontend deploy (after a verified backup and authorization):
 
 ```bash
 sudo rsync -a --delete \
+  --exclude='.well-known' \
+  --exclude='storage' \
   --exclude='laravel.php' \
   /www/dev/primeclassy/frontend/dist/ \
   /www/wwwroot/primeccookies.com/primeclassy/public_html/
 ```
 
-Also preserve `public_html/storage` (symlink to `../backend/storage/app/public`), `config.js`, the production `.htaccess`/Nginx rules and anything production-specific — **dry-run first** (`rsync -an --itemize-changes …`) and read the deletions before running for real. If `laravel.php` is ever lost, restore it from the pre-deployment backup (`public_html/laravel.php`; template `deploy/public_html/laravel.php`).
+Also preserve `public_html/storage` (symlink to `../backend/storage/app/public`), `public_html/.well-known` (server-owned, e.g. ACME challenges — never synced from `dist/`), `config.js`, the production `.htaccess`/Nginx rules and anything production-specific — **dry-run first** (`rsync -an --itemize-changes …`) and read the deletions before running for real. If `laravel.php` is ever lost, restore it from the pre-deployment backup (`public_html/laravel.php`; template `deploy/public_html/laravel.php`).
+
+**PWA branding source of truth:** Admin → Pengaturan Website → Favicon (`site_favicon_media_id`) is the single canonical branding source. `frontend/public/icons/*` are only technical release derivatives of that favicon (192/512 + maskable + apple-touch-icon, stable filenames referenced by `manifest.webmanifest`) — never a second branding setting. When the favicon changes, regenerate the PWA icon derivatives from the current canonical favicon on the next frontend release (aspect preserved, no crop/distort, maskable padded into the safe zone on brand `#8f1d3c`).
 
 ### 7.3 Deployment and migration procedure
 

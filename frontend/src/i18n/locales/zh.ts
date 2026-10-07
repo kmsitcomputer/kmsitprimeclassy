@@ -568,4 +568,15 @@ export default {
     message: '找不到您要访问的页面。',
     backHome: '返回首页',
   },
+  pwa: {
+    updateTitle: '有新版本可用。',
+    updateMessage: '重新加载以使用最新版本的 PrimeClassy。',
+    reload: '重新加载',
+    offlineNotice: '您当前处于离线状态——数据可能不是最新的。',
+    offlineView: '离线状态',
+    offlineTitle: '您当前处于离线状态',
+    offlineMessage: 'PrimeClassy 需要连接服务器才能加载最新数据。订单、支付、库存和配送操作只能在联网时处理。',
+    retry: '重试',
+    mutationBlocked: '无法连接到服务器。此操作需要网络连接——没有任何内容被发送。',
+  },
 } satisfies typeof id

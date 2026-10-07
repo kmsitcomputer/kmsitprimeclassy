@@ -1,4 +1,15 @@
 import axios from 'axios'
+import {
+  assertOnlineForMutation,
+  reportNetworkFailure,
+  reportNetworkSuccess,
+} from '@/pwa/connectivity'
+import { ApiError } from './errors'
+
+// Backward compatibility: ApiError historically lived in this module and is
+// imported from '@/api/client' across views and api modules. It now lives in
+// ./errors (see that file for why); re-exported so no caller changes.
+export { ApiError } from './errors'
 
 // Runtime config (public/config.js, edited on the deployed server, no rebuild needed) wins
 // over the build-time VITE_API_URL — see env.d.ts and README §"Production deployment".
@@ -56,6 +67,10 @@ export function ensureCsrfCookie(): Promise<void> {
 http.interceptors.request.use((config) => {
   const locale = localStorage.getItem('pc-locale')
   if (locale) config.headers['X-Locale'] = locale
+  // Centralized PWA mutation guard (see pwa/connectivity.ts): mutations are
+  // pre-blocked ONLY when the browser is certain there is no connectivity.
+  // Everything else goes to the real server; failures reject honestly.
+  assertOnlineForMutation(config.method)
   return config
 })
 
@@ -67,21 +82,23 @@ export interface ApiEnvelope<T, M = Record<string, unknown>> {
   meta: M | null
 }
 
-export class ApiError extends Error {
-  status: number
-  errors: Record<string, string[]> | null
-
-  constructor(message: string, status: number, errors: Record<string, string[]> | null) {
-    super(message)
-    this.status = status
-    this.errors = errors
-  }
-}
-
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Any HTTP response proves the server is reachable (PWA connectivity UX).
+    reportNetworkSuccess()
+    return response
+  },
   async (error) => {
     const status = error.response?.status ?? 0
+
+    // No response at all: the request never reached the server (offline,
+    // DNS/TCP failure, timeout). Record it for the offline UX signal — the
+    // rejection below still carries the honest failure to the caller.
+    if (!error.response) {
+      reportNetworkFailure()
+    } else {
+      reportNetworkSuccess()
+    }
 
     // Belt-and-suspenders on top of the request interceptor's unconditional
     // pre-fetch above: if a 419 still slips through (e.g. the token was

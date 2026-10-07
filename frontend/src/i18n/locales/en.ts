@@ -568,4 +568,17 @@ export default {
     message: "The page you're looking for could not be found.",
     backHome: 'Back to Home',
   },
+  pwa: {
+    updateTitle: 'A new version is available.',
+    updateMessage: 'Reload to use the latest PrimeClassy version.',
+    reload: 'Reload',
+    offlineNotice: 'You are offline — data may be out of date.',
+    offlineView: 'Offline status',
+    offlineTitle: 'You are offline',
+    offlineMessage:
+      'PrimeClassy needs a server connection to load fresh data. Order, payment, stock, and delivery actions can only be processed while online.',
+    retry: 'Try again',
+    mutationBlocked:
+      'No connection to the server. This operation requires a connection — nothing was sent.',
+  },
 } satisfies typeof id

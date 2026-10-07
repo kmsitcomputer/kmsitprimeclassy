@@ -566,4 +566,17 @@ export default {
     message: 'Halaman yang Anda cari tidak ditemukan.',
     backHome: 'Kembali ke Beranda',
   },
+  pwa: {
+    updateTitle: 'Versi baru tersedia.',
+    updateMessage: 'Muat ulang untuk memakai versi terbaru PrimeClassy.',
+    reload: 'Muat ulang',
+    offlineNotice: 'Anda offline — data mungkin tidak terbaru.',
+    offlineView: 'Status offline',
+    offlineTitle: 'Anda sedang offline',
+    offlineMessage:
+      'PrimeClassy memerlukan koneksi server untuk memuat data terbaru. Tindakan pesanan, pembayaran, stok, dan pengiriman hanya dapat diproses saat online.',
+    retry: 'Coba lagi',
+    mutationBlocked:
+      'Tidak ada koneksi ke server. Operasi ini memerlukan koneksi — tidak ada perubahan yang dikirim.',
+  },
 }

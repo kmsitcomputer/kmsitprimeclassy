@@ -37,3 +37,29 @@
   # Everything else falls back to the SPA shell.
   RewriteRule ^ index.html [L]
 </IfModule>
+
+# PWA: correct MIME for the web app manifest (Apache may otherwise serve
+# .webmanifest as text/plain, which breaks installability checks).
+<IfModule mod_mime.c>
+  AddType application/manifest+json .webmanifest
+</IfModule>
+
+# PWA cache lifetimes: the service worker, manifest, shell, and runtime
+# config are file names that NEVER change between builds, so they must be
+# revalidated on every load — never long-lived immutable.
+<IfModule mod_headers.c>
+  <FilesMatch "^(sw\.js|manifest\.webmanifest|index\.html|config\.js)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
+
+# Hashed build assets under /assets/* are content-addressed (a new build
+# emits new file names), so they are safe to cache for a year. Icons are
+# deliberately excluded so replacement artwork is picked up promptly.
+<IfVersion >= 2.4>
+  <If "%{REQUEST_URI} =~ m#^/assets/#">
+    <IfModule mod_headers.c>
+      Header set Cache-Control "public, max-age=31536000, immutable"
+    </IfModule>
+  </If>
+</IfVersion>

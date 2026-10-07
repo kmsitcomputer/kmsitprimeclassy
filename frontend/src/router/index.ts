@@ -487,6 +487,13 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresPermission: 'orders.manage.fulfillment' },
     },
     {
+      path: '/offline',
+      name: 'offline',
+      component: () => import('@/views/OfflineView.vue'),
+      // Deliberately public: the branded offline state must render for any
+      // visitor (authenticated or not) when the network is unreachable.
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: () => import('@/views/NotFoundView.vue'),
