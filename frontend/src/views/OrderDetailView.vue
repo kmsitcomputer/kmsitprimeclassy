@@ -51,6 +51,17 @@ const paymentActionError = ref<string | null>(null)
 const verifying = ref(false)
 const codUpdating = ref(false)
 const rejectionReason = ref('')
+/** Pembayar — who actually supplied the money (Konsumen by default; Sales/Korsal only when they paid). */
+const paidBy = ref<'konsumen' | 'sales' | 'korsal'>('konsumen')
+const paidByOptions = computed(() => {
+  const role = auth.user?.role
+  const opts: { value: 'konsumen' | 'sales' | 'korsal'; label: string }[] = [{ value: 'konsumen', label: 'Konsumen' }]
+  if (role === 'sales' || role === 'sales-kurir-sub') opts.push({ value: 'sales', label: 'Sales' })
+  if (role === 'korsal') opts.push({ value: 'korsal', label: 'Korsal' })
+  return opts
+})
+const paidByLabel = (v?: string | null) => ({ konsumen: 'Konsumen', sales: 'Sales', korsal: 'Korsal' } as Record<string, string>)[v ?? ''] ?? '-'
+const roleLabel = (r?: string | null) => ({ konsumen: 'Konsumen', sales: 'Sales', 'sales-kurir-sub': 'Sales', korsal: 'Korsal', keuangan: 'Keuangan', admin: 'Admin', agen: 'Agen', super_admin: 'Super Admin' } as Record<string, string>)[r ?? ''] ?? (r ?? '')
 
 async function load() {
   loading.value = true
@@ -65,11 +76,12 @@ onMounted(loadActiveCouriers)
    Admin/agen may submit proof and view status but must never settle it (backend routes are super_admin,keuangan only). */
 /** IMP-001: Korsal/Sales may submit a proof on behalf of an in-scope konsumen — the backend (OrderPolicy::payOnBehalf) decides. */
 const canPayOnBehalf = computed(() => ['korsal', 'sales', 'sales-kurir-sub'].includes(auth.user?.role ?? ''))
-const canVerifyBankTransfer = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.payment.verify') || auth.can('orders.manage.payment.scoped'))
+/** Sales/Korsal are NOT payment approvers: only super_admin / Keuangan verify (backend re-enforces). */
+const canVerifyBankTransfer = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.payment.verify'))
 const canSettleCod = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.cod.settle'))
 /** UAT-008: COD proof approve/reject is part of the scoped verification path (unlike the direct paid/unpaid toggle above, which stays Keuangan-only). */
-const canConfirmCodProof = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.cod.settle') || auth.can('orders.manage.payment.scoped'))
-const canRequestDpSettlement = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.dp.settle') || auth.can('orders.manage.payment.scoped'))
+const canConfirmCodProof = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.cod.settle'))
+const canRequestDpSettlement = computed(() => auth.user?.role === 'super_admin' || auth.can('finance.dp.settle'))
 
 /**
  * "Minta Pelunasan" is only offered once the DP itself is actually
@@ -454,7 +466,7 @@ async function uploadCodProof() {
   submittingCodProof.value = true
   paymentActionError.value = null
   try {
-    await submitCodPaymentProof(props.id, codProofFile.value)
+    await submitCodPaymentProof(props.id, codProofFile.value, paidBy.value)
     await load()
   } catch (e) {
     paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.codProofUpload')
@@ -498,7 +510,7 @@ async function uploadProof() {
   uploadingProof.value = true
   paymentActionError.value = null
   try {
-    await submitBankTransferProof(props.id, proofFile.value)
+    await submitBankTransferProof(props.id, proofFile.value, paidBy.value)
     await load()
   } catch (e) {
     paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.transferProofUpload')
@@ -1280,6 +1292,11 @@ async function submitReturn(item: OrderItem) {
           </div>
 
           <div v-if="!order.payment_transaction?.bank_transfer_verification" class="mt-3">
+            <label v-if="paidByOptions.length > 1" class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Pembayar
+              <select v-model="paidBy" class="ml-2 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
+                <option v-for="o in paidByOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </label>
             <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.uploadTransferProof') }}</label>
             <input type="file" accept="image/*" class="block w-full text-xs" @change="onProofSelected" />
             <AppButton class="mt-2" size="sm" :disabled="!proofFile || uploadingProof" @click="uploadProof">
@@ -1295,6 +1312,11 @@ async function submitReturn(item: OrderItem) {
             <p v-if="order.payment_transaction.bank_transfer_verification.submitted_on_behalf && order.payment_transaction.bank_transfer_verification.submitted_by" class="text-xs text-stone-500 dark:text-stone-400">
               {{ t('orders.paidOnBehalfBy', { name: order.payment_transaction.bank_transfer_verification.submitted_by.name }) }}
             </p>
+            <dl class="mt-1 space-y-0.5 text-xs text-stone-500 dark:text-stone-400">
+              <div>Pembayar: <strong>{{ paidByLabel(order.payment_transaction.bank_transfer_verification.paid_by) }}</strong></div>
+              <div v-if="order.payment_transaction.bank_transfer_verification.submitted_by">Bukti di-upload oleh: <strong>{{ roleLabel(order.payment_transaction.bank_transfer_verification.submitted_by.role) }} — {{ order.payment_transaction.bank_transfer_verification.submitted_by.name }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.submitted_at"> ({{ formatDate(order.payment_transaction.bank_transfer_verification.submitted_at) }})</span></div>
+              <div v-if="order.payment_transaction.bank_transfer_verification.verified_by">Diverifikasi oleh: <strong>{{ roleLabel(order.payment_transaction.bank_transfer_verification.verified_by.role) }} — {{ order.payment_transaction.bank_transfer_verification.verified_by.name }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.verified_at"> ({{ formatDate(order.payment_transaction.bank_transfer_verification.verified_at) }})</span></div>
+            </dl>
             <a
               v-if="order.payment_transaction.bank_transfer_verification.proof_url"
               :href="order.payment_transaction.bank_transfer_verification.proof_url"
@@ -1355,6 +1377,11 @@ async function submitReturn(item: OrderItem) {
               <p v-if="order.payment_transaction?.cod_payment_proof?.status === 'rejected'" class="mb-2 text-xs text-red-600">
                 {{ t('orders.previousProofRejected', { reason: order.payment_transaction.cod_payment_proof.rejection_reason ? t('orders.rejectedSuffix', { reason: order.payment_transaction.cod_payment_proof.rejection_reason }) : '' }) }}
               </p>
+              <label v-if="paidByOptions.length > 1" class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Pembayar
+              <select v-model="paidBy" class="ml-2 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
+                <option v-for="o in paidByOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </label>
               <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.uploadCodProof') }}</label>
               <input type="file" accept="image/*" class="block w-full text-xs" @change="onCodProofSelected" />
               <AppButton class="mt-2" size="sm" :disabled="!codProofFile || submittingCodProof" @click="uploadCodProof">
@@ -1366,7 +1393,13 @@ async function submitReturn(item: OrderItem) {
             </p>
           </div>
 
-          <!-- Keuangan + UAT-008 in-scope Sales/Korsal: confirm or reject the konsumen's COD proof.
+          <dl v-if="order.payment_transaction?.cod_payment_proof" class="mt-2 space-y-0.5 text-xs text-stone-500 dark:text-stone-400">
+            <div>Pembayar: <strong>{{ paidByLabel(order.payment_transaction.cod_payment_proof.paid_by) }}</strong></div>
+            <div v-if="order.payment_transaction.cod_payment_proof.submitted_by">Bukti di-upload oleh: <strong>{{ roleLabel(order.payment_transaction.cod_payment_proof.submitted_by.role) }} — {{ order.payment_transaction.cod_payment_proof.submitted_by.name }}</strong></div>
+            <div v-if="order.payment_transaction.cod_payment_proof.verified_by">Diverifikasi oleh: <strong>{{ roleLabel(order.payment_transaction.cod_payment_proof.verified_by.role) }} — {{ order.payment_transaction.cod_payment_proof.verified_by.name }}</strong></div>
+          </dl>
+
+          <!-- Keuangan only: confirm or reject the konsumen's COD proof (Sales/Korsal are not approvers).
                The direct paid/unpaid toggle above stays Keuangan-only; this proof-based
                approve/reject reuses the canonical workflow (server re-checks scope). -->
           <div

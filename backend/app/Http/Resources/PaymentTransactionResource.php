@@ -33,6 +33,11 @@ class PaymentTransactionResource extends JsonResource
                     // IMP-001: payer actor vs. order owner (the konsumen) — the owner is never rewritten.
                     'submitted_on_behalf' => (bool) $this->bankTransferVerification->submitted_on_behalf,
                     'submitted_by' => $this->payerSummary($this->bankTransferVerification->submittedBy),
+                    // Audit trio: Pembayar (paid_by) / Bukti di-upload oleh (submitted_by) / Diverifikasi oleh (verified_by).
+                    'paid_by' => $this->bankTransferVerification->paid_by_role,
+                    'submitted_at' => $this->bankTransferVerification->submitted_at,
+                    'verified_by' => $this->payerSummary($this->bankTransferVerification->verifiedBy),
+                    'verified_at' => $this->bankTransferVerification->verified_at,
                 ] : null
             ),
             'cod_payment_proof' => $this->whenLoaded(
@@ -44,6 +49,10 @@ class PaymentTransactionResource extends JsonResource
                     'rejection_reason' => $this->codPaymentProof->rejection_reason,
                     'submitted_on_behalf' => (bool) $this->codPaymentProof->submitted_on_behalf,
                     'submitted_by' => $this->payerSummary($this->codPaymentProof->submittedBy),
+                    'paid_by' => $this->codPaymentProof->paid_by_role,
+                    'submitted_at' => $this->codPaymentProof->submitted_at,
+                    'verified_by' => $this->payerSummary($this->codPaymentProof->confirmedBy),
+                    'verified_at' => $this->codPaymentProof->confirmed_at,
                 ] : null
             ),
         ];

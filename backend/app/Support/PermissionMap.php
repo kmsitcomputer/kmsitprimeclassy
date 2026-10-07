@@ -28,17 +28,9 @@ class PermissionMap
             ],
             'korsal' => [
                 'users.view.network', 'orders.view.network', 'orders.create',
-                // UAT-008: scoped payment/pelunasan verification hint — the
-                // Sales/Korsal may verify ONLY orders inside their own
-                // legitimate scope (server: PaymentController::
-                // assertMayVerifyPayment via OrderPolicy::payOnBehalf).
-                // UI convenience only, never a security boundary.
-                'orders.manage.payment.scoped',
             ],
             'sales' => [
                 'users.view.network', 'orders.view.network', 'orders.create',
-                // UAT-008 scoped verification hint — same scope rule as korsal.
-                'orders.manage.payment.scoped',
             ],
             'konsumen' => [
                 'orders.view.own', 'orders.create',
@@ -75,8 +67,6 @@ class PermissionMap
             ],
             'sales-kurir-sub' => [
                 'users.view.network', 'orders.create', 'orders.view.assigned', 'orders.manage.shipment',
-                // UAT-008 scoped verification hint — same scope rule as sales.
-                'orders.manage.payment.scoped',
             ],
             default => [],
         };

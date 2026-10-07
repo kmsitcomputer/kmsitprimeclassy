@@ -47,7 +47,7 @@ Authority by action (route role gate **and** a policy/service ownership check ap
 | Cancel an order | `super_admin`; `agen`/`admin` branch; `korsal`/`sales`/`sales-kurir-sub`/`konsumen` for their own (business rule §14 decides when) |
 | Adjust fulfilled quantity, reschedule/split | `super_admin`, `agen`, `admin` |
 | **Add a product line to an existing order (SC-03)** | **`admin` only**, same Agent |
-| Verify payment proof / settle DP / confirm COD proof | `super_admin`, `keuangan`; **plus `korsal`/`sales`/`sales-kurir-sub` for orders whose konsumen is CURRENTLY in their own referral scope, same Agent (§24)** — UAT-008, Human-approved; still the canonical `PaymentService`, never a second ledger |
+| Verify (approve/reject) payment proof / request pelunasan / confirm COD proof | `super_admin`, `keuangan` only. **`korsal`/`sales`/`sales-kurir-sub` are NOT payment approvers** (Human rule, supersedes UAT-008); route gate and controller both refuse them (§24) |
 | Mark COD paid/unpaid directly (no proof workflow) | `super_admin`, `keuangan` (unchanged — deliberately excluded from the UAT-008 scoped extension) |
 | Refund and additional-payment status; mark return refunded | `super_admin`, `keuangan` (lists also `agen`, `admin`) |
 | Operate a shipment (pickup/deliver, receipt) | `super_admin`, `agen`, `admin`, `kurir` (own/claimable), `sales-kurir-sub` (own `self_sub` only), `koordinator-kurir` (own executor profile only) |
@@ -71,7 +71,7 @@ Authority by action (route role gate **and** a policy/service ownership check ap
 | CMS, media library, languages, website settings, audit log, global gateway/shipping toggles, region import/export | `super_admin` |
 | Agent payment-method config / shipping-provider config & store profile | `agen`,`admin` / `agen` |
 | Referral-code management | `agen`, `korsal`, `sales`, `sales-kurir-sub` |
-| Submit a payment proof (bank transfer / DP / settlement / COD) | `konsumen` (own); `super_admin`, `agen`/`admin`/`keuangan` (branch); **`korsal`/`sales`/`sales-kurir-sub` on behalf of a konsumen currently in their own referral scope** (§24) |
+| Submit a payment proof (bank transfer / DP / settlement / COD) | `konsumen` (own); `super_admin`, `agen`/`admin`/`keuangan` (branch); **`korsal`/`sales`/`sales-kurir-sub` on behalf of a konsumen currently in their own referral scope** (§24; upload only, never approve) |
 
 ## 3. Agent hierarchy and creation
 
@@ -267,11 +267,16 @@ Which work is done at which grain (**LOCKED**, deliberately different per concer
 
 - `korsal`, `sales` and `sales-kurir-sub` may submit a payment **proof** for an order of a konsumen who is **currently** inside their own referral scope (`OrderPolicy::payOnBehalf`: same Agent; Korsal ⇒ `konsumen.korsal_id = actor`, Sales/Sales-Kurir-Sub ⇒ `konsumen.sales_id = actor`). Knowing an order id grants nothing; cross-Agent and cross-referral access is denied; after an audited reassignment the scope follows the konsumen's current chain.
 - Order owner (`orders.konsumen_id`) is never rewritten. The payer actor is recorded on the proof (`submitted_by_user_id`, `submitted_on_behalf`) and in the audit log (`payment.proof_submitted` / `payment.cod_proof_submitted`, with `on_behalf_of_konsumen_id`). Historical proofs keep `NULL` (unknown, not backfilled).
-- The payer **cannot** mark anything paid on their own: `PaymentService` remains the only writer of paid/remaining/status. **UAT-008 (Human-approved 2026-10-06):** the proof-based approve/reject actions (`verify`, DP-settlement request, COD-proof confirm) are additionally available to an in-scope `korsal`/`sales`/`sales-kurir-sub`, using the *same* `payOnBehalf` scope rule and the same canonical `PaymentService`; the direct COD paid/unpaid toggle stays `super_admin`/`keuangan` only. Scope, never a global grant.
+- The payer **cannot** mark anything paid on their own: `PaymentService` remains the only writer of paid/remaining/status. **Authority (Human change request, supersedes UAT-008):** `korsal`/`sales`/`sales-kurir-sub` may only SUBMIT proof in their `payOnBehalf` scope. `verify`, DP-settlement request and COD-proof confirm are `super_admin`/`keuangan` only (route `role:` gate + `assertMayVerifyPayment`). **Payment audit trio** stored on `bank_transfer_verifications` / `cod_payment_proofs`: *Pembayar* `paid_by_role` (`konsumen`|`sales`|`korsal`; a Sales/Sales-Kurir-Sub may claim only `sales`, a Korsal only `korsal`, everyone else only `konsumen`; default `konsumen`), *Bukti di-upload oleh* `submitted_by_user_id` + `submitted_at`, *Diverifikasi oleh* `verified_by`/`confirmed_by` + timestamp. Historical rows keep NULL (never backfilled).
 - **Hardened invariant (applies to every submitter, including the konsumen):** a proof is refused (422) once the transfer is verified/paid, the COD proof is confirmed, or the order is cancelled. Previously a re-upload silently reset a *verified* proof to `pending` while `paid_amount` stayed applied, so a second verification would add the same amount again (double count). No authoritative rule permits replacing verified evidence, so this is kept deliberately; a *rejected* proof can still be re-submitted. Writers lock verification (or COD proof) row → transaction → order.
 - **Resolved in IMP-004 (2026-10-05):** the deferred gap above is closed — `OrderPolicy::view` now ALSO grants read access to the Sales whose konsumen is **currently** in its referral scope (mirroring `payOnBehalf`; same Agent), so the new Sales can open the older order's detail after an audited reassignment. The order's historical `sales_id` snapshot is never rewritten (audit continuity, AGENTS.md §9) — the old Sales keeps its snapshot access, and a Sales that is neither snapshot owner nor current scope is still denied.
 - Ordinary email/password registration is unchanged in IMP-001 (referral remains optional there); only Google registration requires a referral.
 - A proof is refused (422) when the above conditions hold. Gateway methods (Xendit/Tripay/Stripe) have no proof step and remain webhook-only.
+
+## 24a. Stock pages and order filters (change request)
+
+- `GET /stock/products|variations` list every target the viewed Agent holds in legacy OR warehouse rows with ADA/DITAHAN/TERSEDIA from `SellableStockService` — the same truth as catalog, storefront and checkout. `StockService::reserveFor*` provisions a ZERO-quantity commitment row for a warehouse-only target so such a target is orderable; availability is still decided canonically (nothing invented).
+- `GET /orders` accepts `status`, `payment_status` (canonical settlement states: unpaid, pending_verification, partially_paid, paid, failed, refunds), `search`, and the Dispatch-equivalent `delivery_date`, `province_id…village_id`, `paid` (one shared `OrderFilterService`); `GET /orders/regions` gives cascading options from the caller's own scoped orders. Filters only narrow the role scope (scope is a nested group); operational roles cannot use payment filters.
 
 ## 25. Observations to confirm (not changed by documentation)
 

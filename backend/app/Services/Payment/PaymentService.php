@@ -230,9 +230,9 @@ class PaymentService
      * cancelled-order rejection now holds against a real concurrent cancel() (OrderService::cancel
      * re-reads the Order with the same lockForUpdate before acting).
      */
-    public function submitBankTransferProof(PaymentTransaction $transaction, UploadedFile $proof, ?User $submittedBy = null): BankTransferVerification
+    public function submitBankTransferProof(PaymentTransaction $transaction, UploadedFile $proof, ?User $submittedBy = null, string $paidBy = 'konsumen'): BankTransferVerification
     {
-        return DB::transaction(function () use ($transaction, $proof, $submittedBy) {
+        return DB::transaction(function () use ($transaction, $proof, $submittedBy, $paidBy) {
             $existing = BankTransferVerification::query()
                 ->where('payment_transaction_id', $transaction->id)->lockForUpdate()->first();
             // Locking re-read: serialize against OrderService::cancel() and verifyBankTransfer()
@@ -263,6 +263,8 @@ class PaymentService
                     'rejection_reason' => null,
                     'submitted_by_user_id' => $submittedBy?->id,
                     'submitted_on_behalf' => $onBehalf,
+                    'paid_by_role' => $paidBy,
+                    'submitted_at' => now(),
                 ]
             );
 
@@ -273,6 +275,7 @@ class PaymentService
                     'actor_role' => $submittedBy->role?->slug,
                     'on_behalf_of_konsumen_id' => $onBehalf ? $order->konsumen_id : null,
                     'submitted_on_behalf' => $onBehalf,
+                    'paid_by' => $paidBy,
                     'payment_transaction_id' => $current->id,
                     'amount' => (float) $current->amount,
                     'payment_method' => $current->paymentMethod?->code,
@@ -384,9 +387,9 @@ class PaymentService
      * itself (only confirmCodPayment(), an Admin/Agen action, ever does);
      * this only puts the request in front of them.
      */
-    public function submitCodPaymentProof(PaymentTransaction $transaction, UploadedFile $proof, User $actor): CodPaymentProof
+    public function submitCodPaymentProof(PaymentTransaction $transaction, UploadedFile $proof, User $actor, string $paidBy = 'konsumen'): CodPaymentProof
     {
-        return DB::transaction(function () use ($transaction, $proof, $actor) {
+        return DB::transaction(function () use ($transaction, $proof, $actor, $paidBy) {
             // Same lock order as confirmCodPayment (proof row → order): a confirmed proof is never overwritten.
             $existing = CodPaymentProof::query()
                 ->where('payment_transaction_id', $transaction->id)->lockForUpdate()->first();
@@ -408,13 +411,14 @@ class PaymentService
                     'proof_media_id' => $media->id, 'status' => 'pending',
                     'confirmed_by' => null, 'confirmed_at' => null, 'rejection_reason' => null,
                     'submitted_by_user_id' => $actor->id, 'submitted_on_behalf' => $onBehalf,
+                    'paid_by_role' => $paidBy, 'submitted_at' => now(),
                 ]
             );
 
             ActivityLogger::log($actor->id, $order, 'payment.cod_proof_submitted', null, [
                 'actor_role' => $actor->role?->slug, 'payment_transaction_id' => $transaction->id,
                 'on_behalf_of_konsumen_id' => $onBehalf ? $order->konsumen_id : null,
-                'submitted_on_behalf' => $onBehalf,
+                'submitted_on_behalf' => $onBehalf, 'paid_by' => $paidBy,
                 'amount' => (float) $transaction->amount,
                 'payment_method' => $transaction->paymentMethod?->code,
                 'order_payment_status' => $order->payment_status,

@@ -101,32 +101,8 @@ class DispatchController extends Controller
             $orderQuery->where('agent_id', $agentId);
         }
 
-        // Canonical region filters (the stored *_id columns are the stable master keys) —
-        // applied at the ORDER level, matching the existing queue contract.
-        foreach (['province_id', 'regency_id', 'district_id', 'village_id'] as $column) {
-            if ($request->filled($column)) {
-                $orderQuery->where($column, $request->string($column)->toString());
-            }
-        }
-
-        // delivery_date filter — an order matches when ANY of its items'
-        // requested_delivery_date equals the filter date.
-        if ($request->filled('delivery_date')) {
-            $date = $request->string('delivery_date')->toString();
-            $orderQuery->whereHas('items', fn ($item) => $item->whereDate('requested_delivery_date', $date));
-        }
-
-        // paid_in_full planning filter — server-authored from the canonical
-        // Order payment state (paid / not-yet-paid), never a client-visible
-        // amount leak (bucket mirrors ReportService pending grouping).
-        if ($request->filled('paid')) {
-            $paid = $request->string('paid')->toString() === 'paid';
-            $orderQuery->where(
-                $paid
-                    ? fn ($q) => $q->where('payment_status', 'paid')
-                    : fn ($q) => $q->whereIn('payment_status', ['unpaid', 'pending_verification', 'partially_paid'])
-            );
-        }
+        // Shared with the Admin Order list so both surfaces interpret region / delivery-date / paid identically.
+        app(\App\Services\Order\OrderFilterService::class)->applyDispatchFilters($orderQuery, $request);
 
         return $orderQuery;
     }

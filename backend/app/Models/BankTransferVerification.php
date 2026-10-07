@@ -10,12 +10,12 @@ class BankTransferVerification extends Model
     protected $fillable = [
         'payment_transaction_id', 'bank_name', 'account_name', 'account_number',
         'proof_image_path', 'verified_by', 'verified_at', 'status', 'rejection_reason',
-        'submitted_by_user_id', 'submitted_on_behalf',
+        'submitted_by_user_id', 'submitted_on_behalf', 'paid_by_role', 'submitted_at',
     ];
 
     protected function casts(): array
     {
-        return ['verified_at' => 'datetime', 'submitted_on_behalf' => 'boolean'];
+        return ['verified_at' => 'datetime', 'submitted_on_behalf' => 'boolean', 'submitted_at' => 'datetime'];
     }
 
     public function paymentTransaction(): BelongsTo

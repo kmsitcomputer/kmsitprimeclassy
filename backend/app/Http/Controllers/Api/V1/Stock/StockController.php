@@ -15,8 +15,10 @@ use App\Models\ProductVariationStock;
 use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Services\Logging\ActivityLogger;
+use App\Services\Stock\SellableStockService;
 use App\Services\Stock\StockService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -29,34 +31,85 @@ class StockController extends Controller
 {
     public function __construct(private readonly StockService $stockService) {}
 
-    /** Stock for products WITHOUT variations, in the caller's own agent branch. */
+    /**
+     * Stock for products WITHOUT variations, in the viewed agent branch.
+     *
+     * Canonical (SellableStockService): the target list is every product the
+     * branch holds in legacy OR warehouse buckets, and ADA / DITAHAN /
+     * TERSEDIA come from the same formula the catalog, storefront and checkout
+     * use — so this page can never disagree with "Produk & Kategori".
+     */
     public function products(Request $request)
     {
         $agentId = $this->resolveViewedAgentId($request);
+        $page = $this->targetPage('product_stocks', 'product_id', $agentId, $request);
+        $products = Product::query()->whereIn('id', $page->pluck('product_id'))
+            ->where('has_variations', false)->get()->keyBy('id');
+        $sellable = app(SellableStockService::class);
 
-        $stocks = ProductStock::query()->withoutGlobalScopes()
-            ->where('agent_id', $agentId)
-            ->with('product')
-            ->paginate($request->integer('per_page', 15));
+        $rows = $page->getCollection()->map(function ($target) use ($products, $sellable, $agentId) {
+            $product = $products->get($target->product_id);
+            if (! $product) {
+                return null;
+            }
+            $s = $sellable->forProduct($agentId, $product->id);
 
-        return $this->ok(ProductStockResource::collection($stocks)->resolve(), meta: [
-            'current_page' => $stocks->currentPage(), 'last_page' => $stocks->lastPage(), 'total' => $stocks->total(),
+            return [
+                'id' => $product->id, 'agent_id' => $agentId, 'product_id' => $product->id,
+                'product_name' => $product->name, 'sku' => $product->sku,
+                'quantity_on_hand' => $s['sellable_base'], 'quantity_reserved' => $s['reserved'],
+                'quantity_available' => $s['available'], 'source' => $s['source'], 'updated_at' => null,
+            ];
+        })->filter()->values();
+
+        return $this->ok($rows, meta: [
+            'current_page' => $page->currentPage(), 'last_page' => $page->lastPage(), 'total' => $page->total(),
         ]);
     }
 
-    /** Stock for product VARIATIONS, in the caller's own agent branch. */
+    /** Stock for product VARIATIONS — same canonical source as products(). */
     public function variations(Request $request)
     {
         $agentId = $this->resolveViewedAgentId($request);
+        $page = $this->targetPage('product_variation_stocks', 'product_variation_id', $agentId, $request);
+        $variations = ProductVariation::query()->with('product')
+            ->whereIn('id', $page->pluck('product_variation_id'))->get()->keyBy('id');
+        $sellable = app(SellableStockService::class);
 
-        $stocks = ProductVariationStock::query()->withoutGlobalScopes()
-            ->where('agent_id', $agentId)
-            ->with('variation')
-            ->paginate($request->integer('per_page', 15));
+        $rows = $page->getCollection()->map(function ($target) use ($variations, $sellable, $agentId) {
+            $variation = $variations->get($target->product_variation_id);
+            if (! $variation || ! $variation->product) {
+                return null;
+            }
+            $s = $sellable->forVariation($agentId, $variation->id);
 
-        return $this->ok(ProductVariationStockResource::collection($stocks)->resolve(), meta: [
-            'current_page' => $stocks->currentPage(), 'last_page' => $stocks->lastPage(), 'total' => $stocks->total(),
+            return [
+                'id' => $variation->id, 'agent_id' => $agentId, 'product_variation_id' => $variation->id,
+                'sku' => $variation->sku, 'variation_label' => $variation->label(),
+                'quantity_on_hand' => $s['sellable_base'], 'quantity_reserved' => $s['reserved'],
+                'quantity_available' => $s['available'], 'source' => $s['source'], 'updated_at' => null,
+            ];
+        })->filter()->values();
+
+        return $this->ok($rows, meta: [
+            'current_page' => $page->currentPage(), 'last_page' => $page->lastPage(), 'total' => $page->total(),
         ]);
+    }
+
+    /**
+     * One paginated page of target ids held by the agent: legacy commitment
+     * rows UNION warehouse buckets (never another agent's rows).
+     */
+    private function targetPage(string $legacyTable, string $column, int $agentId, Request $request)
+    {
+        $legacy = DB::table($legacyTable)->where('agent_id', $agentId)->select($column);
+        $warehouse = DB::table('warehouse_stocks')->where('agent_id', $agentId)
+            ->whereIn('stock_type', ['transit', 'factory_plan', 'shipping'])
+            ->whereNotNull($column)->select($column);
+
+        return DB::query()->fromSub($legacy->union($warehouse), 't')
+            ->select($column)->orderBy($column)
+            ->paginate($request->integer('per_page', 15));
     }
 
     public function warehouse(Request $request)

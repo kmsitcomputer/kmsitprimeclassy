@@ -9,6 +9,7 @@ use App\Models\ProductStock;
 use App\Models\ProductVariation;
 use App\Models\ProductVariationStock;
 use App\Models\StockMovement;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -43,9 +44,17 @@ class StockService
             ->lockForUpdate()
             ->first();
 
+        // Canonical-stock follow-up: a target that only exists in warehouse
+        // buckets (no legacy commitment row yet) must still be reservable —
+        // otherwise the catalog/storefront (SellableStockService) shows
+        // sellable stock while checkout throws InsufficientStock. The
+        // provisioned row carries ZERO physical quantity (nothing is
+        // invented); availability is decided by the canonical service below.
+        $stock ??= $this->provisionProductCommitment($agentId, $product->id);
+
         $available = $this->availableProduct($agentId, $product->id, $stock);
 
-        if (! $stock || $available < $qty) {
+        if ($available < $qty) {
             throw new InsufficientStockException($product->name, $available, $qty);
         }
 
@@ -76,9 +85,13 @@ class StockService
             ->lockForUpdate()
             ->first();
 
+        // Same canonical-stock follow-up as reserveForProduct(): a variation
+        // stocked only through warehouse buckets must remain orderable.
+        $stock ??= $this->provisionVariationCommitment($agentId, $variation->id);
+
         $available = $this->availableVariation($agentId, $variation->id, $stock);
 
-        if (! $stock || $available < $qty) {
+        if ($available < $qty) {
             throw new InsufficientStockException($variation->sku, $available, $qty);
         }
 
@@ -334,6 +347,45 @@ class StockService
                 __('messages.stock.insufficient_column', ['column' => $column]), 422,
                 ['available' => $available, 'needed' => $needed]
             );
+        }
+    }
+
+    /**
+     * Provision the legacy commitment row for a warehouse-only target.
+     *
+     * The row starts at ZERO physical / ZERO reserved — it is a locking
+     * anchor for the reservation counter, never invented stock. Callers run
+     * inside a DB transaction and already hold the canonical inventory lock
+     * order, so no new ordering vocabulary is introduced. A concurrent
+     * provision race resolves through the UNIQUE(agent_id, product_id) key
+     * by re-reading the winner under lock.
+     */
+    private function provisionProductCommitment(int $agentId, int $productId): ProductStock
+    {
+        try {
+            return ProductStock::withoutGlobalScopes()->create([
+                'agent_id' => $agentId, 'product_id' => $productId,
+                'quantity_on_hand' => 0, 'quantity_reserved' => 0,
+            ]);
+        } catch (QueryException) {
+            return ProductStock::withoutGlobalScopes()
+                ->where('agent_id', $agentId)->where('product_id', $productId)
+                ->lockForUpdate()->firstOrFail();
+        }
+    }
+
+    /** Same as provisionProductCommitment(), for a variation target. */
+    private function provisionVariationCommitment(int $agentId, int $variationId): ProductVariationStock
+    {
+        try {
+            return ProductVariationStock::withoutGlobalScopes()->create([
+                'agent_id' => $agentId, 'product_variation_id' => $variationId,
+                'quantity_on_hand' => 0, 'quantity_reserved' => 0,
+            ]);
+        } catch (QueryException) {
+            return ProductVariationStock::withoutGlobalScopes()
+                ->where('agent_id', $agentId)->where('product_variation_id', $variationId)
+                ->lockForUpdate()->firstOrFail();
         }
     }
 

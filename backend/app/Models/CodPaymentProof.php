@@ -9,12 +9,12 @@ class CodPaymentProof extends Model
 {
     protected $fillable = [
         'payment_transaction_id', 'proof_media_id', 'status', 'confirmed_by', 'confirmed_at', 'rejection_reason',
-        'submitted_by_user_id', 'submitted_on_behalf',
+        'submitted_by_user_id', 'submitted_on_behalf', 'paid_by_role', 'submitted_at',
     ];
 
     protected function casts(): array
     {
-        return ['confirmed_at' => 'datetime', 'submitted_on_behalf' => 'boolean'];
+        return ['confirmed_at' => 'datetime', 'submitted_on_behalf' => 'boolean', 'submitted_at' => 'datetime'];
     }
 
     public function paymentTransaction(): BelongsTo

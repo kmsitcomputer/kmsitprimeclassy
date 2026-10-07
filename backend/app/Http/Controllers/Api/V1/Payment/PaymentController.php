@@ -40,7 +40,7 @@ class PaymentController extends Controller
 
         $transaction = $this->latestManualTransaction($order);
 
-        $this->paymentService->submitBankTransferProof($transaction, $request->file('proof'), $request->user());
+        $this->paymentService->submitBankTransferProof($transaction, $request->file('proof'), $request->user(), $this->resolvePaidBy($request));
 
         return $this->ok([
             'transaction' => new PaymentTransactionResource($transaction->fresh('bankTransferVerification')),
@@ -111,7 +111,7 @@ class PaymentController extends Controller
         }
 
         $transaction = $this->latestCodTransaction($order);
-        $proof = $this->paymentService->submitCodPaymentProof($transaction, $request->file('proof'), $request->user());
+        $proof = $this->paymentService->submitCodPaymentProof($transaction, $request->file('proof'), $request->user(), $this->resolvePaidBy($request));
 
         return $this->ok([
             'transaction' => new PaymentTransactionResource($transaction->fresh('codPaymentProof.proof')),
@@ -175,14 +175,12 @@ class PaymentController extends Controller
     }
 
     /**
-     * UAT-008 scoped verification authority — who may approve/reject a
+     * Payment verification authority — who may approve/reject a
      * payment proof or request pelunasan on this order:
      *
      * - super_admin anywhere (existing override);
      * - keuangan of the order's own branch (existing separation of duties);
-     * - sales / korsal / sales-kurir-sub ONLY inside their legitimate
-     *   scope (OrderPolicy::payOnBehalf — the konsumen's CURRENT referral
-     *   chain, same-Agent). Cross-scope and cross-Agent actors are denied.
+     * - sales / korsal / sales-kurir-sub are NEVER approvers (they only upload proof).
      *
      * The direct COD paid/unpaid toggle (markCod) deliberately stays
      * keuangan-only: it flips payment state with no proof workflow, so it
@@ -198,10 +196,8 @@ class PaymentController extends Controller
             return;
         }
 
-        if ($actor->isRole('korsal', 'sales', 'sales-kurir-sub') && $actor->can('payOnBehalf', $order)) {
-            return;
-        }
-
+        // Business rule (Human, supersedes UAT-008): Sales / Korsal / Sales-Kurir-Sub are NOT payment
+        // approvers. They may only SUBMIT proof in scope (authorizeProofSubmission).
         throw new ApiException(__('messages.system.unauthorized_action'), 403);
     }
 
@@ -223,6 +219,28 @@ class PaymentController extends Controller
 
         $this->authorize('view', $order);
         $this->assertOwnedByActor($request, $order);
+    }
+
+    /**
+     * PAID BY (Pembayar) — who actually supplied the money: konsumen | sales | korsal. Distinct from the
+     * proof uploader (the authenticated actor) and the verifier. Default konsumen. A Sales/Sales-Kurir-Sub
+     * may only claim 'sales', a Korsal only 'korsal', everyone else only 'konsumen' (422 otherwise).
+     */
+    private function resolvePaidBy(Request $request): string
+    {
+        $paidBy = $request->input('paid_by', 'konsumen');
+        $actor = $request->user();
+        $allowed = ['konsumen'];
+        if ($actor->isRole('sales', 'sales-kurir-sub')) {
+            $allowed[] = 'sales';
+        } elseif ($actor->isRole('korsal')) {
+            $allowed[] = 'korsal';
+        }
+        if (! is_string($paidBy) || ! in_array($paidBy, $allowed, true)) {
+            throw new ApiException(__('messages.system.validation_failed'), 422, ['paid_by' => __('messages.system.field_invalid')]);
+        }
+
+        return $paidBy;
     }
 
     /** Only the konsumen who owns the order, or that branch's agen/admin/keuangan, may act on its payment. */

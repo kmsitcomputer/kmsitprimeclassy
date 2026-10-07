@@ -206,30 +206,25 @@ class AssistedConsumerPaymentTest extends TestCase
         $this->actingAs($unrelated)->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
     }
 
-    public function test_only_in_scope_payer_may_verify(): void
+    public function test_sales_and_korsal_are_not_payment_approvers_even_in_scope(): void
     {
-        // UAT-008: in-scope Sales/Korsal verify through the canonical
-        // PaymentService::verifyBankTransfer (locked, idempotent,
-        // approve/reject); out-of-scope actors stay denied and no money
-        // moves for them. The audit actor is the actual verifier.
-        ['agen' => $agen, 'sales' => $sales, 'korsal' => $korsal, 'konsumen' => $konsumen] = $this->branch();
+        // Human rule: Sales/Korsal may upload proof in scope but can NEVER approve/reject (route gate AND controller).
+        ['agen' => $agen, 'sales' => $sales, 'korsal' => $korsal, 'konsumen' => $konsumen, 'keuangan' => $keuangan] = $this->branch();
         $order = $this->placeOrder($konsumen, $agen);
         $this->proof($sales, $order)->assertOk();
 
-        $unrelatedSales = User::factory()->sales()->create(['agent_id' => $agen->id, 'parent_id' => $korsal->id, 'korsal_id' => $korsal->id]);
-        $unrelatedKorsal = User::factory()->korsal()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
-        foreach ([$unrelatedSales, $unrelatedKorsal] as $outsider) {
-            $this->actingAs($outsider)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertForbidden();
+        foreach ([$sales, $korsal] as $actor) {
+            $this->actingAs($actor)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertForbidden();
+            $this->actingAs($actor)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => false, 'rejection_reason' => 'x'])->assertForbidden();
         }
-        $this->assertSame(0.0, (float) $order->fresh()->paid_amount);
+        $order->refresh();
+        $this->assertSame(0.0, (float) $order->paid_amount);
+        $this->assertSame('pending_verification', $order->payment_status);
 
-        $this->actingAs($sales)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
         $this->assertSame((float) $order->fresh()->total_amount, (float) $order->fresh()->paid_amount);
         $log = ActivityLog::query()->where('event', 'payment.bank_transfer_verified')->latest('id')->firstOrFail();
-        $this->assertSame($sales->id, $log->causer_id);
-
-        // Replay / double approval is refused — never double-counted.
-        $this->actingAs($korsal)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertStatus(422);
+        $this->assertSame($keuangan->id, $log->causer_id);
     }
 
     public function test_keuangan_verification_still_applies_and_a_verified_proof_cannot_be_overwritten(): void
@@ -266,25 +261,23 @@ class AssistedConsumerPaymentTest extends TestCase
             ->assertJsonPath('data.transaction.bank_transfer_verification.submitted_by.id', $konsumen->id);
     }
 
-    public function test_in_scope_sales_confirms_cod_proof_but_unrelated_sales_cannot(): void
+    public function test_sales_uploads_cod_proof_but_cannot_confirm_it(): void
     {
-        // UAT-008: the proof-based COD approve/reject reuses the same scoped
-        // authority as verify() (server-side payOnBehalf scope). The direct
-        // paid/unpaid toggle (markCod) stays keuangan-only and is untouched.
-        ['agen' => $agen, 'korsal' => $korsal, 'sales' => $sales, 'konsumen' => $konsumen] = $this->branch();
+        ['agen' => $agen, 'sales' => $sales, 'korsal' => $korsal, 'konsumen' => $konsumen, 'keuangan' => $keuangan] = $this->branch();
         $order = $this->placeOrder($konsumen, $agen, 'cod');
 
         $this->proof($sales, $order, 'payment/cod-proof')->assertOk()
             ->assertJsonPath('data.transaction.cod_payment_proof.submitted_on_behalf', true);
-
         $proof = CodPaymentProof::query()->firstOrFail();
         $this->assertSame($sales->id, $proof->submitted_by_user_id);
 
-        $stranger = User::factory()->sales()->create(['agent_id' => $agen->id, 'parent_id' => $korsal->id, 'korsal_id' => $korsal->id]);
-        $this->actingAs($stranger)->patchJson("/api/v1/admin/cod-payment-proofs/{$proof->id}/confirm", ['confirmed' => true])->assertForbidden();
+        foreach ([$sales, $korsal] as $actor) {
+            $this->actingAs($actor)->patchJson("/api/v1/admin/cod-payment-proofs/{$proof->id}/confirm", ['confirmed' => true])->assertForbidden();
+            $this->actingAs($actor)->patchJson("/api/v1/admin/cod-payment-proofs/{$proof->id}/confirm", ['confirmed' => false, 'rejection_reason' => 'x'])->assertForbidden();
+        }
         $this->assertSame('unpaid', $order->fresh()->payment_status);
 
-        $this->actingAs($sales)->patchJson("/api/v1/admin/cod-payment-proofs/{$proof->id}/confirm", ['confirmed' => true])->assertOk();
+        $this->actingAs($keuangan)->patchJson("/api/v1/admin/cod-payment-proofs/{$proof->id}/confirm", ['confirmed' => true])->assertOk();
         $this->assertSame('paid', $order->fresh()->payment_status);
     }
 

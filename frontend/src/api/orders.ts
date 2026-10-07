@@ -62,9 +62,42 @@ export async function createOrder(payload: CreateOrderPayload) {
   return data.data
 }
 
-export async function listOrders(page = 1) {
-  const { data } = await http.get<ApiEnvelope<Order[]>>('/orders', { params: { page } })
+/** Server-side order filters. Dispatch-equivalent keys (delivery_date, region ids, paid) share one backend interpretation. */
+export interface OrderListFilters {
+  status?: string
+  payment_status?: string
+  search?: string
+  delivery_date?: string
+  province_id?: string
+  regency_id?: string
+  district_id?: string
+  village_id?: string
+  paid?: 'paid' | 'unpaid'
+  agent_id?: number
+}
+
+function cleanFilters(filters: object): Record<string, string | number> {
+  return Object.fromEntries(
+    Object.entries(filters).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+  ) as Record<string, string | number>
+}
+
+export async function listOrders(page = 1, filters: OrderListFilters = {}) {
+  const { data } = await http.get<ApiEnvelope<Order[]>>('/orders', { params: { page, ...cleanFilters(filters) } })
   return { orders: data.data, meta: data.meta as unknown as PaginationMeta }
+}
+
+export interface OrderRegionOptions {
+  provinces: { id: string; name: string }[]
+  regencies: { id: string; name: string }[]
+  districts: { id: string; name: string }[]
+  villages: { id: string; name: string }[]
+}
+
+/** Cascading region options derived only from the caller's own scoped orders. */
+export async function listOrderRegionOptions(filters: OrderListFilters = {}): Promise<OrderRegionOptions> {
+  const { data } = await http.get<ApiEnvelope<OrderRegionOptions>>('/orders/regions', { params: cleanFilters(filters) })
+  return data.data
 }
 
 export async function getOrder(id: number) {
@@ -89,9 +122,10 @@ export async function updateOrderStatus(id: number, status: 'diproses' | 'dikiri
   return data.data
 }
 
-export async function submitBankTransferProof(orderId: number, proof: File) {
+export async function submitBankTransferProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen') {
   const form = new FormData()
   form.append('proof', proof)
+  form.append('paid_by', paidBy)
   const { data } = await http.post<ApiEnvelope<{ transaction: Order['payment_transaction'] }>>(
     `/orders/${orderId}/payment/proof`,
     form,

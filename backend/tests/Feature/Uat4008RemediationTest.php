@@ -277,83 +277,39 @@ class Uat4008RemediationTest extends TestCase
         $this->actingAs($koordinator)->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => 0])->assertOk();
     }
 
-    // ---------- UAT-008 ----------
+    // ---------- UAT-008 (superseded: Sales/Korsal are NOT payment approvers) ----------
 
-    public function test_in_scope_sales_verifies_and_audit_records_the_verifier(): void
+    public function test_sales_and_korsal_cannot_verify_settle_or_confirm_even_in_scope(): void
     {
-        ['agen' => $agen, 'konsumen' => $konsumen, 'korsal' => $korsal, 'sales' => $sales] = $this->branch();
+        ['agen' => $agen, 'konsumen' => $konsumen, 'korsal' => $korsal, 'sales' => $sales, 'keuangan' => $keuangan] = $this->branch();
         $order = $this->placeOrder($konsumen, $agen, 'down_payment', 50000);
         $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/proof", [
             'proof' => UploadedFile::fake()->image('dp.jpg'),
         ])->assertOk();
 
-        $this->actingAs($sales)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        foreach ([$sales, $korsal] as $actor) {
+            $this->actingAs($actor)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertForbidden();
+            $this->actingAs($actor)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertForbidden();
+        }
+        $this->assertSame(0.0, (float) $order->fresh()->paid_amount, 'no money moved');
 
-        $order->refresh();
-        $this->assertSame(50000.0, (float) $order->paid_amount, 'canonical totals move through the canonical service');
-
-        $log = \App\Models\ActivityLog::query()->where('event', 'payment.bank_transfer_verified')->latest('id')->firstOrFail();
-        $this->assertSame($sales->id, $log->causer_id, 'audit actor is the actual sales verifier');
-
-        // Korsal leg: same scope rule through its own downline.
-        $order2 = $this->placeOrder($konsumen, $agen, 'down_payment', 50000);
-        $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order2->id}/payment/proof", [
-            'proof' => UploadedFile::fake()->image('dp2.jpg'),
-        ])->assertOk();
-        $this->actingAs($korsal)->postJson("/api/v1/orders/{$order2->id}/payment/verify", ['approved' => true])->assertOk();
-        $this->assertSame(50000.0, (float) $order2->fresh()->paid_amount);
+        // Keuangan path stays valid, including pelunasan request.
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
+        $this->assertSame(50000.0, (float) $order->fresh()->paid_amount);
+        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
     }
 
-    public function test_out_of_scope_sales_and_korsal_cannot_verify(): void
+    public function test_cross_agent_sales_and_korsal_cannot_verify(): void
     {
-        ['agen' => $agen, 'korsal' => $korsal, 'sales' => $sales, 'konsumen' => $konsumen] = $this->branch();
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->branch();
         $order = $this->placeOrder($konsumen, $agen, 'down_payment', 50000);
         $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/proof", [
             'proof' => UploadedFile::fake()->image('dp.jpg'),
         ])->assertOk();
 
-        $otherSales = User::factory()->sales()->create(['agent_id' => $agen->id, 'parent_id' => $korsal->id, 'korsal_id' => $korsal->id]);
-        $otherKorsal = User::factory()->korsal()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
-        $this->actingAs($otherSales)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertForbidden();
-        $this->actingAs($otherKorsal)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertForbidden();
-
-        // Cross-agent is denied too (404/403 — never a verification).
         $b = $this->branch('B');
         $this->assertContains($this->actingAs($b['sales'])->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->status(), [403, 404]);
         $this->assertContains($this->actingAs($b['korsal'])->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->status(), [403, 404]);
-
-        $this->assertSame(0.0, (float) $order->fresh()->paid_amount, 'no money moved');
-    }
-
-    public function test_in_scope_sales_requests_pelunasan_and_keuangan_path_still_valid(): void
-    {
-        ['agen' => $agen, 'konsumen' => $konsumen, 'sales' => $sales, 'keuangan' => $keuangan] = $this->branch();
-        $order = $this->placeOrder($konsumen, $agen, 'down_payment', 50000);
-        $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/proof", [
-            'proof' => UploadedFile::fake()->image('dp.jpg'),
-        ])->assertOk();
-        $this->actingAs($keuangan)->postJson("/api/v1/orders/{$order->id}/payment/verify", ['approved' => true])->assertOk();
-
-        // In-scope sales may request the pelunasan of the outstanding balance…
-        $settle = $this->actingAs($sales)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertOk();
-        $this->assertNotNull($settle->json('data.transaction.id'));
-
-        // …while an unrelated sales is denied.
-        $korsalId = $konsumen->korsal_id;
-        $stranger = User::factory()->sales()->create(['agent_id' => $agen->id, 'parent_id' => $korsalId, 'korsal_id' => $korsalId]);
-        $this->actingAs($stranger)->postJson("/api/v1/orders/{$order->id}/payment/settle")->assertForbidden();
-    }
-
-    public function test_in_scope_korsal_confirms_cod_proof(): void
-    {
-        ['agen' => $agen, 'konsumen' => $konsumen, 'korsal' => $korsal] = $this->branch();
-        $order = $this->placeOrder($konsumen, $agen, 'cod');
-
-        $proofId = $this->actingAs($konsumen)->postJson("/api/v1/orders/{$order->id}/payment/cod-proof", [
-            'proof' => UploadedFile::fake()->image('cash.jpg'),
-        ])->assertOk()->json('data.transaction.cod_payment_proof.id');
-
-        $this->actingAs($korsal)->patchJson("/api/v1/admin/cod-payment-proofs/{$proofId}/confirm", ['confirmed' => true])->assertOk();
-        $this->assertSame('paid', $order->fresh()->payment_status);
+        $this->assertSame(0.0, (float) $order->fresh()->paid_amount);
     }
 }

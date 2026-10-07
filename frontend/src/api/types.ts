@@ -100,6 +100,10 @@ export interface PaymentTransaction {
     rejection_reason: string | null
     submitted_on_behalf?: boolean
     submitted_by?: PaymentPayer | null
+    paid_by?: 'konsumen' | 'sales' | 'korsal' | null
+    submitted_at?: string | null
+    verified_by?: PaymentPayer | null
+    verified_at?: string | null
   } | null
   cod_payment_proof: {
     id: number
@@ -108,6 +112,10 @@ export interface PaymentTransaction {
     rejection_reason: string | null
     submitted_on_behalf?: boolean
     submitted_by?: PaymentPayer | null
+    paid_by?: 'konsumen' | 'sales' | 'korsal' | null
+    submitted_at?: string | null
+    verified_by?: PaymentPayer | null
+    verified_at?: string | null
   } | null
 }
 

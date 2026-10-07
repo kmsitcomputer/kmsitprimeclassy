@@ -9,6 +9,7 @@ use App\Http\Requests\Order\StoreOrderRequest;
 use App\Http\Requests\Order\UpdateOrderStatusRequest;
 use App\Http\Resources\OrderResource;
 use App\Models\Order;
+use App\Services\Order\OrderFilterService;
 use App\Services\Order\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -29,55 +30,7 @@ class OrderController extends Controller
             throw new ApiException(__('messages.system.unauthorized_action'), 403);
         }
 
-        $query = Order::query()->with(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'shipments.courier.user', 'shipments.proof'])->latest();
-
-        if ($user->isRole('konsumen')) {
-            $query->where('konsumen_id', $user->id);
-        } elseif ($user->isRole('sales-kurir-sub')) {
-            $query->where(fn ($scope) => $scope
-                ->where('sales_id', $user->id)
-                ->orWhere('konsumen_id', $user->id))
-                // IMP-004 (mirrors OrderPolicy::view): after an audited
-                // konsumen reassignment the new sales-kurir-sub may also see
-                // orders whose konsumen is CURRENTLY inside its scope (the
-                // order's referral snapshot is historical).
-                ->orWhereHas('konsumen', fn ($k) => $k
-                    ->where('sales_id', $user->id)
-                    ->where('agent_id', $user->agent_id));
-        } elseif ($user->isRole('sales')) {
-            $query->where('sales_id', $user->id)
-                // IMP-004: same current-scope addition for the plain sales role.
-                ->orWhereHas('konsumen', fn ($k) => $k
-                    ->where('sales_id', $user->id)
-                    ->where('agent_id', $user->agent_id));
-        } elseif ($user->isRole('korsal')) {
-            $query->where('korsal_id', $user->id)
-                // IMP-004: korsal current-chain mirror (sales reassigned to
-                // this korsal → their konsumen's current korsal_id is ours).
-                ->orWhereHas('konsumen', fn ($k) => $k
-                    ->where('korsal_id', $user->id)
-                    ->where('agent_id', $user->agent_id));
-        }
-        // R-04 / §C: a normal Kurir must NOT use the generic order list — /kurir/orders is the only
-        // authorized (minimized) discovery surface (throws above).
-        //
-        // IMP-001 UAT remediation (Gap 2): Gudang may see an order ONLY while it is in the warehouse
-        // work queue — status exactly 'diproses' AND no courier assigned yet (no shipment carries
-        // courier_id, and no self_sub shipment has a self-delivering Sales-Kurir-Sub). This is
-        // enforced here too — NOT just in OrderPolicy::view — so a direct /orders API call can never
-        // bypass the scope rule. The moment status moves on or any courier is assigned, the order
-        // disappears from this list (server-side; frontend filtering alone would be insufficient).
-        elseif ($user->isRole('gudang')) {
-            $query->where('status', 'diproses')
-                ->whereDoesntHave('shipments', fn ($shipment) => $shipment
-                    ->whereNotNull('courier_id')
-                    ->orWhereNotNull('self_delivered_by_user_id'));
-        }
-        // agen/admin: BelongsToAgentScope already applies. super_admin sees
-        // every branch by default, optionally narrowed to one via ?agent_id=.
-        if ($user->isRole('super_admin') && $request->filled('agent_id')) {
-            $query->where('agent_id', $request->integer('agent_id'));
-        }
+        $query = $this->scopedQuery($request)->with(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'shipments.courier.user', 'shipments.proof'])->latest();
 
         $orders = $query->paginate($request->integer('per_page', 15));
 
@@ -85,6 +38,89 @@ class OrderController extends Controller
             'current_page' => $orders->currentPage(),
             'last_page' => $orders->lastPage(),
             'total' => $orders->total(),
+        ]);
+    }
+
+    /**
+     * The role-scoped order query. The role scope is wrapped in ONE nested group so any filter added
+     * afterwards is ANDed with it — an `orWhere` scope branch can never be widened by a filter.
+     */
+    private function scopedQuery(Request $request)
+    {
+        $user = $request->user();
+        $query = Order::query();
+
+        if ($user->isRole('konsumen')) {
+            $query->where('konsumen_id', $user->id);
+        } elseif ($user->isRole('sales-kurir-sub')) {
+            $query->where(fn ($scope) => $scope
+                ->where('sales_id', $user->id)
+                ->orWhere('konsumen_id', $user->id)
+                // IMP-004 (mirrors OrderPolicy::view): current-scope konsumen after an audited reassignment.
+                ->orWhereHas('konsumen', fn ($k) => $k->where('sales_id', $user->id)->where('agent_id', $user->agent_id)));
+        } elseif ($user->isRole('sales')) {
+            $query->where(fn ($scope) => $scope
+                ->where('sales_id', $user->id)
+                ->orWhereHas('konsumen', fn ($k) => $k->where('sales_id', $user->id)->where('agent_id', $user->agent_id)));
+        } elseif ($user->isRole('korsal')) {
+            $query->where(fn ($scope) => $scope
+                ->where('korsal_id', $user->id)
+                ->orWhereHas('konsumen', fn ($k) => $k->where('korsal_id', $user->id)->where('agent_id', $user->agent_id)));
+        } elseif ($user->isRole('gudang')) {
+            // IMP-001 Gap 2: Gudang sees only the warehouse work queue (diproses AND no courier assigned).
+            $query->where('status', 'diproses')
+                ->whereDoesntHave('shipments', fn ($shipment) => $shipment
+                    ->whereNotNull('courier_id')
+                    ->orWhereNotNull('self_delivered_by_user_id'));
+        }
+        // agen/admin/keuangan/koordinator: BelongsToAgentScope applies. super_admin: all, optional ?agent_id=.
+        if ($user->isRole('super_admin') && $request->filled('agent_id')) {
+            $query->where('agent_id', $request->integer('agent_id'));
+        }
+
+        $filters = app(OrderFilterService::class);
+        $financial = $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal');
+        $filters->applyStatusFilters($query, $request, $financial);
+
+        // Dispatch-equivalent filters (delivery date, region, paid) — office/branch roles and the
+        // Sales/Korsal inside their own scope; operational-only roles never get the money bucket.
+        if (! $financial) {
+            $request->query->remove('paid');
+        }
+        $filters->applyDispatchFilters($query, $request);
+
+        return $query;
+    }
+
+    /** Region options for the Order filters, derived only from the caller's own scoped orders. */
+    public function regions(Request $request)
+    {
+        if ($request->user()->isRole('kurir')) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        $options = function (string $idColumn, string $nameColumn, array $parents) use ($request) {
+            $query = $this->scopedQuery($request);
+            foreach ($parents as $column => $value) {
+                $query->where($column, $value);
+            }
+
+            return $query->whereNotNull($idColumn)
+                ->selectRaw("{$idColumn} as id, MAX({$nameColumn}) as name")
+                ->groupBy($idColumn)->orderBy('name')->get()
+                ->map(fn ($row) => ['id' => (string) $row->id, 'name' => (string) $row->name])
+                ->filter(fn ($o) => $o['name'] !== '')->values()->all();
+        };
+
+        $province = $request->filled('province_id') ? $request->string('province_id')->toString() : null;
+        $regency = $request->filled('regency_id') ? $request->string('regency_id')->toString() : null;
+        $district = $request->filled('district_id') ? $request->string('district_id')->toString() : null;
+
+        return $this->ok([
+            'provinces' => $options('province_id', 'province_snapshot', []),
+            'regencies' => $province ? $options('regency_id', 'regency_snapshot', ['province_id' => $province]) : [],
+            'districts' => $regency ? $options('district_id', 'district_snapshot', ['regency_id' => $regency]) : [],
+            'villages' => $district ? $options('village_id', 'village_snapshot', ['district_id' => $district]) : [],
         ]);
     }
 

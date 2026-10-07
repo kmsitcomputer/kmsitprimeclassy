@@ -101,7 +101,7 @@ Admin/Agen/Super Admin can: adjust an item's fulfilled quantity (only while the 
 
 ## 13. Payment
 
-Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amount`, `remaining_amount`, `payment_status`, written only by `OrderTotalCalculator` (totals) and `PaymentService` (money). `PaymentSummaryService` is the single canonical summary read by Order Detail, reports and Sheets. Flows: COD (photo proof + Finance confirmation), manual bank transfer (proof + Finance verification), DP (partial payment + separate settlement), gateways (signature-verified, idempotent webhooks). Korsal/Sales may submit a payment proof on behalf of a konsumen in their own referral scope (recorded payer actor, no verification authority — [§24](BUSINESS-RULES.md#24-assisted-consumer-payment-imp-001)). Payment verification, shipment/delivery and delivery verification are three separate concerns.
+Payment truth is **Order-level**: `orders.total_amount`, `dp_amount`, `paid_amount`, `remaining_amount`, `payment_status`, written only by `OrderTotalCalculator` (totals) and `PaymentService` (money). `PaymentSummaryService` is the single canonical summary read by Order Detail, reports and Sheets. Flows: COD (photo proof + Finance confirmation), manual bank transfer (proof + Finance verification), DP (partial payment + separate settlement), gateways (signature-verified, idempotent webhooks). Korsal/Sales may submit a payment proof on behalf of a konsumen in their own referral scope (recorded payer / uploader / verifier, never an approver — [§24](BUSINESS-RULES.md#24-assisted-consumer-payment-imp-001)). Payment verification, shipment/delivery and delivery verification are three separate concerns.
 
 ## 14. Fulfilment
 

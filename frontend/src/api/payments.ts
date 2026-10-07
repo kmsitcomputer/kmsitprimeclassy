@@ -37,9 +37,10 @@ export async function markCodPayment(orderId: number, paid: boolean) {
 }
 
 /** Konsumen submits a photo of the cash handed to the kurir, requesting Admin/Agen mark the COD order paid in full. */
-export async function submitCodPaymentProof(orderId: number, proof: File) {
+export async function submitCodPaymentProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen') {
   const form = new FormData()
   form.append('proof', proof)
+  form.append('paid_by', paidBy)
   const { data } = await http.post<ApiEnvelope<{ transaction: Order['payment_transaction'] }>>(
     `/orders/${orderId}/payment/cod-proof`,
     form,

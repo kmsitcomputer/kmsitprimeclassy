@@ -215,7 +215,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::middleware('role:super_admin,keuangan')->group(function () {
         Route::patch('/orders/{order}/payment/cod', [PaymentController::class, 'markCod']);
     });
-    Route::middleware('role:super_admin,keuangan,sales,korsal,sales-kurir-sub')->group(function () {
+    Route::middleware('role:super_admin,keuangan')->group(function () {
         Route::post('/orders/{order}/payment/verify', [PaymentController::class, 'verify']);
         // DP pelunasan: Keuangan requests settlement of the outstanding balance.
         Route::post('/orders/{order}/payment/settle', [PaymentController::class, 'settle']);
@@ -356,6 +356,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Visibility is scoped per-role inside the controller/policy — every
     // internal role plus konsumen can reach these, never each other's data.
     Route::get('/orders', [OrderController::class, 'index']);
+    Route::get('/orders/regions', [OrderController::class, 'regions']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
     Route::post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
 
