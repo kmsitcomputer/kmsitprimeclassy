@@ -156,8 +156,23 @@ Never copy DEV `.env`/credentials to production · preserve production `.env`, u
 | `php artisan system:audit-catalog-hierarchy` | Read-only SKU/hierarchy audit (JSON) |
 | `php artisan warehouse:reconcile [--agent_id=]` | Read-only diagnostics of warehouse buckets, reservations, movements, requests, opnames |
 | `php artisan warehouse:migrate-legacy-stock --dry-run …` | Historical legacy-stock → Transit backfill tooling (the production cutover is already done). Any non-dry run needs verified backup + explicit Human authorization |
-| `php artisan transactions:reset [--dry-run] [--force]` | **Legacy tool — do not use.** It predates the warehouse/Sub tables and does not know `stock_requests`, `stock_transfers`, `sub_stock_*`, `delivery_verifications`, `inventory_cancellation_reversals`, etc. Their FKs are `RESTRICT`, so on a database with such rows it fails and rolls back, and it can never be a safe production reset. For DEV use §3.1; there is no authorized production reset procedure |
+| `php artisan transactions:reset [--dry-run] [--force]` | Destructive operational command — removes transaction-derived data while preserving audited masters/configuration and current physical stock. Warehouse/Sub-aware (knows `stock_requests`, `stock_transfers`, `sub_stock_*`, `delivery_verifications`, `inventory_cancellation_reversals`, etc.). Production: verified backup + explicit Human authorization + `--dry-run` audit first, then `--force` (§8.1). Refuses production without `--force`; `--dry-run` never mutates |
 | `php artisan primeclassy:reset-dev-transactions` | DEV only (§3.1) |
+
+### 8.1 `transactions:reset` — production procedure (destructive)
+
+1. **Authorize + back up first:** explicit Human authorization for this step, then a verified backup (§6: database + media + `.env`).
+2. **Dry-run and review the complete TRANSACTION RESET AUDIT:** `php artisan transactions:reset --dry-run`. Proceed only with no BLOCKER and no unsupported stock-movement types.
+3. **Run for real:** `php artisan transactions:reset --force`, then review TRANSACTION RESET VERIFICATION.
+4. **Success requires:** all covered transaction tables After=0; Remaining transaction stock movements=0; Remaining reserved-stock rows=0; Transaction file deletion failures=0; final message confirming transaction data is empty and audited master row counts are preserved.
+
+**Stock semantics:** `product_stocks`/`product_variation_stocks` rows are preserved; transaction-derived Agent on-hand effects are restored by the command and `quantity_reserved` is cleared. `warehouse_stocks` is current physical warehouse state — its quantities are preserved exactly and never reversed; historical warehouse-domain stock movements are kept as history, not undone because transfer/request records are reset.
+
+**Preserved:** `warehouse_settings`, `warehouse_sub_locations`, `warehouse_stocks`, `warehouse_migration_runs`, `warehouse_migration_markers`, `stock_opnames`/`stock_opname_items`, and all genuine master/configuration/catalog/user/region/payment/shipping data.
+
+**Never substitute:** `migrate:fresh`, `migrate:refresh`, `migrate:reset`, `db:wipe`, raw `TRUNCATE`, or `FOREIGN_KEY_CHECKS=0`.
+
+**On error: STOP.** Do not retry repeatedly — investigate the exact FK/blocker. Database deletion runs in one transaction, so verify actual state before any retry. File/media deletion happens after the DB commit: if verification reports file deletion failures, the database reset did NOT roll back — investigate the file failure separately.
 
 ## 9. Integrations — operational notes
 
