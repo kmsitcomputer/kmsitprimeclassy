@@ -289,7 +289,11 @@ class PricingRemediationTest extends TestCase
         $this->assertSame(0, $o->additionalPayments()->count());
         $this->assertSame(10000.0, (float) $line->unit_price_snapshot);
         $this->assertSame(80000.0, (float) $o->items()->orderBy('id')->first()->unit_price_snapshot);
-        $settlement = $pay->requestSettlement($o, $finance);
+        // requestSettlement() returns [PaymentTransaction, bool $wasReplay]; the settlement must be a fresh
+        // obligation for exactly the remaining balance (80000 total - 40000 paid = 40000), not a replay.
+        [$settlement, $wasReplay] = $pay->requestSettlement($o, $finance);
+        $this->assertFalse($wasReplay);
+        $this->assertSame(40000.0, (float) $settlement->amount);
         $proof = $pay->submitBankTransferProof($settlement, UploadedFile::fake()->image('settlement.jpg'), $b['konsumen']);
         $pay->verifyBankTransfer($proof, $finance, true);
         $this->assertSame('paid', $o->fresh()->payment_status);

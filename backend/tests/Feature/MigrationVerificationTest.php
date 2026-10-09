@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\Support\RestoresIsolatedTestDatabase;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,9 @@ use Tests\TestCase;
 class MigrationVerificationTest extends TestCase
 {
     use RestoresIsolatedTestDatabase;
+
+    /** Earliest Package B migration; everything at or after it is in the rollback span. */
+    private const FIRST_ROLLBACK_BOUNDARY = '2026_10_01_100000_add_self_delivery_to_shipments_table';
 
     protected function setUp(): void
     {
@@ -62,8 +66,27 @@ class MigrationVerificationTest extends TestCase
 
     public function test_rollback_removes_everything_and_migrate_restores_it(): void
     {
-        // Tail migrations now: 5 Package A/B/C + 4 IMP-001 + 4 IMP-002 + 1 IMP-003 = 14.
-        Artisan::call('migrate:rollback', ['--step' => 14, '--force' => true]);
+        // Explicit defense in depth: this destructive schema test must never run outside
+        // the exact isolated testing database, even if its base test setup changes later.
+        TestDatabaseGuard::assertApplicationSafe(app());
+        $this->assertSame(TestDatabaseGuard::DATABASE, DB::connection()->getDatabaseName());
+
+        $migrationFiles = collect(glob(database_path('migrations/*.php')) ?: [])
+            ->map(fn (string $path) => pathinfo($path, PATHINFO_FILENAME))
+            ->filter(fn (string $name) => $name >= self::FIRST_ROLLBACK_BOUNDARY)
+            ->sort()->values()->all();
+        $allRecorded = DB::table('migrations')->orderBy('migration')->pluck('migration')->all();
+        $recorded = array_values(array_filter(
+            $allRecorded,
+            fn (string $name) => $name >= self::FIRST_ROLLBACK_BOUNDARY,
+        ));
+
+        $this->assertNotEmpty($migrationFiles, 'The rollback boundary must match at least one migration file.');
+        $this->assertSame($migrationFiles, $recorded, 'Every migration file in the rollback boundary must be recorded as ran before rollback.');
+        $steps = count($recorded);
+        $this->assertSame($recorded, array_slice($allRecorded, -$steps), 'The rollback span must be exactly the ledger tail; no migration before the boundary may be rolled back.');
+
+        Artisan::call('migrate:rollback', ['--step' => $steps, '--force' => true]);
 
         $this->assertFalse(Schema::hasTable('delivery_verifications'));
         $this->assertFalse(Schema::hasColumn('shipments', 'delivery_mode'));
@@ -152,7 +175,7 @@ class MigrationVerificationTest extends TestCase
     private function selfSubTriggers(): array
     {
         return array_values(array_filter(
-            DB::select("SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()"),
+            DB::select('SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()'),
             fn ($t) => str_contains($t->TRIGGER_NAME, 'shipments_self_sub_no_courier'),
         ));
     }
