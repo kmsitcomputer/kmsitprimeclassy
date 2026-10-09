@@ -285,6 +285,136 @@ class DevSchemaForeignKeyRestorationDdlTest extends TestCase
         $this->assertSame('CASCADE', strtoupper((string) $row->delete_rule));
     }
 
+    /* ───────────────── NO ACTION / RESTRICT equivalence ───────────────── */
+
+    /**
+     * MariaDB reports an `on delete restrict` / `on update restrict` clause as
+     * either `RESTRICT` or `NO ACTION` depending on how the constraint was
+     * written (or which tool installed it). Both spellings enforce the SAME
+     * InnoDB behaviour, and a database that already satisfies a declared
+     * constraint must be recognised as satisfied rather than refused — refusing
+     * would make the phase permanently inapplicable on such a database while
+     * nothing is actually wrong with it.
+     *
+     * This is the production shape: `sql_prime` carries 43 constraints written
+     * as `NO ACTION` where the canonical DEV/testing schema writes `RESTRICT`.
+     */
+    public function test_no_action_spelling_of_a_satisfied_constraint_is_accepted_and_runs_no_ddl(): void
+    {
+        $table = 'stock_handovers';
+        $column = 'agent_id';
+        $name = "{$table}_{$column}_foreign";
+
+        // Rewrite the constraint in the alternative (but equivalent) spelling.
+        DB::statement("alter table `{$table}` drop foreign key `{$name}`");
+        DB::statement("alter table `{$table}` add constraint `{$name}` foreign key (`{$column}`)
+                       references `users` (`id`) on delete no action on update no action");
+
+        $row = $this->constraintRow($table, $name);
+        $this->assertSame('NO ACTION', strtoupper((string) $row->delete_rule), 'The probe must really carry the NO ACTION spelling');
+        $this->assertSame('NO ACTION', strtoupper((string) $row->update_rule));
+
+        $before = $this->foreignKeyCount();
+
+        // Must NOT refuse, and must NOT add a second parallel constraint.
+        $this->migration(self::PHASE_A)->up();
+
+        $this->assertSame(
+            $before,
+            $this->foreignKeyCount(),
+            'An already-satisfied constraint must not be re-added as a duplicate'
+        );
+
+        // And the existing constraint is left exactly as it was.
+        $after = $this->constraintRow($table, $name);
+        $this->assertSame('NO ACTION', strtoupper((string) $after->delete_rule));
+        $this->assertSame('NO ACTION', strtoupper((string) $after->update_rule));
+
+        // Phase C uses the same guard, so it must agree.
+        $this->migration(self::PHASE_C)->up();
+        $this->assertSame($before, $this->foreignKeyCount());
+    }
+
+    /**
+     * The equivalence must stay narrow: `CASCADE` (and separately `SET NULL`)
+     * change what a parent delete DOES, so they must keep failing closed even
+     * though `NO ACTION` is accepted. Without this, normalising the spelling
+     * would silently widen into accepting a genuinely different constraint.
+     */
+    public function test_set_null_spelling_of_a_satisfied_constraint_still_fails_closed(): void
+    {
+        // `received_by` is nullable, so an `on delete set null` constraint is
+        // legal here — exactly the column Phase A declares as SET NULL, so
+        // flipping it to CASCADE/RESTRICT is a genuinely different constraint.
+        $table = 'stock_handovers';
+        $column = 'received_by';
+        $name = "{$table}_{$column}_foreign";
+
+        DB::statement("alter table `{$table}` drop foreign key `{$name}`");
+        DB::statement("alter table `{$table}` add constraint `{$name}` foreign key (`{$column}`)
+                       references `users` (`id`) on delete restrict on update restrict");
+
+        $before = $this->foreignKeyCount();
+
+        try {
+            $this->migration(self::PHASE_A)->up();
+            $this->fail('RESTRICT must still fail closed where the migration declares SET NULL');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('different definition', $e->getMessage());
+            $this->assertStringContainsString("{$table}.{$column}", $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->foreignKeyCount());
+        $this->assertSame('RESTRICT', strtoupper((string) $this->constraintRow($table, $name)->delete_rule));
+    }
+
+    /* ─────────── fail-closed on column / parent / name identity ─────────── */
+
+    /**
+     * Accepting the alternative spelling must not weaken the OTHER identity
+     * checks the guard performs. A constraint that carries the expected NAME but
+     * a different COLUMN, or a different PARENT, is a different constraint and
+     * must keep failing closed.
+     */
+    public function test_same_named_constraint_on_a_different_column_or_parent_still_fails_closed(): void
+    {
+        // (a) Same constraint name, but attached to a different column.
+        $table = 'stock_handovers';
+        $name = "{$table}_agent_id_foreign";
+
+        DB::statement("alter table `{$table}` drop foreign key `{$name}`");
+        DB::statement("alter table `{$table}` add constraint `{$name}` foreign key (`received_by`)
+                       references `users` (`id`) on delete no action on update no action");
+
+        $before = $this->foreignKeyCount();
+
+        try {
+            $this->migration(self::PHASE_A)->up();
+            $this->fail('A constraint carrying the expected name but a different column must fail closed');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('different definition', $e->getMessage());
+            $this->assertStringContainsString("{$table}.agent_id", $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->foreignKeyCount());
+
+        // (b) Same constraint name and column, but a different parent table.
+        DB::statement("alter table `{$table}` drop foreign key `{$name}`");
+        DB::statement("alter table `{$table}` add constraint `{$name}` foreign key (`agent_id`)
+                       references `roles` (`id`) on delete no action on update no action");
+
+        try {
+            $this->migration(self::PHASE_A)->up();
+            $this->fail('A constraint carrying the expected name and column but a different parent must fail closed');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('different definition', $e->getMessage());
+            $this->assertStringContainsString("{$table}.agent_id", $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->foreignKeyCount());
+        $this->assertSame('roles', (string) $this->constraintRow($table, $name)->referenced_table_name);
+    }
+
     /* ─────────────────────────── helpers ─────────────────────────── */
 
     private function migration(string $phase): object
@@ -294,11 +424,21 @@ class DevSchemaForeignKeyRestorationDdlTest extends TestCase
 
     private function constraintExists(string $table, string $constraint): bool
     {
+        return $this->constraintRow($table, $constraint) !== null;
+    }
+
+    private function constraintRow(string $table, string $constraint): ?object
+    {
         return DB::selectOne(
-            'select 1 as present from information_schema.referential_constraints
-              where constraint_schema = ? and table_name = ? and constraint_name = ?',
+            'select r.delete_rule, r.update_rule, k.referenced_table_name
+               from information_schema.referential_constraints r
+               join information_schema.key_column_usage k
+                 on k.constraint_schema = r.constraint_schema
+                and k.table_name = r.table_name
+                and k.constraint_name = r.constraint_name
+              where r.constraint_schema = ? and r.table_name = ? and r.constraint_name = ?',
             [DB::getDatabaseName(), $table, $constraint]
-        ) !== null;
+        );
     }
 
     private function foreignKeyCount(): int

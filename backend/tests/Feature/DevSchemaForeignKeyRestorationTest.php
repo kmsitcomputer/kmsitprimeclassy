@@ -232,6 +232,93 @@ class DevSchemaForeignKeyRestorationTest extends TestCase
         $this->assertSame($before, $this->foreignKeyCount());
     }
 
+    /* ─────────────────── restored legacy migrations ─────────────────── */
+
+    /**
+     * `2026_10_03_100000` and `2026_10_04_100000` had been dropped from the
+     * repository while production kept their schema and their ledger rows, which
+     * left production's two tables unreproducible from a fresh migration. They
+     * are restored here, so a fresh migrate must rebuild BOTH tables with every
+     * foreign key the canonical migrations declare — this is the regression that
+     * pins that compatibility.
+     */
+    public function test_the_restored_legacy_migrations_rebuild_their_tables_and_foreign_keys_on_a_fresh_migration(): void
+    {
+        $this->assertTrue(
+            Schema::hasTable('order_fulfillment_change_proposals'),
+            'A fresh migration must recreate the table that only the restored legacy migration declares'
+        );
+        $this->assertTrue(
+            Schema::hasTable('stock_request_proposal_items'),
+            'stock_request_proposal_items is created by the shared proposals migration'
+        );
+
+        // Every foreign key the restored legacy migrations declare, with the rule
+        // each one declares. A missing entry means the schema and the migration
+        // have drifted apart again.
+        $expected = [
+            'order_fulfillment_change_proposals_agent_id_foreign' => ['users', 'RESTRICT'],
+            'order_fulfillment_change_proposals_order_id_foreign' => ['orders', 'CASCADE'],
+            'order_fulfillment_change_proposals_order_item_id_foreign' => ['order_items', 'CASCADE'],
+            'order_fulfillment_change_proposals_proposed_by_foreign' => ['users', 'RESTRICT'],
+            'order_fulfillment_change_proposals_decided_by_foreign' => ['users', 'SET NULL'],
+            'stock_request_proposal_items_decided_by_foreign' => ['users', 'SET NULL'],
+        ];
+
+        $problems = [];
+
+        foreach ($expected as $constraint => [$parent, $deleteRule]) {
+            $table = substr($constraint, 0, (int) strrpos($constraint, '_'));
+
+            $row = DB::selectOne(
+                'select k.referenced_table_name as parent, r.delete_rule as delete_rule
+                   from information_schema.key_column_usage k
+                   join information_schema.referential_constraints r
+                     on r.constraint_schema = k.constraint_schema
+                    and r.table_name = k.table_name
+                    and r.constraint_name = k.constraint_name
+                  where k.constraint_schema = ? and k.constraint_name = ?
+                    and k.referenced_table_name is not null',
+                [DB::getDatabaseName(), $constraint]
+            );
+
+            if ($row === null) {
+                $problems[] = "{$constraint}: the fresh schema does not carry it";
+
+                continue;
+            }
+
+            if ((string) $row->parent !== $parent || strtoupper((string) $row->delete_rule) !== $deleteRule) {
+                $problems[] = "{$constraint}: expected {$parent} ON DELETE {$deleteRule}, schema has {$row->parent} ON DELETE {$row->delete_rule}";
+            }
+        }
+
+        $this->assertSame([], $problems);
+    }
+
+    /**
+     * The restored migrations must be present in the repository AND recorded by
+     * a fresh migrate — the exact defect was a schema that production carried but
+     * that the repository could no longer reproduce.
+     */
+    public function test_the_restored_legacy_migrations_are_both_present_and_recorded(): void
+    {
+        foreach ([
+            '2026_10_03_100000_add_item_decision_to_stock_request_proposal_items',
+            '2026_10_04_100000_create_order_fulfillment_change_proposals_table',
+        ] as $name) {
+            $this->assertFileExists(
+                database_path("migrations/{$name}.php"),
+                "{$name} must exist in the repository"
+            );
+            $this->assertDatabaseHas('migrations', ['migration' => $name]);
+        }
+
+        // The decision columns added by the restored migration must exist too.
+        $this->assertTrue(Schema::hasColumn('stock_request_proposal_items', 'decision_status'));
+        $this->assertTrue(Schema::hasColumn('stock_request_proposal_items', 'decided_by'));
+    }
+
     /* ─────────────────────────── forbidden mechanisms ─────────────────────────── */
 
     public function test_the_migrations_never_weaken_or_bypass_a_constraint(): void

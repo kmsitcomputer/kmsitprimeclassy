@@ -193,6 +193,13 @@ return new class extends Migration
         ) !== null;
     }
 
+    private function normalizeRestrictRule(string $rule): string
+    {
+        $rule = strtoupper(trim($rule));
+
+        return $rule === 'NO ACTION' ? 'RESTRICT' : $rule;
+    }
+
     private function foreignKeyMatches(string $table, string $column, string $parent, string $parentColumn, string $deleteRule): bool
     {
         $rows = DB::select(
@@ -211,8 +218,8 @@ return new class extends Migration
             && (string) $rows[0]->column_name === $column
             && (string) $rows[0]->referenced_table_name === $parent
             && (string) $rows[0]->referenced_column_name === $parentColumn
-            && strtoupper((string) $rows[0]->delete_rule) === strtoupper($deleteRule)
-            && strtoupper((string) $rows[0]->update_rule) === 'RESTRICT';
+            && $this->normalizeRestrictRule((string) $rows[0]->delete_rule) === $this->normalizeRestrictRule($deleteRule)
+            && $this->normalizeRestrictRule((string) $rows[0]->update_rule) === 'RESTRICT';
     }
 
     /** @return array{0: ?string, 1: bool} [lowercased column type, nullable] */
