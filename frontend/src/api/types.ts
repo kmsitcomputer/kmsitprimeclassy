@@ -179,6 +179,14 @@ export interface Order {
    * The UI renders this instead of inventing or inferring a date.
    */
   shipment_delivery_dates?: Record<string, { delivery_date: string | null; status: string; delivery_mode: string | null }>
+  /**
+   * FIX-COURIER-ASSIGNMENT-422: the order's own branch id, serialized by OrderResource
+   * ONLY for the courier-assignment roles (super_admin/agen/admin/koordinator-kurir).
+   * The courier dropdown must scope a super_admin's dispatch-courier list to THIS id —
+   * never to auth.user.agent_id (which is null for a super_admin). Absent for all
+   * other roles.
+   */
+  agent_id?: number | null
   delivery_date_estimate: string | null
   cancellation_reason: string | null
   konsumen: { name: string; phone: string | null } | null

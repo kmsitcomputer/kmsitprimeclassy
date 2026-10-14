@@ -345,6 +345,43 @@ class R04OrderProjectionTest extends TestCase
         $this->actingAs($other)->getJson("/api/v1/orders/{$order->id}")->assertNotFound();
     }
 
+    /* ------------- FIX-COURIER-ASSIGNMENT-422: order branch identity for courier assignment ------------- */
+
+    public function test_order_detail_exposes_agent_id_only_to_courier_assignment_roles(): void
+    {
+        $order = $this->placeAgentOrder();
+        $agentId = $order->agent_id;
+
+        // Courier-assignment roles (the exact roles on PATCH /shipments/{shipment}/courier)
+        // see the order's own branch id — a super_admin scopes the dispatch-courier
+        // list to THIS id, never to their own (null) agent_id.
+        $superAdmin = User::factory()->superAdmin()->create();
+        $super = $this->actingAs($superAdmin)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame($agentId, $super['agent_id']);
+
+        foreach (['agen' => $this->b['agen'], 'admin' => $this->b['admin']] as $role => $user) {
+            $data = $this->actingAs($user)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+            $this->assertSame($agentId, $data['agent_id'], "[{$role}] sees the order branch id");
+        }
+
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $this->b['agen']->id]);
+        $koord = $this->actingAs($koordinator)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertSame($agentId, $koord['agent_id']);
+
+        // Every other order viewer never receives the branch routing field, and the
+        // financial projection boundary is unchanged.
+        $keuangan = $this->actingAs($this->b['keuangan'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertArrayNotHasKey('agent_id', $keuangan);
+        $this->assertArrayHasKey('payment_summary', $keuangan, 'keuangan keeps the financial projection');
+
+        $owner = $this->actingAs($this->b['konsumen'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertArrayNotHasKey('agent_id', $owner);
+
+        $gudang = $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
+        $this->assertArrayNotHasKey('agent_id', $gudang);
+        $this->assertNoFinancialFields($gudang);
+    }
+
     public function test_admin_product_and_variation_delete_denied_but_cru_allowed(): void
     {
         // Admin CREATE + UPDATE allowed (variation product: no product-level sku/price).

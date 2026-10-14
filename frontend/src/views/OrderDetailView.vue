@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
@@ -8,7 +8,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
-import { getCourierReport } from '@/api/reports'
+import { listDispatchCouriers } from '@/api/dispatch'
 import { recordDeliveryVerification } from '@/api/deliveries'
 import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem } from '@/api/orderAdjustments'
 import { downloadInvoice } from '@/api/invoice'
@@ -40,6 +40,8 @@ const auth = useAuthStore()
 
 const order = ref<Order | null>(null)
 const loading = ref(true)
+/** Order-detail load failure (safe, displayable message) — set when getOrder() rejects. */
+const orderError = ref<string | null>(null)
 const cancelling = ref(false)
 const cancelReason = ref('')
 const showCancelForm = ref(false)
@@ -63,14 +65,69 @@ const paidByOptions = computed(() => {
 const paidByLabel = (v?: string | null) => ({ konsumen: 'Konsumen', sales: 'Sales', korsal: 'Korsal' } as Record<string, string>)[v ?? ''] ?? '-'
 const roleLabel = (r?: string | null) => ({ konsumen: 'Konsumen', sales: 'Sales', 'sales-kurir-sub': 'Sales', korsal: 'Korsal', keuangan: 'Keuangan', admin: 'Admin', agen: 'Agen', super_admin: 'Super Admin' } as Record<string, string>)[r ?? ''] ?? (r ?? '')
 
-async function load() {
-  loading.value = true
-  order.value = await getOrder(props.id)
-  loading.value = false
+/**
+ * REMEDIATION R-1 — lifecycle + stale-response protection.
+ * Vue reuses this component when navigating order A → order B (props.id changes,
+ * onMounted does NOT refire), so the courier-assignment state must reset per order
+ * and a late response for A must never overwrite B. orderLoadSeq is the guard:
+ * every load() mints a new sequence number and any response whose seq is stale
+ * is discarded before touching reactive state.
+ */
+let orderLoadSeq = 0
+
+function resetCourierAssignmentState() {
+  activeCouriers.value = []
+  assignableCouriersLoaded.value = false
+  courierListError.value = null
+  assignCourierError.value = null
+  for (const key of Object.keys(assignTargets)) delete assignTargets[key as unknown as number]
 }
 
-onMounted(load)
-onMounted(loadActiveCouriers)
+async function load(orderId: number = props.id) {
+  const seq = ++orderLoadSeq
+  // A new order id invalidates the previous order's detail BEFORE fetching, so
+  // branch-A data can never render while branch-B loads (or fails to load).
+  // Same-order refreshes (payment/shipment/verification actions) keep the loaded
+  // order and courier list.
+  const isNewOrder = orderId !== order.value?.id
+  if (isNewOrder) {
+    order.value = null
+    resetCourierAssignmentState()
+  }
+  orderError.value = null
+  loading.value = true
+  try {
+    const fetched = await getOrder(orderId)
+    if (seq !== orderLoadSeq) return
+    order.value = fetched
+  } catch (e) {
+    // A handled failure: the (already cleared, for a new order) detail stays
+    // empty and a safe message renders instead of an unhandled rejection.
+    if (seq !== orderLoadSeq) return
+    orderError.value = e instanceof ApiError ? e.message : t('orders.errors.loadOrder')
+    return
+  } finally {
+    if (seq === orderLoadSeq) loading.value = false
+  }
+  if (seq !== orderLoadSeq) return
+  // FIX-COURIER-ASSIGNMENT-422: the assignable-courier list needs the order's own
+  // agent_id (super_admin scope), so it loads only after the order detail succeeds.
+  await loadAssignableCouriers(seq)
+}
+
+// load() never rejects (getOrder/courier-list failures are caught above), so
+// neither onMounted nor the props.id watcher can produce an unhandled rejection.
+onMounted(() => {
+  void load()
+})
+
+// R-1: props.id change (A → B without browser reload) reloads the new order detail.
+watch(
+  () => props.id,
+  (newId, oldId) => {
+    if (newId !== oldId) void load(newId)
+  },
+)
 
 /* ---------- Payment verification/settlement — Keuangan's authority (separation of duties), super_admin override.
    Admin/agen may submit proof and view status but must never settle it (backend routes are super_admin,keuangan only). */
@@ -430,11 +487,59 @@ const activeCouriers = ref<{ id: number; name: string }[]>([])
 const assignTargets = reactive<Record<number, number | null>>({})
 const assigningCourierId = ref<number | null>(null)
 const assignCourierError = ref<string | null>(null)
+/**
+ * FIX-COURIER-ASSIGNMENT-422: the assignment dropdown must offer ONLY couriers the
+ * backend will actually accept for a `standard` shipment (active + same-branch +
+ * kurir/koordinator-kurir role). GET /dispatch/couriers enforces exactly that scope
+ * server-side — and CourierService::assignCourier re-validates it on write. The old
+ * getCourierReport() source listed every merely-active courier regardless of role
+ * or branch, so an ineligible `sales-kurir-sub` courier (production Order 9 /
+ * Shipment 12) was offered and then refused with HTTP 422.
+ */
+const assignableCouriersLoaded = ref(false)
+const courierListError = ref<string | null>(null)
 
-async function loadActiveCouriers() {
-  if (!isOfficeRole.value) return
-  const report = await getCourierReport({ per_page: 100 })
-  activeCouriers.value = report.items.filter((c) => c.is_active).map((c) => ({ id: c.courier_id, name: c.courier_name }))
+async function loadAssignableCouriers(seq: number = orderLoadSeq) {
+  if (!isOfficeRole.value || assignableCouriersLoaded.value) return
+  // REMEDIATION R-2 — super_admin without an order agent_id: never call
+  // GET /dispatch/couriers without the branch scope (the backend answers 422).
+  // Leave the list empty with an informative message; the empty dropdown keeps
+  // assignment disabled. Never fall back to auth.user.agent_id (null for
+  // super_admin). Agen/Admin keep the backend-enforced branch scope (no param).
+  if (auth.user?.role === 'super_admin') {
+    const agentId = order.value?.agent_id
+    if (typeof agentId !== 'number' || !Number.isInteger(agentId) || agentId <= 0) {
+      activeCouriers.value = []
+      courierListError.value = t('orders.errors.courierListNoBranch')
+      assignableCouriersLoaded.value = true
+      return
+    }
+    try {
+      const rows = await listDispatchCouriers(agentId)
+      if (seq !== orderLoadSeq) return
+      activeCouriers.value = rows
+      assignableCouriersLoaded.value = true
+    } catch {
+      if (seq !== orderLoadSeq) return
+      // Separate failure path: the order detail above already rendered — a courier-list
+      // failure leaves the dropdown empty instead of breaking the page. Not marked
+      // loaded, so a later refresh may still recover; a loaded list is never refetched.
+      courierListError.value = t('orders.errors.courierList')
+    }
+    return
+  }
+  try {
+    const rows = await listDispatchCouriers()
+    if (seq !== orderLoadSeq) return
+    activeCouriers.value = rows
+    assignableCouriersLoaded.value = true
+  } catch {
+    if (seq !== orderLoadSeq) return
+    // Separate failure path: the order detail above already rendered — a courier-list
+    // failure leaves the dropdown empty instead of breaking the page. Not marked
+    // loaded, so a later refresh may still recover; a loaded list is never refetched.
+    courierListError.value = t('orders.errors.courierList')
+  }
 }
 
 async function submitAssignCourier(shipmentId: number) {
@@ -804,7 +909,12 @@ async function submitReturn(item: OrderItem) {
 
     <div v-if="loading" class="h-64 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
 
+    <div v-else-if="orderError && !order" class="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+      {{ orderError }}
+    </div>
+
     <div v-else-if="order" class="space-y-4">
+      <p v-if="orderError" class="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-400">{{ orderError }}</p>
       <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <div class="flex items-center justify-between">
           <h1 class="font-display text-lg font-semibold text-stone-800 dark:text-stone-100">{{ order.order_no }}</h1>
@@ -1126,8 +1236,9 @@ async function submitReturn(item: OrderItem) {
             <!-- R-03: a self_sub shipment is never handed to a normal Kurir — no Assign Courier. -->
             <div v-if="isOfficeRole && !isSelfSubGroup(group)" class="flex flex-wrap items-center gap-2">
               <p v-if="assignCourierError" class="w-full text-xs text-red-600">{{ assignCourierError }}</p>
+              <p v-if="courierListError && !activeCouriers.length" class="w-full text-xs text-amber-600">{{ courierListError }}</p>
               <label class="text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.assignCourierLabel') }}</label>
-              <select v-model.number="assignTargets[group.shipmentId]" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
+              <select v-model.number="assignTargets[group.shipmentId]" :disabled="!activeCouriers.length" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
                 <option :value="null">{{ t('orders.chooseCourier') }}</option>
                 <option v-for="c in activeCouriers" :key="c.id" :value="c.id">{{ c.name }}</option>
               </select>

@@ -84,6 +84,16 @@ class OrderResource extends JsonResource
             'district_id' => $this->district_id,
             'village_id' => $this->village_id,
             'postal_code' => $this->postal_code,
+            // FIX-COURIER-ASSIGNMENT-422: the order's own branch identity, for the
+            // courier-assignment roles only (super_admin/agen/admin/koordinator-kurir —
+            // the exact roles on PATCH /shipments/{shipment}/courier). A super_admin must
+            // scope the dispatch-courier list to THIS order's branch (not their own, which
+            // is null); ordinary staff stay on the backend-enforced branch scope. Branch
+            // identity is operational routing data, never a financial figure.
+            'agent_id' => $this->when(
+                $request->user()?->isRole('super_admin', 'agen', 'admin', 'koordinator-kurir') ?? false,
+                $this->agent_id
+            ),
             // The exact pin the konsumen picked at checkout — only meaningful
             // to show as a map when shipping_provider is 'openroute' ("Kurir
             // Online"; see ShippingQuoteService's own $labels mapping). Not
