@@ -76,7 +76,7 @@ const ROLE_ITEMS: NavItem[] = [
     // operations-only projection), not the generic (financial) order list —
     // its backend order projection is operational-only anyway. Kurir uses
     // /kurir/orders; konsumen uses their own order history.
-    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'sales-kurir-sub', 'gudang'),
+    show: (auth) => !auth.isKonsumen && !isRole(auth, 'kurir', 'gudang'),
   },
   {
     key: 'commissions',
