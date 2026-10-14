@@ -1,27 +1,35 @@
 /**
- * FIX-COURIER-ASSIGNMENT-422 — focused regression for OrderDetailView.vue.
+ * FIX-COURIER-ASSIGNMENT-422 + CR-SALES-KURIR-SUB-DELIVERY-001 — focused
+ * regression for OrderDetailView.vue.
  *
- * Covers the R-1 lifecycle/stale-response remediation and the R-2 super_admin
- * branch-scope remediation at the component level (jsdom + @vue/test-utils,
- * all API modules mocked — no backend, no network).
+ * Covers the R-1 lifecycle/stale-response remediation at the component level
+ * (jsdom + @vue/test-utils, all API modules mocked — no backend, no network).
+ *
+ * The assignment dropdown source is the PER-SHIPMENT eligible list
+ * (GET /shipments/{id}/eligible-couriers): branch kurir/koordinator plus the
+ * Sales-Kurir-Sub executors eligible for the viewed order only. Scoping is
+ * server-side per shipment — the component never sends a branch param
+ * (the FIX-422 super_admin branch-scope remediation holds structurally).
  *
  * Scenario map (task §3–§7):
- *  1. A → B navigation follows branch B and clears A immediately.
- *  2. A late order-A response never overwrites B.
- *  3. A late courier-list response from the previous order is discarded.
- *  4. getOrder() failure renders a safe error (ApiError + generic).
- *  5. super_admin scopes by the ORDER agent_id, never its own.
- *  6. super_admin with empty agent_id: no request + guidance + disabled dropdown.
- *  7. agen/admin send no extra branch param (backend scoping).
- *  8. Courier-list failure keeps the detail with an empty dropdown.
- *  9. self_sub shipments never offer courier assignment.
- *  10. Same-order double refresh keeps the loaded list; stale in-flight
- *      courier responses are discarded.
+ *  1. A → B navigation fetches B's shipment candidates and clears A's.
+ *  2. A late order-A response never overwrites B (and triggers no fetch).
+ *  3. A late eligible-list response from the previous order is discarded.
+ *  4. getOrder() failure renders a safe error (ApiError + generic) with no fetch.
+ *  5. super_admin/agen/admin fetch per shipment id with no branch param.
+ *  6. Eligible-list failure keeps the detail with an empty dropdown.
+ *  7. self_sub shipments never offer courier assignment (and trigger no fetch).
+ *  8. Two standard shipments fetch independently per shipment.
+ *  9. Same-order double refresh keeps loaded lists; stale in-flight
+ *      eligible responses are discarded.
+ *  10. A Sales-Kurir-Sub operates only its assigned standard shipment or its
+ *      owned self_sub shipment — never unassigned or another courier's work.
  */
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/api/errors'
+import type { EligibleCourier } from '@/api/dispatch'
 import type { Order, OrderItem } from '@/api/types'
 import OrderDetailView from '@/views/OrderDetailView.vue'
 
@@ -41,7 +49,7 @@ const api = vi.hoisted(() => ({
   requestDpSettlement: vi.fn(),
   updateShipmentStatus: vi.fn(),
   assignCourier: vi.fn(),
-  listDispatchCouriers: vi.fn(),
+  listEligibleCouriers: vi.fn(),
   recordDeliveryVerification: vi.fn(),
   adjustItemFulfillment: vi.fn(),
   rescheduleOrderItem: vi.fn(),
@@ -68,7 +76,7 @@ vi.mock('@/api/shipments', () => ({
   updateShipmentStatus: api.updateShipmentStatus,
   assignCourier: api.assignCourier,
 }))
-vi.mock('@/api/dispatch', () => ({ listDispatchCouriers: api.listDispatchCouriers }))
+vi.mock('@/api/dispatch', () => ({ listEligibleCouriers: api.listEligibleCouriers }))
 vi.mock('@/api/deliveries', () => ({ recordDeliveryVerification: api.recordDeliveryVerification }))
 vi.mock('@/api/orderAdjustments', () => ({
   adjustItemFulfillment: api.adjustItemFulfillment,
@@ -243,7 +251,7 @@ function assignButton(wrapper: VueWrapper) {
 /* Tests                                                               */
 /* ------------------------------------------------------------------ */
 
-describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () => {
+describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422 + SKS-DELIVERY-001)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     authState.user = { id: 900, role: 'super_admin', agent_id: null }
@@ -251,15 +259,15 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     api.adjustItemFulfillment.mockResolvedValue(undefined)
   })
 
-  it('follows branch B after A → B navigation and clears A immediately', async () => {
-    const orderA = orderFixture({ id: 1, order_no: 'ORD-A', agent_id: 10 })
-    const orderB = orderFixture({ id: 2, order_no: 'ORD-B', agent_id: 20 })
+  it('follows shipment B after A → B navigation and clears A immediately', async () => {
+    const orderA = orderFixture({ id: 1, order_no: 'ORD-A', agent_id: 10, items: [stdItem({ shipment_id: 12 })] })
+    const orderB = orderFixture({ id: 2, order_no: 'ORD-B', agent_id: 20, items: [stdItem({ shipment_id: 13 })] })
     const orderBRequest = deferred<Order>()
     api.getOrder.mockImplementation((id: number) =>
       id === 1 ? Promise.resolve(orderA) : orderBRequest.promise,
     )
-    api.listDispatchCouriers.mockImplementation((agentId?: number) =>
-      Promise.resolve(agentId === 10 ? [{ id: 1, name: 'Kurir A' }] : [{ id: 2, name: 'Kurir B' }]),
+    api.listEligibleCouriers.mockImplementation((shipmentId: number) =>
+      Promise.resolve(shipmentId === 12 ? [{ courier_id: 1, user_id: 11, name: 'Kurir A' }] : [{ courier_id: 2, user_id: 22, name: 'Kurir B' }]),
     )
 
     const wrapper = mountDetail(1)
@@ -277,17 +285,17 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     expect(wrapper.html()).toContain('ORD-B')
     expect(courierOptions(wrapper)).toContain('Kurir B')
     expect(courierOptions(wrapper)).not.toContain('Kurir A')
-    expect(api.listDispatchCouriers).toHaveBeenLastCalledWith(20)
+    expect(api.listEligibleCouriers).toHaveBeenLastCalledWith(13)
   })
 
   it('discards a late order-A response after navigating to B', async () => {
-    const orderA = orderFixture({ id: 1, order_no: 'ORD-A', agent_id: 10 })
-    const orderB = orderFixture({ id: 2, order_no: 'ORD-B', agent_id: 20 })
+    const orderA = orderFixture({ id: 1, order_no: 'ORD-A', agent_id: 10, items: [stdItem({ shipment_id: 12 })] })
+    const orderB = orderFixture({ id: 2, order_no: 'ORD-B', agent_id: 20, items: [stdItem({ shipment_id: 13 })] })
     const orderARequest = deferred<Order>()
     api.getOrder.mockImplementation((id: number) =>
       id === 1 ? orderARequest.promise : Promise.resolve(orderB),
     )
-    api.listDispatchCouriers.mockResolvedValue([{ id: 2, name: 'Kurir B' }])
+    api.listEligibleCouriers.mockResolvedValue([{ courier_id: 2, user_id: 22, name: 'Kurir B' }])
 
     const wrapper = mountDetail(1)
     await wrapper.setProps({ id: 2 })
@@ -298,18 +306,19 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     await flushPromises()
     expect(wrapper.html()).toContain('ORD-B')
     expect(wrapper.html()).not.toContain('ORD-A')
-    expect(api.listDispatchCouriers).not.toHaveBeenCalledWith(10)
+    // Order A never resolved while active, so its shipment was never fetched.
+    expect(api.listEligibleCouriers).not.toHaveBeenCalledWith(12)
   })
 
-  it('discards a late courier-list response from the previous order', async () => {
-    const orderA = orderFixture({ id: 1, order_no: 'ORD-A', agent_id: 10 })
-    const orderB = orderFixture({ id: 2, order_no: 'ORD-B', agent_id: 20 })
-    const staleCouriers = deferred<{ id: number; name: string }[]>()
+  it('discards a late eligible-list response from the previous order', async () => {
+    const orderA = orderFixture({ id: 1, order_no: 'ORD-A', agent_id: 10, items: [stdItem({ shipment_id: 12 })] })
+    const orderB = orderFixture({ id: 2, order_no: 'ORD-B', agent_id: 20, items: [stdItem({ shipment_id: 13 })] })
+    const staleCouriers = deferred<EligibleCourier[]>()
     api.getOrder.mockImplementation((id: number) =>
       Promise.resolve(id === 1 ? orderA : orderB),
     )
-    api.listDispatchCouriers.mockImplementation((agentId?: number) =>
-      agentId === 10 ? staleCouriers.promise : Promise.resolve([{ id: 2, name: 'Kurir B' }]),
+    api.listEligibleCouriers.mockImplementation((shipmentId: number) =>
+      shipmentId === 12 ? staleCouriers.promise : Promise.resolve([{ courier_id: 2, user_id: 22, name: 'Kurir B' }]),
     )
 
     const wrapper = mountDetail(1)
@@ -320,7 +329,7 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     await flushPromises()
     expect(courierOptions(wrapper)).toContain('Kurir B')
 
-    staleCouriers.resolve([{ id: 1, name: 'Kurir STALE' }])
+    staleCouriers.resolve([{ courier_id: 1, user_id: 11, name: 'Kurir STALE' }])
     await flushPromises()
     expect(courierOptions(wrapper)).toContain('Kurir B')
     expect(courierOptions(wrapper)).not.toContain('Kurir STALE')
@@ -333,7 +342,7 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     expect(wrapper.html()).toContain('Sesi berakhir.')
     expect(wrapper.html()).not.toContain('orders.assignCourierButton')
     expect(courierSelect(wrapper)).toBeUndefined()
-    expect(api.listDispatchCouriers).not.toHaveBeenCalled()
+    expect(api.listEligibleCouriers).not.toHaveBeenCalled()
   })
 
   it('falls back to a generic message for non-API order failures', async () => {
@@ -344,48 +353,25 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     expect(courierSelect(wrapper)).toBeUndefined()
   })
 
-  it('super_admin scopes the courier list by the order agent_id, never its own', async () => {
-    authState.user = { id: 900, role: 'super_admin', agent_id: 999 }
-    api.getOrder.mockResolvedValue(orderFixture({ agent_id: 10 }))
-    api.listDispatchCouriers.mockResolvedValue([{ id: 1, name: 'Kurir A' }])
-    const wrapper = mountDetail(1)
-    await flushPromises()
-    expect(api.listDispatchCouriers).toHaveBeenCalledTimes(1)
-    expect(api.listDispatchCouriers).toHaveBeenCalledWith(10)
-    expect(api.listDispatchCouriers).not.toHaveBeenCalledWith(999)
-    expect(courierOptions(wrapper)).toContain('Kurir A')
-  })
-
-  it('super_admin with an empty agent_id makes no request and disables assignment', async () => {
-    api.getOrder.mockResolvedValue(orderFixture({ agent_id: null }))
-    api.listDispatchCouriers.mockResolvedValue([{ id: 1, name: 'Must Not Appear' }])
-    const wrapper = mountDetail(1)
-    await flushPromises()
-    expect(api.listDispatchCouriers).not.toHaveBeenCalled()
-    expect(wrapper.html()).toContain('orders.errors.courierListNoBranch')
-    const select = courierSelect(wrapper)
-    expect(select?.attributes('disabled')).not.toBeUndefined()
-    expect(courierOptions(wrapper)).toEqual(['orders.chooseCourier'])
-    expect(assignButton(wrapper)?.attributes('disabled')).not.toBeUndefined()
-  })
-
-  it.each(['agen', 'admin'] as const)(
-    '%s relies on backend scoping without an extra branch param',
+  it.each(['super_admin', 'agen', 'admin'] as const)(
+    '%s fetches candidates per shipment id with no branch param',
     async (role) => {
-      authState.user = { id: 11, role, agent_id: 10 }
-      api.getOrder.mockResolvedValue(orderFixture({ agent_id: 10 }))
-      api.listDispatchCouriers.mockResolvedValue([{ id: 3, name: 'Kurir Cabang' }])
+      authState.user = { id: 11, role, agent_id: role === 'super_admin' ? 999 : 10 }
+      api.getOrder.mockResolvedValue(orderFixture({ agent_id: 10, items: [stdItem({ shipment_id: 12 })] }))
+      api.listEligibleCouriers.mockResolvedValue([{ courier_id: 3, user_id: 33, name: 'Kurir Cabang' }])
       const wrapper = mountDetail(1)
       await flushPromises()
-      expect(api.listDispatchCouriers).toHaveBeenCalledTimes(1)
-      expect(api.listDispatchCouriers.mock.calls[0]).toHaveLength(0)
+      // Branch scoping is server-side per shipment — no branch arg by construction.
+      expect(api.listEligibleCouriers).toHaveBeenCalledTimes(1)
+      expect(api.listEligibleCouriers).toHaveBeenCalledWith(12)
+      expect(api.listEligibleCouriers.mock.calls[0]).toHaveLength(1)
       expect(courierOptions(wrapper)).toContain('Kurir Cabang')
     },
   )
 
-  it('keeps the order detail with an empty dropdown when the courier list fails', async () => {
+  it('keeps the order detail with an empty dropdown when the eligible list fails', async () => {
     api.getOrder.mockResolvedValue(orderFixture())
-    api.listDispatchCouriers.mockRejectedValueOnce(new Error('offline'))
+    api.listEligibleCouriers.mockRejectedValueOnce(new Error('offline'))
     const wrapper = mountDetail(1)
     await flushPromises()
     expect(wrapper.html()).toContain('ORD-1')
@@ -402,28 +388,49 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
         ],
       }),
     )
-    api.listDispatchCouriers.mockResolvedValue([{ id: 1, name: 'Kurir A' }])
+    api.listEligibleCouriers.mockResolvedValue([{ courier_id: 1, user_id: 11, name: 'Kurir A' }])
     const wrapper = mountDetail(1)
     await flushPromises()
     expect(wrapper.html()).toContain('ORD-1')
     expect(courierSelect(wrapper)).toBeUndefined()
     expect(assignButton(wrapper)).toBeUndefined()
+    expect(api.listEligibleCouriers).not.toHaveBeenCalled()
+  })
+
+  it('fetches each standard shipment independently within one order', async () => {
+    api.getOrder.mockResolvedValue(
+      orderFixture({
+        items: [stdItem({ shipment_id: 12 }), stdItem({ id: 102, shipment_id: 13 })],
+      }),
+    )
+    api.listEligibleCouriers.mockImplementation((shipmentId: number) =>
+      Promise.resolve(shipmentId === 12 ? [{ courier_id: 1, user_id: 11, name: 'Kurir A' }] : [{ courier_id: 2, user_id: 44, name: 'SKS B', executor_role: 'sales-kurir-sub' }]),
+    )
+    const wrapper = mountDetail(1)
+    await flushPromises()
+    expect(api.listEligibleCouriers).toHaveBeenCalledWith(12)
+    expect(api.listEligibleCouriers).toHaveBeenCalledWith(13)
+    const selects = wrapper.findAll('select').filter((s) => s.html().includes('orders.chooseCourier'))
+    expect(selects).toHaveLength(2)
+    const texts = selects.map((s) => s.findAll('option').map((o) => o.text()))
+    expect(texts[0]).toContain('Kurir A')
+    expect(texts[1]).toContain('SKS B')
   })
 
   it('same-order refresh keeps the loaded list and discards the stale in-flight request', async () => {
     api.getOrder.mockResolvedValue(orderFixture({ id: 1, order_no: 'ORD-1', agent_id: 10 }))
-    const firstCouriers = deferred<{ id: number; name: string }[]>()
-    const secondCouriers = deferred<{ id: number; name: string }[]>()
-    api.listDispatchCouriers
+    const firstCouriers = deferred<EligibleCourier[]>()
+    const secondCouriers = deferred<EligibleCourier[]>()
+    api.listEligibleCouriers
       .mockImplementationOnce(() => firstCouriers.promise)
       .mockImplementationOnce(() => secondCouriers.promise)
 
     const wrapper = mountDetail(1)
     await flushPromises()
-    expect(api.listDispatchCouriers).toHaveBeenCalledTimes(1)
+    expect(api.listEligibleCouriers).toHaveBeenCalledTimes(1)
 
     // Same-order refresh via the fulfillment-adjust action while the first
-    // courier request is still in flight.
+    // eligible request is still in flight.
     const openForm = wrapper.findAll('button').find((b) => b.text() === 'orders.changeFulfillment')
     expect(openForm).not.toBeUndefined()
     await openForm!.trigger('click')
@@ -433,13 +440,13 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
     await save!.trigger('click')
     await flushPromises()
     expect(api.getOrder).toHaveBeenCalledTimes(2)
-    expect(api.listDispatchCouriers).toHaveBeenCalledTimes(2)
+    expect(api.listEligibleCouriers).toHaveBeenCalledTimes(2)
 
-    firstCouriers.resolve([{ id: 1, name: 'Kurir STALE' }])
+    firstCouriers.resolve([{ courier_id: 1, user_id: 11, name: 'Kurir STALE' }])
     await flushPromises()
     expect(courierOptions(wrapper)).toEqual(['orders.chooseCourier'])
 
-    secondCouriers.resolve([{ id: 2, name: 'Kurir BARU' }])
+    secondCouriers.resolve([{ courier_id: 2, user_id: 22, name: 'Kurir BARU' }])
     await flushPromises()
     expect(courierOptions(wrapper)).toContain('Kurir BARU')
     expect(courierOptions(wrapper)).not.toContain('Kurir STALE')
@@ -453,7 +460,55 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422)', () =
       .find((b) => b.text() === 'orders.save')!
       .trigger('click')
     await flushPromises()
-    expect(api.listDispatchCouriers).toHaveBeenCalledTimes(2)
+    expect(api.listEligibleCouriers).toHaveBeenCalledTimes(2)
     expect(courierOptions(wrapper)).toContain('Kurir BARU')
+  })
+
+  it('a sales-kurir-sub operates only its assigned standard or owned self_sub work', async () => {
+    authState.user = { id: 777, role: 'sales-kurir-sub', agent_id: 10 }
+    authState.permissions = [...OFFICE_PERMISSIONS]
+    api.getOrder.mockResolvedValue(
+      orderFixture({
+        items: [
+          // Assigned to this SKS → actionable pickup.
+          stdItem({ id: 101, product_name: 'Milik SKS', shipment_id: 12, courier: { name: 'SKS', phone: null, user_id: 777 } }),
+          // Another courier's shipment → rendered but without any action.
+          stdItem({ id: 102, product_name: 'Milik Lain', shipment_id: 13, courier: { name: 'Lain', phone: null, user_id: 888 } }),
+          // Own self_sub shipment → actionable pickup.
+          stdItem({ id: 103, product_name: 'Self Sub', shipment_id: 14, delivery_mode: 'self_sub', self_delivered_by_user_id: 777, courier: null }),
+        ],
+      }),
+    )
+    api.listEligibleCouriers.mockResolvedValue([])
+    const wrapper = mountDetail(1)
+    await flushPromises()
+    // Office dropdowns never render for a sales-kurir-sub viewer.
+    expect(courierSelect(wrapper)).toBeUndefined()
+    const pickups = wrapper.findAll('button').filter((b) => b.text() === 'orders.pickupAndDeliver')
+    expect(pickups).toHaveLength(2)
+    expect(wrapper.html()).toContain('Milik Lain')
+  })
+
+  it('assigns a profile-less candidate by user id and a regular courier by courier id', async () => {
+    api.getOrder.mockResolvedValue(orderFixture({ items: [stdItem({ shipment_id: 12 })] }))
+    api.listEligibleCouriers.mockResolvedValue([
+      { courier_id: 5, user_id: 55, name: 'Kurir A' },
+      { courier_id: null, user_id: 777, name: 'SKS Tanpa Profil', executor_role: 'sales-kurir-sub' },
+    ])
+    api.assignCourier.mockResolvedValue(orderFixture())
+    const wrapper = mountDetail(1)
+    await flushPromises()
+
+    const select = courierSelect(wrapper)
+    expect(select).not.toBeUndefined()
+    await select!.setValue('u:777')
+    await assignButton(wrapper)!.trigger('click')
+    await flushPromises()
+    expect(api.assignCourier).toHaveBeenCalledWith(12, { executor_user_id: 777 })
+
+    await select!.setValue('c:5')
+    await assignButton(wrapper)!.trigger('click')
+    await flushPromises()
+    expect(api.assignCourier).toHaveBeenCalledWith(12, { courier_id: 5 })
   })
 })

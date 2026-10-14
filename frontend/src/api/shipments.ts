@@ -44,9 +44,22 @@ export async function updateShipmentItemStatus(
   return data.data
 }
 
-/** Office-only (admin/agen/super_admin) proactive assignment — a kurir self-assigns instead by marking 'dikirim'. */
-export async function assignCourier(shipmentId: number, courierId: number) {
-  const { data } = await http.patch<ApiEnvelope<Order>>(`/shipments/${shipmentId}/courier`, { courier_id: courierId })
+/**
+ * Office-only (admin/agen/super_admin + koordinator-kurir dispatch) proactive
+ * assignment — a kurir self-assigns instead by marking 'dikirim'.
+ *
+ * CR-SALES-KURIR-SUB-DELIVERY-001: besides a Courier row id, the target may be
+ * `{ executor_user_id }` for an eligible profile-less Sales-Kurir-Sub — the
+ * backend resolves (and safely creates) the profile on this write path. The
+ * plain-number form stays for every existing caller (incl. the koordinator
+ * `0` self-executor sentinel in the dispatch workspace).
+ */
+export async function assignCourier(
+  shipmentId: number,
+  target: number | { courier_id?: number; executor_user_id?: number },
+) {
+  const payload = typeof target === 'number' ? { courier_id: target } : target
+  const { data } = await http.patch<ApiEnvelope<Order>>(`/shipments/${shipmentId}/courier`, payload)
   return data.data
 }
 

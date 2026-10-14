@@ -256,6 +256,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // and dispatch read are same-agent, server-authoritative routes.
     Route::middleware('role:super_admin,agen,admin,koordinator-kurir')->group(function () {
         Route::patch('/shipments/{shipment}/courier', [ShipmentController::class, 'assign']);
+        // CR-SALES-KURIR-SUB-DELIVERY-001: per-shipment assignable couriers (branch
+        // kurir/koordinator + the Sales-Kurir-Sub executors eligible for THIS order
+        // only). Same role gate as the assignment it feeds; the service re-validates.
+        Route::get('/shipments/{shipment}/eligible-couriers', [ShipmentController::class, 'eligibleCouriers']);
     });
 
     // IMP-003: Koordinator-Kurir dispatch workspace — the same

@@ -197,7 +197,7 @@ return [
         'assigned' => 'Courier assigned successfully.',
         'return_confirmed' => 'Return status updated successfully.',
         'delivery_proof_required' => 'The kurir must upload delivery proof to mark this shipment as delivered.',
-        'sales_kurir_sub_standard_forbidden' => 'A Sales-Kurir-Sub may only self-deliver shipments sourced from their own Sub stock.',
+        'executor_inactive' => 'The delivery executor account has been deactivated and cannot continue this delivery.',
         'self_delivery_no_courier' => 'A self-delivery shipment cannot be assigned to a courier.',
     ],
 

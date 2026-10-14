@@ -31,10 +31,20 @@ class ShipmentPolicy
 
         // R-03: a self_sub shipment is operated only by its recorded Sales-Kurir-Sub owner
         // (self_delivered_by_user_id) — never by a normal Kurir, never by another Sales-Kurir-Sub.
+        // CR-SALES-KURIR-SUB-DELIVERY-001: on a STANDARD shipment an explicitly assigned
+        // Sales-Kurir-Sub executor (courier_id → own Courier profile, same branch) progresses
+        // exactly like a normal Kurir — never an unassigned or another courier's shipment.
         if ($user->isRole('sales-kurir-sub')) {
-            return $shipment->delivery_mode === Shipment::DELIVERY_MODE_SELF_SUB
-                && (int) $shipment->self_delivered_by_user_id === (int) $user->id
-                && $shipment->order?->agent_id === $user->agent_id;
+            if ($shipment->delivery_mode === Shipment::DELIVERY_MODE_SELF_SUB) {
+                return (int) $shipment->self_delivered_by_user_id === (int) $user->id
+                    && $shipment->order?->agent_id === $user->agent_id;
+            }
+
+            return ! $shipment->isSelfDelivery()
+                && $shipment->order?->agent_id === $user->agent_id
+                && $shipment->courier_id !== null
+                && $shipment->courier?->user_id !== null
+                && (int) $shipment->courier->user_id === (int) $user->id;
         }
 
         if ($user->isRole('koordinator-kurir')) {

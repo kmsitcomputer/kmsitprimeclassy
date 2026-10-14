@@ -28,6 +28,9 @@ class CourierOrderResource extends JsonResource
         // own self_sub shipments are already theirs, so they always get full detail.
         // A1-01: a Koordinator-Kurir self-executor behaves exactly like a normal Kurir; the same
         // minimal-until-assigned projection applies, driven by their own Courier profile.
+        // CR-SALES-KURIR-SUB-DELIVERY-001: a Sales-Kurir-Sub assigned as the executor of a
+        // standard shipment sees exactly that shipment's items (same recorded-executor rule as
+        // a Koordinator-Kurir) — plus their own self_sub items. Anything else stays hidden.
         $assignedToViewer = false;
         if ($viewerIsKurir || $viewerIsKoordinator) {
             $assignedToViewer = $this->relationLoaded('items') && $this->items->contains(
@@ -89,10 +92,19 @@ class CourierOrderResource extends JsonResource
 
     private function itemVisibleToViewer($item, bool $viewerIsKurir, bool $viewerIsSubActor, ?int $viewerCourierId, ?int $viewerUserId, bool $viewerIsKoordinator = false): bool
     {
-        // R-03: a Sales-Kurir-Sub only ever sees items on their OWN self_sub shipment.
+        // R-03: a Sales-Kurir-Sub sees items on their OWN self_sub shipment — plus, since
+        // CR-SALES-KURIR-SUB-DELIVERY-001, items on a standard shipment explicitly assigned
+        // to their own Courier profile. Never an unassigned shipment, never another
+        // courier's, never another Sales-Kurir-Sub's self_sub.
         if ($viewerIsSubActor) {
-            return $item->shipment?->self_delivered_by_user_id !== null
-                && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId;
+            if ($item->shipment?->self_delivered_by_user_id !== null
+                && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId) {
+                return true;
+            }
+
+            return $item->shipment?->delivery_mode === 'standard'
+                && $viewerCourierId !== null
+                && $item->shipment?->courier_id === $viewerCourierId;
         }
 
         if ($viewerIsKoordinator) {

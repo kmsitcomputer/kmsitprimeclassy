@@ -197,7 +197,7 @@ return [
         'assigned' => '骑手分配成功。',
         'return_confirmed' => '退货状态更新成功。',
         'delivery_proof_required' => '骑手必须上传送货凭证才能将此订单标记为已送达。',
-        'sales_kurir_sub_standard_forbidden' => 'Sales-Kurir-Sub 只能自行配送来自其自有 Sub 库存的货件。',
+        'executor_inactive' => '配送执行者帐户已停用，无法继续配送。',
         'self_delivery_no_courier' => '自行配送的货件不能分配给骑手。',
     ],
 

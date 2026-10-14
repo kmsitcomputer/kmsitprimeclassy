@@ -39,6 +39,10 @@ class CourierDashboardController extends Controller
      * their OWN self_sub shipment (delivery_mode = self_sub AND self_delivered_by_user_id = self),
      * for both 'diproses' and 'dikirim'. They must never see Agent-sourced standard shipments or
      * another Sales-Kurir-Sub's self_sub shipment.
+     *
+     * CR-SALES-KURIR-SUB-DELIVERY-001: plus the standard shipments explicitly assigned to their
+     * own Courier profile by an office dispatcher (courier_id = own profile) — unassigned or
+     * another courier's standard shipments stay invisible (no self-assignment surface).
      */
     public function orders(Request $request)
     {
@@ -56,14 +60,23 @@ class CourierDashboardController extends Controller
                 // here would escape whereHas's own order_id correlation constraint.
                 $q->where(function ($sq) use ($courierId, $actor, $isSubActor, $isKoordinator, $status, $validStatuses) {
                     if ($isSubActor) {
-                        // Sales-Kurir-Sub: ONLY their own self_sub shipments, for every status
-                        // (their "Selesai" history is status=terkirim). Never an Agent-source
-                        // standard shipment and never another Sales-Kurir-Sub's shipment.
+                        // Sales-Kurir-Sub: their own self_sub shipments for every status (their
+                        // "Selesai" history is status=terkirim), PLUS standard shipments explicitly
+                        // assigned to their own Courier profile. Never an unassigned or another
+                        // courier's standard shipment, and never another Sales-Kurir-Sub's shipment.
                         $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
                         $sq->whereIn('status', $statuses)
-                            ->whereHas('shipment', function ($ssq) use ($actor) {
-                                $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB)
-                                    ->where('self_delivered_by_user_id', $actor->id);
+                            ->where(function ($wq) use ($actor, $courierId) {
+                                $wq->whereHas('shipment', function ($ssq) use ($actor) {
+                                    $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB)
+                                        ->where('self_delivered_by_user_id', $actor->id);
+                                });
+                                if ($courierId) {
+                                    $wq->orWhereHas('shipment', function ($ssq) use ($courierId) {
+                                        $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_STANDARD)
+                                            ->where('courier_id', $courierId);
+                                    });
+                                }
                             });
 
                         return;

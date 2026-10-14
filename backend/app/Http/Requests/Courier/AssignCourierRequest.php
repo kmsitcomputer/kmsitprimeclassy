@@ -21,8 +21,18 @@ class AssignCourierRequest extends BaseFormRequest
             // profile (created lazily) before calling CourierService. Any other
             // courier_id must reference an existing Courier row.
             'courier_id' => [
-                'required', 'integer',
-                Rule::when(fn () => $this->integer('courier_id') !== 0, ['exists:couriers,id']),
+                'nullable', 'integer',
+                Rule::requiredIf(fn () => ! $this->filled('executor_user_id')),
+                Rule::when(fn () => $this->filled('courier_id') && $this->integer('courier_id') !== 0, ['exists:couriers,id']),
+                Rule::when(fn () => $this->filled('executor_user_id'), ['prohibits:executor_user_id']),
+            ],
+            // CR-SALES-KURIR-SUB-DELIVERY-001: an eligible Sales-Kurir-Sub executor
+            // WITHOUT a Courier row yet is referenced by user id; the controller
+            // resolves (and safely creates) the profile on this write path —
+            // never on GET. Exactly one of courier_id / executor_user_id.
+            'executor_user_id' => [
+                'nullable', 'integer', 'exists:users,id',
+                Rule::requiredIf(fn () => ! $this->filled('courier_id')),
             ],
         ];
     }
@@ -31,5 +41,10 @@ class AssignCourierRequest extends BaseFormRequest
     {
         // A1-01: only a Koordinator-Kurir may use the 0 self-executor sentinel.
         return (int) $this->integer('courier_id') !== 0;
+    }
+
+    public function wantsSalesKurirSubExecutor(): bool
+    {
+        return $this->filled('executor_user_id');
     }
 }

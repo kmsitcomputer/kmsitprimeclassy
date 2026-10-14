@@ -57,6 +57,19 @@ export interface DispatchCourier {
   name: string
 }
 
+/**
+ * CR-SALES-KURIR-SUB-DELIVERY-001 — one assignable candidate for a specific
+ * shipment. A profile-less eligible Sales-Kurir-Sub carries `courier_id: null`
+ * plus `user_id`; the office assigns them via `executor_user_id` and the
+ * backend resolves the profile on the write path — never on GET.
+ */
+export interface EligibleCourier {
+  courier_id: number | null
+  user_id: number | null
+  name: string
+  executor_role?: string | null
+}
+
 export interface DispatchFilters {
   delivery_date?: string
   province_id?: string
@@ -99,6 +112,20 @@ export async function listDispatchCouriers(agentId?: number) {
   const { data } = await http.get<ApiEnvelope<DispatchCourier[]>>('/dispatch/couriers', {
     params: agentId ? { agent_id: agentId } : {},
   })
+  return data.data
+}
+
+/**
+ * CR-SALES-KURIR-SUB-DELIVERY-001 — couriers assignable to THIS shipment: the
+ * branch's active kurir/koordinator-kurir plus the Sales-Kurir-Sub executors
+ * eligible for this exact order (own purchase / own sale / current referral
+ * scope, same branch). Scoping is server-side per shipment — the caller never
+ * passes a branch. READ-ONLY: the endpoint never creates rows.
+ */
+export async function listEligibleCouriers(shipmentId: number) {
+  const { data } = await http.get<ApiEnvelope<EligibleCourier[]>>(
+    `/shipments/${shipmentId}/eligible-couriers`,
+  )
   return data.data
 }
 

@@ -208,7 +208,7 @@ return [
         'assigned' => 'Kurir berhasil ditugaskan.',
         'return_confirmed' => 'Status pengembalian berhasil diperbarui.',
         'delivery_proof_required' => 'Kurir wajib mengunggah bukti pengiriman untuk menandai order sebagai terkirim.',
-        'sales_kurir_sub_standard_forbidden' => 'Sales-Kurir-Sub hanya dapat mengantar pengiriman yang bersumber dari stok Sub miliknya sendiri.',
+        'executor_inactive' => 'Akun pelaksana pengiriman sudah dinonaktifkan sehingga tidak dapat melanjutkan pengiriman.',
         'self_delivery_no_courier' => 'Pengiriman self-delivery tidak dapat ditugaskan ke kurir.',
     ],
 

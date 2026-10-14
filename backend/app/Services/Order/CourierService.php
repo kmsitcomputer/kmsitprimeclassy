@@ -94,9 +94,21 @@ class CourierService
             $executor = $courier->user_id !== null
                 ? User::query()->whereKey($courier->user_id)->lockForUpdate()->first()
                 : null;
+            // CR-SALES-KURIR-SUB-DELIVERY-001: a Sales-Kurir-Sub Courier row is
+            // assignable ONLY for a standard shipment they are eligible for
+            // (own purchase / own sales snapshot / current referral scope, same
+            // Agent — checked under this same Order→Shipment lock with a
+            // locking konsumen read, never from frontend input). self_sub
+            // shipments were already rejected above and keep their courier ban.
+            $salesKurirSubEligible = false;
+            if ($executor && $executor->isRole('sales-kurir-sub')) {
+                $konsumen = User::query()->whereKey($order->konsumen_id)->lockForUpdate()->first();
+                $salesKurirSubEligible = app(SalesKurirSubEligibilityService::class)
+                    ->isEligibleForShipment($executor, $shipment, $order, $konsumen);
+            }
             if ($courier->agent_id !== $agentId || ! $courier->is_active
                 || ($courier->user_id !== null && (! $executor || $executor->status !== 'active'
-                    || $executor->agent_id !== $agentId || ! $executor->isRole('kurir', 'koordinator-kurir')))) {
+                    || $executor->agent_id !== $agentId || (! $executor->isRole('kurir', 'koordinator-kurir') && ! $salesKurirSubEligible)))) {
                 throw new ApiException(__('messages.courier.invalid_assignment'), 422);
             }
 
@@ -126,6 +138,78 @@ class CourierService
             ]);
 
             return $shipment->fresh();
+        });
+    }
+
+    /**
+     * C3 (Human decision) — resolve the Courier row for an eligible
+     * Sales-Kurir-Sub executor on the ASSIGNMENT write path (never on GET).
+     *
+     * A legacy Sales-Kurir-Sub (role renamed in place) may have no Courier row
+     * yet, and the assignment FK needs one. The profile is created here,
+     * inside a transaction that takes the same canonical locks as
+     * assignCourier (Order → Shipment → candidate → konsumen) and re-checks
+     * role, active status, branch, per-shipment eligibility AND the very same
+     * assignable-state guards assignCourier enforces (order `diproses`,
+     * shipment `pending` + unassigned + no self-delivery owner, no pending
+     * SC-03 demand) BEFORE writing — so a request that could never complete an
+     * assignment never leaves an orphan profile behind. assignCourier then
+     * re-validates everything under its own lock (defence in depth); the
+     * `couriers_user_unique` index plus the re-read below keep a double-resolve
+     * race from surfacing a 500 (same pattern as ensureSelfExecutorProfile).
+     */
+    public function resolveSalesKurirSubExecutor(Shipment $shipment, int $candidateUserId, User $actor): Courier
+    {
+        return DB::transaction(function () use ($shipment, $candidateUserId, $actor) {
+            $order = Order::query()->whereKey($shipment->order_id)->lockForUpdate()->firstOrFail();
+            $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
+
+            // Same canonical eligibility as assignCourier: work that can never be
+            // assigned must not mint a profile (no write on a doomed request).
+            if ($order->status !== 'diproses' || $shipment->status !== 'pending'
+                || $shipment->courier_id !== null || $shipment->self_delivered_by_user_id !== null
+                || $shipment->delivery_mode !== Shipment::DELIVERY_MODE_STANDARD) {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            $candidate = User::query()->whereKey($candidateUserId)->lockForUpdate()->first();
+
+            if (! $candidate || ! $candidate->isRole('sales-kurir-sub')
+                || ($candidate->status ?? null) !== 'active'
+                || $candidate->agent_id === null) {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            $konsumen = User::query()->whereKey($order->konsumen_id)->lockForUpdate()->first();
+            if (! app(SalesKurirSubEligibilityService::class)->isEligibleForShipment($candidate, $shipment, $order, $konsumen)) {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            // Mirrors assignCourier's SC-03 gate so a pending added demand refuses
+            // here too instead of creating a profile the assignment will reject.
+            $this->assertAddedDemandFulfilled($order->id);
+
+            try {
+                $profile = Courier::firstOrCreate([
+                    'user_id' => $candidate->id,
+                ], [
+                    'type' => 'internal', 'user_id' => $candidate->id, 'agent_id' => $candidate->agent_id,
+                    'name' => $candidate->name, 'is_active' => true,
+                ]);
+            } catch (QueryException $e) {
+                $profile = Courier::query()->where('user_id', $candidate->id)->first();
+
+                if (! $profile) {
+                    throw $e;
+                }
+            }
+
+            ActivityLogger::log($actor->id, $shipment, 'shipment.courier_profile_resolved', null, [
+                'order_id' => $shipment->order_id, 'courier_id' => $profile->id,
+                'executor_user_id' => $candidate->id, 'actor_role' => $actor->role?->slug,
+            ]);
+
+            return $profile->fresh();
         });
     }
 
@@ -198,7 +282,10 @@ class CourierService
      * koordinator-kurir may only ever claim a delivery assigned to their OWN
      * executor profile; they never take another courier's or an unassigned
      * standard delivery on pickup (dispatch is their job — self-execution is
-     * a deliberate, audited assignment through the dispatch workspace).
+     * a deliberate, audited assignment through the dispatch workspace). A
+     * sales-kurir-sub never claims on pickup either — its standard deliveries
+     * come only from an explicit office assignment (assertMayOperateShipment
+     * refuses anything not recorded to its own profile).
      */
     public function selfAssignIfUnassigned(Shipment $shipment, User $kurirActor): void
     {
@@ -234,9 +321,13 @@ class CourierService
      *  - self_sub: ONLY the recorded Sales-Kurir-Sub owner (`self_delivered_by_user_id`) — a normal
      *    Kurir is never involved and a Courier profile is never required. Delivery proof stays
      *    mandatory to reach 'terkirim'.
-     *  - standard: the normal Kurir workflow. A Sales-Kurir-Sub must NEVER operate it — they may
-     *    only self-deliver Sub-sourced shipments — so this is rejected explicitly instead of
-     *    relying on an accidental "missing courier profile" failure.
+     *  - standard: the normal Kurir workflow, plus an ASSIGNED Sales-Kurir-Sub executor
+     *    (CR-SALES-KURIR-SUB-DELIVERY-001): a Sales-Kurir-Sub may progress a standard shipment
+     *    ONLY when an office dispatcher explicitly assigned it to their own Courier profile
+     *    (`courier_id` → Courier.user_id === themselves) — the exact same recorded-executor
+     *    ownership rule a normal Kurir passes. An unassigned standard shipment is never theirs
+     *    to claim (no self-assignment; `selfAssignIfUnassigned` still refuses them), and
+     *    delivery proof stays mandatory to reach 'terkirim'.
      *
      * A1-01 (Koordinator self-executor): a Koordinator-Kurir may progress a
      * standard shipment ONLY when it is assigned to their OWN executor
@@ -248,6 +339,16 @@ class CourierService
     private function assertMayOperateShipment(Shipment $shipment, User $actor, string $newStatus, ?UploadedFile $proof): void
     {
         $shipment = $shipment->fresh();
+
+        // A deactivated delivery executor may not continue a delivery — even one
+        // assigned while still active. Checked authoritatively here (per request,
+        // from the persisted row) for the executor roles; office flows are out of
+        // scope. Assignment of an inactive executor is already refused by the
+        // eligibility checks on the write path.
+        if ($actor->isRole('kurir', 'sales-kurir-sub', 'koordinator-kurir')
+            && ($actor->status ?? null) !== 'active') {
+            throw new ApiException(__('messages.courier.executor_inactive'), 403);
+        }
 
         if ($shipment->isSelfDelivery()) {
             $isOwner = $actor->isRole('sales-kurir-sub')
@@ -268,7 +369,21 @@ class CourierService
         }
 
         if ($actor->isRole('sales-kurir-sub')) {
-            throw new ApiException(__('messages.courier.sales_kurir_sub_standard_forbidden'), 403);
+            // Assigned standard executor only: the shipment must be recorded to
+            // their own Courier profile by an office dispatcher. Anything else
+            // (unassigned, another courier's, another Sub's self_sub handled
+            // above) is not their delivery.
+            $assignedCourierUserId = $shipment->courier?->user_id;
+
+            if ($assignedCourierUserId === null || (int) $assignedCourierUserId !== (int) $actor->id) {
+                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
+            }
+
+            if ($newStatus === 'terkirim' && ! $proof) {
+                throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
+            }
+
+            return;
         }
 
         // A1-01 (Koordinator self-executor): the Koordinator progresses delivery ONLY as the

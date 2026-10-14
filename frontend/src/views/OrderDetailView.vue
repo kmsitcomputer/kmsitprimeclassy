@@ -8,7 +8,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
-import { listDispatchCouriers } from '@/api/dispatch'
+import { listEligibleCouriers, type EligibleCourier } from '@/api/dispatch'
 import { recordDeliveryVerification } from '@/api/deliveries'
 import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem } from '@/api/orderAdjustments'
 import { downloadInvoice } from '@/api/invoice'
@@ -76,8 +76,8 @@ const roleLabel = (r?: string | null) => ({ konsumen: 'Konsumen', sales: 'Sales'
 let orderLoadSeq = 0
 
 function resetCourierAssignmentState() {
-  activeCouriers.value = []
-  assignableCouriersLoaded.value = false
+  for (const key of Object.keys(eligibleCouriersByShipment)) delete eligibleCouriersByShipment[key as unknown as number]
+  for (const key of Object.keys(eligibleCouriersLoaded)) delete eligibleCouriersLoaded[key as unknown as number]
   courierListError.value = null
   assignCourierError.value = null
   for (const key of Object.keys(assignTargets)) delete assignTargets[key as unknown as number]
@@ -110,8 +110,8 @@ async function load(orderId: number = props.id) {
     if (seq === orderLoadSeq) loading.value = false
   }
   if (seq !== orderLoadSeq) return
-  // FIX-COURIER-ASSIGNMENT-422: the assignable-courier list needs the order's own
-  // agent_id (super_admin scope), so it loads only after the order detail succeeds.
+  // The per-shipment eligible-courier lists need the loaded items (shipment ids +
+  // delivery modes), so they load only after the order detail succeeds.
   await loadAssignableCouriers(seq)
 }
 
@@ -280,14 +280,16 @@ function shipmentActionableByViewer(group: { courierUserId: number | null }): bo
 
 /**
  * R-03 UX gating (the backend stays authoritative): a self_sub shipment is operated ONLY by its
- * recorded Sales-Kurir-Sub owner; a standard shipment is NEVER operated by a Sales-Kurir-Sub.
+ * recorded Sales-Kurir-Sub owner; a standard shipment assigned to a Sales-Kurir-Sub executor is
+ * operated ONLY by that assignee (mirrors ShipmentPolicy::updateStatus + CourierService —
+ * unassigned or another courier's standard work is never actionable for them, no self-claim).
  */
 function canOperateShipmentGroup(group: { deliveryMode: string | null; selfDeliveredByUserId: number | null; courierUserId: number | null }): boolean {
   if (!canManageShipment.value) return false
   if (isSelfSubGroup(group)) {
     return isSubRole.value && auth.user?.id === group.selfDeliveredByUserId
   }
-  if (isSubRole.value) return false
+  if (isSubRole.value) return auth.user?.id === group.courierUserId && group.courierUserId !== null
   return shipmentActionableByViewer(group)
 }
 
@@ -338,7 +340,9 @@ const printableShipmentGroups = computed(() => {
       if (['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? '')) return true
       return isSubRole.value && auth.user?.id === g.selfDeliveredByUserId
     }
-    if (isSubRole.value) return false
+    // A Sales-Kurir-Sub prints only the standard shipment explicitly assigned to them
+    // (mirrors ShipmentPolicy::printReceipt's courier-ownership rule).
+    if (isSubRole.value) return auth.user?.id === g.courierUserId && g.courierUserId !== null
     if (['kurir', 'koordinator-kurir'].includes(auth.user?.role ?? '')) return g.courierUserId === auth.user?.id
     return true
   })
@@ -483,72 +487,78 @@ async function submitVerification(shipmentId: number) {
 const isOfficeRole = computed(() => ['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? ''))
 /** R-04: operational roles (gudang/kurir) receive no financial projection — hide money UI for them. */
 const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? ''))
-const activeCouriers = ref<{ id: number; name: string }[]>([])
-const assignTargets = reactive<Record<number, number | null>>({})
+const assignTargets = reactive<Record<number, string | null>>({})
 const assigningCourierId = ref<number | null>(null)
 const assignCourierError = ref<string | null>(null)
 /**
- * FIX-COURIER-ASSIGNMENT-422: the assignment dropdown must offer ONLY couriers the
- * backend will actually accept for a `standard` shipment (active + same-branch +
- * kurir/koordinator-kurir role). GET /dispatch/couriers enforces exactly that scope
- * server-side — and CourierService::assignCourier re-validates it on write. The old
- * getCourierReport() source listed every merely-active courier regardless of role
- * or branch, so an ineligible `sales-kurir-sub` courier (production Order 9 /
- * Shipment 12) was offered and then refused with HTTP 422.
+ * CR-SALES-KURIR-SUB-DELIVERY-001: the assignment dropdown offers ONLY couriers the
+ * backend will actually accept for the shipment being viewed — per-shipment eligible
+ * candidates (branch kurir/koordinator-kurir + the Sales-Kurir-Sub executors eligible
+ * for THIS order), never the whole branch roster. GET /shipments/{id}/eligible-couriers
+ * scopes server-side per shipment (the branch derives from the order itself, so no
+ * branch param is ever sent — the FIX-422 super_admin branch-scope remediation holds
+ * structurally); CourierService::assignCourier re-validates on write. A self_sub
+ * shipment lists no Sales-Kurir-Sub candidate and keeps no dropdown at all.
  */
-const assignableCouriersLoaded = ref(false)
+const eligibleCouriersByShipment = reactive<Record<number, EligibleCourier[]>>({})
+const eligibleCouriersLoaded = reactive<Record<number, boolean>>({})
 const courierListError = ref<string | null>(null)
 
+function eligibleCouriersFor(shipmentId: number): EligibleCourier[] {
+  return eligibleCouriersByShipment[shipmentId] ?? []
+}
+
+/** Stable select key: a Courier row id, or the user id for a profile-less candidate. */
+function eligibleCandidateKey(c: EligibleCourier): string {
+  return c.courier_id !== null ? `c:${c.courier_id}` : `u:${c.user_id}`
+}
+
 async function loadAssignableCouriers(seq: number = orderLoadSeq) {
-  if (!isOfficeRole.value || assignableCouriersLoaded.value) return
-  // REMEDIATION R-2 — super_admin without an order agent_id: never call
-  // GET /dispatch/couriers without the branch scope (the backend answers 422).
-  // Leave the list empty with an informative message; the empty dropdown keeps
-  // assignment disabled. Never fall back to auth.user.agent_id (null for
-  // super_admin). Agen/Admin keep the backend-enforced branch scope (no param).
-  if (auth.user?.role === 'super_admin') {
-    const agentId = order.value?.agent_id
-    if (typeof agentId !== 'number' || !Number.isInteger(agentId) || agentId <= 0) {
-      activeCouriers.value = []
-      courierListError.value = t('orders.errors.courierListNoBranch')
-      assignableCouriersLoaded.value = true
-      return
-    }
+  if (!isOfficeRole.value || !order.value) return
+  // One fetch per standard, actionable shipment group — an already-loaded
+  // shipment is never refetched (same-order refreshes keep their lists), and a
+  // late response for a previous order is discarded via the load sequence.
+  const targets = new Set<number>()
+  for (const item of order.value.items ?? []) {
+    if (!item.shipment_id || item.status !== 'diproses') continue
+    if ((item.delivery_mode ?? null) === 'self_sub') continue
+    if (!eligibleCouriersLoaded[item.shipment_id]) targets.add(item.shipment_id)
+  }
+  await Promise.all([...targets].map(async (shipmentId) => {
     try {
-      const rows = await listDispatchCouriers(agentId)
+      const rows = await listEligibleCouriers(shipmentId)
       if (seq !== orderLoadSeq) return
-      activeCouriers.value = rows
-      assignableCouriersLoaded.value = true
+      // A newer order load cleared this map mid-flight — its reset wins.
+      if (!order.value) return
+      eligibleCouriersByShipment[shipmentId] = rows
+      eligibleCouriersLoaded[shipmentId] = true
     } catch {
       if (seq !== orderLoadSeq) return
       // Separate failure path: the order detail above already rendered — a courier-list
-      // failure leaves the dropdown empty instead of breaking the page. Not marked
-      // loaded, so a later refresh may still recover; a loaded list is never refetched.
-      courierListError.value = t('orders.errors.courierList')
+      // failure leaves that shipment's dropdown empty instead of breaking the page.
+      // Not marked loaded, so a later refresh may still recover.
+      if (!eligibleCouriersByShipment[shipmentId]?.length) courierListError.value = t('orders.errors.courierList')
     }
-    return
-  }
-  try {
-    const rows = await listDispatchCouriers()
-    if (seq !== orderLoadSeq) return
-    activeCouriers.value = rows
-    assignableCouriersLoaded.value = true
-  } catch {
-    if (seq !== orderLoadSeq) return
-    // Separate failure path: the order detail above already rendered — a courier-list
-    // failure leaves the dropdown empty instead of breaking the page. Not marked
-    // loaded, so a later refresh may still recover; a loaded list is never refetched.
-    courierListError.value = t('orders.errors.courierList')
-  }
+  }))
 }
 
 async function submitAssignCourier(shipmentId: number) {
-  const courierId = assignTargets[shipmentId]
-  if (!courierId) return
+  const key = assignTargets[shipmentId]
+  if (!key) return
+  const candidate = eligibleCouriersFor(shipmentId).find((c) => eligibleCandidateKey(c) === key)
+  if (!candidate) return
   assigningCourierId.value = shipmentId
   assignCourierError.value = null
   try {
-    order.value = await assignCourier(shipmentId, courierId)
+    if (candidate.courier_id !== null) {
+      order.value = await assignCourier(shipmentId, { courier_id: candidate.courier_id })
+    } else if (candidate.user_id !== null) {
+      // A profile-less eligible Sales-Kurir-Sub is assigned by user id; the backend
+      // resolves the Courier profile on this write path (never on GET).
+      order.value = await assignCourier(shipmentId, { executor_user_id: candidate.user_id })
+    } else {
+      return
+    }
   } catch (e) {
     assignCourierError.value = e instanceof ApiError ? e.message : t('orders.errors.assignCourier')
   } finally {
@@ -1236,11 +1246,11 @@ async function submitReturn(item: OrderItem) {
             <!-- R-03: a self_sub shipment is never handed to a normal Kurir — no Assign Courier. -->
             <div v-if="isOfficeRole && !isSelfSubGroup(group)" class="flex flex-wrap items-center gap-2">
               <p v-if="assignCourierError" class="w-full text-xs text-red-600">{{ assignCourierError }}</p>
-              <p v-if="courierListError && !activeCouriers.length" class="w-full text-xs text-amber-600">{{ courierListError }}</p>
+              <p v-if="courierListError && !eligibleCouriersFor(group.shipmentId).length" class="w-full text-xs text-amber-600">{{ courierListError }}</p>
               <label class="text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.assignCourierLabel') }}</label>
-              <select v-model.number="assignTargets[group.shipmentId]" :disabled="!activeCouriers.length" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
+              <select v-model="assignTargets[group.shipmentId]" :disabled="!eligibleCouriersFor(group.shipmentId).length" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950">
                 <option :value="null">{{ t('orders.chooseCourier') }}</option>
-                <option v-for="c in activeCouriers" :key="c.id" :value="c.id">{{ c.name }}</option>
+                <option v-for="c in eligibleCouriersFor(group.shipmentId)" :key="eligibleCandidateKey(c)" :value="eligibleCandidateKey(c)">{{ c.name }}</option>
               </select>
               <AppButton
                 size="sm"

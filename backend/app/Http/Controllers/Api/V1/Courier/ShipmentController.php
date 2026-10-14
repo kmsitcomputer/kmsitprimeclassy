@@ -26,15 +26,59 @@ class ShipmentController extends Controller
 {
     public function __construct(private readonly CourierService $courierService) {}
 
+    /**
+     * CR-SALES-KURIR-SUB-DELIVERY-001: couriers the dispatcher may pick for THIS
+     * shipment — the branch's active kurir/koordinator-kurir couriers plus the
+     * Sales-Kurir-Sub executors eligible for this exact order/shipment only
+     * (never every Sales-Kurir-Sub in the branch).
+     *
+     * READ-ONLY: no rows are created here. A profile-less eligible
+     * Sales-Kurir-Sub is listed with `courier_id = null` (plus `user_id`); the
+     * frontend assigns them via `executor_user_id`, resolved on the write
+     * path. Shipments that cannot be assigned at all (non-`diproses` order,
+     * non-`pending` or already-executed shipment) list nobody.
+     */
+    public function eligibleCouriers(Request $request, Shipment $shipment)
+    {
+        $this->authorize('assignCourier', $shipment);
+
+        $shipment = $shipment->fresh();
+        $order = $shipment->order;
+
+        if (! $order || $order->status !== 'diproses'
+            || $shipment->status !== 'pending'
+            || $shipment->courier_id !== null
+            || $shipment->self_delivered_by_user_id !== null) {
+            return $this->ok([]);
+        }
+
+        $couriers = app(\App\Services\Order\SalesKurirSubEligibilityService::class)
+            ->eligibleCouriersForShipment($shipment);
+
+        return $this->ok($couriers->map(fn (array $row) => [
+            'courier_id' => $row['courier_id'],
+            'user_id' => $row['user_id'],
+            'name' => $row['name'],
+            'executor_role' => $row['executor_role'],
+        ])->values());
+    }
+
     public function assign(AssignCourierRequest $request, Shipment $shipment)
     {
         $this->authorize('assignCourier', $shipment);
 
-        // A1-01: courier_id=0 is the Koordinator self-executor sentinel — resolve
-        // the actor's own Courier profile (created on first self-assignment) so
-        // the assignment records THEM as the executor. A genuine Courier row is
-        // used for every other call; the request validation guarantees existence.
-        if (! $request->wantsCourier()) {
+        // CR-SALES-KURIR-SUB-DELIVERY-001: a profile-less eligible Sales-Kurir-Sub
+        // is referenced by user id; the profile is resolved (created if still
+        // eligible) on this write path — never on GET.
+        if ($request->wantsSalesKurirSubExecutor()) {
+            $courier = $this->courierService->resolveSalesKurirSubExecutor(
+                $shipment, $request->integer('executor_user_id'), $request->user()
+            );
+        } elseif (! $request->wantsCourier()) {
+            // A1-01: courier_id=0 is the Koordinator self-executor sentinel — resolve
+            // the actor's own Courier profile (created on first self-assignment) so
+            // the assignment records THEM as the executor. A genuine Courier row is
+            // used for every other call; the request validation guarantees existence.
             $actor = $request->user();
             if (! $actor->isRole('koordinator-kurir')) {
                 abort(403);
