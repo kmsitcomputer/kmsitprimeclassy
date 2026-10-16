@@ -77,6 +77,17 @@ async function run(action: () => Promise<void>) {
     busy.value = false
   }
 }
+async function registerDestination() {
+  await run(async () => {
+    await http.post('/google-sheets/destinations', {
+      spreadsheet_id: spreadsheet.value,
+      agent_id: agent.value,
+    })
+    spreadsheet.value = ''
+    await load()
+  })
+}
+
 async function load() {
   const { data } = await http.get('/google-sheets')
   destinations.value = data.data.destinations
@@ -221,16 +232,7 @@ onMounted(() =>
       <form
         v-if="['super_admin', 'agen', 'admin'].includes(auth.user?.role || '')"
         class="space-y-3 rounded-xl border p-4"
-        @submit.prevent="
-          run(async () => {
-            await http.post('/google-sheets/destinations', {
-              spreadsheet_id: spreadsheet,
-              agent_id: agent,
-            })
-            spreadsheet = ''
-            await load()
-          })
-        "
+        @submit.prevent="registerDestination"
       >
         <h2 class="font-semibold">Daftarkan spreadsheet tujuan</h2>
         <p class="text-sm text-stone-500">
