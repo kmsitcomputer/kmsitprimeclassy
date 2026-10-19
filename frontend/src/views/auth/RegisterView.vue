@@ -110,57 +110,38 @@ async function submit() {
 <template>
   <AuthLayout>
     <h1 class="mb-1 font-display text-lg font-semibold text-stone-800 dark:text-stone-100">{{ t('auth.register.title') }}</h1>
-    <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">{{ t('auth.register.subtitle') }}</p>
+    <!-- <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">{{ t('auth.register.subtitle') }}</p> -->
 
     <form class="space-y-3" @submit.prevent="submit">
       <p v-if="generalError" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">{{ generalError }}</p>
 
-      <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">
-          {{ t('auth.register.referralCode') }}
-          <span class="font-normal text-stone-400">({{ t('auth.register.optional') }})</span>
-        </label>
-        <input v-model="form.referral_code" type="text" :placeholder="t('auth.register.referralPlaceholder')" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm uppercase dark:border-stone-700 dark:bg-stone-950" />
-        <p v-if="errors.referral_code" class="mt-1 text-xs text-red-600">{{ errors.referral_code[0] }}</p>
-        <p v-else-if="referralChecking" class="mt-1 text-xs text-stone-400">{{ t('auth.register.checkingCode') }}</p>
-        <p v-else-if="referralPreview" class="mt-1 flex items-center gap-1 text-xs text-emerald-600">
-          <AppIcon name="check" :size="13" />
-          {{ t('auth.register.referredBy', { name: referralPreview.referrer_name }) }}
-          <template v-if="referralPreview.agent_store_name">· {{ referralPreview.agent_store_name }}</template>
-        </p>
-        <p v-else-if="form.referral_code" class="mt-1 text-xs text-red-600">{{ t('auth.register.invalidCode') }}</p>
-        <p v-else class="mt-1 text-xs text-stone-400">
-          {{ t('auth.register.noReferralCode') }}
-          <RouterLink :to="{ name: 'store-locator' }" class="font-medium text-brand-600 dark:text-brand-400">{{ t('auth.register.viewAgentDirectory') }}</RouterLink>
-        </p>
-      </div>
 
       <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.fullName') }}</label>
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.fullName') }}<span class="text-red-500">*</span></label>
         <input v-model="form.name" type="text" required class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
         <p v-if="errors.name" class="mt-1 text-xs text-red-600">{{ errors.name[0] }}</p>
       </div>
-
+      
       <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.email') }}</label>
-        <input v-model="form.email" type="email" required class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
-        <p v-if="errors.email" class="mt-1 text-xs text-red-600">{{ errors.email[0] }}</p>
-      </div>
-
-      <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.phone') }}</label>
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.phone') }}<span class="text-red-500">*</span></label>
         <input v-model="form.phone" type="tel" required class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
         <p v-if="errors.phone" class="mt-1 text-xs text-red-600">{{ errors.phone[0] }}</p>
       </div>
 
       <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.password') }}</label>
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.email') }} (Optional)</label>
+        <input v-model="form.email" type="email" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+        <p v-if="errors.email" class="mt-1 text-xs text-red-600">{{ errors.email[0] }}</p>
+      </div>
+
+      <div>
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.password') }}<span class="text-red-500">*</span></label>
         <PasswordInput v-model="form.password" required :minlength="8" autocomplete="new-password" />
         <p v-if="errors.password" class="mt-1 text-xs text-red-600">{{ errors.password[0] }}</p>
       </div>
 
       <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.confirmPassword') }}</label>
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.register.confirmPassword') }}<span class="text-red-500">*</span></label>
         <PasswordInput v-model="form.password_confirmation" required autocomplete="new-password" />
       </div>
 

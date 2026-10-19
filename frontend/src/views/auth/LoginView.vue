@@ -1,3 +1,4 @@
+
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -14,14 +15,19 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const email = ref('')
+const identifier = ref('')
 const password = ref('')
 const submitting = ref(false)
 const errorMessage = ref<string | null>(null)
 
-// Google callback failures come back as ?google_error=<code> (see GoogleAuthController).
 const googleError = route.query.google_error as string | undefined
-if (googleError) errorMessage.value = t(`auth.google.errors.${googleError}`, t('auth.google.errors.provider_error'))
+
+if (googleError) {
+  errorMessage.value = t(
+    `auth.google.errors.${googleError}`,
+    t('auth.google.errors.provider_error'),
+  )
+}
 
 function continueWithGoogle() {
   window.location.assign(googleAuthUrl('login'))
@@ -30,17 +36,24 @@ function continueWithGoogle() {
 async function submit() {
   submitting.value = true
   errorMessage.value = null
+
   try {
-    await auth.login(email.value, password.value)
-    const fallback = auth.isKonsumen ? { name: 'home' } : { name: 'dashboard-home' }
+    await auth.login(identifier.value.trim(), password.value)
+
+    const fallback = auth.isKonsumen
+      ? { name: 'home' }
+      : { name: 'dashboard-home' }
+
     router.push((route.query.redirect as string) || fallback)
   } catch (e) {
-    errorMessage.value = e instanceof ApiError ? e.message : t('auth.login.genericError')
+    errorMessage.value =
+      e instanceof ApiError ? e.message : t('auth.login.genericError')
   } finally {
     submitting.value = false
   }
 }
 </script>
+
 
 <template>
   <AuthLayout>
@@ -51,8 +64,8 @@ async function submit() {
       <p v-if="errorMessage" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">{{ errorMessage }}</p>
 
       <div>
-        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.login.email') }}</label>
-        <input v-model="email" type="email" required class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+        <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.login.email') }}/No. Telepon</label>
+        <input v-model="identifier" type="text" name="identifier" required class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
       </div>
       <div>
         <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.login.password') }}</label>
