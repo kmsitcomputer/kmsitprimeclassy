@@ -69,20 +69,58 @@ class AuthController extends Controller
         return $this->created($this->authPayload($user), __('messages.auth.register_success'));
     }
 
+    // public function login(LoginRequest $request)
+    // {
+    //     if (! Auth::attempt($request->only('email', 'password'), true)) {
+    //         throw ValidationException::withMessages([
+    //             'email' => __('messages.auth.login_failed'),
+    //         ]);
+    //     }
+
+    //     $request->session()->regenerate();
+
+    //     $user = Auth::user();
+    //     ActivityLogger::log($user->id, $user, 'auth.login', null, ['actor_role' => $user->role?->slug]);
+
+    //     return $this->ok($this->authPayload($user), __('messages.auth.login_success'));
+    // }
+
+        
     public function login(LoginRequest $request)
     {
-        if (! Auth::attempt($request->only('email', 'password'), true)) {
+        $identifier = trim($request->input('identifier'));
+
+        $column = filter_var($identifier, FILTER_VALIDATE_EMAIL)
+            ? 'email'
+            : 'phone';
+
+        $credentials = [
+            $column => $identifier,
+            'password' => $request->input('password'),
+        ];
+
+        if (! Auth::attempt($credentials, true)) {
             throw ValidationException::withMessages([
-                'email' => __('messages.auth.login_failed'),
+                'identifier' => __('messages.auth.login_failed'),
             ]);
         }
 
         $request->session()->regenerate();
 
         $user = Auth::user();
-        ActivityLogger::log($user->id, $user, 'auth.login', null, ['actor_role' => $user->role?->slug]);
 
-        return $this->ok($this->authPayload($user), __('messages.auth.login_success'));
+        ActivityLogger::log(
+            $user->id,
+            $user,
+            'auth.login',
+            null,
+            ['actor_role' => $user->role?->slug],
+        );
+
+        return $this->ok(
+            $this->authPayload($user),
+            __('messages.auth.login_success'),
+        );
     }
 
     public function logout(Request $request)

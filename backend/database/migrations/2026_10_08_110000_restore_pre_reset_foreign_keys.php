@@ -315,16 +315,28 @@ return new class extends Migration
     private function foreignKeyMatches(string $table, string $column, string $parent, string $parentColumn, string $deleteRule): bool
     {
         $rows = DB::select(
-            'select k.column_name, k.referenced_table_name, k.referenced_column_name,
-                    r.delete_rule, r.update_rule
-               from information_schema.key_column_usage k
-               join information_schema.referential_constraints r
-                 on r.constraint_schema = k.constraint_schema and r.table_name = k.table_name
-                and r.constraint_name = k.constraint_name
-              where k.constraint_schema = ? and k.table_name = ? and k.constraint_name = ?
-                and k.referenced_table_name is not null',
-            [DB::getDatabaseName(), $table, $this->constraintName($table, $column)]
+        'select
+        k.COLUMN_NAME as column_name,
+        k.REFERENCED_TABLE_NAME as referenced_table_name,
+        k.REFERENCED_COLUMN_NAME as referenced_column_name,
+        r.DELETE_RULE as delete_rule,
+        r.UPDATE_RULE as update_rule
+     from information_schema.KEY_COLUMN_USAGE k
+     join information_schema.REFERENTIAL_CONSTRAINTS r
+       on r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+      and r.TABLE_NAME = k.TABLE_NAME
+      and r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+     where k.CONSTRAINT_SCHEMA = ?
+       and k.TABLE_NAME = ?
+       and k.CONSTRAINT_NAME = ?
+       and k.REFERENCED_TABLE_NAME is not null',
+        [
+        DB::getDatabaseName(),
+        $table,
+        $this->constraintName($table, $column),
+        ]
         );
+
 
         return count($rows) === 1
             && (string) $rows[0]->column_name === $column
