@@ -59,6 +59,43 @@ class AuthTest extends TestCase
         $this->assertSame($agen->id, $konsumen->agent_id);
     }
 
+    public function test_registration_without_referral_uses_active_agen_role(): void
+    {
+        $sales = User::factory()->sales()->create([
+            'status' => 'active',
+        ]);
+
+        $inactiveAgen = User::factory()->agen()->create([
+            'status' => 'inactive',
+        ]);
+
+        $activeAgen = User::factory()->agen()->create([
+            'status' => 'active',
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/register', [
+            'name' => 'Konsumen Tanpa Referral',
+            'email' => 'tanpa.referral@example.com',
+            'phone' => '081298765432',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ]);
+
+        $response->assertCreated();
+
+        $konsumen = User::query()
+            ->where('email', 'tanpa.referral@example.com')
+            ->firstOrFail();
+
+        $this->assertSame('konsumen', $konsumen->role->slug);
+        $this->assertSame($activeAgen->id, $konsumen->agent_id);
+        $this->assertSame($activeAgen->id, $konsumen->parent_id);
+        $this->assertNull($konsumen->korsal_id);
+        $this->assertNull($konsumen->sales_id);
+        $this->assertNotEquals($sales->id, $konsumen->agent_id);
+        $this->assertNotEquals($inactiveAgen->id, $konsumen->agent_id);
+    }
+
     public function test_registration_fails_with_invalid_referral_code(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
@@ -75,6 +112,51 @@ class AuthTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'budi2@example.com']);
     }
 
+    public function test_registration_rejects_duplicate_phone_after_normalization(): void
+    {
+        User::factory()->konsumen()->create([
+            'phone' => '081234567890',
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/register', [
+            'name' => 'Budi Santoso',
+            'email' => 'budi.duplicate@example.com',
+            'phone' => '+6281234567890',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['phone']);
+        $this->assertDatabaseMissing('users', [
+            'email' => 'budi.duplicate@example.com',
+        ]);
+    }
+
+    public function test_login_accepts_normalized_phone_identifiers(): void
+    {
+        $konsumen = User::factory()->konsumen()->create([
+            'phone' => '081234567890',
+            'password' => bcrypt('correct-password'),
+        ]);
+
+        foreach ([
+            '081234567890',
+            '6281234567890',
+            '+6281234567890',
+        ] as $identifier) {
+            $this->postJson('/api/v1/auth/login', [
+                'identifier' => $identifier,
+                'password' => 'correct-password',
+            ])->assertOk()->assertJsonPath('success', true);
+        }
+
+        $this->assertSame(
+            '081234567890',
+            $konsumen->fresh()->phone
+        );
+    }
+
     public function test_login_requires_correct_credentials(): void
     {
         $agen = User::factory()->agen()->create();
@@ -84,12 +166,12 @@ class AuthTest extends TestCase
         ]);
 
         $this->postJson('/api/v1/auth/login', [
-            'email' => $konsumen->email,
+            'identifier' => $konsumen->email,
             'password' => 'wrong-password',
         ])->assertStatus(422);
 
         $this->postJson('/api/v1/auth/login', [
-            'email' => $konsumen->email,
+            'identifier' => $konsumen->email,
             'password' => 'correct-password',
         ])->assertOk()->assertJsonPath('success', true);
     }

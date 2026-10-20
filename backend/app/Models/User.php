@@ -42,6 +42,11 @@ class User extends Authenticatable
         'remember_token',
     ];
 
+    public function setPhoneAttribute(?string $value): void
+    {
+        $this->attributes['phone'] = \App\Support\PhoneNormalizer::normalize($value);
+    }
+
     protected function casts(): array
     {
         return [

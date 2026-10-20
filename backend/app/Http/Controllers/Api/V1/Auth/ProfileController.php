@@ -27,9 +27,15 @@ class ProfileController extends Controller
     {
         $user = $request->user();
 
+        if (is_string($request->input('phone'))) {
+            $request->merge([
+                'phone' => \App\Support\PhoneNormalizer::normalize($request->input('phone')),
+            ]);
+        }
+
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:150'],
-            'phone' => ['sometimes', 'string', 'max:20'],
+            'phone' => ['sometimes', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($user->id)],
             'email' => ['sometimes', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             // The system has no separate "username" — this profile's editable
             // display name doubles as it (login is always by email).

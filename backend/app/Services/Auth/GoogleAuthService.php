@@ -36,7 +36,6 @@ class GoogleAuthService
 
     private const SESSION_KEY = 'google_oauth';
     private const FLOW_TTL_SECONDS = 600;
-    private const DEFAULT_AGENT_ROLE_ID = 4;
     private const GOOGLE_CERTS_CACHE_KEY = 'google_oauth_public_certs';
     private const GOOGLE_CERTS_URL = 'https://www.googleapis.com/oauth2/v1/certs';
 
@@ -300,7 +299,7 @@ class GoogleAuthService
     private function findDefaultAgentId(): ?int
     {
         $agent = User::query()
-            ->where('role_id', self::DEFAULT_AGENT_ROLE_ID)
+            ->whereHas('role', fn ($query) => $query->where('slug', 'agen'))
             ->where('status', 'active')
             ->orderBy('id')
             ->first(['id']);
@@ -313,7 +312,7 @@ class GoogleAuthService
     {
         $agent = User::query()
             ->whereKey($agentId)
-            ->where('role_id', self::DEFAULT_AGENT_ROLE_ID)
+            ->whereHas('role', fn ($query) => $query->where('slug', 'agen'))
             ->where('status', 'active')
             ->first(['id']);
 

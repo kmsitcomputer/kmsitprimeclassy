@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Auth;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Support\PhoneNormalizer;
 
 /** Public registration is only ever for the konsumen role — see Blueprint §Authentication. */
 class RegisterKonsumenRequest extends BaseFormRequest
@@ -10,6 +11,15 @@ class RegisterKonsumenRequest extends BaseFormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('phone'))) {
+            $this->merge([
+                'phone' => PhoneNormalizer::normalize($this->input('phone')),
+            ]);
+        }
     }
 
     public function rules(): array

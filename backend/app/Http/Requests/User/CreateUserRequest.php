@@ -5,11 +5,21 @@ namespace App\Http\Requests\User;
 use App\Http\Requests\BaseFormRequest;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\PhoneNormalizer;
 use Illuminate\Validation\Rule;
 
 /** Actor-aware validation; policy and service independently enforce the same creation matrix. */
 class CreateUserRequest extends BaseFormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('phone'))) {
+            $this->merge([
+                'phone' => PhoneNormalizer::normalize($this->input('phone')),
+            ]);
+        }
+    }
+
     public function authorize(): bool
     {
         return $this->user()?->can('create', [User::class, $this->targetRole()]) ?? false;
@@ -21,7 +31,7 @@ class CreateUserRequest extends BaseFormRequest
             'role' => ['required', 'string', 'in:agen,korsal,sales,admin,keuangan,kurir,gudang,sales-kurir-sub,sales-kurir,koordinator-kurir'],
             'name' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-            'phone' => ['required', 'string', 'max:20'],
+            'phone' => ['required', 'string', 'max:20', Rule::unique('users', 'phone')],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
 
             'agent_id' => ['nullable', 'integer', Rule::in([$this->user()?->agent_id])],

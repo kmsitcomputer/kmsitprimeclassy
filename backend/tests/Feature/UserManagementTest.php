@@ -26,7 +26,7 @@ class UserManagementTest extends TestCase
         return array_merge([
             'name' => 'New Account',
             'email' => 'new-'.uniqid().'@example.com',
-            'phone' => '081200000000',
+            'phone' => '08'.fake()->unique()->numerify('##########'),
             'password' => 'password123',
             'password_confirmation' => 'password123',
         ], $overrides);
@@ -413,5 +413,37 @@ class UserManagementTest extends TestCase
         $this->assertDatabaseCount('couriers', 2);
         $this->actingAs($agent)->patchJson("/api/v1/users/{$id}/convert-to-sales-kurir-sub")->assertUnprocessable();
         $this->assertDatabaseCount('couriers', 2);
+    }
+
+    public function test_user_phone_update_preserves_own_number_and_rejects_duplicates(): void
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+
+        $target = User::factory()->admin()->create([
+            'agent_id' => $agen->id,
+            'phone' => '081234567890',
+        ]);
+
+        $other = User::factory()->admin()->create([
+            'agent_id' => $agen->id,
+            'phone' => '089876543210',
+        ]);
+
+        $url = "/api/v1/users/{$target->id}";
+
+        $this->actingAs($agen)
+            ->patchJson($url, ['phone' => '+6281234567890'])
+            ->assertOk();
+
+        $this->assertSame('081234567890', $target->fresh()->phone);
+
+        $this->actingAs($agen)
+            ->patchJson($url, ['phone' => '+6289876543210'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['phone']);
+
+        $this->assertSame('081234567890', $target->fresh()->phone);
+        $this->assertSame('089876543210', $other->fresh()->phone);
     }
 }

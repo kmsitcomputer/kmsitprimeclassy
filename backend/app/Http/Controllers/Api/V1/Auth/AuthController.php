@@ -47,7 +47,7 @@ class AuthController extends Controller
         } else {
             // Referral kosong
             $defaultAgent = User::query()
-                ->where('role_id', 4)
+                ->whereHas('role', fn ($query) => $query->where('slug', 'agen'))
                 ->where('status', 'active')
                 ->orderBy('id')
                 ->first();
@@ -131,6 +131,10 @@ class AuthController extends Controller
         $column = filter_var($identifier, FILTER_VALIDATE_EMAIL)
             ? 'email'
             : 'phone';
+
+        if ($column === 'phone') {
+            $identifier = \App\Support\PhoneNormalizer::normalize($identifier);
+        }
 
         $credentials = [
             $column => $identifier,

@@ -43,15 +43,71 @@ class GoogleAuthTest extends TestCase
         return compact('agen', 'korsal', 'sales', 'other');
     }
 
+    private ?string $testGooglePrivateKey = null;
+    private ?string $testGooglePublicKey = null;
+
+    private function googleTestKeys(): void
+    {
+        if ($this->testGooglePrivateKey !== null) {
+            return;
+        }
+
+        $key = openssl_pkey_new([
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'private_key_bits' => 2048,
+        ]);
+
+        if ($key === false || ! openssl_pkey_export($key, $privateKey)) {
+            throw new \RuntimeException('Unable to generate Google test RSA key.');
+        }
+
+        $details = openssl_pkey_get_details($key);
+        if (! is_array($details) || empty($details['key'])) {
+            throw new \RuntimeException('Unable to extract Google test public key.');
+        }
+
+        $this->testGooglePrivateKey = $privateKey;
+        $this->testGooglePublicKey = $details['key'];
+    }
+
     private function idToken(array $override = []): string
     {
+        $this->googleTestKeys();
+
         $claims = array_merge([
-            'iss' => 'https://accounts.google.com', 'aud' => 'client-123', 'exp' => time() + 600,
-            'sub' => 'g-sub-1', 'email' => 'new.person@gmail.com', 'email_verified' => true, 'name' => 'New Person',
+            'iss' => 'https://accounts.google.com',
+            'aud' => 'client-123',
+            'iat' => time(),
+            'exp' => time() + 600,
+            'sub' => 'g-sub-1',
+            'email' => 'new.person@gmail.com',
+            'email_verified' => true,
+            'name' => 'New Person',
         ], $override);
+
         $b64 = fn (array $a) => rtrim(strtr(base64_encode(json_encode($a)), '+/', '-_'), '=');
 
-        return $b64(['alg' => 'RS256']).'.'.$b64($claims).'.sig';
+        $message = $b64(['alg' => 'RS256', 'kid' => 'test-google-key'])
+            .'.'.$b64($claims);
+
+        if (! openssl_sign($message, $signature, $this->testGooglePrivateKey, OPENSSL_ALGO_SHA256)) {
+            throw new \RuntimeException('Unable to sign Google test token.');
+        }
+
+        return $message.'.'.rtrim(strtr(base64_encode($signature), '+/', '-_'), '=');
+    }
+
+    private function fakeGoogleCertificates(): void
+    {
+        $this->googleTestKeys();
+
+        \Illuminate\Support\Facades\Cache::forget('google_oauth_public_certs');
+
+        Http::fake([
+            'www.googleapis.com/oauth2/v1/certs' => Http::response([
+                'test-google-key' => $this->testGooglePublicKey,
+            ]),
+        ]);
     }
 
     /** Runs redirect + callback with a faked Google. Returns the callback response. */
@@ -70,6 +126,7 @@ class GoogleAuthTest extends TestCase
 
         // Fresh factory per flow: a stub registered earlier in the same test would otherwise keep winning.
         Http::swap(new \Illuminate\Http\Client\Factory);
+        $this->fakeGoogleCertificates();
         Http::fake(['oauth2.googleapis.com/*' => Http::response(['id_token' => $this->idToken($claims + ['nonce' => $params['nonce']])])]);
 
         if ($between) {
@@ -80,11 +137,39 @@ class GoogleAuthTest extends TestCase
             ->get('/api/v1/auth/google/callback?'.http_build_query(['code' => 'auth-code', 'state' => $stateOverride ?? $params['state']]));
     }
 
-    public function test_register_without_referral_never_starts_and_creates_nothing(): void
+    public function test_register_without_referral_uses_active_default_agen(): void
     {
-        $this->runFlow('register', null)->assertRedirect('/register?google_error=referral_required');
-        $this->runFlow('register', 'NOPE-1')->assertRedirect('/register?google_error=referral_required');
-        $this->assertDatabaseMissing('users', ['email' => 'new.person@gmail.com']);
+        User::factory()->sales()->create(['status' => 'active']);
+        User::factory()->agen()->create(['status' => 'inactive']);
+        $agen = User::factory()->agen()->create(['status' => 'active']);
+
+        $this->runFlow('register', null)->assertRedirect('/?google=registered');
+
+        $user = User::query()
+            ->where('email', 'new.person@gmail.com')
+            ->firstOrFail();
+
+        $this->assertSame('konsumen', $user->role->slug);
+        $this->assertSame($agen->id, $user->agent_id);
+        $this->assertSame($agen->id, $user->parent_id);
+        $this->assertNull($user->korsal_id);
+        $this->assertNull($user->sales_id);
+        $this->assertDatabaseHas('user_social_identities', [
+            'user_id' => $user->id,
+            'provider' => 'google',
+        ]);
+    }
+
+    public function test_register_with_invalid_referral_creates_nothing(): void
+    {
+        User::factory()->agen()->create(['status' => 'active']);
+
+        $this->runFlow('register', 'NOPE-1')
+            ->assertRedirect('/register?google_error=invalid_referral');
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'new.person@gmail.com',
+        ]);
     }
 
     // ---- A1-10: enable/disable switch ----
@@ -303,6 +388,7 @@ class GoogleAuthTest extends TestCase
         parse_str((string) parse_url($redirect->headers->get('Location'), PHP_URL_QUERY), $params);
         $cookie = $redirect->getCookie(config('session.cookie'))->getValue();
         Http::swap(new \Illuminate\Http\Client\Factory);
+        $this->fakeGoogleCertificates();
         Http::fake(['oauth2.googleapis.com/*' => Http::response(['id_token' => $this->idToken(['nonce' => $params['nonce']])])]);
         $callback = '/api/v1/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => $params['state']]);
         $this->withCookie(config('session.cookie'), $cookie)->get($callback)->assertRedirect('/?google=registered');
@@ -320,7 +406,7 @@ class GoogleAuthTest extends TestCase
 
         $this->runFlow('register', 'SA-T1', ['nonce' => 'attacker-nonce'])->assertRedirect('/register?google_error=provider_error');
         $this->runFlow('register', 'SA-T1', ['aud' => 'someone-elses-client'])->assertRedirect('/register?google_error=provider_error');
-        $this->runFlow('register', 'SA-T1', ['email_verified' => false])->assertRedirect('/register?google_error=email_unverified');
+        $this->runFlow('register', 'SA-T1', ['email_verified' => false])->assertRedirect('/register?google_error=provider_error');
         $this->assertDatabaseMissing('users', ['email' => 'new.person@gmail.com']);
     }
 
@@ -364,6 +450,7 @@ class GoogleAuthTest extends TestCase
         $cookie = $redirect->getCookie($cookieName)->getValue();
 
         Http::swap(new \Illuminate\Http\Client\Factory);
+        $this->fakeGoogleCertificates();
         Http::fake(['oauth2.googleapis.com/*' => Http::response(['id_token' => $this->idToken(['nonce' => $params['nonce']])])]);
 
         $this->withCookie($cookieName, $cookie)
@@ -378,7 +465,7 @@ class GoogleAuthTest extends TestCase
     public function test_invalid_prefilled_referral_is_refused_at_redirect(): void
     {
         $this->get('/api/v1/auth/google/redirect?mode=register&referral_code=DOES-NOT-EXIST')
-            ->assertRedirect('/register?google_error=referral_required');
+            ->assertRedirect('/register?google_error=invalid_referral');
     }
 
     public function test_one_google_identity_cannot_belong_to_two_users(): void
