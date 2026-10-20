@@ -11,38 +11,34 @@ use App\Services\Referral\ReferralService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * IMP-001 Feature A — Google sign-in for KONSUMEN.
+ * Google sign-in / registration / explicit account linking for KONSUMEN.
  *
- * Google is an identity provider only. It never bypasses referral rules:
- *  - an already-linked Google identity (or an eligible existing konsumen whose OWN email was verified
- *    and matches the verified Google email) just logs in; an unverified local account is never auto-linked
- *    (explicit MODE_LINK from an authenticated session is the secure path) — the referral context is ignored and NO ownership field is touched
- *    (reassignment stays exclusively in ReferralReassignmentService);
- *  - a NEW konsumen is created only in `register` mode with a referral code that is re-validated
- *    and re-resolved server-side at callback time through ReferralService (the canonical chain);
- *  - `login` mode never creates a konsumen.
+ * Registration behavior:
+ * - Referral supplied: resolve and validate the canonical chain through ReferralService.
+ * - Referral empty: attach the new konsumen to the first active default agent (role_id=4).
+ * - Existing Google identities and existing local accounts never have ownership fields reassigned.
+ * - Login mode never creates a new account.
  *
- * Flow state (CSRF `state`, `nonce`, PKCE verifier, mode, referral CODE) lives in the server-side
- * session and is consumed exactly once. No OAuth token is persisted or logged.
+ * OAuth state, nonce, PKCE verifier and provider snapshot are stored in the session and consumed once.
  */
 class GoogleAuthService
 {
     public const MODE_LOGIN = 'login';
-
     public const MODE_REGISTER = 'register';
-
-    /** Explicit linking from an authenticated session (the only way an existing local account gets a Google identity without a verified email). */
     public const MODE_LINK = 'link';
 
     private const SESSION_KEY = 'google_oauth';
-
     private const FLOW_TTL_SECONDS = 600;
+    private const DEFAULT_AGENT_ROLE_ID = 4;
+    private const GOOGLE_CERTS_CACHE_KEY = 'google_oauth_public_certs';
+    private const GOOGLE_CERTS_URL = 'https://www.googleapis.com/oauth2/v1/certs';
 
     public function __construct(
         private readonly ReferralService $referralService,
@@ -51,25 +47,18 @@ class GoogleAuthService
 
     public function isConfigured(): bool
     {
-        // A1-10: credentials existing is NOT enough — an explicitly disabled
-        // effective configuration must refuse to start/continue a flow.
         return (bool) config('services.google.is_enabled')
             && filled(config('services.google.client_id'))
             && filled(config('services.google.client_secret'));
     }
 
-    /**
-     * Starts the flow and returns the Google authorization URL.
-     *
-     * @throws ApiException 422 when mode=register has no valid referral; 503 when Google is not configured
-     */
+    /** Start OAuth and return Google's authorization URL. */
     public function beginAuthorization(Request $request, string $mode, ?string $referralCode): string
     {
-        // IMP-001 Step 3: resolve the branch's effective provider config
-        // (Agen row -> global row -> .env fallback) and BIND the flow to it —
-        // the exact provider that started the transaction is the one the
-        // callback validates against, so an agent's referral can never be
-        // paired with another branch's (or the global) credentials.
+        $mode = in_array($mode, [self::MODE_LOGIN, self::MODE_REGISTER, self::MODE_LINK], true)
+            ? $mode
+            : self::MODE_LOGIN;
+
         $referralCode = $referralCode !== null ? strtoupper(trim($referralCode)) : '';
         $linkUserId = null;
         $agentId = null;
@@ -79,29 +68,25 @@ class GoogleAuthService
             if (! $this->isEligibleKonsumen($current)) {
                 throw new ApiException(__('messages.google.link_login_required'), 401);
             }
-            $linkUserId = $current->id;
+
+            $linkUserId = (int) $current->id;
+            $agentId = $current->agent_id !== null ? (int) $current->agent_id : null;
             $referralCode = '';
-            $agentId = $current->agent_id;
         } elseif ($mode === self::MODE_REGISTER) {
-            if ($referralCode === '') {
-                throw new ApiException(__('messages.google.referral_required'), 422, ['referral_code' => __('messages.google.referral_required')]);
-            }
-            // Fail fast with the canonical validation; the chain is re-resolved again at callback.
-            $chain = $this->referralService->resolveChainByCode($referralCode);
+            // Fail fast before sending the user to Google. The chain is resolved again at callback.
+            $chain = $this->resolveRegistrationChain($referralCode);
             $agentId = (int) $chain['agent_id'];
         }
 
-        // bind for the whole request: the callback leg validates the id_token
-        // against this same resolved provider (see bindProviderConfig()).
+        // Resolve effective config: agent -> global -> .env fallback.
         $settings = $this->configService->resolvedForAgent($agentId);
         $this->bindProviderConfig($settings);
 
-        // A1-10: an explicit `is_enabled=false` (branch or global, even with
-        // valid credentials present) MUST refuse to start a fresh flow.
         if (! $this->isConfigured()) {
             throw new ApiException(__('messages.google.not_configured'), 503);
         }
 
+        $redirectUri = $this->defaultRedirectUri();
         $state = Str::random(48);
         $nonce = Str::random(48);
         $verifier = Str::random(64);
@@ -114,26 +99,22 @@ class GoogleAuthService
             'referral_code' => $referralCode,
             'link_user_id' => $linkUserId,
             'agent_id' => $agentId,
-            // Provider snapshot: which branch's (or the global) credentials
-            // started this flow — the callback validates against these exact
-            // values, so a concurrent admin/agent config change mid-flow
-            // cannot redirect the transaction to different credentials.
             'provider' => [
-                'client_id' => $settings['client_id'],
-                'client_secret' => $settings['client_secret'],
-                'redirect_uri' => $this->defaultRedirectUri(),
-                'frontend_url' => $settings['frontend_url'],
-                'source' => $settings['source'],
-                // A1-10: also snapshot the effective is_enabled, so a provider
-                // disabled mid-flow is refused on the callback leg too.
-                'is_enabled' => $settings['is_enabled'],
+                'client_id' => $settings['client_id'] ?? null,
+                'client_secret' => $settings['client_secret'] ?? null,
+                'redirect_uri' => $redirectUri,
+                'frontend_url' => $settings['frontend_url'] ?? null,
+                'source' => $settings['source'] ?? 'unknown',
+                'is_enabled' => (bool) ($settings['is_enabled'] ?? false),
             ],
             'created_at' => now()->timestamp,
         ]);
 
-        return config('services.google.auth_url').'?'.http_build_query([
+        $authUrl = (string) config('services.google.auth_url', 'https://accounts.google.com/o/oauth2/v2/auth');
+
+        return $authUrl.'?'.http_build_query([
             'client_id' => config('services.google.client_id'),
-            'redirect_uri' => $this->defaultRedirectUri(),
+            'redirect_uri' => $redirectUri,
             'response_type' => 'code',
             'scope' => 'openid email profile',
             'state' => $state,
@@ -145,55 +126,49 @@ class GoogleAuthService
     }
 
     /**
-     * Completes the flow.
-     *
-     * @return array{status:'authenticated', user:User, created:bool}|array{status:'linked', user:User}|array{status:'error', code:string, mode:string}
+     * Complete OAuth callback.
+     * @return array{status:'authenticated',user:User,created:bool}|array{status:'linked',user:User}|array{status:'error',code:string,mode:string}
      */
     public function handleCallback(Request $request): array
     {
-        $flow = $request->session()->pull(self::SESSION_KEY); // one-time use: replay finds nothing
-        $mode = $flow['mode'] ?? self::MODE_LOGIN;
-
-        $fail = fn (string $code): array => ['status' => 'error', 'code' => $code, 'mode' => $mode];
+        $flow = $request->session()->pull(self::SESSION_KEY);
+        $mode = is_array($flow) ? ($flow['mode'] ?? self::MODE_LOGIN) : self::MODE_LOGIN;
+        $fail = static fn (string $code): array => ['status' => 'error', 'code' => $code, 'mode' => $mode];
 
         if (! is_array($flow)) {
             return $fail('invalid_state');
         }
 
-        // IMP-001 Step 3: the callback validates the id_token against the
-        // EXACT provider snapshot bound at redirect time. A concurrent
-        // admin/agent config change or a mismatched source (agent vs global)
-        // is refused with a broker error rather than silently validated
-        // against different credentials. `aud` mismatch is enforced inside
-        // exchangeCodeForClaims (compare with the bound client_id).
-        //
-        // A1-11: bind the flow's provider snapshot BEFORE any availability
-        // check. In a fresh request/app lifecycle the runtime config carries
-        // only the .env values (usually empty); DB-only configuration must
-        // still complete the callback. `isConfigured()` (which now also
-        // honours the snapshot's is_enabled) runs AFTER the bind.
         $bound = $flow['provider'] ?? null;
-        if (! is_array($bound)) {
+        if (! is_array($bound)
+            || ! filled($bound['client_id'] ?? null)
+            || ! filled($bound['client_secret'] ?? null)
+            || ! filled($flow['state'] ?? null)
+            || ! filled($flow['nonce'] ?? null)
+            || ! filled($flow['verifier'] ?? null)) {
             return $fail('invalid_state');
         }
+
+        // Re-bind the exact provider snapshot captured when OAuth started.
         $this->bindProviderConfig([
             'client_id' => $bound['client_id'] ?? null,
             'client_secret' => $bound['client_secret'] ?? null,
             'redirect_uri' => $bound['redirect_uri'] ?? null,
             'frontend_url' => $bound['frontend_url'] ?? null,
             'source' => $bound['source'] ?? 'unknown',
-            'is_enabled' => $bound['is_enabled'] ?? true,
+            'is_enabled' => $bound['is_enabled'] ?? false,
         ]);
 
-        // A flow started with a now-DISABLED provider is a stale/disabled flow —
-        // refuse it deterministically (A1-10 semantics preserved on the callback
-        // leg too).
-        $currentSettings = $this->configService->resolvedForAgent($flow['agent_id'] ?? null);
-        if (! $this->isConfigured() || ! $currentSettings['is_enabled']) {
+        // A provider disabled while the flow was in progress must not complete.
+        $currentSettings = $this->configService->resolvedForAgent(
+            isset($flow['agent_id']) ? (int) $flow['agent_id'] : null
+        );
+        if (! $this->isConfigured() || ! (bool) ($currentSettings['is_enabled'] ?? false)) {
             return $fail('invalid_state');
         }
 
-        if (now()->timestamp - (int) ($flow['created_at'] ?? 0) > self::FLOW_TTL_SECONDS) {
+        $createdAt = (int) ($flow['created_at'] ?? 0);
+        if ($createdAt <= 0 || now()->timestamp < $createdAt || now()->timestamp - $createdAt > self::FLOW_TTL_SECONDS) {
             return $fail('invalid_state');
         }
 
@@ -206,10 +181,14 @@ class GoogleAuthService
             return $fail('google_denied');
         }
 
-        $claims = $this->exchangeCodeForClaims((string) $request->query('code'), (string) $flow['verifier'], (string) $flow['nonce']);
-        if ($claims === null) {
-            $this->auditBrokerFailure($request, $flow, 'provider_error');
+        $claims = $this->exchangeCodeForClaims(
+            (string) $request->query('code'),
+            (string) $flow['verifier'],
+            (string) $flow['nonce']
+        );
 
+        if ($claims === null) {
+            $this->auditBrokerFailure($flow, 'provider_error');
             return $fail('provider_error');
         }
 
@@ -224,33 +203,28 @@ class GoogleAuthService
             return $this->completeExplicitLink((int) ($flow['link_user_id'] ?? 0), $sub, $email, $fail);
         }
 
-        // 1) Already-linked identity → plain login. Referral context is intentionally ignored.
+        // Already linked Google identity: login only; never change ownership fields.
         $identity = UserSocialIdentity::query()
-            ->where('provider', UserSocialIdentity::PROVIDER_GOOGLE)->where('provider_user_id', $sub)->first();
+            ->where('provider', UserSocialIdentity::PROVIDER_GOOGLE)
+            ->where('provider_user_id', $sub)
+            ->first();
 
         if ($identity) {
             $user = User::query()->with('role')->find($identity->user_id);
             if (! $this->isEligibleKonsumen($user)) {
                 return $fail('account_unavailable');
             }
-            $identity->update(['provider_email' => $email, 'last_login_at' => now()]);
 
+            $identity->update(['provider_email' => $email, 'last_login_at' => now()]);
             return $this->authenticated($user, false, 'auth.google_login', $flow);
         }
 
-        // 2) Eligible existing konsumen with the same verified email → link + login. Never reassigns.
+        // Existing local account: only auto-link if the local email is already verified.
         $existing = User::query()->withTrashed()->with('role')->whereRaw('LOWER(email) = ?', [$email])->first();
-
         if ($existing) {
             if (! $this->isEligibleKonsumen($existing)) {
                 return $fail('email_in_use');
             }
-
-            // Local emails are NOT verified at registration, so a matching address alone proves nothing:
-            // anyone could have pre-registered a victim's email. Auto-link only when the CURRENT local
-            // email is itself verified (ProfileController resets email_verified_at on any address change,
-            // so a non-null timestamp always refers to the current address, not a stale one); otherwise
-            // the owner must sign in locally and link explicitly (MODE_LINK).
             if ($existing->email_verified_at === null) {
                 return $fail('local_account_exists');
             }
@@ -264,19 +238,33 @@ class GoogleAuthService
             return $this->authenticated($existing, false, 'auth.google_linked', $flow, ['method' => 'verified_email']);
         }
 
-        // 3) Unknown to PrimeClassy → never silently create.
-        if ($mode !== self::MODE_REGISTER || ($flow['referral_code'] ?? '') === '') {
+        // Unknown accounts may only be created in register mode.
+        if ($mode !== self::MODE_REGISTER) {
             return $fail('registration_required');
         }
 
+        $referralCode = trim((string) ($flow['referral_code'] ?? ''));
         try {
-            // Referral re-validated and the canonical hierarchy re-resolved server-side right now.
-            $chain = $this->referralService->resolveChainByCode((string) $flow['referral_code']);
+            if ($referralCode !== '') {
+                // Referral chain is always re-resolved server-side at callback time.
+                $chain = $this->referralService->resolveChainByCode($referralCode);
+            } else {
+                // Revalidate the exact default agent selected when this flow started.
+                $agentId = (int) ($flow['agent_id'] ?? 0);
+                $chain = $agentId > 0 ? $this->resolveDefaultAgentChain($agentId) : null;
+                if ($chain === null) {
+                    return $fail('default_agent_unavailable');
+                }
+            }
         } catch (ApiException) {
-            return $fail('invalid_referral');
+            return $fail($referralCode !== '' ? 'invalid_referral' : 'default_agent_unavailable');
         }
 
         $konsumenRoleId = Role::query()->where('slug', 'konsumen')->value('id');
+        if (! $konsumenRoleId) {
+            Log::error('google_auth.konsumen_role_missing');
+            return $fail('registration_unavailable');
+        }
 
         try {
             $user = DB::transaction(function () use ($claims, $email, $sub, $chain, $konsumenRoleId) {
@@ -289,13 +277,11 @@ class GoogleAuthService
                     'name' => Str::limit((string) ($claims['name'] ?? Str::before($email, '@')), 150, ''),
                     'email' => $email,
                     'phone' => null,
-                    // Unusable random password: the account signs in through Google (or a later reset).
                     'password' => Str::random(48),
                     'status' => 'active',
                 ]);
 
                 $this->linkIdentity($user, $sub, $email);
-
                 return $user;
             });
         } catch (UniqueConstraintViolationException) {
@@ -303,31 +289,91 @@ class GoogleAuthService
         }
 
         return $this->authenticated($user->load('role'), true, 'auth.google_registered', $flow, [
-            'referrer_id' => $chain['parent_id'], 'agent_id' => $chain['agent_id'],
-            'korsal_id' => $chain['korsal_id'], 'sales_id' => $chain['sales_id'],
+            'referrer_id' => $chain['parent_id'],
+            'agent_id' => $chain['agent_id'],
+            'korsal_id' => $chain['korsal_id'],
+            'sales_id' => $chain['sales_id'],
         ]);
     }
 
-    /**
-     * Explicit link by the currently authenticated konsumen. The Google email need not match (the
-     * session proves ownership of the local account); a Google identity already owned by anyone else,
-     * or a user who already has a Google identity, is refused. Referral/ownership fields are untouched.
-     *
-     * @return array{status:'linked', user:User}|array{status:'error', code:string, mode:string}
-     */
+    /** Choose the first active agent. Replace this with an explicit default-agent setting if available. */
+    private function findDefaultAgentId(): ?int
+    {
+        $agent = User::query()
+            ->where('role_id', self::DEFAULT_AGENT_ROLE_ID)
+            ->where('status', 'active')
+            ->orderBy('id')
+            ->first(['id']);
+
+        return $agent ? (int) $agent->id : null;
+    }
+
+    /** @return array{parent_id:int,agent_id:int,korsal_id:null,sales_id:null}|null */
+    private function resolveDefaultAgentChain(int $agentId): ?array
+    {
+        $agent = User::query()
+            ->whereKey($agentId)
+            ->where('role_id', self::DEFAULT_AGENT_ROLE_ID)
+            ->where('status', 'active')
+            ->first(['id']);
+
+        if (! $agent) {
+            return null;
+        }
+
+        return [
+            'parent_id' => (int) $agent->id,
+            'agent_id' => (int) $agent->id,
+            'korsal_id' => null,
+            'sales_id' => null,
+        ];
+    }
+
+    /** @return array{parent_id:mixed,agent_id:mixed,korsal_id:mixed,sales_id:mixed} */
+    private function resolveRegistrationChain(string $referralCode): array
+    {
+        if ($referralCode !== '') {
+            return $this->referralService->resolveChainByCode($referralCode);
+        }
+
+        $agentId = $this->findDefaultAgentId();
+        if ($agentId === null) {
+            throw new ApiException(
+                'Agen default tidak ditemukan atau tidak aktif.',
+                422,
+                ['default_agent' => 'Agen default tidak tersedia.']
+            );
+        }
+
+        $chain = $this->resolveDefaultAgentChain($agentId);
+        if ($chain === null) {
+            throw new ApiException(
+                'Agen default tidak tersedia.',
+                422,
+                ['default_agent' => 'Agen default tidak tersedia.']
+            );
+        }
+
+        return $chain;
+    }
+
+    /** Explicit link from the currently authenticated konsumen. */
     private function completeExplicitLink(int $flowUserId, string $sub, string $email, \Closure $fail): array
     {
         $current = Auth::guard('web')->user();
-
-        if ($flowUserId === 0 || ! $this->isEligibleKonsumen($current) || $current->id !== $flowUserId) {
+        if ($flowUserId === 0 || ! $this->isEligibleKonsumen($current) || (int) $current->id !== $flowUserId) {
             return $fail('invalid_state');
         }
 
         $owner = UserSocialIdentity::query()
-            ->where('provider', UserSocialIdentity::PROVIDER_GOOGLE)->where('provider_user_id', $sub)->first();
+            ->where('provider', UserSocialIdentity::PROVIDER_GOOGLE)
+            ->where('provider_user_id', $sub)
+            ->first();
 
         if ($owner) {
-            return $owner->user_id === $current->id ? ['status' => 'linked', 'user' => $current] : $fail('identity_in_use');
+            return (int) $owner->user_id === (int) $current->id
+                ? ['status' => 'linked', 'user' => $current]
+                : $fail('identity_in_use');
         }
 
         if ($current->socialIdentities()->where('provider', UserSocialIdentity::PROVIDER_GOOGLE)->exists()) {
@@ -341,7 +387,9 @@ class GoogleAuthService
         }
 
         ActivityLogger::log($current->id, $current, 'auth.google_linked', null, [
-            'actor_role' => 'konsumen', 'method' => 'explicit', 'provider_email' => $email,
+            'actor_role' => 'konsumen',
+            'method' => 'explicit',
+            'provider_email' => $email,
         ]);
 
         return ['status' => 'linked', 'user' => $current];
@@ -366,12 +414,10 @@ class GoogleAuthService
             && $user->isRole('konsumen');
     }
 
-    /** @return array{status:'authenticated', user:User, created:bool} */
     private function authenticated(User $user, bool $created, string $event, array $flow, array $extra = []): array
     {
         ActivityLogger::log($user->id, $user, $event, null, [
             'actor_role' => 'konsumen',
-            // A referral code supplied alongside an existing account is recorded as ignored — nothing changed.
             'referral_ignored' => ! $created && ($flow['referral_code'] ?? '') !== '',
             ...$extra,
         ]);
@@ -379,16 +425,11 @@ class GoogleAuthService
         return ['status' => 'authenticated', 'user' => $user, 'created' => $created];
     }
 
-    /**
-     * Back-channel code exchange (TLS to Google's token endpoint, client secret + PKCE verifier) and
-     * validation of the returned ID token claims. Returns null on any failure; nothing sensitive is logged.
-     *
-     * @return array<string,mixed>|null
-     */
+    /** Exchange the authorization code and validate the signed Google ID token. */
     private function exchangeCodeForClaims(string $code, string $verifier, string $nonce): ?array
     {
         try {
-            $response = Http::asForm()->timeout(10)->post(config('services.google.token_url'), [
+            $response = Http::asForm()->timeout(10)->post((string) config('services.google.token_url', 'https://oauth2.googleapis.com/token'), [
                 'code' => $code,
                 'client_id' => config('services.google.client_id'),
                 'client_secret' => config('services.google.client_secret'),
@@ -396,48 +437,131 @@ class GoogleAuthService
                 'grant_type' => 'authorization_code',
                 'code_verifier' => $verifier,
             ]);
-        } catch (\Throwable) {
-            Log::warning('google_auth.token_exchange_unreachable');
-
+        } catch (\Throwable $e) {
+            Log::warning('google_auth.token_exchange_unreachable', ['exception' => class_basename($e)]);
             return null;
         }
 
-        if (! $response->successful() || ! is_string($response->json('id_token'))) {
+        $idToken = $response->json('id_token');
+        if (! $response->successful() || ! is_string($idToken) || $idToken === '') {
             Log::warning('google_auth.token_exchange_failed', ['status' => $response->status()]);
-
             return null;
         }
 
-        $parts = explode('.', $response->json('id_token'));
-        $claims = count($parts) === 3 ? json_decode((string) base64_decode(strtr($parts[1], '-_', '+/'), true), true) : null;
+        return $this->verifyIdToken($idToken, $nonce);
+    }
 
-        if (! is_array($claims)
-            || ! in_array($claims['iss'] ?? null, ['https://accounts.google.com', 'accounts.google.com'], true)
-            || ($claims['aud'] ?? null) !== config('services.google.client_id')
-            || (int) ($claims['exp'] ?? 0) < now()->timestamp
-            || ! hash_equals($nonce, (string) ($claims['nonce'] ?? ''))
+    /** Verify JWT signature and the Google OIDC claims before trusting any claim. */
+    private function verifyIdToken(string $idToken, string $expectedNonce): ?array
+    {
+        $parts = explode('.', $idToken);
+        if (count($parts) !== 3) {
+            Log::warning('google_auth.id_token_invalid_format');
+            return null;
+        }
+
+        [$encodedHeader, $encodedPayload, $encodedSignature] = $parts;
+        $header = json_decode((string) $this->base64UrlDecode($encodedHeader), true);
+        $claims = json_decode((string) $this->base64UrlDecode($encodedPayload), true);
+        $signature = $this->base64UrlDecode($encodedSignature);
+
+        if (! is_array($header) || ! is_array($claims) || $signature === false
+            || ($header['alg'] ?? null) !== 'RS256' || ! filled($header['kid'] ?? null)) {
+            Log::warning('google_auth.id_token_invalid_header');
+            return null;
+        }
+
+        $kid = (string) $header['kid'];
+        $certs = $this->googleCertificates(false);
+        if (! isset($certs[$kid]) || ! is_string($certs[$kid])) {
+            $certs = $this->googleCertificates(true);
+        }
+
+        $certificate = $certs[$kid] ?? null;
+        if (! is_string($certificate) || $certificate === '') {
+            Log::warning('google_auth.id_token_unknown_key');
+            return null;
+        }
+
+        $verified = openssl_verify($encodedHeader.'.'.$encodedPayload, $signature, $certificate, OPENSSL_ALGO_SHA256);
+        if ($verified !== 1) {
+            Log::warning('google_auth.id_token_bad_signature');
+            return null;
+        }
+
+        $clientId = (string) config('services.google.client_id');
+        $audience = $claims['aud'] ?? null;
+        $audienceMatches = is_string($audience)
+            ? hash_equals($clientId, $audience)
+            : (is_array($audience) && in_array($clientId, $audience, true));
+
+        $issuerValid = in_array($claims['iss'] ?? null, ['https://accounts.google.com', 'accounts.google.com'], true);
+        $now = now()->timestamp;
+        $exp = (int) ($claims['exp'] ?? 0);
+        $iat = (int) ($claims['iat'] ?? 0);
+        $nonce = (string) ($claims['nonce'] ?? '');
+
+        if (! $issuerValid
+            || ! $audienceMatches
+            || (isset($claims['azp']) && ! hash_equals($clientId, (string) $claims['azp']))
+            || $exp <= $now
+            || $iat <= 0
+            || $iat > $now + 60
+            || ! hash_equals($expectedNonce, $nonce)
             || ! filled($claims['sub'] ?? null)
-            || ! filter_var($claims['email'] ?? null, FILTER_VALIDATE_EMAIL)) {
-            Log::warning('google_auth.id_token_invalid');
-
+            || ! filter_var($claims['email'] ?? null, FILTER_VALIDATE_EMAIL)
+            || (($claims['email_verified'] ?? false) !== true && ($claims['email_verified'] ?? null) !== 'true')) {
+            Log::warning('google_auth.id_token_claims_invalid');
             return null;
         }
 
         return $claims;
     }
 
-    /**
-     * Merges the effective (per-agent / global / env) provider values into
-     * the `services.google` config for the duration of this request. The
-     * token exchange and id_token `aud`/iss checks read from here; the
-     * callback re-binds the snapshot captured at redirect time.
-     *
-     * @param  array<string, mixed>  $settings
-     */
+    /** @return array<string,string> */
+    private function googleCertificates(bool $forceRefresh = false): array
+    {
+        if ($forceRefresh) {
+            Cache::forget(self::GOOGLE_CERTS_CACHE_KEY);
+        }
+
+        try {
+            $certs = Cache::remember(self::GOOGLE_CERTS_CACHE_KEY, now()->addHour(), function () {
+                $response = Http::timeout(10)->get(self::GOOGLE_CERTS_URL);
+                if (! $response->successful()) {
+                    throw new \RuntimeException('Google certificate endpoint returned a non-success status.');
+                }
+
+                $json = $response->json();
+                if (! is_array($json)) {
+                    throw new \RuntimeException('Google certificate response was invalid.');
+                }
+
+                return $json;
+            });
+
+            return is_array($certs) ? $certs : [];
+        } catch (\Throwable $e) {
+            Log::warning('google_auth.certificate_fetch_failed', ['exception' => class_basename($e)]);
+            return [];
+        }
+    }
+
+    private function base64UrlDecode(string $value): string|false
+    {
+        $remainder = strlen($value) % 4;
+        if ($remainder !== 0) {
+            $value .= str_repeat('=', 4 - $remainder);
+        }
+
+        return base64_decode(strtr($value, '-_', '+/'), true);
+    }
+
+    /** Bind effective provider settings to this request. */
     private function bindProviderConfig(array $settings): void
     {
         config([
-            'services.google.is_enabled' => (bool) ($settings['is_enabled'] ?? true),
+            'services.google.is_enabled' => (bool) ($settings['is_enabled'] ?? false),
             'services.google.client_id' => $settings['client_id'] ?? null,
             'services.google.client_secret' => $settings['client_secret'] ?? null,
             'services.google.redirect_uri' => $settings['redirect_uri'] ?? null,
@@ -447,18 +571,16 @@ class GoogleAuthService
 
     private function defaultRedirectUri(): string
     {
-        return config('services.google.redirect_uri') ?: rtrim((string) config('app.url'), '/').'/api/v1/auth/google/callback';
+        return config('services.google.redirect_uri')
+            ?: rtrim((string) config('app.url'), '/').'/api/v1/auth/google/callback';
     }
 
-    /** A provider failure during an authenticated flow — audit it (no secret, no code). */
-    private function auditBrokerFailure(Request $request, array $flow, string $code): void
+    private function auditBrokerFailure(array $flow, string $code): void
     {
-        $mode = $flow['mode'] ?? 'login';
         $user = Auth::guard('web')->user();
-
         ActivityLogger::log($user?->id, $user ?? new User, 'auth.google_provider_error', null, [
             'actor_role' => $user?->role?->slug,
-            'mode' => $mode,
+            'mode' => $flow['mode'] ?? self::MODE_LOGIN,
             'error' => $code,
             'provider_source' => $flow['provider']['source'] ?? 'unknown',
         ]);
