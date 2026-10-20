@@ -10,10 +10,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 /**
- * IMP-001 Feature A. Registered under the `web` middleware group (session + cookies) because both
- * legs are top-level browser navigations: the callback comes from accounts.google.com and must see
- * the server-side OAuth state stored by the redirect leg. Every outcome ends in a browser redirect to
- * the SPA — never JSON, never a token in a URL.
+ * Google OAuth browser redirects. Routes must use the `web` middleware group
+ * so the session can retain OAuth state between redirect and callback.
  */
 class GoogleAuthController extends Controller
 {
@@ -26,18 +24,25 @@ class GoogleAuthController extends Controller
             GoogleAuthService::MODE_LINK => GoogleAuthService::MODE_LINK,
             default => GoogleAuthService::MODE_LOGIN,
         };
-        $referral = is_string($request->query('referral_code')) ? $request->query('referral_code') : null;
+
+        $referral = is_string($request->query('referral_code'))
+            ? $request->query('referral_code')
+            : null;
 
         try {
             $url = $this->google->beginAuthorization($request, $mode, $referral);
         } catch (ApiException $e) {
-            return $this->toSpa($this->pathFor($mode), [
-                'google_error' => match ($e->status()) {
-                    503 => 'not_configured',
-                    401 => 'login_required',
-                    default => 'referral_required',
-                },
-            ]);
+            $errorCode = match (true) {
+                $e->status() === 503 => 'not_configured',
+                $e->status() === 401 => 'login_required',
+                $e->status() === 422 && $mode === GoogleAuthService::MODE_REGISTER
+                    && trim((string) $referral) !== '' => 'invalid_referral',
+                $e->status() === 422 && $mode === GoogleAuthService::MODE_REGISTER
+                    => 'default_agent_unavailable',
+                default => 'google_auth_failed',
+            };
+
+            return $this->toSpa($this->pathFor($mode), ['google_error' => $errorCode]);
         }
 
         return redirect()->away($url);
@@ -48,14 +53,22 @@ class GoogleAuthController extends Controller
         $result = $this->google->handleCallback($request);
 
         if ($result['status'] === 'error') {
-            $path = in_array($result['code'], ['registration_required', 'invalid_referral'], true)
-                ? '/register' : $this->pathFor($result['mode']);
+            $registerErrors = [
+                'registration_required',
+                'invalid_referral',
+                'default_agent_unavailable',
+                'registration_unavailable',
+            ];
+
+            $path = in_array($result['code'], $registerErrors, true)
+                ? '/register'
+                : $this->pathFor($result['mode']);
 
             return $this->toSpa($path, ['google_error' => $result['code']]);
         }
 
         if ($result['status'] === 'linked') {
-            // Already authenticated as this user — no login/session change.
+            // Linking an identity does not replace the current authenticated session.
             return $this->toSpa('/profile', ['google' => 'linked']);
         }
 

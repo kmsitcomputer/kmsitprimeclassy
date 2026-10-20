@@ -33,32 +33,66 @@ class AuthController extends Controller
         ];
     }
 
+
     public function register(RegisterKonsumenRequest $request)
     {
-        // referral_code is optional (see RegisterKonsumenRequest) — a konsumen
-        // may sign up with no referral at all and get linked to an agent
-        // later. When a code IS supplied it is always re-resolved here
-        // server-side; the client's own agent_id/korsal_id/sales_id (if any
-        // were smuggled in the payload) are never read — RegisterKonsumenRequest
-        // doesn't even declare those fields.
-        $referralCode = $request->string('referral_code')->trim()->toString();
-        $chain = $referralCode !== ''
-            ? $this->referralService->resolveChainByCode($referralCode)
-            : ['parent_id' => null, 'sales_id' => null, 'korsal_id' => null, 'agent_id' => null];
+        $referralCode = $request->string('referral_code')
+            ->trim()
+            ->toString();
 
-        $konsumenRoleId = Role::query()->where('slug', 'konsumen')->value('id');
+        if ($referralCode !== '') {
+            // Referral diisi
+            $chain = $this->referralService
+                ->resolveChainByCode($referralCode);
+        } else {
+            // Referral kosong
+            $defaultAgent = User::query()
+                ->where('role_id', 4)
+                ->where('status', 'active')
+                ->orderBy('id')
+                ->first();
 
-        $user = DB::transaction(function () use ($request, $chain, $konsumenRoleId) {
+            if (!$defaultAgent) {
+                throw new \RuntimeException(
+                    'Agen default tidak ditemukan.'
+                );
+            }
+
+            $chain = [
+                'parent_id' => $defaultAgent->id,
+                'agent_id' => $defaultAgent->id,
+                'korsal_id' => null,
+                'sales_id' => null,
+            ];
+        }
+
+        $konsumenRoleId = Role::query()
+            ->where('slug', 'konsumen')
+            ->value('id');
+
+        if ($konsumenRoleId === null) {
+            throw new \LogicException(
+                'Role konsumen belum dikonfigurasi.'
+            );
+        }
+
+        $user = DB::transaction(function () use (
+            $request,
+            $chain,
+            $konsumenRoleId
+        ) {
             return User::create([
                 'role_id' => $konsumenRoleId,
                 'parent_id' => $chain['parent_id'],
                 'agent_id' => $chain['agent_id'],
                 'korsal_id' => $chain['korsal_id'],
                 'sales_id' => $chain['sales_id'],
-                'name' => $request->string('name'),
-                'email' => $request->string('email'),
-                'phone' => $request->string('phone'),
-                'password' => $request->string('password'),
+                'name' => $request->string('name')->toString(),
+                'email' => $request->filled('email')
+                    ? trim($request->input('email'))
+                    : null,
+                'phone' => $request->string('phone')->toString(),
+                'password' => $request->string('password')->toString(),
                 'status' => 'active',
             ]);
         });
@@ -66,23 +100,65 @@ class AuthController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return $this->created($this->authPayload($user), __('messages.auth.register_success'));
+        return $this->created(
+            $this->authPayload($user),
+            __('messages.auth.register_success')
+        );
     }
 
+
+    // public function login(LoginRequest $request)
+    // {
+    //     if (! Auth::attempt($request->only('email', 'password'), true)) {
+    //         throw ValidationException::withMessages([
+    //             'email' => __('messages.auth.login_failed'),
+    //         ]);
+    //     }
+
+    //     $request->session()->regenerate();
+
+    //     $user = Auth::user();
+    //     ActivityLogger::log($user->id, $user, 'auth.login', null, ['actor_role' => $user->role?->slug]);
+
+    //     return $this->ok($this->authPayload($user), __('messages.auth.login_success'));
+    // }
+
+        
     public function login(LoginRequest $request)
     {
-        if (! Auth::attempt($request->only('email', 'password'), true)) {
+        $identifier = trim($request->input('identifier'));
+
+        $column = filter_var($identifier, FILTER_VALIDATE_EMAIL)
+            ? 'email'
+            : 'phone';
+
+        $credentials = [
+            $column => $identifier,
+            'password' => $request->input('password'),
+        ];
+
+        if (! Auth::attempt($credentials, true)) {
             throw ValidationException::withMessages([
-                'email' => __('messages.auth.login_failed'),
+                'identifier' => __('messages.auth.login_failed'),
             ]);
         }
 
         $request->session()->regenerate();
 
         $user = Auth::user();
-        ActivityLogger::log($user->id, $user, 'auth.login', null, ['actor_role' => $user->role?->slug]);
 
-        return $this->ok($this->authPayload($user), __('messages.auth.login_success'));
+        ActivityLogger::log(
+            $user->id,
+            $user,
+            'auth.login',
+            null,
+            ['actor_role' => $user->role?->slug],
+        );
+
+        return $this->ok(
+            $this->authPayload($user),
+            __('messages.auth.login_success'),
+        );
     }
 
     public function logout(Request $request)

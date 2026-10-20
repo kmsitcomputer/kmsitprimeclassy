@@ -17,9 +17,9 @@ export async function register(payload: RegisterPayload) {
   return data.data
 }
 
-export async function login(email: string, password: string) {
+export async function login(identifier: string, password: string) {
   await ensureCsrfCookie()
-  const { data } = await http.post<ApiEnvelope<AuthPayload>>('/auth/login', { email, password })
+  const { data } = await http.post<ApiEnvelope<AuthPayload>>('/auth/login', { identifier, password })
   return data.data
 }
 
