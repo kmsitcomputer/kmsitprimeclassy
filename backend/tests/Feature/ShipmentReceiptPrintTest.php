@@ -58,7 +58,14 @@ class ShipmentReceiptPrintTest extends TestCase
             'agent_id' => $agen->id, 'korsal_id' => $korsal->id, 'sales_id' => $sales->id,
         ]);
         $superAdmin = User::factory()->superAdmin()->create();
-        $kurir = User::factory()->kurir()->create(['agent_id' => $agen->id, 'name' => 'Budi Kurir', 'phone' => '0899123456']);
+        // Unique per branch fixture: a hard-coded phone collided with users_phone_unique when a
+        // test builds more than one branch (uniqueness stays enforced).
+        static $phoneSeq = 0;
+        $phoneSeq++;
+        $kurir = User::factory()->kurir()->create([
+            'agent_id' => $agen->id, 'name' => 'Budi Kurir',
+            'phone' => '0899'.str_pad((string) $phoneSeq, 7, '0', STR_PAD_LEFT),
+        ]);
         Courier::create(['type' => 'internal', 'user_id' => $kurir->id, 'agent_id' => $agen->id, 'name' => $kurir->name, 'is_active' => true]);
 
         return compact('agen', 'korsal', 'sales', 'admin', 'keuangan', 'konsumen', 'superAdmin', 'kurir');

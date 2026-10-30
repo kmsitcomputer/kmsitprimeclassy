@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import { getFinanceSummary, getFinanceOrders, type FinanceSummary, type FinanceOrderRow } from '@/api/reports'
+import { getFinanceSummary, getFinanceOrders, downloadReportXlsx, type FinanceSummary, type FinanceOrderRow } from '@/api/reports'
 import { formatRupiah } from '@/utils/format'
 
 const loading = ref(true)
@@ -44,6 +44,13 @@ onMounted(load)
       </label>
       <button type="button" class="rounded-lg bg-stone-800 px-3 py-2 text-xs font-medium text-white hover:bg-stone-900 dark:bg-stone-100 dark:text-stone-900" @click="load">
         Terapkan
+      </button>
+      <button
+        type="button"
+        class="ml-auto rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700"
+        @click="downloadReportXlsx('finance-orders', { from: from || undefined, to: to || undefined })"
+      >
+        Unduh .xlsx
       </button>
     </div>
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import { ref, onMounted } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -48,10 +49,6 @@ const importFile = ref<File | null>(null)
 const importing = ref(false)
 const importResult = ref<{ provinces: number; regencies: number; districts: number; villages: number } | null>(null)
 const importError = ref<string | null>(null)
-
-function onImportFileSelected(e: Event) {
-  importFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
-}
 
 async function runImport() {
   if (!importFile.value) return
@@ -108,7 +105,15 @@ async function runImport() {
           <a :href="regionsExportUrl()" class="flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-sm font-medium text-stone-700 dark:border-stone-700 dark:text-stone-200">
             <AppIcon name="box" :size="16" /> Ekspor CSV
           </a>
-          <input type="file" accept=".csv" class="text-xs" @change="onImportFileSelected" />
+          <PrimeFileUpload
+            :model-value="importFile ? [importFile] : []"
+            accept=".csv,text/csv"
+            :max-size-mb="10"
+            hint="CSV, maks 10MB"
+            :uploading="importing"
+            test-id="shipping-import-csv-upload"
+            @update:model-value="importFile = $event[0] ?? null"
+          />
           <AppButton size="sm" :disabled="!importFile || importing" @click="runImport">{{ importing ? 'Mengimpor...' : 'Impor CSV' }}</AppButton>
         </div>
         <p v-if="importError" class="mt-2 text-xs text-red-600">{{ importError }}</p>
@@ -123,7 +128,8 @@ async function runImport() {
         <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">Jumlah Kurir per Agen</h2>
         <p class="mt-1 text-xs text-stone-400">Staf kurir internal yang terdaftar di masing-masing agen.</p>
         <div v-if="couriersLoading" class="mt-3 text-sm text-stone-500">Memuat...</div>
-        <table v-else class="mt-3 w-full text-left text-sm">
+        <div v-else class="overflow-x-auto">
+        <table class="mt-3 w-full text-left text-sm">
           <thead class="text-stone-500 dark:text-stone-400">
             <tr><th class="py-1.5">Agen</th><th class="py-1.5 text-right">Jumlah Kurir</th></tr>
           </thead>
@@ -135,6 +141,7 @@ async function runImport() {
             <tr v-if="couriersPerAgent.length === 0"><td colspan="2" class="py-3 text-center text-stone-400">Tidak ada data.</td></tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   </DashboardLayout>

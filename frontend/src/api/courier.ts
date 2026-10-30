@@ -50,6 +50,8 @@ export interface CourierReturnItem {
   quantity_returned: number
   status: string
   condition_note: string | null
+  /** GAP-A: WIB business date the pickup was scheduled for; null = belum dijadwalkan. */
+  pickup_scheduled_for: string | null
   picked_up_by_me: boolean
 }
 
@@ -65,6 +67,12 @@ export interface CourierReturn {
 export async function listCourierReturns(page = 1) {
   const { data } = await http.get<ApiEnvelope<CourierReturn[]>>('/kurir/returns', { params: { page } })
   return { returns: data.data, meta: data.meta as unknown as PaginationMeta }
+}
+
+/** GAP-A: KPI "pickup retur yang dijadwalkan hari ini" untuk dashboard Kurir. */
+export async function courierReturnPickupsToday() {
+  const { data } = await http.get<ApiEnvelope<{ date: string; count: number }>>('/kurir/returns/pickup-today')
+  return data.data
 }
 
 export async function pickupReturnItem(itemId: number, note?: string) {

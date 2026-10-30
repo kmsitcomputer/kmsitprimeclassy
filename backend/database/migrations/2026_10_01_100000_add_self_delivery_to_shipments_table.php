@@ -46,6 +46,11 @@ return new class extends Migration
                 )"
             );
 
+            // Both engines refuse a CHECK clause over a SET NULL foreign-key column
+            // (MariaDB 1901, MySQL 3823), so this half of the invariant needs real triggers on
+            // MySQL 8.4 as well. Creating a trigger with binary logging enabled requires SUPER or
+            // `log_bin_trust_function_creators=1`; the local ServBay MySQL therefore sets that
+            // flag (see docs/PC-MIGRATION-CHECKPOINT.md) instead of granting SUPER to app users.
             DB::unprepared(
                 "CREATE TRIGGER shipments_self_sub_no_courier_insert BEFORE INSERT ON shipments
                  FOR EACH ROW

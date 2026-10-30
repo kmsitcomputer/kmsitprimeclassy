@@ -111,6 +111,76 @@ class SalesCourierDualFeeTest extends TestCase
         $this->assertSame(1, Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'courier')->count());
     }
 
+    public function test_fees_are_pending_until_the_item_is_delivered_then_final_per_item_without_losing_any_type(): void
+    {
+        $fixture = $this->createFixture();
+        $salesKurir = $fixture['sales_kurir'];
+        $order = $this->placeOrder($salesKurir, $fixture['buyer'], $fixture['product']);
+        $item = $order->items()->firstOrFail();
+        $shipment = $order->shipments()->firstOrFail();
+
+        // Not delivered yet: every fee that exists is Pending.
+        $this->assertSame(['pending'], Commission::where('order_item_id', $item->id)->pluck('status')->unique()->values()->all());
+
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $salesKurir);
+        $this->assertSame(['pending'], Commission::where('order_item_id', $item->id)->pluck('status')->unique()->values()->all(), 'dikirim is not delivery');
+
+        app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $salesKurir, UploadedFile::fake()->image('p.jpg'));
+
+        // Delivered: the SAME person holds a sales row AND a courier row (never merged, never deduplicated by beneficiary), the agent has
+        // its own row, and all three are final.
+        $rows = Commission::where('order_item_id', $item->id)->get();
+        $this->assertSame(['agent', 'courier', 'sales'], $rows->pluck('beneficiary_role')->sort()->values()->all());
+        $this->assertSame(['approved'], $rows->pluck('status')->unique()->values()->all());
+        $this->assertSame(
+            2,
+            $rows->where('beneficiary_user_id', $salesKurir->id)->count(),
+            'sales and courier fee of the same Sales-Kurir-Sub are two distinct rights',
+        );
+    }
+
+    public function test_finalisation_is_idempotent_and_never_touches_paid_or_reversed_rows(): void
+    {
+        $fixture = $this->createFixture();
+        $order = $this->placeOrder($fixture['sales_kurir'], $fixture['buyer'], $fixture['product']);
+        $item = $order->items()->firstOrFail();
+        $finalizer = app(\App\Services\Commission\CommissionFinalizer::class);
+
+        $paid = Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'agent')->firstOrFail();
+        $paid->forceFill(['status' => 'paid'])->save();
+        $reversed = Commission::where('order_item_id', $item->id)->where('beneficiary_role', 'sales')->firstOrFail();
+        $reversed->forceFill(['status' => 'reversed'])->save();
+
+        $this->assertSame(0, $finalizer->finalizeItems([$item->id]));
+        $this->assertSame('paid', $paid->fresh()->status);
+        $this->assertSame('reversed', $reversed->fresh()->status);
+        $this->assertSame(0, $finalizer->finalizeItems([]));
+    }
+
+    public function test_koordinator_kurir_sees_its_own_courier_fee_and_only_that(): void
+    {
+        $fixture = $this->createFixture();
+        $order = $this->placeOrder($fixture['sales_kurir'], $fixture['buyer'], $fixture['product']);
+        $item = $order->items()->firstOrFail();
+
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $fixture['agent']->id, 'parent_id' => $fixture['agent']->id]);
+        $mine = Commission::create(['order_id' => $order->id, 'order_item_id' => $item->id, 'beneficiary_user_id' => $koordinator->id, 'beneficiary_role' => 'courier', 'amount' => 100, 'status' => 'approved', 'earned_at' => now()]);
+
+        // 1. the route is reachable for the role (the `role:` middleware list)
+        $middleware = app('router')->getRoutes()->match(\Illuminate\Http\Request::create('/api/v1/commissions', 'GET'))->gatherMiddleware();
+        $this->assertTrue(collect($middleware)->contains(fn ($m) => is_string($m) && str_starts_with($m, 'role:') && in_array('koordinator-kurir', explode(',', substr($m, 5)), true)));
+
+        // 2. the controller scopes it to its own courier rows only (called directly: this fixture registers a buyer over HTTP, which
+        //    leaves guard state that would make a follow-up HTTP request unauthenticated and say nothing about the rule under test)
+        $request = fn (string $uri) => tap(\Illuminate\Http\Request::create($uri, 'GET'), fn ($r) => $r->setUserResolver(fn () => $koordinator));
+        $controller = app(\App\Http\Controllers\Api\V1\Fee\CommissionController::class);
+        $list = json_decode($controller->index($request('/api/v1/commissions'))->getContent(), true);
+        $this->assertSame([$mine->id], collect($list['data'])->pluck('id')->all(), 'only its own courier fee — no agent/sales rows, nobody else\'s');
+        $summary = json_decode($controller->summary($request('/api/v1/commissions/summary'))->getContent(), true);
+        $this->assertEquals(100, $summary['data']['total_courier_fee']);
+        $this->assertArrayNotHasKey('total_agent_fee', $summary['data']);
+        $this->assertArrayNotHasKey('total_sales_fee', $summary['data']);
+    }
     private function createFixture(): array
     {
         $agent = User::factory()->agen()->create();

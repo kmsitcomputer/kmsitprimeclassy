@@ -154,7 +154,7 @@ class GoogleSheetsTest extends TestCase
         User::factory()->sales()->create(['agent_id' => $a->id, 'name' => 'Own']);
         User::factory()->sales()->create(['agent_id' => $b->id, 'name' => 'Foreign']);
         $this->mock(SheetsClient::class, function ($mock) use ($a) {
-            $mock->shouldReceive('replace')->once()->with('sheet-'.$a->id, 'Export', [['Nama'], ['Own']]);
+            $mock->shouldReceive('replace')->once()->with('sheet-'.$a->id, 'Export', [['Nama'], ['Own']], [], [], []);
             $mock->shouldReceive('credentialInfo')->andReturn(['client_email' => 'service@example.test']);
         });
         $this->actingAs($a)->postJson('/api/v1/google-sheets/configs/'.$c->id.'/sync')->assertOk()->assertJsonPath('data.status', 'success');
@@ -181,6 +181,9 @@ class GoogleSheetsTest extends TestCase
             'global-sheet',
             'Sales Report',
             [['Status Akun', 'Nama Sales'], ['active', 'Global Sales']],
+            [],
+            [],
+            [],
         ));
 
         $admin = User::factory()->superAdmin()->create();

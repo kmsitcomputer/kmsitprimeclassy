@@ -11,16 +11,11 @@ use App\Models\CodPaymentProof;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\PaymentTransaction;
-use App\Models\PaymentWebhookLog;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Media\MediaService;
-use App\Services\Payment\Gateways\PaymentGatewayClientFactory;
-use Illuminate\Database\QueryException;
-use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -36,12 +31,6 @@ use Illuminate\Support\Str;
  *     puts the order at 'pending_verification'; only an explicit
  *     Admin/Agen verifyBankTransfer() call can move it to 'paid'/'failed'.
  *     The order cannot advance to 'diproses' until then.
- *   - gateway (Xendit/Tripay/Stripe): delegates to the method's
- *     PaymentGatewayClientInterface implementation (see
- *     PaymentGatewayClientFactory) using whichever environment
- *     (sandbox/production) the Super Admin has set as active. The gateway's
- *     webhook is the only thing that ever marks these paid — never the
- *     frontend, never a redirect callback alone.
  */
 class PaymentService
 {
@@ -58,7 +47,6 @@ class PaymentService
     private const SETTLEMENT_NOTE = 'dp_settlement';
 
     public function __construct(
-        private readonly PaymentGatewayClientFactory $gatewayFactory,
         private readonly MediaService $mediaService,
     ) {}
 
@@ -75,7 +63,6 @@ class PaymentService
         return match ($method->type) {
             'cod' => $this->initiateCod($order, $method),
             'manual' => $this->initiateManual($order, $method),
-            'gateway' => $this->initiateGateway($order, $method),
             default => throw new ApiException(__('messages.payment.unsupported_method_type', ['type' => $method->type]), 422),
         };
     }
@@ -136,29 +123,6 @@ class PaymentService
                 'note' => 'down_payment',
             ],
         ]);
-    }
-
-    private function initiateGateway(Order $order, PaymentMethod $method): PaymentTransaction
-    {
-        $config = $this->activeConfigFor($method, $order->agent_id);
-
-        $transaction = PaymentTransaction::create([
-            'order_id' => $order->id,
-            'payment_method_id' => $method->id,
-            'type' => 'payment',
-            'amount' => $order->total_amount,
-            'status' => PaymentTransactionStatus::PENDING->value,
-        ]);
-
-        $client = $this->gatewayFactory->make($method->code);
-        $result = $client->createPayment($order, $transaction, [...$config->config, 'environment' => $config->environment]);
-
-        $transaction->update([
-            'gateway_reference' => $result['reference'],
-            'raw_payload' => $result['instructions'],
-        ]);
-
-        return $transaction->fresh();
     }
 
     /**
@@ -654,160 +618,24 @@ private function pendingSettlementFor(int $orderId): ?PaymentTransaction
     private function recalculatePaymentStatus(Order $order, ?float $paidAmount = null): Order
     {
         $total = round((float) $order->total_amount, 2);
-        $paid = round(max(0.0, $paidAmount ?? (float) $order->paid_amount), 2);
+        $current = round((float) $order->paid_amount, 2);
+        $paid = round(max(0.0, $paidAmount ?? $current), 2);
         $remaining = round(max(0.0, $total - $paid), 2);
+
+        // Refund ledger: G is "all verified money in" and never decreases on a refund. Only a
+        // positive payment delta grows it; the refund path reduces paid_amount alone.
+        $gross = round((float) $order->gross_received_amount, 2);
+        if ($paid > $current) {
+            $gross = round($gross + ($paid - $current), 2);
+        }
 
         $order->update([
             'paid_amount' => $paid,
+            'gross_received_amount' => $gross,
             'remaining_amount' => $remaining,
             'payment_status' => $remaining <= 0 ? 'paid' : ($paid > 0 ? 'partially_paid' : 'unpaid'),
         ]);
 
         return $order->fresh();
-    }
-
-    /**
-     * Entry point for POST /webhooks/payment/{method}. Every call is logged
-     * (payment_webhook_logs) BEFORE anything else happens — signature
-     * failures and processing outcomes alike — so the full history is
-     * auditable even for attacks that never got past verification.
-     * Idempotent via the (payment_method_id, event_id) unique index: the
-     * same event delivered twice short-circuits on the second delivery
-     * without reprocessing.
-     *
-     * @return array{status: 'processed'|'duplicate'|'invalid_signature'|'unknown_reference', message: string}
-     */
-    /**
-     * Signature verification requires the credentials of whichever agen this
-     * transaction belongs to, but the webhook URL carries no agent identifier
-     * — so the gateway's own reference is extracted from the (still
-     * unverified) payload first, purely to look up which agen's config to
-     * check the signature against. parseWebhookPayload() never touches
-     * secrets (it's plain JSON/body parsing for all three gateways), so
-     * nothing here is trusted to affect a transaction/order until the
-     * signature check below passes.
-     */
-    public function handleWebhook(PaymentMethod $method, Request $request): array
-    {
-        $client = $this->gatewayFactory->make($method->code);
-        $parsed = $client->parseWebhookPayload($request);
-
-        $transaction = PaymentTransaction::query()
-            ->where('payment_method_id', $method->id)
-            ->where('gateway_reference', $parsed->reference)
-            ->first();
-
-        if (! $transaction) {
-            PaymentWebhookLog::create([
-                'payment_method_id' => $method->id,
-                'event_id' => 'unknown-'.Str::uuid(),
-                'gateway_reference' => $parsed->reference,
-                'headers' => $request->headers->all(),
-                'payload' => (array) $request->json()->all(),
-                'signature_valid' => false,
-                'processed' => false,
-                'note' => 'No matching transaction for this reference — cannot resolve which agen to verify against.',
-            ]);
-            Log::warning('payment.webhook_unknown_reference', ['method' => $method->code, 'reference' => $parsed->reference]);
-
-            return ['status' => 'unknown_reference', 'message' => 'No matching transaction.'];
-        }
-
-        $agentId = $transaction->order->agent_id;
-
-        try {
-            $config = $this->activeConfigFor($method, $agentId);
-        } catch (ApiException) {
-            $config = null;
-        }
-
-        $signatureValid = $config && $client->verifyWebhookSignature($request, $config->config);
-
-        if (! $signatureValid) {
-            PaymentWebhookLog::create([
-                'payment_method_id' => $method->id,
-                'event_id' => 'invalid-'.Str::uuid(),
-                'gateway_reference' => $parsed->reference,
-                'headers' => $request->headers->all(),
-                'payload' => (array) $request->json()->all(),
-                'signature_valid' => false,
-                'processed' => false,
-                'note' => 'Signature verification failed.',
-            ]);
-            Log::warning('payment.webhook_signature_invalid', ['method' => $method->code, 'agent_id' => $agentId]);
-
-            return ['status' => 'invalid_signature', 'message' => 'Invalid signature.'];
-        }
-
-        // Idempotency: a row already existing for this (method, event_id) means
-        // this exact event was already handled — never process it twice.
-        $existingLog = PaymentWebhookLog::query()
-            ->where('payment_method_id', $method->id)->where('event_id', $parsed->eventId)->first();
-
-        if ($existingLog) {
-            return ['status' => 'duplicate', 'message' => 'Event already processed.'];
-        }
-
-        // Two near-simultaneous deliveries of the same event can both pass the
-        // check above before either inserts — the (payment_method_id, event_id)
-        // unique index is the real guard; a race here throws instead of
-        // silently double-processing, so catch it and treat it the same as
-        // the already-existing-row case above.
-        try {
-            $log = PaymentWebhookLog::create([
-                'payment_method_id' => $method->id,
-                'event_id' => $parsed->eventId,
-                'gateway_reference' => $parsed->reference,
-                'headers' => $request->headers->all(),
-                'payload' => $parsed->raw,
-                'signature_valid' => true,
-                'processed' => false,
-            ]);
-        } catch (QueryException $e) {
-            return ['status' => 'duplicate', 'message' => 'Event already processed.'];
-        }
-
-        // Cross-check the amount the gateway reports against our own record —
-        // the webhook body is never trusted to redefine what was actually owed.
-        if ($parsed->amount !== null && abs($parsed->amount - (float) $transaction->amount) > 0.01) {
-            $log->update(['note' => 'Amount mismatch: expected '.$transaction->amount.' got '.$parsed->amount]);
-            Log::warning('payment.webhook_amount_mismatch', [
-                'transaction_id' => $transaction->id, 'expected' => (float) $transaction->amount, 'got' => $parsed->amount,
-            ]);
-
-            return ['status' => 'unknown_reference', 'message' => 'Amount mismatch.'];
-        }
-
-        DB::transaction(function () use ($transaction, $parsed, $log) {
-            $order = $transaction->order;
-            $previousStatus = $transaction->status;
-
-            $transaction->update([
-                'status' => $parsed->status->value,
-                'paid_at' => $parsed->status === PaymentTransactionStatus::PAID ? now() : $transaction->paid_at,
-                'raw_payload' => $parsed->raw,
-            ]);
-
-            match ($parsed->status) {
-                PaymentTransactionStatus::PAID => $this->applyPaymentToOrder($order, (float) $transaction->amount),
-                PaymentTransactionStatus::REFUNDED => $order->update(['payment_status' => 'refunded']),
-                PaymentTransactionStatus::FAILED,
-                PaymentTransactionStatus::EXPIRED,
-                PaymentTransactionStatus::CANCELLED => $order->update(['payment_status' => 'failed']),
-                // A still-pending gateway event never changes our own state.
-                PaymentTransactionStatus::PENDING => null,
-            };
-
-            ActivityLogger::log(null, $order, 'payment.webhook_processed', null, [
-                'payment_transaction_id' => $transaction->id,
-                'event_id' => $parsed->eventId,
-                'from' => $previousStatus,
-                'to' => $parsed->status->value,
-            ]);
-
-            $log->update(['processed' => true]);
-        });
-
-        return ['status' => 'processed', 'message' => 'Webhook processed.'];
     }
 }

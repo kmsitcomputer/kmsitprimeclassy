@@ -58,7 +58,12 @@ class SalesCourierOrderIsolationTest extends TestCase
         }
     }
 
-    public function test_sales_kurir_can_checkout_for_itself_without_self_referral_commission(): void
+    /**
+     * Owner decision (BUSINESS-RULES §15, §25; Phase 2 directive §4.3): a self-purchase does NOT zero the fee. A Sales-Kurir-Sub buying for
+     * itself earns the SALES fee as a separate per-item row (the agent fee is a different row for the agent). The old assertion expected
+     * no sales row, i.e. it encoded the opposite of the Owner rule.
+     */
+    public function test_sales_kurir_can_checkout_for_itself_and_earns_its_own_sales_fee(): void
     {
         $branch = $this->branch();
         $product = $this->product($branch['agent']);
@@ -79,12 +84,18 @@ class SalesCourierOrderIsolationTest extends TestCase
         $order = Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
         $this->assertSame($branch['sales_kurir']->id, $order->konsumen_id);
         $this->assertNull($order->sales_id);
-        $this->assertDatabaseMissing('commissions', [
-            'order_id' => $order->id,
-            'beneficiary_user_id' => $branch['sales_kurir']->id,
-            'beneficiary_role' => 'sales',
-        ]);
-        $this->assertSame(0, Commission::where('order_id', $order->id)->where('beneficiary_user_id', $branch['sales_kurir']->id)->count());
+        $itemIds = $order->items()->pluck('id');
+        $this->assertGreaterThan(0, $itemIds->count());
+        foreach ($itemIds as $itemId) {
+            // exactly ONE sales row per item, credited to the buyer itself, still pending (nothing is delivered yet)
+            $this->assertSame(1, Commission::where('order_item_id', $itemId)->where('beneficiary_role', 'sales')->count());
+            $this->assertDatabaseHas('commissions', [
+                'order_id' => $order->id, 'order_item_id' => $itemId,
+                'beneficiary_user_id' => $branch['sales_kurir']->id, 'beneficiary_role' => 'sales', 'status' => 'pending',
+            ]);
+            // the agent fee is a different row for a different beneficiary — never merged into the sales fee
+            $this->assertSame(0, Commission::where('order_item_id', $itemId)->where('beneficiary_role', 'agent')->where('beneficiary_user_id', $branch['sales_kurir']->id)->count());
+        }
     }
 
     public function test_sales_kurir_order_index_is_inner_scoped_before_filters_and_pagination(): void
@@ -124,6 +135,62 @@ class SalesCourierOrderIsolationTest extends TestCase
 
         $agentIds = collect($this->actingAs($a['agent'])->getJson('/api/v1/orders?per_page=100')->assertOk()->json('data'))->pluck('id');
         $this->assertEqualsCanonicalizing([$own->id, $sameKorsalSales->id, $otherKorsalSales->id, $otherSalesKurirOrder->id], $agentIds->all());
+    }
+
+    public function test_sales_self_orders_stay_visible_in_list_and_detail_across_every_forward_status_without_scope_leaks(): void
+    {
+        $branch = $this->branch();
+        $otherBranch = $this->branch();
+        $paymentMethodId = PaymentMethod::where('code', 'cod')->value('id');
+
+        $selfOrders = collect(['diterima', 'diproses', 'dikirim', 'terkirim'])->map(function (string $status) use ($branch, $paymentMethodId) {
+            return Order::withoutGlobalScopes()->create([
+                'order_no' => 'PC-SELF-'.Str::upper(Str::random(10)),
+                'konsumen_id' => $branch['sales']->id,
+                'sales_id' => null,
+                'korsal_id' => $branch['korsal']->id,
+                'agent_id' => $branch['agent']->id,
+                'placed_by_user_id' => $branch['sales']->id,
+                'payment_method_id' => $paymentMethodId,
+                'status' => $status,
+                'payment_status' => 'unpaid',
+                'subtotal_amount' => 10000,
+                'total_amount' => 10000,
+                'recipient_name_snapshot' => $branch['sales']->name,
+                'recipient_phone_snapshot' => $branch['sales']->phone,
+                'address_snapshot' => 'Test Address',
+            ]);
+        });
+        $referredOrder = $this->order($branch['agent'], $branch['customer_two'], $branch['sales'], $branch['korsal']);
+
+        $salesListIds = collect($this->actingAs($branch['sales'])
+            ->getJson('/api/v1/orders?per_page=100')->assertOk()->json('data'))
+            ->pluck('id');
+
+        foreach ($selfOrders as $order) {
+            $this->assertContains($order->id, $salesListIds, "Self-order status {$order->status} must remain listed.");
+            $this->actingAs($branch['sales'])->getJson("/api/v1/orders/{$order->id}")->assertOk();
+        }
+        $this->assertContains($referredOrder->id, $salesListIds);
+
+        $protectedOrder = $selfOrders->last();
+        $sameAgentOtherSalesIds = collect($this->actingAs($branch['sales_two'])
+            ->getJson('/api/v1/orders?per_page=100')->assertOk()->json('data'))
+            ->pluck('id');
+        $this->assertNotContains($protectedOrder->id, $sameAgentOtherSalesIds);
+        $this->actingAs($branch['sales_two'])->getJson("/api/v1/orders/{$protectedOrder->id}")->assertForbidden();
+
+        $crossAgentIds = collect($this->actingAs($otherBranch['sales'])
+            ->getJson('/api/v1/orders?per_page=100')->assertOk()->json('data'))
+            ->pluck('id');
+        $this->assertNotContains($protectedOrder->id, $crossAgentIds);
+        $this->actingAs($otherBranch['sales'])->getJson("/api/v1/orders/{$protectedOrder->id}")->assertNotFound();
+
+        $otherConsumerIds = collect($this->actingAs($branch['konsumen'])
+            ->getJson('/api/v1/orders?per_page=100')->assertOk()->json('data'))
+            ->pluck('id');
+        $this->assertNotContains($protectedOrder->id, $otherConsumerIds);
+        $this->actingAs($branch['konsumen'])->getJson("/api/v1/orders/{$protectedOrder->id}")->assertForbidden();
     }
 
     private function branch(): array

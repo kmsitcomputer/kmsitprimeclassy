@@ -65,7 +65,14 @@ class CourierSystemTest extends TestCase
         // driver name) against whichever user we actingAs() next — logging them straight
         // back out. UserManagementService's Courier-row auto-creation on account creation is
         // already covered separately by UserManagementTest; this only needs the end state.
-        $kurir = User::factory()->kurir()->create(['agent_id' => $agen->id, 'name' => 'Budi Kurir', 'phone' => '0899123456']);
+        // Unique per branch fixture: several tests build TWO branches, and a hard-coded phone
+        // collided with users_phone_unique (which must stay enforced).
+        static $phoneSeq = 0;
+        $phoneSeq++;
+        $kurir = User::factory()->kurir()->create([
+            'agent_id' => $agen->id, 'name' => 'Budi Kurir',
+            'phone' => '0899'.str_pad((string) $phoneSeq, 7, '0', STR_PAD_LEFT),
+        ]);
         Courier::create(['type' => 'internal', 'user_id' => $kurir->id, 'agent_id' => $agen->id, 'name' => $kurir->name, 'is_active' => true]);
 
         return compact('agen', 'korsal', 'sales', 'admin', 'konsumen', 'superAdmin', 'kurir');
@@ -149,8 +156,14 @@ class CourierSystemTest extends TestCase
         $salesResponse->assertOk();
         $this->assertArrayNotHasKey('courier_fee', $salesResponse->json('data'));
 
-        // Admin/korsal/konsumen cannot reach the fee endpoint at all.
-        foreach (['admin', 'korsal', 'konsumen'] as $role) {
+        // Korsal shares the Sales workflow (own scope): sales_fee is visible, agent_fee/courier_fee never are.
+        $korsalResponse = $this->actingAs($branch['korsal'])->getJson("/api/v1/products/{$product->id}/fees");
+        $korsalResponse->assertOk()->assertJsonPath('data.sales_fee', 5000);
+        $this->assertArrayNotHasKey('agent_fee', $korsalResponse->json('data'));
+        $this->assertArrayNotHasKey('courier_fee', $korsalResponse->json('data'));
+
+        // Admin/konsumen cannot reach the fee endpoint at all.
+        foreach (['admin', 'konsumen'] as $role) {
             $this->actingAs($branch[$role])->getJson("/api/v1/products/{$product->id}/fees")->assertStatus(403);
         }
     }
@@ -660,7 +673,7 @@ class CourierSystemTest extends TestCase
             $view = $this->actingAs($branch[$role])->getJson("/api/v1/orders/{$order->id}");
             $view->assertOk();
             $this->assertSame('Budi Kurir', $view->json('data.couriers.0.name'));
-            $this->assertSame('0899123456', $view->json('data.couriers.0.phone'));
+            $this->assertSame($branch['kurir']->phone, $view->json('data.couriers.0.phone'));
         }
     }
 

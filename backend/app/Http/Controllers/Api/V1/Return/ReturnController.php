@@ -47,6 +47,12 @@ class ReturnController extends Controller
             })
             ->latest();
 
+        // Optional status filter (comma list), e.g. the dashboard's "Retur Tertunda" = requested,under_review
+        // (awaiting Admin review). Read-only narrowing inside the same branch scope above.
+        if ($request->filled('status')) {
+            $query->whereIn('status', array_filter(explode(',', $request->string('status')->toString())));
+        }
+
         $returns = $query->paginate($request->integer('per_page', 15));
 
         return $this->ok(ReturnRequestResource::collection($returns)->resolve(), meta: [
@@ -59,6 +65,42 @@ class ReturnController extends Controller
         $this->authorizeBranch($request, $return);
 
         return $this->ok(new ReturnRequestResource($return->load(['order.konsumen', 'requestedBy', 'reviewedBy', 'items.orderItem'])));
+    }
+
+    /**
+     * Gudang inspection queue — the branch's approved return lines that still need a physical
+     * condition inspection (approved + never inspected). Deliberately item-level: a multi-item
+     * return stays in the queue until every eligible line has been inspected, and lines that are
+     * already inspected, rejected, still pending review, or belong to another branch are never
+     * returned. Read-only; all mutations stay on the existing inspect/finalize endpoints.
+     */
+    public function warehouseQueue(Request $request)
+    {
+        $actor = $request->user();
+
+        // Defence in depth — the route group is already role:gudang, but the branch scope must
+        // never depend on the request or on a global scope alone.
+        if (! $actor->isRole('gudang') || ! $actor->agent_id) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        $inspectable = fn ($query) => $query->where('status', 'approved')->whereNull('inspected_at');
+
+        $returns = ReturnRequestModel::query()
+            ->where('status', 'approved')
+            ->whereHas('order', fn ($query) => $query->where('agent_id', $actor->agent_id))
+            ->whereHas('items', $inspectable)
+            ->with([
+                'order.konsumen',
+                'requestedBy',
+                'items' => fn ($query) => $inspectable($query)->with('orderItem'),
+            ])
+            ->latest()
+            ->paginate($request->integer('per_page', 15));
+
+        return $this->ok(ReturnRequestResource::collection($returns)->resolve(), meta: [
+            'current_page' => $returns->currentPage(), 'last_page' => $returns->lastPage(), 'total' => $returns->total(),
+        ]);
     }
 
     public function review(ReviewReturnRequest $request, ReturnRequestModel $return)
@@ -127,5 +169,41 @@ class ReturnController extends Controller
         if ((int) $orderAgentId !== (int) $actor->agent_id) {
             throw new ApiException(__('messages.system.unauthorized_action'), 403);
         }
+    }
+
+    /**
+     * GAP-A (OD-P2-A): set/change the return pickup schedule. Staff authority =
+     * the same route group that reviews returns (super_admin/agen/admin);
+     * branch scope is enforced by authorizeBranch() exactly like every other
+     * mutator here. A NEW schedule may never be in the past (WIB business
+     * calendar). Only items still awaiting pickup (return status
+     * pending/approved) get the date — already-collected/rejected items are
+     * never rewritten, historical data is never touched, and every change is
+     * audited.
+     */
+    public function schedulePickup(Request $request, \App\Models\ReturnRequest $return)
+    {
+        $this->authorizeBranch($request, $return);
+
+        $data = $request->validate([
+            'pickup_scheduled_for' => ['required', 'date_format:Y-m-d', 'after_or_equal:'.now('Asia/Jakarta')->toDateString()],
+        ]);
+
+        $items = $return->items()->whereIn('status', ['pending', 'approved'])->get();
+        if ($items->isEmpty()) {
+            throw new ApiException('Tidak ada item retur yang masih menunggu penjemputan.', 422);
+        }
+        foreach ($items as $item) {
+            $item->update(['pickup_scheduled_for' => $data['pickup_scheduled_for']]);
+        }
+        \App\Services\Logging\ActivityLogger::log($request->user()->id, $return, 'return.pickup_scheduled', null, [
+            'return_id' => $return->id, 'scheduled_for' => $data['pickup_scheduled_for'], 'items' => $items->count(),
+        ]);
+
+        return $this->ok([
+            'return_id' => $return->id,
+            'pickup_scheduled_for' => $data['pickup_scheduled_for'],
+            'items' => $items->count(),
+        ]);
     }
 }

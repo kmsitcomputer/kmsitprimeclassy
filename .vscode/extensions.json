@@ -1,5 +1,6 @@
 {
     "recommendations": [
-        "vizards.deepseek-v4-for-copilot"
+        "vizards.deepseek-v4-for-copilot",
+        "ltmoerdani.opencode-copilot-chat"
     ]
 }

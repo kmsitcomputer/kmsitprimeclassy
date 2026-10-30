@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/utils/googleMaps'
+import { getGoogleMapsMapId, loadGoogleMaps, onGoogleMapsAuthFailure } from '@/utils/googleMaps'
 import type { GoogleMapInstance, GoogleMapsNamespace, GoogleMarkerInstance, GooglePlace, PlaceAutocompleteElement } from '@/utils/googleMaps'
 
 const { t } = useI18n()
@@ -134,7 +134,9 @@ const stopAuthFailureListener = onGoogleMapsAuthFailure(() => {
   ready.value = false
 })
 
-onMounted(async () => {
+async function initMap() {
+  error.value = null
+  ready.value = false
   try {
     google = await loadGoogleMaps()
     if (!isMounted || !mapEl.value) return
@@ -143,7 +145,7 @@ onMounted(async () => {
     // A neutral generic viewport (not any particular customer's location) —
     // only used until a real coordinate (saved, geolocated, or picked) exists.
     const initialCenter = hasInitial ? { lat: props.latitude!, lng: props.longitude! } : { lat: -6.2, lng: 106.816666 }
-    map = new google.maps.Map(mapEl.value, { center: initialCenter, zoom: hasInitial ? 16 : 12, mapId: 'DEMO_MAP_ID' })
+    map = new google.maps.Map(mapEl.value, { center: initialCenter, zoom: hasInitial ? 16 : 12, mapId: getGoogleMapsMapId() })
 
     if (hasInitial) placeMarker(props.latitude!, props.longitude!, false)
 
@@ -155,10 +157,12 @@ onMounted(async () => {
 
     await setupPlaceAutocomplete()
     ready.value = true
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : t('checkout.address.mapLoadError')
+  } catch {
+    if (isMounted) error.value = t('checkout.address.mapLoadError')
   }
-})
+}
+
+onMounted(initMap)
 
 onBeforeUnmount(() => {
   isMounted = false
@@ -181,7 +185,10 @@ onBeforeUnmount(() => {
       :placeholder="t('checkout.address.mapSearchPlaceholder')"
     />
     <div ref="mapEl" class="h-72 w-full rounded-lg bg-stone-100 sm:h-80 dark:bg-stone-800" />
-    <p v-if="error" class="text-xs text-red-600">{{ error }}</p>
+    <div v-if="error" class="flex items-center gap-2 text-xs text-red-600" role="alert">
+      <span>{{ error }}</span>
+      <button type="button" class="rounded border border-red-300 px-2 py-0.5 font-medium" @click="initMap">{{ t('checkout.address.mapRetry') }}</button>
+    </div>
     <p v-if="!ready && !error" class="text-xs text-stone-400">{{ t('checkout.address.mapLoading') }}</p>
     <p class="text-xs text-stone-400">{{ t('checkout.address.mapHint') }}</p>
   </div>

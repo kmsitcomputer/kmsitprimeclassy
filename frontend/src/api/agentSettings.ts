@@ -3,18 +3,16 @@ import type { ApiEnvelope } from './client'
 
 /**
  * An Agen's own scoped payment-method settings — on/off (never the global
- * super_admin switch) plus, for manual/gateway types, their own credentials
- * and (for gateway types) which environment is active. Never visible or
- * writable by another agen.
+ * super_admin switch) plus, for manual types, their own bank account. Never
+ * visible or writable by another agen.
  */
 export interface AgentPaymentMethodRow {
   id: number
   code: string
   name: string
-  type: 'cod' | 'manual' | 'gateway'
+  type: 'cod' | 'manual'
   globally_active: boolean
   is_active: boolean
-  active_environment: 'sandbox' | 'production' | null
   configured: boolean | null
 }
 
@@ -28,12 +26,8 @@ export async function toggleAgentPaymentMethod(id: number) {
   return data.data
 }
 
-export async function setAgentPaymentMethodEnvironment(id: number, environment: 'sandbox' | 'production') {
-  await http.patch(`/agent/payment-methods/${id}/environment`, { environment })
-}
-
-export async function saveAgentPaymentMethodConfig(id: number, config: Record<string, string | string[]>, environment?: 'sandbox' | 'production') {
-  await http.put(`/agent/payment-methods/${id}/config`, { config, environment })
+export async function saveAgentPaymentMethodConfig(id: number, config: Record<string, string | string[]>) {
+  await http.put(`/agent/payment-methods/${id}/config`, { config })
 }
 
 /** An Agen's own scoped shipping-provider settings — on/off plus their own credentials/rate config. */

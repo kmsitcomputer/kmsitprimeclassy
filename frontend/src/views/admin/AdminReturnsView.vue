@@ -4,7 +4,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AgentPicker from '@/components/ui/AgentPicker.vue'
 import { useAuthStore } from '@/stores/auth'
-import { finalizeReturn, listReturns, reviewReturn, markReturnItemRefunded, type ReturnRequestRecord } from '@/api/returns'
+import { finalizeReturn, listReturns, reviewReturn, markReturnItemRefunded, scheduleReturnPickup, type ReturnRequestRecord } from '@/api/returns'
 import { formatRupiah, formatDate, skuLabel } from '@/utils/format'
 
 /** Admin dashboard: return list — item/quantity/amount/customer/order/reason/status/refund status. */
@@ -52,6 +52,39 @@ async function markRefunded(itemId: number) {
 }
 
 const DISPOSITION_LABEL: Record<string, string> = { pending_disposition: 'Menunggu disposisi final', restocked: 'Masuk Transit', damaged_confirmed: 'Rusak terkonfirmasi' }
+
+/* GAP-A: pickup scheduling — Admin/Agen/Super Admin set or change the WIB business date per return. */
+const SCHEDULABLE = new Set(['pending', 'approved'])
+const PICKUP_MIN_DATE = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+const scheduleDraft = ref<Record<number, string>>({})
+const scheduleBusyId = ref<number | null>(null)
+const scheduleErrors = ref<Record<number, string>>({})
+
+function schedulable(r: ReturnRequestRecord): boolean {
+  return (r.items ?? []).some((i) => SCHEDULABLE.has(i.status))
+}
+
+function scheduledDate(r: ReturnRequestRecord): string | null {
+  const date = (r.items ?? []).map((i) => i.pickup_scheduled_for ?? null).find(Boolean)
+  return date ?? null
+}
+
+async function saveSchedule(r: ReturnRequestRecord) {
+  const date = scheduleDraft.value[r.id]?.trim()
+  if (!date) return
+  scheduleBusyId.value = r.id
+  scheduleErrors.value[r.id] = ''
+  try {
+    await scheduleReturnPickup(r.id, date)
+    scheduleDraft.value[r.id] = ''
+    await load()
+  } catch (e) {
+    scheduleErrors.value[r.id] = 'Gagal menyimpan jadwal — silakan ulangi.'
+    void e
+  } finally {
+    scheduleBusyId.value = null
+  }
+}
 
 async function finalize(itemId: number) {
   busyId.value = itemId
@@ -102,6 +135,9 @@ async function finalize(itemId: number) {
               <span class="text-stone-600 dark:text-stone-300">
                 {{ item.product_name }}<span v-if="item.variation_label"> ({{ item.variation_label }})</span> &times;{{ item.quantity_returned }} — {{ formatRupiah(item.refund_amount) }}
                 <span class="block text-xs text-stone-400 dark:text-stone-500">{{ skuLabel(item.sku) }}</span>
+                <span v-if="item.pickup_scheduled_for" class="block text-xs font-medium text-brand-700 dark:text-brand-300">
+                  Jadwal pickup: {{ formatDate(item.pickup_scheduled_for) }}
+                </span>
               </span>
               <span class="flex items-center gap-2">
                 <span class="text-stone-400">{{ REFUND_LABEL[item.refund_status] }}</span>
@@ -121,6 +157,24 @@ async function finalize(itemId: number) {
             </div>
           </li>
         </ul>
+
+        <!-- GAP-A: set/ubah jadwal pickup untuk item yang masih menunggu penjemputan. -->
+        <div v-if="schedulable(r)" class="mt-2 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-2 text-xs dark:border-stone-800">
+          <span class="text-stone-500 dark:text-stone-400">
+            Jadwal pickup{{ scheduledDate(r) ? `: ${formatDate(scheduledDate(r)!)}` : ' belum diatur' }}
+          </span>
+          <input
+            v-model="scheduleDraft[r.id]"
+            type="date"
+            :min="PICKUP_MIN_DATE"
+            aria-label="Tanggal pickup"
+            class="rounded-lg border border-stone-200 px-2 py-1 text-xs text-stone-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
+          />
+          <AppButton size="sm" :disabled="scheduleBusyId === r.id || !scheduleDraft[r.id]" @click="saveSchedule(r)">
+            Simpan Jadwal
+          </AppButton>
+          <span v-if="scheduleErrors[r.id]" class="text-red-600 dark:text-red-400">{{ scheduleErrors[r.id] }}</span>
+        </div>
 
         <div v-if="r.status === 'requested' || r.status === 'under_review'" class="mt-2 flex gap-2 border-t border-stone-100 pt-2 dark:border-stone-800">
           <AppButton size="sm" :disabled="busyId === r.id" @click="review(r, true)">Setujui</AppButton>

@@ -6,6 +6,8 @@ use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
 use App\Models\Product;
 use App\Models\ProductVariation;
+use App\Models\RefundAttempt;
+use App\Models\RefundObligation;
 use App\Models\Shipment;
 use App\Models\StockOpname;
 use App\Models\StockRequest;
@@ -15,6 +17,8 @@ use App\Models\SubStockRequest;
 use App\Models\User;
 use App\Services\Order\OrderFulfillmentService;
 use App\Services\Order\OrderService;
+use App\Services\Refund\OrderFinancialSnapshotService;
+use App\Services\Refund\RefundLedgerService;
 use App\Services\Stock\StockOpnameService;
 use App\Services\Stock\StockRequestFulfillmentService;
 use App\Services\Stock\StockRequestProposalService;
@@ -107,6 +111,27 @@ $longOptions = [
     'dispatch-race-date:',
 ];
 
+/**
+ * Checked readiness write. A readiness file is the harness's only proof that this actor booted, so a
+ * silent failure turns into an opaque 15s timeout in the parent. Retry at most 3 times (a Windows
+ * antivirus/indexer can briefly lock a freshly created file), then report and exit nonzero BEFORE any
+ * business operation runs.
+ */
+function actorSignalReady(string $path, string $contents): void
+{
+    $lastError = 'empty readiness path';
+    for ($attempt = 1; $path !== '' && $attempt <= 3; $attempt++) {
+        $written = @file_put_contents($path, $contents);
+        if ($written !== false) {
+            return;
+        }
+        $lastError = (string) (error_get_last()['message'] ?? 'file_put_contents returned false');
+        usleep(50000);
+    }
+
+    fwrite(STDERR, sprintf("READINESS WRITE FAILED: %s (path=%s)\n", substr($lastError, 0, 300), $path));
+    exit(4);
+}
 $options = getopt('', $longOptions);
 
 if (! isset($options['role'], $options['runtime-dir'])) {
@@ -211,7 +236,7 @@ if (str_starts_with($role, 'checkout-')) {
     $destination = json_decode(base64_decode((string) $options['checkout-destination'], true), true, 512, JSON_THROW_ON_ERROR);
     $startedAt = microtime(true);
 
-    @file_put_contents($ready, 'ready');
+    actorSignalReady($ready, 'ready');
     $deadline = microtime(true) + 20;
     while (microtime(true) < $deadline && ! file_exists($release)) {
         usleep(100000);
@@ -265,7 +290,7 @@ if (str_starts_with($role, 'fulfillment-')) {
     $actorId = (int) ($isA ? $options['fulfillment-actor-a'] : $options['fulfillment-actor-b']);
     $startedAt = microtime(true);
 
-    @file_put_contents($ready, 'ready');
+    actorSignalReady($ready, 'ready');
     $deadline = microtime(true) + 20;
     while (microtime(true) < $deadline && ! file_exists($release)) {
         usleep(100000);
@@ -324,7 +349,7 @@ if (str_starts_with($role, 'sr-')) {
     $extra = isset($options['sr-extra']) ? (json_decode(base64_decode((string) $options['sr-extra']), true) ?? []) : [];
     $startedAt = microtime(true);
 
-    @file_put_contents($ready, 'ready');
+    actorSignalReady($ready, 'ready');
     $deadline = microtime(true) + 20;
     while (microtime(true) < $deadline && ! file_exists($release)) {
         usleep(100000);
@@ -716,6 +741,53 @@ if (str_starts_with($role, 'sr-')) {
                     return null;
                 });
                 break;
+            case 'order-dispatch':
+                // Two concurrent first-handover dispatches must serialise on the Order and
+                // create exactly one immutable financial snapshot.
+                $order = Order::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(OrderService::class)->updateStatus($order, 'dikirim', $actor);
+                $payload['order_status'] = $result->status;
+                break;
+            case 'refund-attempt-create':
+                // N-04: two independent reservations against the same obligation balance.
+                $obligation = RefundObligation::query()->findOrFail($subjectId);
+                $order = Order::withoutGlobalScopes()->findOrFail($obligation->order_id);
+                $result = app(RefundLedgerService::class)->createAttempt($order, $obligation, [
+                    'amount_cents' => (int) ($extra['amount_cents'] ?? 0),
+                    'method' => (string) ($extra['method'] ?? 'cash'),
+                    'idempotency_key' => (string) ($extra['key'] ?? 'race-attempt'),
+                ], $actor);
+                $payload['attempt_id'] = $result->id;
+                $payload['attempt_status'] = $result->status;
+                break;
+            case 'refund-attempt-complete':
+                // N-04: duplicate finalisation of the SAME attempt -> one payout, one paid effect.
+                $attempt = RefundAttempt::query()->findOrFail($subjectId);
+                $result = app(RefundLedgerService::class)->completeAttempt($attempt, $actor);
+                $payload['payout_id'] = $result->id;
+                $payload['payout_amount'] = (string) $result->amount;
+                break;
+            case 'refund-materialize':
+                // G-01: materialisation races serialise on the Order; only the cap is consumable.
+                $origin = RefundObligation::query()->findOrFail($subjectId);
+                $result = app(RefundLedgerService::class)->materializeDeferred(
+                    $origin,
+                    (int) ($extra['amount_cents'] ?? 0),
+                    $actor,
+                    (string) ($extra['key'] ?? 'race-materialize'),
+                );
+                $payload['child_obligation_id'] = $result->id;
+                break;
+            case 'refund-snapshot':
+                $order = Order::withoutGlobalScopes()->findOrFail($subjectId);
+                $result = app(OrderFinancialSnapshotService::class)->ensure(
+                    $order,
+                    OrderFinancialSnapshotService::TRIGGER_FIRST_HANDOVER,
+                    $actor,
+                );
+                $payload['snapshot_id'] = $result->id;
+                $payload['checksum'] = $result->allocation_checksum;
+                break;
             default:
                 throw new InvalidArgumentException('Unknown service race operation: '.$operation);
         }
@@ -746,7 +818,7 @@ if (str_starts_with($role, 'fc-')) {
     $actorId = (int) ($isFulfillment ? $options['fc-fulfillment-actor'] : $options['fc-cancellation-actor']);
     $startedAt = microtime(true);
 
-    @file_put_contents($ready, 'ready');
+    actorSignalReady($ready, 'ready');
     $deadline = microtime(true) + 20;
     while (microtime(true) < $deadline && ! file_exists($release)) {
         usleep(100000);
@@ -811,7 +883,7 @@ if (str_starts_with($role, 'to-')) {
     $actorId = (int) ($isTransfer ? $options['to-transfer-actor'] : $options['to-opname-actor']);
     $startedAt = microtime(true);
 
-    @file_put_contents($ready, 'ready');
+    actorSignalReady($ready, 'ready');
     $deadline = microtime(true) + 20;
     while (microtime(true) < $deadline && ! file_exists($release)) {
         usleep(100000);
@@ -862,7 +934,7 @@ if ($role === 'actor-a') {
         'timeline' => ['actor_a_begin', 'actor_a_locked'],
     ];
     @file_put_contents($actorAResult, json_encode($payload));
-    @file_put_contents($actorAReady, 'ready');
+    actorSignalReady($actorAReady, 'ready');
 
     $deadline = microtime(true) + 20;
     while (microtime(true) < $deadline && ! file_exists($releaseFile)) {
@@ -959,7 +1031,7 @@ if (str_starts_with($role, 'dispatch-race-')) {
     if ($isFirst) {
         DB::beginTransaction();
         Order::withoutGlobalScopes()->whereKey($orderId)->lockForUpdate()->firstOrFail();
-        @file_put_contents($ready, 'order-locked');
+        actorSignalReady($ready, 'order-locked');
         $deadline = microtime(true) + 25;
         while (microtime(true) < $deadline && ! file_exists($release)) {
             usleep(100000);
@@ -968,7 +1040,7 @@ if (str_starts_with($role, 'dispatch-race-')) {
         // Signal at the real competing lock attempt, while A still owns Order.
         DB::connection()->beforeExecuting(function ($query) use ($ready) {
             if (str_contains(strtolower($query), '`orders`') && str_contains(strtolower($query), 'for update')) {
-                @file_put_contents($ready, 'order-lock-attempt');
+                actorSignalReady($ready, 'order-lock-attempt');
             }
         });
     }

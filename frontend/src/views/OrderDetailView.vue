@@ -4,6 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
+import ConsentPanel from '@/components/dashboard/ConsentPanel.vue'
+import RefundRecipientPanel from '@/components/dashboard/RefundRecipientPanel.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
@@ -48,6 +51,21 @@ const showCancelForm = ref(false)
 const cancelError = ref<string | null>(null)
 
 const proofFile = ref<File | null>(null)
+// Shared transport state for the evidence uploads below (Universal Upload Standard): real axios
+// progress + safe cancellation. Uploading evidence is never approval — verification stays server-side.
+const uploadProgress = ref<number | null>(null)
+let uploadAbort: AbortController | null = null
+function beginUpload() {
+  uploadAbort = new AbortController()
+  uploadProgress.value = null
+  return { signal: uploadAbort.signal, onProgress: (p: number) => { uploadProgress.value = p } }
+}
+function cancelUpload() {
+  uploadAbort?.abort()
+}
+function isUploadCancelled(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === 'ERR_CANCELED'
+}
 const uploadingProof = ref(false)
 const paymentActionError = ref<string | null>(null)
 const verifying = ref(false)
@@ -383,10 +401,6 @@ async function downloadInvoicePdf() {
   }
 }
 
-function onDeliveryProofSelected(shipmentId: number, e: Event) {
-  deliveryProofFiles[shipmentId] = (e.target as HTMLInputElement).files?.[0] ?? null
-}
-
 async function pickupShipment(shipmentId: number) {
   shipmentBusy.value = shipmentId
   shipmentError.value = null
@@ -407,11 +421,11 @@ async function deliverShipment(shipmentId: number) {
   shipmentBusy.value = shipmentId
   shipmentError.value = null
   try {
-    const updated = await updateShipmentStatus(shipmentId, 'terkirim', proof)
+    const updated = await updateShipmentStatus(shipmentId, 'terkirim', proof, beginUpload())
     if (auth.user?.role === 'koordinator-kurir') await load()
     else order.value = updated
   } catch (e) {
-    shipmentError.value = e instanceof ApiError ? e.message : t('orders.errors.delivered')
+    shipmentError.value = isUploadCancelled(e) ? 'Upload dibatalkan.' : e instanceof ApiError ? e.message : t('orders.errors.delivered')
   } finally {
     shipmentBusy.value = null
   }
@@ -572,19 +586,15 @@ const submittingCodProof = ref(false)
 const confirmingCodProof = ref(false)
 const codRejectionReason = ref('')
 
-function onCodProofSelected(e: Event) {
-  codProofFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
-}
-
 async function uploadCodProof() {
   if (!codProofFile.value) return
   submittingCodProof.value = true
   paymentActionError.value = null
   try {
-    await submitCodPaymentProof(props.id, codProofFile.value, paidBy.value)
+    await submitCodPaymentProof(props.id, codProofFile.value, paidBy.value, beginUpload())
     await load()
   } catch (e) {
-    paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.codProofUpload')
+    paymentActionError.value = isUploadCancelled(e) ? 'Upload dibatalkan.' : e instanceof ApiError ? e.message : t('orders.errors.codProofUpload')
   } finally {
     submittingCodProof.value = false
   }
@@ -616,19 +626,15 @@ async function submitCancel() {
   }
 }
 
-function onProofSelected(e: Event) {
-  proofFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
-}
-
 async function uploadProof() {
   if (!proofFile.value) return
   uploadingProof.value = true
   paymentActionError.value = null
   try {
-    await submitBankTransferProof(props.id, proofFile.value, paidBy.value)
+    await submitBankTransferProof(props.id, proofFile.value, paidBy.value, beginUpload())
     await load()
   } catch (e) {
-    paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.transferProofUpload')
+    paymentActionError.value = isUploadCancelled(e) ? 'Upload dibatalkan.' : e instanceof ApiError ? e.message : t('orders.errors.transferProofUpload')
   } finally {
     uploadingProof.value = false
   }
@@ -882,10 +888,6 @@ function openReturnForm(item: OrderItem) {
   returnError.value = null
 }
 
-function onEvidenceSelected(e: Event) {
-  returnEvidence.value = (e.target as HTMLInputElement).files?.[0] ?? null
-}
-
 async function submitReturn(item: OrderItem) {
   if (!returnEvidence.value) {
     returnError.value = t('orders.returnReasonRequired')
@@ -1129,7 +1131,14 @@ async function submitReturn(item: OrderItem) {
                 <input v-model="returnForm.reason" type="text" :placeholder="t('orders.returnReason')" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
                 <div>
                   <label class="mb-1 block text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.evidencePhoto') }}</label>
-                  <input type="file" accept="image/*" class="block w-full text-xs" @change="onEvidenceSelected" />
+                  <PrimeFileUpload
+                    :model-value="returnEvidence ? [returnEvidence] : []"
+                    accept="image/jpeg,image/png,image/webp"
+                    capture="environment"
+                    :uploading="submittingReturn"
+                    :test-id="`return-evidence-upload-${item.id}`"
+                    @update:model-value="returnEvidence = $event[0] ?? null"
+                  />
                 </div>
                 <div class="flex gap-2">
                   <AppButton size="sm" :disabled="!returnForm.reason || !returnEvidence || submittingReturn" @click="submitReturn(item)">{{ t('orders.sendRequest') }}</AppButton>
@@ -1211,6 +1220,16 @@ async function submitReturn(item: OrderItem) {
         </div>
       </div>
 
+      <!-- REM-005: consent evidence for assisted returns. The panel renders nothing unless the viewer
+           may capture consent or consent already exists; the backend enforces every rule. -->
+      <ConsentPanel v-if="['super_admin', 'agen', 'admin', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? '')" :order-id="order.id" />
+
+      <!-- G17-D4: CRM-origin orders have no account to refund to — recipient + authorization evidence first. -->
+      <RefundRecipientPanel
+        v-if="order.buyer_origin === 'crm' && ['super_admin', 'agen', 'admin', 'keuangan', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? '')"
+        :order-id="order.id"
+      />
+
       <!-- Return status: only rendered once at least one return has been requested on this order. -->
       <div v-if="order.returns?.length" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <h2 class="mb-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{{ t('orders.returnStatus') }}</h2>
@@ -1265,7 +1284,16 @@ async function submitReturn(item: OrderItem) {
 
           <div v-else-if="group.status === 'dikirim' && canOperateShipmentGroup(group)" class="mt-2 space-y-2">
             <label class="block text-[11px] font-medium text-stone-500 dark:text-stone-400">{{ t('orders.deliveryProofRequired') }}</label>
-            <input type="file" accept="image/*" class="block w-full text-xs" @change="onDeliveryProofSelected(group.shipmentId, $event)" />
+            <PrimeFileUpload
+              :model-value="deliveryProofFiles[group.shipmentId] ? [deliveryProofFiles[group.shipmentId]!] : []"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              :uploading="shipmentBusy === group.shipmentId"
+              :progress="uploadProgress"
+              :test-id="`delivery-proof-upload-${group.shipmentId}`"
+              @update:model-value="deliveryProofFiles[group.shipmentId] = $event[0] ?? null"
+              @cancel="cancelUpload"
+            />
             <AppButton
               size="sm"
               :disabled="!deliveryProofFiles[group.shipmentId] || shipmentBusy === group.shipmentId"
@@ -1419,7 +1447,18 @@ async function submitReturn(item: OrderItem) {
               </select>
             </label>
             <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.uploadTransferProof') }}</label>
-            <input type="file" accept="image/*" class="block w-full text-xs" @change="onProofSelected" />
+            <PrimeFileUpload
+              :model-value="proofFile ? [proofFile] : []"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              :uploading="uploadingProof"
+              :progress="uploadProgress"
+              :error="paymentActionError"
+              test-id="transfer-proof-upload"
+              @update:model-value="proofFile = $event[0] ?? null"
+              @retry="uploadProof"
+              @cancel="cancelUpload"
+            />
             <AppButton class="mt-2" size="sm" :disabled="!proofFile || uploadingProof" @click="uploadProof">
               {{ uploadingProof ? t('orders.uploading') : t('orders.sendTransferProof') }}
             </AppButton>
@@ -1504,7 +1543,18 @@ async function submitReturn(item: OrderItem) {
               </select>
             </label>
               <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.uploadCodProof') }}</label>
-              <input type="file" accept="image/*" class="block w-full text-xs" @change="onCodProofSelected" />
+              <PrimeFileUpload
+                :model-value="codProofFile ? [codProofFile] : []"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                :uploading="submittingCodProof"
+                :progress="uploadProgress"
+                :error="paymentActionError"
+                test-id="cod-proof-upload"
+                @update:model-value="codProofFile = $event[0] ?? null"
+                @retry="uploadCodProof"
+                @cancel="cancelUpload"
+              />
               <AppButton class="mt-2" size="sm" :disabled="!codProofFile || submittingCodProof" @click="uploadCodProof">
                 {{ submittingCodProof ? t('orders.uploading') : t('orders.sendAndRequestConfirm') }}
               </AppButton>

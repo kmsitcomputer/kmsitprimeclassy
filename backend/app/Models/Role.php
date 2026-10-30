@@ -32,6 +32,12 @@ class Role extends Model
      *
      * @return list<string>
      */
+    /** Every stored slug that counts as a Sales seller (Sales-Kurir-Sub inherits all Sales rights). */
+    public static function sellerSlugs(): array
+    {
+        return ['sales', ...self::slugsFor(self::SALES_KURIR_SUB)];
+    }
+
     public static function slugsFor(string $canonical): array
     {
         return $canonical === self::SALES_KURIR_SUB ? [self::SALES_KURIR_SUB, self::LEGACY_SALES_KURIR] : [$canonical];

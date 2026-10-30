@@ -279,7 +279,7 @@ class DevSchemaForeignKeyRestorationDdlTest extends TestCase
 
         $this->assertSame($before, $this->foreignKeyCount());
         $row = DB::selectOne(
-            'select delete_rule from information_schema.referential_constraints where constraint_schema = ? and table_name = ? and constraint_name = ?',
+            'select delete_rule as delete_rule from information_schema.referential_constraints where constraint_schema = ? and table_name = ? and constraint_name = ?',
             [DB::getDatabaseName(), $table, $name]
         );
         $this->assertSame('CASCADE', strtoupper((string) $row->delete_rule));
@@ -430,7 +430,7 @@ class DevSchemaForeignKeyRestorationDdlTest extends TestCase
     private function constraintRow(string $table, string $constraint): ?object
     {
         return DB::selectOne(
-            'select r.delete_rule, r.update_rule, k.referenced_table_name
+            'select r.delete_rule as delete_rule, r.update_rule as update_rule, k.referenced_table_name as referenced_table_name
                from information_schema.referential_constraints r
                join information_schema.key_column_usage k
                  on k.constraint_schema = r.constraint_schema

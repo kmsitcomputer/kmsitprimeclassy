@@ -1,5 +1,7 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
+import { uploadConfig } from './payments'
+import type { UploadOptions } from './payments'
 import type { Order } from './types'
 
 /**
@@ -9,15 +11,13 @@ import type { Order } from './types'
  * never the order as a whole. Marking 'terkirim' as a kurir requires a
  * delivery proof photo — the backend enforces this regardless of what's sent.
  */
-export async function updateShipmentStatus(shipmentId: number, status: 'dikirim' | 'terkirim', proof?: File) {
+export async function updateShipmentStatus(shipmentId: number, status: 'dikirim' | 'terkirim', proof?: File, opts?: UploadOptions) {
   const form = new FormData()
   form.append('status', status)
   if (proof) form.append('proof', proof)
   form.append('_method', 'PATCH')
 
-  const { data } = await http.post<ApiEnvelope<Order>>(`/shipments/${shipmentId}/status`, form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
+  const { data } = await http.post<ApiEnvelope<Order>>(`/shipments/${shipmentId}/status`, form, uploadConfig(opts))
   return data.data
 }
 
@@ -32,15 +32,14 @@ export async function updateShipmentItemStatus(
   itemId: number,
   status: 'dikirim' | 'terkirim',
   proof?: File,
+  opts?: UploadOptions,
 ) {
   const form = new FormData()
   form.append('status', status)
   if (proof) form.append('proof', proof)
   form.append('_method', 'PATCH')
 
-  const { data } = await http.post<ApiEnvelope<Order>>(`/shipments/${shipmentId}/items/${itemId}/status`, form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
+  const { data } = await http.post<ApiEnvelope<Order>>(`/shipments/${shipmentId}/items/${itemId}/status`, form, uploadConfig(opts))
   return data.data
 }
 

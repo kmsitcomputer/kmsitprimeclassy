@@ -20,19 +20,6 @@ class PaymentGatewayFields
                 'account_name' => ['required', 'string', 'max:100'],
                 'account_number' => ['required', 'string', 'max:40'],
             ],
-            'xendit' => [
-                'secret_key' => ['required', 'string', 'max:255'],
-                'callback_token' => ['required', 'string', 'max:255'],
-            ],
-            'tripay' => [
-                'merchant_code' => ['required', 'string', 'max:100'],
-                'private_key' => ['required', 'string', 'max:255'],
-                'api_key' => ['required', 'string', 'max:255'],
-            ],
-            'stripe' => [
-                'secret_key' => ['required', 'string', 'max:255'],
-                'webhook_secret' => ['required', 'string', 'max:255'],
-            ],
         ];
     }
 

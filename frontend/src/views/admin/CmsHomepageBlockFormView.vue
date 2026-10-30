@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
@@ -57,7 +58,6 @@ const removeImage = ref(false)
 const existingImageUrl = ref<string | null>(null)
 const localPreview = ref<string | null>(null)
 const isDragging = ref(false)
-const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const previewUrl = computed(() => localPreview.value ?? (removeImage.value ? null : existingImageUrl.value))
 
@@ -106,15 +106,13 @@ function stageFile(file: File) {
   removeImage.value = false
 }
 
-function onFileChange(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (file) stageFile(file)
-}
-
-function onDrop(e: DragEvent) {
-  isDragging.value = false
-  const file = e.dataTransfer?.files?.[0]
-  if (file) stageFile(file)
+function onImageChange(files: File[]) {
+  if (files[0]) stageFile(files[0])
+  else {
+    if (localPreview.value) URL.revokeObjectURL(localPreview.value)
+    imageFile.value = null
+    localPreview.value = null
+  }
 }
 
 function clearImage() {
@@ -122,7 +120,6 @@ function clearImage() {
   imageFile.value = null
   localPreview.value = null
   removeImage.value = true
-  if (fileInputRef.value) fileInputRef.value.value = ''
 }
 
 function buildContent(): Record<string, unknown> {
@@ -310,35 +307,16 @@ async function submit() {
           </div>
 
           <div v-if="IMAGE_TYPES.has(form.type)" class="space-y-2">
-            <label class="block text-sm font-medium text-stone-700 dark:text-stone-200">Gambar</label>
-            <div
-              class="relative flex min-h-40 flex-col items-center justify-center rounded-xl border-2 border-dashed p-4 transition"
-              :class="isDragging ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30' : 'border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900'"
-              @dragover.prevent="isDragging = true"
-              @dragleave.prevent="isDragging = false"
-              @drop.prevent="onDrop"
-            >
-              <template v-if="previewUrl">
-                <img :src="previewUrl" alt="Gambar block" class="max-h-48 rounded-lg object-contain" />
-                <div class="mt-3 flex gap-2">
-                  <button type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-stone-200 px-3 py-1.5 text-sm font-medium text-stone-800 hover:bg-stone-300 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700" @click="fileInputRef?.click()">
-                    <AppIcon name="plus" :size="16" /> Ganti
-                  </button>
-                  <button type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300" @click="clearImage">
-                    <AppIcon name="trash" :size="16" /> Hapus
-                  </button>
-                </div>
-              </template>
-              <template v-else>
-                <AppIcon name="box" :size="32" class="text-stone-400" />
-                <p class="mt-2 text-center text-sm text-stone-500 dark:text-stone-400">
-                  Seret gambar ke sini, atau
-                  <button type="button" class="font-medium text-brand-600 hover:underline dark:text-brand-400" @click="fileInputRef?.click()">pilih file</button>
-                </p>
-                <p class="mt-1 text-xs text-stone-400">JPG/PNG/WEBP, maks 2MB</p>
-              </template>
-            </div>
-            <input ref="fileInputRef" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" @change="onFileChange" />
+            <PrimeFileUpload
+              :model-value="imageFile ? [imageFile] : []"
+              label="Gambar"
+              accept="image/jpeg,image/png,image/webp"
+              :max-size-mb="2"
+              :existing="existingImageUrl && !removeImage && !imageFile ? [{ url: existingImageUrl, name: 'Gambar saat ini' }] : []"
+              test-id="cms-block-image-upload"
+              @update:model-value="onImageChange"
+            />
+            <button v-if="existingImageUrl && !removeImage && !imageFile" type="button" class="text-xs font-medium text-red-700 hover:underline" @click="clearImage">Hapus gambar</button>
             <p v-if="errors.image" class="text-xs text-red-600">{{ errors.image[0] }}</p>
           </div>
         </div>

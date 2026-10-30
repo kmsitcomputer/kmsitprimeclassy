@@ -11,7 +11,7 @@ use App\Services\Logging\ActivityLogger;
 use Illuminate\Http\Request;
 
 /**
- * Payment method settings (cod/manual/gateway) for one Agen's own branch —
+ * Payment method settings (cod/manual) for one Agen's own branch —
  * reachable by the Agen themselves AND by that branch's own Admin (never
  * another branch's), same "own agent_id, never own id" scoping pattern as
  * StockController::resolveViewedAgentId(): an agen's own agent_id equals
@@ -22,10 +22,9 @@ use Illuminate\Http\Request;
  * admin) as the audit-log causer, never the resolved agent id.
  *   - on/off override (never widens what super_admin's global
  *     PaymentMethod::is_active already allows, only narrows it further)
- *   - for manual/gateway: their own credentials (bank account, or
- *     Xendit/Tripay/Stripe API keys) — never shared with or visible to
+ *   - for manual: their own bank account — never shared with or visible to
  *     another agen or to super_admin (config is always $hidden).
- *   - for gateway: which environment (sandbox/production) is active.
+ *   External payment gateways are not supported (removed by Owner decision).
  */
 class AgentPaymentMethodController extends Controller
 {
@@ -33,7 +32,7 @@ class AgentPaymentMethodController extends Controller
     {
         $agentId = $request->user()->agent_id;
 
-        $methods = PaymentMethod::query()->orderBy('id')->get();
+        $methods = PaymentMethod::query()->where('type', '!=', 'gateway')->orderBy('id')->get();
         $overrides = AgentPaymentMethodSetting::query()->where('agent_id', $agentId)->get()->keyBy('payment_method_id');
         $configuredMethodIds = AgentPaymentGatewayConfig::query()
             ->where('agent_id', $agentId)->pluck('payment_method_id')->unique();
@@ -48,7 +47,6 @@ class AgentPaymentMethodController extends Controller
                 'type' => $method->type,
                 'globally_active' => $method->is_active,
                 'is_active' => $override?->is_active ?? true,
-                'active_environment' => $method->type === 'gateway' ? ($override?->active_environment ?? 'sandbox') : null,
                 'configured' => $method->type === 'cod' ? null : $configuredMethodIds->contains($method->id),
             ];
         })->values());
@@ -56,6 +54,13 @@ class AgentPaymentMethodController extends Controller
 
     public function toggle(Request $request, PaymentMethod $method)
     {
+        // External gateways were removed by Owner decision. Their historical rows stay readable
+        // in the DB, but they are never mutable through this surface (PAY-01): a direct-ID call
+        // must not re-activate or otherwise rewrite a legacy gateway method.
+        if (! in_array($method->type, ['manual', 'cod'], true)) {
+            abort(403, __('messages.system.unauthorized_action'));
+        }
+
         $actor = $request->user();
         $agentId = $actor->agent_id;
         $current = AgentPaymentMethodSetting::query()
@@ -81,31 +86,9 @@ class AgentPaymentMethodController extends Controller
         ], __('messages.payment.gateway_toggled'));
     }
 
-    public function setEnvironment(Request $request, PaymentMethod $method)
-    {
-        if ($method->type !== 'gateway') {
-            abort(403, __('messages.system.unauthorized_action'));
-        }
-
-        $validated = $request->validate(['environment' => ['required', 'in:sandbox,production']]);
-        $actor = $request->user();
-        $agentId = $actor->agent_id;
-
-        $setting = AgentPaymentMethodSetting::query()->updateOrCreate(
-            ['agent_id' => $agentId, 'payment_method_id' => $method->id],
-            ['active_environment' => $validated['environment']],
-        );
-
-        ActivityLogger::log($actor->id, $setting, 'agent_payment_method.environment_changed', null, [
-            'payment_method' => $method->code, 'active_environment' => $validated['environment'], 'actor_role' => $actor->role?->slug,
-        ]);
-
-        return $this->ok(null, __('messages.payment.gateway_environment_updated'));
-    }
-
     public function updateConfig(UpdateAgentPaymentGatewayConfigRequest $request, PaymentMethod $method)
     {
-        if (! in_array($method->type, ['manual', 'gateway'], true)) {
+        if ($method->type !== 'manual') {
             abort(403, __('messages.system.unauthorized_action'));
         }
 

@@ -22,7 +22,28 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Dedicated, independently-keyed limiters: an unnamed `throttle:N,M` shares ONE per-user bucket across every route that
+        // uses it, so confirm calls would silently eat the request budget (and vice versa).
+        \Illuminate\Support\Facades\RateLimiter::for('wa-number-request', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 6)->by('wa-number-request:'.($r->user()?->id ?? $r->ip())));
+        \Illuminate\Support\Facades\RateLimiter::for('wa-number-confirm', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 12)->by('wa-number-confirm:'.($r->user()?->id ?? $r->ip())));
+
+        \Illuminate\Support\Facades\RateLimiter::for('agent-wa-device', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinute(12)->by('agent-wa-device:'.($r->user()?->id ?? $r->ip())));
+
+        // Owner 2026-10-29: only a number the account proved through a `whatsapp_number` challenge counts as verified.
+        $this->app->bindIf(
+            \App\Services\WhatsApp\VerifiedWhatsAppNumberResolver::class,
+            \App\Services\WhatsApp\VerifiedAccountNumberResolver::class,
+        );
+
+        // Dashboard SMTP (Super Admin) overrides the environment mailer only while it is switched ON and complete.
+        $this->app->make(\App\Services\Mail\SmtpSettings::class)->applyRuntime();
+
         User::observe(UserObserver::class);
+
+        // WhatsApp transactional notifications: inert unless the table exists, the gateway is enabled and the event is on.
+        \App\Models\Order::observe(\App\Observers\WhatsAppLifecycleObserver::class);
+        \App\Models\ReturnRequest::observe(\App\Observers\WhatsAppLifecycleObserver::class);
+        \App\Models\RefundPayout::observe(\App\Observers\WhatsAppLifecycleObserver::class);
 
         /**
          * "SUPERADMIN: dapat mengubah konfigurasi website, payment gateway,

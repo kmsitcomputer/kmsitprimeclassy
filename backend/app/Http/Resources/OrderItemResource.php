@@ -79,7 +79,7 @@ class OrderItemResource extends JsonResource
                 $this->agent_fee_amount
             ),
             'sales_fee_amount' => $this->when(
-                $request->user()?->isRole('super_admin', 'agen', 'sales', 'admin', 'keuangan') ?? false,
+                $request->user()?->isRole('super_admin', 'agen', 'sales', 'sales-kurir-sub', 'admin', 'keuangan') ?? false,
                 $this->sales_fee_amount
             ),
             'courier_fee_amount' => $this->when(

@@ -12,7 +12,7 @@ class OrderItem extends Model
         'order_id', 'shipment_id', 'split_from_order_item_id', 'idempotency_key', 'request_fingerprint', 'product_id', 'product_variation_id', 'stock_source', 'sub_location_id', 'additional_payment_id',
         'product_name_snapshot', 'variation_label_snapshot', 'sku_snapshot',
         'unit_price_snapshot', 'agent_fee_amount', 'sales_fee_amount', 'courier_fee_amount', 'subtotal_snapshot',
-        'original_quantity', 'fulfilled_quantity',
+        'original_quantity', 'fulfilled_quantity', 'handed_over_at',
         'cancelled_quantity', 'returned_quantity', 'refund_quantity', 'additional_quantity',
         'requested_delivery_date', 'status',
     ];
@@ -55,6 +55,7 @@ class OrderItem extends Model
             'courier_fee_amount' => 'decimal:2',
             'subtotal_snapshot' => 'decimal:2',
             'requested_delivery_date' => 'date',
+            'handed_over_at' => 'datetime',
         ];
     }
 
@@ -108,5 +109,10 @@ class OrderItem extends Model
     public function returnItems(): HasMany
     {
         return $this->hasMany(ReturnItem::class);
+    }
+
+    public function financialBasis(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(OrderItemFinancialBasis::class);
     }
 }

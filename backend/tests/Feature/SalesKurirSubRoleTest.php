@@ -104,7 +104,10 @@ class SalesKurirSubRoleTest extends TestCase
     {
         [$agen, $korsal] = $this->branch();
         $service = app(UserManagementService::class);
-        $data = fn () => ['name' => 'Sub', 'email' => uniqid().'@example.com', 'phone' => '0812', 'password' => 'password123', 'korsal_id' => $korsal->id];
+        // The closure is called three times in this test; a fixed phone violated the
+        // (intentionally preserved) users_phone_unique index. hrtime() keeps the value numeric and
+        // distinct per call without touching production uniqueness rules.
+        $data = fn () => ['name' => 'Sub', 'email' => uniqid().'@example.com', 'phone' => '0812'.substr((string) hrtime(true), -6), 'password' => 'password123', 'korsal_id' => $korsal->id];
 
         $byAgen = $service->create($agen, 'sales-kurir-sub', $data());
         $byKorsal = $service->create($korsal, 'sales-kurir-sub', ['korsal_id' => $korsal->id] + $data());

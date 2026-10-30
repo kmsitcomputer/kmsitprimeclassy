@@ -302,4 +302,26 @@ class ReturnSystemTest extends TestCase
 
         $this->actingAs($otherKonsumen)->getJson("/api/v1/orders/{$order->id}")->assertStatus(403);
     }
+
+    public function test_admin_returns_list_can_be_narrowed_to_awaiting_review_without_leaving_the_branch(): void
+    {
+        ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        ['order' => $order, 'item' => $item] = $this->makeDeliveredOrder($agen, $admin, $konsumen, price: 80000, qty: 4, stock: 10);
+
+        $returnId = $this->actingAs($konsumen)->post("/api/v1/orders/{$order->id}/returns", [
+            'reason' => 'Salah kirim', 'items' => [['order_item_id' => $item->id, 'quantity' => 1]],
+            'evidence' => UploadedFile::fake()->image('proof.jpg'),
+        ])->json('data.id');
+
+        $awaiting = $this->actingAs($admin)->getJson('/api/v1/admin/returns?status=requested,under_review');
+        $this->assertSame(1, $awaiting->json('meta.total'));
+
+        $this->actingAs($admin)->patchJson("/api/v1/admin/returns/{$returnId}/review", ['approved' => true])->assertOk();
+        $this->assertSame(0, $this->actingAs($admin)->getJson('/api/v1/admin/returns?status=requested,under_review')->json('meta.total'));
+        $this->assertSame(1, $this->actingAs($admin)->getJson('/api/v1/admin/returns?status=approved')->json('meta.total'));
+
+        // Another branch's admin never sees it, whatever the filter.
+        ['admin' => $otherAdmin] = $this->makeAgentBranch();
+        $this->assertSame(0, $this->actingAs($otherAdmin)->getJson('/api/v1/admin/returns?status=approved')->json('meta.total'));
+    }
 }

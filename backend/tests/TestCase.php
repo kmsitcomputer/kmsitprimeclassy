@@ -26,4 +26,18 @@ abstract class TestCase extends BaseTestCase
         // touches an authenticated or session-backed route needs one.
         $this->withHeader('Referer', config('app.url'));
     }
+
+    /**
+     * A deterministic FUTURE date for fixtures that must satisfy the application's
+     * `after_or_equal:today` rules (order delivery date, item reschedule, report ranges).
+     *
+     * Historical hard-coded literals turn into calendar time bombs: the same suite started
+     * failing the day the fixture date fell into the past. Offsets are relative to the day the
+     * test runs, and the value is stable within a single test run, so assertions comparing the
+     * stored date against the fixture date keep working.
+     */
+    protected function futureDate(int $daysFromToday): string
+    {
+        return \Illuminate\Support\Carbon::today()->addDays($daysFromToday)->toDateString();
+    }
 }

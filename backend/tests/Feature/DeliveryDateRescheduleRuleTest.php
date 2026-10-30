@@ -163,14 +163,14 @@ class DeliveryDateRescheduleRuleTest extends TestCase
     {
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, $this->futureDate(20)));
         $this->setDeliveryMethod($order, self::COURIER_ONLINE);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
-        $this->assertSame('2026-12-01', $item->requested_delivery_date?->toDateString());
+        $this->assertSame($this->futureDate(20), $item->requested_delivery_date?->toDateString());
 
-        $this->reschedule($admin, $order, $item, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $item, $this->futureDate(25))->assertOk();
 
-        $this->assertSame('2026-12-05', $item->fresh()->requested_delivery_date?->toDateString());
+        $this->assertSame($this->futureDate(25), $item->fresh()->requested_delivery_date?->toDateString());
         $this->assertDatabaseHas('activity_logs', ['event' => 'order_item.delivery_rescheduled']);
     }
 
@@ -183,17 +183,17 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         $productB = $this->product($agen, 'B');
         // `delivery_date` is order-level at checkout, so per-item dates only diverge through a
         // reschedule: item B is moved onto 2026-12-05 first, giving that date its own shipment.
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, '2026-12-01', $productB, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, $this->futureDate(20), $productB, $this->futureDate(20)));
         $this->setDeliveryMethod($order, self::COURIER_ONLINE);
 
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
-        $this->reschedule($admin, $order, $itemB, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $itemB, $this->futureDate(25))->assertOk();
 
         $shipmentB = Shipment::where('order_id', $order->id)->whereKey($itemB->fresh()->shipment_id)->firstOrFail();
         $shipmentsBefore = Shipment::where('order_id', $order->id)->count();
 
-        $this->reschedule($admin, $order, $itemA, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $itemA, $this->futureDate(25))->assertOk();
 
         $this->assertSame($shipmentB->id, $itemA->fresh()->shipment_id, 'the moved item JOINS the existing shipment for the new date');
         $this->assertSame(
@@ -223,7 +223,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         $productB = $this->product($agen, 'B');
         // Both lines carry the order's delivery date, so under the LOCKED grouping rule they
         // start on ONE canonical shipment.
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, '2026-12-01', $productB, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, $this->futureDate(20), $productB, $this->futureDate(20)));
         $this->setDeliveryMethod($order, self::COURIER_ONLINE);
 
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
@@ -232,7 +232,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         $this->assertSame($sharedShipmentId, $itemB->shipment_id, 'precondition: one shared canonical shipment');
 
         // No shipment exists for 2026-12-05, so moving A there gives it its own canonical shipment.
-        $this->reschedule($admin, $order, $itemA, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $itemA, $this->futureDate(25))->assertOk();
 
         $itemA = $itemA->fresh();
         $this->assertNotSame($sharedShipmentId, (int) $itemA->shipment_id, 'A left onto its own canonical shipment');
@@ -241,7 +241,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         $this->assertSame(
             1,
             OrderItem::where('order_id', $order->id)
-                ->whereDate('requested_delivery_date', '2026-12-05')
+                ->whereDate('requested_delivery_date', $this->futureDate(25))
                 ->where('shipment_id', $itemA->shipment_id)->count(),
             'the new date has its own canonical shipment',
         );
@@ -257,15 +257,15 @@ class DeliveryDateRescheduleRuleTest extends TestCase
     {
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, $this->futureDate(20)));
         $this->setDeliveryMethod($order, Shipment::PROVIDER_EXPEDITION);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
-        $this->reschedule($admin, $order, $item, '2026-12-05')
+        $this->reschedule($admin, $order, $item, $this->futureDate(25))
             ->assertUnprocessable()
             ->assertJsonPath('message', __('messages.fulfillment.reschedule_courier_online_only', ['method' => 'expedition']));
 
-        $this->assertSame('2026-12-01', $item->fresh()->requested_delivery_date?->toDateString(), 'date unchanged');
+        $this->assertSame($this->futureDate(20), $item->fresh()->requested_delivery_date?->toDateString(), 'date unchanged');
         $this->assertSame('rajaongkir', Shipment::whereKey($item->shipment_id)->value('shipping_provider_code'), 'never converted');
         $this->assertDatabaseMissing('activity_logs', ['event' => 'order_item.delivery_rescheduled']);
     }
@@ -276,15 +276,15 @@ class DeliveryDateRescheduleRuleTest extends TestCase
     {
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, $this->futureDate(20)));
         $this->setDeliveryMethod($order, Shipment::PROVIDER_PICKUP);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
-        $this->reschedule($admin, $order, $item, '2026-12-05')
+        $this->reschedule($admin, $order, $item, $this->futureDate(25))
             ->assertUnprocessable()
             ->assertJsonPath('message', __('messages.fulfillment.reschedule_courier_online_only', ['method' => 'pickup']));
 
-        $this->assertSame('2026-12-01', $item->fresh()->requested_delivery_date?->toDateString());
+        $this->assertSame($this->futureDate(20), $item->fresh()->requested_delivery_date?->toDateString());
         $this->assertSame('pickup', Shipment::whereKey($item->shipment_id)->value('shipping_provider_code'));
     }
 
@@ -300,18 +300,18 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         // 'free'/'internal' on a STANDARD shipment are deliberately covered too: eligibility is an
         // allowlist, so an unrecognised provider is never treated as reschedulable.
         foreach (['rajaongkir', 'pickup', 'free', 'internal'] as $method) {
-            $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($this->product($agen, 'P'.substr($method, 0, 2)), '2026-12-01'));
+            $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($this->product($agen, 'P'.substr($method, 0, 2)), $this->futureDate(20)));
             $this->setDeliveryMethod($order, $method);
             $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
             try {
-                $service->rescheduleItemDeliveryDate($item, '2026-12-05', $admin, 'bypass attempt');
+                $service->rescheduleItemDeliveryDate($item, $this->futureDate(25), $admin, 'bypass attempt');
                 $this->fail('Shipping method '.$method.' must not be re-datable');
             } catch (\App\Exceptions\ApiException $e) {
                 $this->assertSame(422, $e->status(), 'service call refused for '.$method);
             }
 
-            $this->assertSame('2026-12-01', $item->fresh()->requested_delivery_date?->toDateString(), 'date unchanged for '.$method);
+            $this->assertSame($this->futureDate(20), $item->fresh()->requested_delivery_date?->toDateString(), 'date unchanged for '.$method);
         }
     }
 
@@ -322,7 +322,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->branch();
         $sub = User::factory()->salesKurirSub()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
         $product = $this->product($agen, 'A');
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, $this->futureDate(20)));
         // A self_sub shipment carries the neutral 'free' provider code in this domain — the
         // canonical delivery_mode decides, never the provider code.
         $this->setDeliveryMethod($order, 'free', Shipment::DELIVERY_MODE_SELF_SUB, $sub->id);
@@ -330,9 +330,9 @@ class DeliveryDateRescheduleRuleTest extends TestCase
 
         $this->assertSame(Shipment::DELIVERY_MODE_SELF_SUB, Shipment::whereKey($item->shipment_id)->value('delivery_mode'));
 
-        $this->reschedule($admin, $order, $item, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $item, $this->futureDate(25))->assertOk();
 
-        $this->assertSame('2026-12-05', $item->fresh()->requested_delivery_date?->toDateString());
+        $this->assertSame($this->futureDate(25), $item->fresh()->requested_delivery_date?->toDateString());
         $this->assertDatabaseHas('activity_logs', ['event' => 'order_item.delivery_rescheduled']);
     }
 
@@ -343,7 +343,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
         $sub = User::factory()->salesKurirSub()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($product, $this->futureDate(20)));
         $this->setDeliveryMethod($order, 'free', Shipment::DELIVERY_MODE_SELF_SUB, $sub->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
         $shipmentBefore = Shipment::whereKey($item->shipment_id)->firstOrFail();
@@ -352,14 +352,14 @@ class DeliveryDateRescheduleRuleTest extends TestCase
 
         // $quantity MOVES onto the new date: the child carries it, the parent keeps the remainder.
         $child = app(\App\Services\Order\OrderFulfillmentService::class)
-            ->rescheduleItemDeliveryDate($item->fresh(), '2026-12-05', $admin, 'Sub split', 1);
+            ->rescheduleItemDeliveryDate($item->fresh(), $this->futureDate(25), $admin, 'Sub split', 1);
 
         $item->refresh();
         $this->assertSame($preSplitQty - 1, (int) $item->fulfilled_quantity, 'parent keeps the retained quantity');
         $this->assertSame(1, (int) $child->fulfilled_quantity, 'child carries the moved quantity');
         $this->assertSame($preSplitQty, (int) $item->fulfilled_quantity + (int) $child->fulfilled_quantity, 'split conserves the original quantity');
         $this->assertSame($item->id, $child->split_from_order_item_id);
-        $this->assertSame('2026-12-05', $child->requested_delivery_date?->toDateString());
+        $this->assertSame($this->futureDate(25), $child->requested_delivery_date?->toDateString());
 
         // The self_delivery path must survive the split — the child is still Sub/self_delivered,
         // never converted into a normal courier shipment.
@@ -389,7 +389,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
             $made[$label] = $this->product($agen, $label);
         }
         $order = $this->placeOrder($konsumen, $agen, array_map(
-            fn (Product $p) => ['product_id' => $p->id, 'date' => '2026-10-10'],
+            fn (Product $p) => ['product_id' => $p->id, 'date' => $this->futureDate(3)],
             array_values($made),
         ));
         $this->setDeliveryMethod($order, self::COURIER_ONLINE);
@@ -424,18 +424,18 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         };
 
         // All six start on 10 Oct => one canonical shipment.
-        $assertCanonical(['2026-10-10']);
+        $assertCanonical([$this->futureDate(3)]);
 
         // Spread onto five distinct dates: 10 (E,F), 15 (A), 17 (B), 20 (C), 25 (D).
-        $service->rescheduleItemDeliveryDate($byId()[$made['A']->id], '2026-10-15', $admin, 'Spread A');
-        $service->rescheduleItemDeliveryDate($byId()[$made['B']->id], '2026-10-17', $admin, 'Spread B');
-        $service->rescheduleItemDeliveryDate($byId()[$made['C']->id], '2026-10-20', $admin, 'Spread C');
-        $service->rescheduleItemDeliveryDate($byId()[$made['D']->id], '2026-10-25', $admin, 'Spread D');
-        $assertCanonical(['2026-10-10', '2026-10-15', '2026-10-17', '2026-10-20', '2026-10-25']);
+        $service->rescheduleItemDeliveryDate($byId()[$made['A']->id], $this->futureDate(5), $admin, 'Spread A');
+        $service->rescheduleItemDeliveryDate($byId()[$made['B']->id], $this->futureDate(7), $admin, 'Spread B');
+        $service->rescheduleItemDeliveryDate($byId()[$made['C']->id], $this->futureDate(10), $admin, 'Spread C');
+        $service->rescheduleItemDeliveryDate($byId()[$made['D']->id], $this->futureDate(14), $admin, 'Spread D');
+        $assertCanonical([$this->futureDate(3), $this->futureDate(5), $this->futureDate(7), $this->futureDate(10), $this->futureDate(14)]);
 
         // C: 20 -> 17 joins B's shipment; the emptied 20-Oct unit disappears.
-        $service->rescheduleItemDeliveryDate($byId()[$made['C']->id], '2026-10-17', $admin, 'Join B');
-        $assertCanonical(['2026-10-10', '2026-10-15', '2026-10-17', '2026-10-25']);
+        $service->rescheduleItemDeliveryDate($byId()[$made['C']->id], $this->futureDate(7), $admin, 'Join B');
+        $assertCanonical([$this->futureDate(3), $this->futureDate(5), $this->futureDate(7), $this->futureDate(14)]);
         $this->assertSame(
             $byId()[$made['B']->id]->shipment_id,
             $byId()[$made['C']->id]->shipment_id,
@@ -443,24 +443,24 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         );
 
         // Reverse: B: 17 -> 10 rejoins E and F; the 17-Oct unit keeps only C.
-        $service->rescheduleItemDeliveryDate($byId()[$made['B']->id], '2026-10-10', $admin, 'Reverse B');
-        $assertCanonical(['2026-10-10', '2026-10-15', '2026-10-17', '2026-10-25']);
+        $service->rescheduleItemDeliveryDate($byId()[$made['B']->id], $this->futureDate(3), $admin, 'Reverse B');
+        $assertCanonical([$this->futureDate(3), $this->futureDate(5), $this->futureDate(7), $this->futureDate(14)]);
         $this->assertSame(
             $byId()[$made['E']->id]->shipment_id,
             $byId()[$made['B']->id]->shipment_id,
         );
 
         // D: 25 -> 10; the 25-Oct unit vanishes entirely.
-        $service->rescheduleItemDeliveryDate($byId()[$made['D']->id], '2026-10-10', $admin, 'Reverse D');
-        $assertCanonical(['2026-10-10', '2026-10-15', '2026-10-17']);
+        $service->rescheduleItemDeliveryDate($byId()[$made['D']->id], $this->futureDate(3), $admin, 'Reverse D');
+        $assertCanonical([$this->futureDate(3), $this->futureDate(5), $this->futureDate(7)]);
 
         // Finally A: 15 -> 10. Final state: E,F,B,D,A on the 10th and C alone on the 17th.
-        $service->rescheduleItemDeliveryDate($byId()[$made['A']->id], '2026-10-10', $admin, 'Reverse A');
-        $assertCanonical(['2026-10-10', '2026-10-17']);
+        $service->rescheduleItemDeliveryDate($byId()[$made['A']->id], $this->futureDate(3), $admin, 'Reverse A');
+        $assertCanonical([$this->futureDate(3), $this->futureDate(7)]);
         $this->assertSame(5, OrderItem::where('order_id', $order->id)
-            ->whereDate('requested_delivery_date', '2026-10-10')->count());
+            ->whereDate('requested_delivery_date', $this->futureDate(3))->count());
         $this->assertSame(1, OrderItem::where('order_id', $order->id)
-            ->whereDate('requested_delivery_date', '2026-10-17')->count());
+            ->whereDate('requested_delivery_date', $this->futureDate(7))->count());
     }
 
     public function test_order_projection_exposes_the_server_derived_reschedule_capability(): void
@@ -478,7 +478,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         ];
 
         foreach ($expected as [$code, $mode, $allowed]) {
-            $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($this->product($agen, 'X'.substr((string) $code, 0, 2)), '2026-12-01'));
+            $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($this->product($agen, 'X'.substr((string) $code, 0, 2)), $this->futureDate(20)));
             $this->setDeliveryMethod($order, $code, $mode, $mode === Shipment::DELIVERY_MODE_SELF_SUB ? $agen->id : null);
 
             $detail = $this->actingAs($admin)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
@@ -495,8 +495,8 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         $productA = $this->product($agen, 'A');
         $productB = $this->product($agen, 'B');
 
-        $orderOne = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, '2026-12-01'));
-        $orderTwo = $this->placeOrder($konsumen, $agen, $this->itemSpec($productB, '2026-12-05'));
+        $orderOne = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, $this->futureDate(20)));
+        $orderTwo = $this->placeOrder($konsumen, $agen, $this->itemSpec($productB, $this->futureDate(25)));
         $this->setDeliveryMethod($orderOne, self::COURIER_ONLINE);
         $this->setDeliveryMethod($orderTwo, self::COURIER_ONLINE);
 
@@ -505,8 +505,8 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         $otherShipmentId = $itemTwo->shipment_id;
 
         // Order Two's item is ALREADY on 2026-12-05 — the exact date we move to.
-        $this->assertSame('2026-12-05', $itemTwo->requested_delivery_date?->toDateString());
-        $this->reschedule($admin, $orderOne, $itemOne, '2026-12-05')->assertOk();
+        $this->assertSame($this->futureDate(25), $itemTwo->requested_delivery_date?->toDateString());
+        $this->reschedule($admin, $orderOne, $itemOne, $this->futureDate(25))->assertOk();
 
         $this->assertSame($orderOne->id, $itemOne->fresh()->order_id);
         $this->assertNotSame($otherShipmentId, $itemOne->fresh()->shipment_id, 'must never join another order\'s shipment');
@@ -521,13 +521,13 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->branch();
         $productA = $this->product($agen, 'A');
         $productB = $this->product($agen, 'B');
-        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, '2026-12-01', $productB, '2026-12-01'));
+        $order = $this->placeOrder($konsumen, $agen, $this->itemSpec($productA, $this->futureDate(20), $productB, $this->futureDate(20)));
         $this->setDeliveryMethod($order, self::COURIER_ONLINE);
 
         $itemA = OrderItem::where('order_id', $order->id)->where('product_id', $productA->id)->firstOrFail();
         $itemB = OrderItem::where('order_id', $order->id)->where('product_id', $productB->id)->firstOrFail();
         // Put item B on the target date, then give that shipment a real executor.
-        $this->reschedule($admin, $order, $itemB, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $itemB, $this->futureDate(25))->assertOk();
         $assignedShipmentId = $itemB->fresh()->shipment_id;
 
         $kurir = User::factory()->kurir()->create(['agent_id' => $agen->id]);
@@ -538,7 +538,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
         Shipment::whereKey($assignedShipmentId)->update(['courier_id' => $courier->id]);
 
         $shipmentACount = Shipment::where('order_id', $order->id)->count();
-        $this->reschedule($admin, $order, $itemA, '2026-12-05')->assertOk();
+        $this->reschedule($admin, $order, $itemA, $this->futureDate(25))->assertOk();
 
         $this->assertNotSame($assignedShipmentId, $itemA->fresh()->shipment_id, 'an assigned shipment is not a grouping target');
         $this->assertSame($courier->id, Shipment::whereKey($assignedShipmentId)->value('courier_id'), 'existing assignment untouched');

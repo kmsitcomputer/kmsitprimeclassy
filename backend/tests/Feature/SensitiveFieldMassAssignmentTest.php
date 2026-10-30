@@ -128,8 +128,11 @@ class SensitiveFieldMassAssignmentTest extends TestCase
         $registration->assertCreated();
         $created = User::where('email', $registration->json('data.user.email'))->firstOrFail();
         $this->assertSame('konsumen', $created->role?->slug);
-        $this->assertNull($created->agent_id);
-        $this->assertNull($created->parent_id);
+        // The client-sent identity/network fields must be ignored. Since HEAD 218db8c a
+        // referral-less registration is linked to the default active Agen server-side, so the
+        // expected branch is that Agen — never the injected 999999.
+        $this->assertSame($fixture['agent']->id, $created->agent_id);
+        $this->assertSame($fixture['agent']->id, $created->parent_id);
         $this->assertNull($created->korsal_id);
         $this->assertNull($created->sales_id);
 

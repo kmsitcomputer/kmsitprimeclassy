@@ -21,6 +21,8 @@ export interface ReturnItemLine {
   condition_status?: string
   disposition_status?: string
   inspected_at?: string | null
+  /** GAP-A: WIB business date the pickup was scheduled for; null = belum dijadwalkan. */
+  pickup_scheduled_for?: string | null
 }
 
 export interface ReturnRequestRecord {
@@ -62,8 +64,17 @@ export async function requestReturn(orderId: number, reason: string, items: Requ
   return data.data
 }
 
-export async function listReturns(page = 1, filters: { agent_id?: number } = {}) {
+export async function listReturns(page = 1, filters: { agent_id?: number; status?: string } = {}) {
   const { data } = await http.get<ApiEnvelope<ReturnRequestRecord[]>>('/admin/returns', { params: { page, ...filters } })
+  return { returns: data.data, meta: data.meta as unknown as PaginationMeta }
+}
+
+/**
+ * Gudang inspection queue: this branch's approved return lines that still need a physical
+ * inspection. Read-only — inspections still go through `inspectReturn`.
+ */
+export async function listWarehouseReturns(page = 1) {
+  const { data } = await http.get<ApiEnvelope<ReturnRequestRecord[]>>('/warehouse/returns', { params: { page } })
   return { returns: data.data, meta: data.meta as unknown as PaginationMeta }
 }
 
@@ -74,6 +85,15 @@ export async function getReturn(id: number) {
 
 export async function reviewReturn(id: number, approved: boolean, note?: string) {
   const { data } = await http.patch<ApiEnvelope<ReturnRequestRecord>>(`/admin/returns/${id}/review`, { approved, note })
+  return data.data
+}
+
+/** GAP-A: set/ubah jadwal pickup retur (Admin/Agen/Super Admin, cabang masing-masing). */
+export async function scheduleReturnPickup(id: number, pickupScheduledFor: string) {
+  const { data } = await http.patch<ApiEnvelope<{ return_id: number; pickup_scheduled_for: string; items: number }>>(
+    `/admin/returns/${id}/pickup-schedule`,
+    { pickup_scheduled_for: pickupScheduledFor },
+  )
   return data.data
 }
 

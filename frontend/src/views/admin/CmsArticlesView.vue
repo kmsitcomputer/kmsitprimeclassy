@@ -36,6 +36,7 @@ async function remove(article: Article) {
       <div v-if="loading" class="text-sm text-stone-500">Memuat...</div>
 
       <div v-else class="overflow-hidden rounded-xl border border-stone-200 dark:border-stone-800">
+        <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
             <tr>
@@ -69,6 +70,7 @@ async function remove(article: Article) {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   </DashboardLayout>

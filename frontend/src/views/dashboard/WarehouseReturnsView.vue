@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
-import { inspectReturn, listReturns, type ReturnRequestRecord } from '@/api/returns'
+import { inspectReturn, listWarehouseReturns, type ReturnRequestRecord } from '@/api/returns'
+import { ApiError } from '@/api/client'
 import { skuLabel } from '@/utils/format'
 
 const returns = ref<ReturnRequestRecord[]>([])
@@ -10,6 +11,9 @@ const damaged = ref<Record<number, number>>({})
 const error = ref('')
 const success = ref('')
 const working = ref(false)
+// 403 is a role/endpoint contract state, not a transient failure — it must not offer a retry that
+// can never succeed. Other failures (network/5xx) stay retryable.
+const forbidden = ref(false)
 
 function dispositionLabel(item: { disposition_status?: string }): string {
   if (item.disposition_status === 'restocked') return 'Sudah dimasukkan Transit'
@@ -19,7 +23,19 @@ function dispositionLabel(item: { disposition_status?: string }): string {
 }
 
 async function load() {
-  returns.value = (await listReturns()).returns
+  error.value = ''
+  forbidden.value = false
+  try {
+    returns.value = (await listWarehouseReturns()).returns
+  } catch (e) {
+    returns.value = []
+    if (e instanceof ApiError && e.status === 403) {
+      forbidden.value = true
+      error.value = 'Akun ini tidak memiliki akses ke antrean inspeksi retur. Hubungi Admin bila akses Gudang diperlukan.'
+    } else {
+      error.value = 'Antrean inspeksi retur gagal dimuat. Periksa koneksi lalu coba lagi.'
+    }
+  }
 }
 
 async function inspect(itemId: number, received: number) {
@@ -44,8 +60,21 @@ onMounted(load)
   <DashboardLayout>
     <h1 class="mb-1 font-display text-2xl font-semibold">Warehouse Returns</h1>
     <p class="mb-5 text-sm text-stone-500">Terima → inspeksi kondisi → Admin finalisasi. Stok Transit hanya bertambah setelah Admin menyetujui.</p>
-    <p v-if="error" class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{{ error }}</p>
+    <p v-if="error" class="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+      <span class="min-w-0 flex-1">{{ error }}</span>
+      <button
+        v-if="!forbidden"
+        type="button"
+        class="shrink-0 rounded-lg border border-red-200 px-3 py-1 font-medium"
+        @click="load"
+      >
+        Coba lagi
+      </button>
+    </p>
     <p v-if="success" class="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-600">{{ success }}</p>
+    <p v-if="!error && !returns.length" class="rounded-xl border border-stone-200 bg-white p-6 text-center text-sm text-stone-400">
+      Tidak ada retur yang menunggu inspeksi.
+    </p>
     <div v-for="request in returns" :key="request.id" class="mb-4 rounded-xl border border-stone-200 bg-white p-4">
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span>Return #{{ request.id }} · Order {{ request.order_no }}</span>
@@ -59,8 +88,8 @@ onMounted(load)
           <span v-if="item.good_quantity || item.damaged_quantity" class="block text-xs text-stone-400">Baik {{ item.good_quantity ?? 0 }} · Rusak {{ item.damaged_quantity ?? 0 }}</span>
         </span>
         <template v-if="item.status === 'approved' && !item.inspected_at">
-          <input v-model.number="good[item.id]" class="w-20 min-w-0 rounded-lg border border-stone-200 p-2" type="number" min="0" placeholder="Good" />
-          <input v-model.number="damaged[item.id]" class="w-20 min-w-0 rounded-lg border border-stone-200 p-2" type="number" min="0" placeholder="Damaged" />
+          <input v-model.number="good[item.id]" class="w-20 min-w-0 rounded-lg border border-stone-200 p-2" type="number" min="0" placeholder="Baik" />
+          <input v-model.number="damaged[item.id]" class="w-20 min-w-0 rounded-lg border border-stone-200 p-2" type="number" min="0" placeholder="Rusak" />
           <button type="button" :disabled="working" class="shrink-0 rounded-xl bg-brand-600 px-3 py-2 text-white disabled:opacity-40" @click="inspect(item.id, item.quantity_returned)">Inspect</button>
         </template>
         <span v-else class="shrink-0 text-xs text-stone-400">{{ dispositionLabel(item) }}</span>

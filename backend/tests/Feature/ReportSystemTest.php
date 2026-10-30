@@ -495,7 +495,7 @@ class ReportSystemTest extends TestCase
         // so item B is moved onto a later date FIRST (canonical reschedule path) and the two items
         // end up on separate shipments. The assertion under test is unchanged.
         $this->assertSame($itemA->shipment_id, $itemB->shipment_id, 'precondition: same date starts on one canonical shipment');
-        $this->spreadDeliveryDates($branch, $order, $itemB, '2026-10-22');
+        $this->spreadDeliveryDates($branch, $order, $itemB, $this->futureDate(5));
 
         // Item A picked up by Budi, item B by Andi — two independent shipments.
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->fresh()->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
@@ -550,7 +550,7 @@ class ReportSystemTest extends TestCase
         // LOCKED UAT-005: two couriers on one order require two real deliveries (one shipment = one
         // executor), so item B is moved onto a later date through the canonical reschedule path.
         // The per-item fee assertions below are unchanged.
-        $this->spreadDeliveryDates($branch, $order, $itemB, '2026-10-22');
+        $this->spreadDeliveryDates($branch, $order, $itemB, $this->futureDate(5));
 
         foreach ([['kurir' => $branch['kurir'], 'item' => $itemA], ['kurir' => $secondKurir, 'item' => $itemB]] as $leg) {
             $shipmentId = $leg['item']->fresh()->shipment_id;
@@ -1047,13 +1047,16 @@ class ReportSystemTest extends TestCase
         $this->assertSame(0, $response->json('meta.total'));
     }
 
-    public function test_only_sales_role_may_reach_my_customers_report(): void
+    public function test_only_sales_function_roles_may_reach_my_customers_report(): void
     {
         $branch = $this->makeAgentBranch();
 
-        foreach (['agen', 'korsal', 'admin', 'superAdmin', 'kurir', 'konsumen'] as $role) {
+        foreach (['agen', 'admin', 'superAdmin', 'kurir', 'konsumen'] as $role) {
             $this->actingAs($branch[$role])->getJson('/api/v1/reports/my-customers')->assertStatus(403);
         }
+
+        // Owner rule (Phase 2): a Korsal has every functional Sales permission, so it reads its OWN Konsumen Saya.
+        $this->actingAs($branch['korsal'])->getJson('/api/v1/reports/my-customers')->assertOk();
     }
 
     /* ---------------------------------------------------------------
@@ -1144,5 +1147,117 @@ class ReportSystemTest extends TestCase
         $this->assertSame('13 September 2026', HumanDate::date('2026-09-13 14:30:00'));
         $this->assertSame('1 Januari 2026', HumanDate::date('2026-01-01'));
         $this->assertNull(HumanDate::date(null));
+    }
+
+    /** P0 (Melina/Purwanti): an unpaid, commission-free self-purchase must count in Sales/Korsal/Konsumen-Saya reports and the dashboard, without leaking to another branch. */
+    public function test_unpaid_self_purchase_counts_in_existing_network_reports_without_commission(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Kue Self', 260000, 10);
+        $order = $this->placeOrder($branch['sales'], $product, 1);
+        $this->assertSame(0, Commission::where('order_id', $order->id)->count());
+
+        $other = $this->makeAgentBranch();
+
+        // Laporan Sales (korsal's view): the sales row carries the transaction + consumer.
+        $row = collect($this->actingAs($branch['korsal'])->getJson('/api/v1/reports/sales')->assertOk()->json('data'))
+            ->firstWhere('sales_id', $branch['sales']->id);
+        $this->assertSame(1, (int) $row['transaction_count']);
+        $this->assertSame(1, (int) $row['customer_count']);
+
+        // Laporan Korsal (agen/admin view).
+        foreach (['agen', 'admin'] as $role) {
+            $k = collect($this->actingAs($branch[$role])->getJson('/api/v1/reports/korsal')->assertOk()->json('data'))
+                ->firstWhere('korsal_id', $branch['korsal']->id);
+            $this->assertSame(1, (int) $k['transaction_count'], $role);
+        }
+
+        // Konsumen Saya (sales' own view) and dashboard agree.
+        $mine = $this->actingAs($branch['sales'])->getJson('/api/v1/reports/my-customers')->assertOk();
+        $this->assertSame(1, $mine->json('meta.total'));
+        $this->assertSame(1, (int) $this->actingAs($branch['sales'])->getJson('/api/v1/dashboard/summary')->json('data.total_orders'));
+
+        // No cross-branch leakage.
+        $this->assertSame(0, $this->actingAs($other['sales'])->getJson('/api/v1/reports/my-customers')->json('meta.total'));
+        $otherRow = collect($this->actingAs($other['agen'])->getJson('/api/v1/reports/sales')->json('data'))->firstWhere('sales_id', $branch['sales']->id);
+        $this->assertNull($otherRow);
+    }
+
+    /** P0 balance: an unpaid COD order (stored remaining_amount = 0) must expose the canonical outstanding, not Rp0. */
+    public function test_unpaid_cod_order_reports_canonical_outstanding_balance(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $order = $this->placeOrder($branch['konsumen'], $this->makeProduct($branch['agen'], 'Kue Sisa', 260000, 5), 1);
+        $order->forceFill(['remaining_amount' => 0])->saveQuietly();
+
+        $unpaid = \App\Services\Payment\PaymentSummaryService::summarize($order->fresh());
+        $this->assertSame('unpaid', $unpaid['payment_status']);
+        $this->assertEquals((float) $order->total_amount, $unpaid['remaining_balance']);
+        $this->assertGreaterThan(0, $unpaid['remaining_balance']);
+
+        $order->forceFill(['paid_amount' => 100000, 'payment_status' => 'partially_paid'])->saveQuietly();
+        $partial = \App\Services\Payment\PaymentSummaryService::summarize($order->fresh());
+        $this->assertEquals((float) $order->total_amount - 100000, $partial['remaining_balance']);
+
+        $order->forceFill(['paid_amount' => $order->total_amount, 'payment_status' => 'paid', 'remaining_amount' => 0])->saveQuietly();
+        $this->assertSame(0.0, \App\Services\Payment\PaymentSummaryService::summarize($order->fresh())['remaining_balance']);
+
+        $order->forceFill(['paid_amount' => 0, 'payment_status' => 'unpaid', 'status' => 'dibatalkan'])->saveQuietly();
+        $this->assertSame(0.0, \App\Services\Payment\PaymentSummaryService::summarize($order->fresh())['remaining_balance']);
+    }
+
+    /** @return array<int, array<int, mixed>> data rows (header row dropped) of a streamed XLSX response */
+    private function xlsxRows(\Illuminate\Testing\TestResponse $response): array
+    {
+        $path = tempnam(sys_get_temp_dir(), 'xlsx');
+        file_put_contents($path, $response->streamedContent());
+        $rows = \PhpOffice\PhpSpreadsheet\IOFactory::load($path)->getActiveSheet()->toArray();
+        @unlink($path);
+
+        return array_slice($rows, 1);
+    }
+
+    /** XLSX == on-screen table == dashboard for identical scope/filters (Sales + Korsal rosters, unpaid self-purchase). */
+    public function test_sales_and_korsal_xlsx_match_table_and_dashboard(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $this->placeOrder($branch['sales'], $this->makeProduct($branch['agen'], 'Kue XLSX', 260000, 10), 1);
+
+        $table = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/sales')->assertOk()->json('data'))
+            ->firstWhere('sales_id', $branch['sales']->id);
+        $xlsx = collect($this->xlsxRows($this->actingAs($branch['agen'])->get('/api/v1/reports/sales?export=xlsx')))
+            ->firstWhere(0, $branch['sales']->name);
+        // Columns: Nama, Telepon, Korsal, Status, Jumlah Transaksi, Jumlah Konsumen, Total Fee
+        $this->assertSame((int) $table['transaction_count'], (int) $xlsx[4]);
+        $this->assertSame((int) $table['customer_count'], (int) $xlsx[5]);
+        $this->assertSame(1, (int) $xlsx[4]);
+
+        $korsalTable = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/korsal')->json('data'))->firstWhere('korsal_id', $branch['korsal']->id);
+        $korsalXlsx = collect($this->xlsxRows($this->actingAs($branch['agen'])->get('/api/v1/reports/korsal?export=xlsx')))->firstWhere(0, $branch['korsal']->name);
+        // Columns: Nama, Telepon, Status, Jumlah Sales Aktif, Jumlah Transaksi, Total Fee Sales
+        $this->assertSame((int) $korsalTable['transaction_count'], (int) $korsalXlsx[4]);
+        $this->assertSame(1, (int) $korsalXlsx[4]);
+
+        // Korsal-scoped dashboard counts the same transaction.
+        $this->assertSame(1, (int) $this->actingAs($branch['korsal'])->getJson('/api/v1/dashboard/summary')->json('data.total_orders'));
+    }
+
+    /** Network scope: a Korsal's OWN purchase (users.korsal_id = NULL) belongs to the Korsal's network in every existing report. */
+    public function test_korsal_own_purchase_counts_in_korsal_reports_transactions_and_dashboard(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $order = $this->placeOrder($branch['korsal'], $this->makeProduct($branch['agen'], 'Kue Korsal Sendiri', 90000, 5), 1);
+
+        $row = collect($this->actingAs($branch['agen'])->getJson('/api/v1/reports/korsal')->assertOk()->json('data'))->firstWhere('korsal_id', $branch['korsal']->id);
+        $this->assertSame(1, (int) $row['transaction_count']);
+
+        $tx = $this->actingAs($branch['korsal'])->getJson('/api/v1/reports/transactions')->assertOk();
+        $this->assertContains($order->order_no, collect($tx->json('data'))->pluck('order_no')->all());
+
+        $this->assertSame(1, (int) $this->actingAs($branch['korsal'])->getJson('/api/v1/dashboard/summary')->json('data.total_orders'));
+
+        // Another branch's korsal never sees it.
+        $other = $this->makeAgentBranch();
+        $this->assertSame([], collect($this->actingAs($other['korsal'])->getJson('/api/v1/reports/transactions')->json('data'))->pluck('order_no')->intersect([$order->order_no])->all());
     }
 }

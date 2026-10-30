@@ -326,6 +326,39 @@ const router = createRouter({
       },
     },
     {
+      // Network transaction totals (Owner 2026-10-29 §7) — server enforces the
+      // per-role network scope; this gate only mirrors the reachable roles.
+      path: '/dashboard/reports/network',
+      name: 'network-report',
+      component: () => import('@/views/dashboard/NetworkTransactionsView.vue'),
+      meta: {
+        requiresAuth: true,
+        requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'],
+      },
+    },
+    {
+      // Consolidated network summary — mirrors the backend gate exactly:
+      // super_admin (agent picker), agen + keuangan (own branch). ADMIN is
+      // deliberately NOT here: the per-agen table carries the agent-fee
+      // rollup and admin must never see agent fee data.
+      path: '/dashboard/reports/network-summary',
+      name: 'network-summary',
+      component: () => import('@/views/dashboard/NetworkSummaryView.vue'),
+      meta: {
+        requiresAuth: true,
+        requiresAnyRole: ['super_admin', 'agen', 'keuangan'],
+      },
+    },
+    {
+      path: '/dashboard/crm/funnel',
+      name: 'crm-funnel',
+      component: () => import('@/views/dashboard/CrmFunnelView.vue'),
+      meta: {
+        requiresAuth: true,
+        requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'],
+      },
+    },
+    {
       path: '/dashboard/agent/payment-methods',
       name: 'agent-payment-methods',
       component: () => import('@/views/dashboard/AgentPaymentMethodsView.vue'),
@@ -340,10 +373,35 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['agen'] },
     },
     {
+      path: '/dashboard/crm/customers',
+      name: 'crm-customers',
+      component: () => import('@/views/dashboard/CrmCustomersView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'] },
+    },
+    {
+      path: '/dashboard/crm/customers/:id(\\d+)',
+      name: 'crm-customer-detail',
+      component: () => import('@/views/dashboard/CrmCustomerDetailView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'] },
+    },
+    {
+      path: '/dashboard/crm/customers/:id(\\d+)/order',
+      name: 'crm-assisted-order',
+      component: () => import('@/views/dashboard/CrmAssistedOrderView.vue'),
+      // Mirrors CrmAccess::canPlaceOrder: owner Sales/SKS, their Korsal, or the branch Agen. The server re-checks.
+      meta: { requiresAuth: true, requiresAnyRole: ['agen', 'korsal', 'sales', 'sales-kurir-sub'] },
+    },
+    {
+      path: '/dashboard/crm/follow-ups',
+      name: 'crm-follow-ups',
+      component: () => import('@/views/dashboard/CrmFollowUpsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'] },
+    },
+    {
       path: '/dashboard/reports/my-customers',
       name: 'sales-customers-report',
       component: () => import('@/views/dashboard/SalesCustomersReportView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['sales', 'sales-kurir-sub'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['sales', 'sales-kurir-sub', 'korsal'] },
     },
     {
       path: '/dashboard/agent/store-profile',
@@ -355,6 +413,24 @@ const router = createRouter({
       path: '/dashboard/agents',
       name: 'agent-contacts',
       component: () => import('@/views/dashboard/AgentContactsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin'] },
+    },
+    {
+      path: '/dashboard/agent/whatsapp',
+      name: 'agent-whatsapp',
+      component: () => import('@/views/dashboard/AgentWhatsAppView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['agen'] },
+    },
+    {
+      path: '/dashboard/settings/integrations/smtp',
+      name: 'smtp-settings',
+      component: () => import('@/views/dashboard/SmtpSettingsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin'] },
+    },
+    {
+      path: '/dashboard/settings/integrations/whatsapp',
+      name: 'whatsapp-gateway',
+      component: () => import('@/views/dashboard/WhatsAppGatewayView.vue'),
       meta: { requiresAuth: true, requiresAnyRole: ['super_admin'] },
     },
     {
@@ -434,12 +510,6 @@ const router = createRouter({
       name: 'admin-audit-logs',
       component: () => import('@/views/admin/AuditLogView.vue'),
       meta: { requiresAuth: true, requiresAnyRole: ['super_admin'] },
-    },
-    {
-      path: '/admin/payment-gateways',
-      name: 'admin-payment-gateways',
-      component: () => import('@/views/admin/AdminPaymentGatewaysView.vue'),
-      meta: { requiresAuth: true, requiresPermission: 'system.payment.manage' },
     },
     {
       path: '/admin/shipping-settings',

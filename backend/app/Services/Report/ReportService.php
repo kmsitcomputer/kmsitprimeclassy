@@ -6,10 +6,12 @@ use App\Exceptions\ApiException;
 use App\Models\Commission;
 use App\Models\Courier;
 use App\Models\Order;
+use App\Services\Refund\RefundMetrics;
 use App\Models\OrderAdditionalPayment;
 use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
 use App\Models\ReturnItem;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\Payment\PaymentSummaryService;
 use App\Services\Stock\SellableStockService;
@@ -109,7 +111,7 @@ class ReportService
                 'order_no' => $order->order_no,
                 'order_date' => $order->created_at?->toDateString(),
                 // UAT-004: Finance triage identity — who owes, how they pay.
-                'customer' => $order->konsumen?->name,
+                'customer' => $order->buyerName(),
                 'payment_method' => $order->paymentMethod?->name,
                 'payment_method_type' => $order->paymentMethod?->type,
                 'grand_total' => $summary['grand_total'],
@@ -139,7 +141,7 @@ class ReportService
         ];
     }
 
-    private function applyDateFilters(Builder $query, array $filters, string $column, string $fromKey = 'from', string $toKey = 'to'): void
+    private function applyDateFilters(Builder|QueryBuilder $query, array $filters, string $column, string $fromKey = 'from', string $toKey = 'to'): void
     {
         if (! empty($filters[$fromKey])) {
             $query->whereDate($column, '>=', $filters[$fromKey]);
@@ -415,6 +417,17 @@ class ReportService
         $this->applyDateFilters($returns, $filters, 'returns.created_at');
         $totalReturnRefunds = $returns->sum('return_items.refund_amount');
 
+        $totalRefunds = (float) $totalAdjustmentRefunds + (float) $totalReturnRefunds;
+        if (config('refunds.reporting_source') === 'ledger') {
+            // R_c must include every proven affecting payout, including returns. The metrics
+            // helper's default excludes return sources for the networkSummary adjustment line,
+            // so add that slice explicitly instead of silently under-reporting returns here.
+            $orderIds = (clone $orders)->pluck('orders.id');
+            $metrics = app(RefundMetrics::class);
+            $totalRefunds = ($metrics->provenCentsForOrders($orderIds)
+                + $metrics->provenCentsForOrders($orderIds, ['return_stage', 'return_approval'])) / 100;
+        }
+
         return [
             'total_orders' => $totalOrders,
             // "Nilai" of fully-completed transactions only (deliberately
@@ -427,15 +440,16 @@ class ReportService
             // PaymentSummaryService/networkSummary.paid_amount: Order.
             // paid_amount, written exclusively by PaymentService).
             'total_received' => round((float) (clone $orders)->sum('paid_amount'), 2),
-            'total_refunds' => (float) $totalAdjustmentRefunds + (float) $totalReturnRefunds,
+            'total_refunds' => $totalRefunds,
             // Money still owed (unpaid / pending verification / DP partially
             // paid) and how much of that is DP-specific — the balance Keuangan
             // still has to reconcile.
+            // Canonical collectible receivable (WS-7 / OD-K5): derived from total - paid, cancelled excluded — never the stored
+            // remaining_amount, which is 0 for a non-DP order that never had a money event (KF-1).
             'total_outstanding' => round((float) (clone $orders)
-                ->whereIn('payment_status', ['unpaid', 'pending_verification', 'partially_paid'])
-                ->sum('remaining_amount'), 2),
+                ->sum(\Illuminate\Support\Facades\DB::raw(\App\Support\CollectibleReceivable::sql('orders'))), 2),
             'total_dp_outstanding' => round((float) (clone $orders)
-                ->where('payment_status', 'partially_paid')->sum('remaining_amount'), 2),
+                ->where('payment_status', 'partially_paid')->sum(\Illuminate\Support\Facades\DB::raw(\App\Support\CollectibleReceivable::sql('orders'))), 2),
         ];
     }
 
@@ -465,7 +479,10 @@ class ReportService
         $query = Order::query()
             ->join('users as konsumen_users', 'konsumen_users.id', '=', 'orders.konsumen_id')
             ->select(['konsumen_users.id as konsumen_id', 'konsumen_users.name as konsumen_name', 'konsumen_users.phone as konsumen_phone'])
-            ->selectRaw("COUNT(*) as order_count, SUM(CASE WHEN orders.payment_status = 'paid' THEN orders.total_amount ELSE 0 END) as total_spent, MAX(orders.created_at) as last_order_at")
+            // total_spent keeps its historical meaning (value of FULLY PAID orders) for API compatibility; the report now also
+            // exposes total_ordered (non-cancelled order value) and total_paid (money actually collected), because an unpaid COD
+            // order is a real transaction whose value must not read as "Rp0 spent".
+            ->selectRaw("COUNT(*) as order_count, SUM(CASE WHEN orders.payment_status = 'paid' THEN orders.total_amount ELSE 0 END) as total_spent, SUM(CASE WHEN orders.status <> 'dibatalkan' THEN orders.total_amount ELSE 0 END) as total_ordered, COALESCE(SUM(CASE WHEN orders.status <> 'dibatalkan' THEN orders.paid_amount ELSE 0 END), 0) as total_paid, MAX(orders.created_at) as last_order_at")
             ->groupBy('konsumen_users.id', 'konsumen_users.name', 'konsumen_users.phone');
 
         $this->scopeToActor($query, $actor, 'orders.agent_id', null, $filters);
@@ -480,6 +497,46 @@ class ReportService
     }
 
     /**
+     * Canonical order -> seller attribution (same rule as OrderTransactionReportService): a buyer
+     * who is itself a seller role is credited with their own purchase (self-attribution; legacy
+     * rows carry sales_id = NULL), otherwise sales_id -> korsal_id -> agent_id. One row per
+     * order, never joined to items/payments/commissions, and independent of payment status or
+     * commission eligibility (a transaction exists whether or not a fee was earned).
+     *
+     * @return \Illuminate\Database\Query\Builder columns: order_id, konsumen_id, total_amount, referrer_id
+     */
+    /**
+     * Canonical "this seller's orders" predicate (same rule as attributedOrders): the seller's OWN purchases, plus orders
+     * credited to them via sales_id whose buyer is NOT itself a seller (a seller-buyer is attributed to themselves only, so an
+     * upline Sales named in a downline seller's sales_id never double-counts that purchase).
+     */
+    private function attributedToSeller($query, int $sellerId, string $orders): void
+    {
+        $query->where("{$orders}.konsumen_id", $sellerId)
+            ->orWhere(function ($q) use ($sellerId, $orders) {
+                $q->where("{$orders}.sales_id", $sellerId)
+                    ->whereNotIn("{$orders}.konsumen_id", \Illuminate\Support\Facades\DB::table('users as sb')
+                        ->join('roles as sbr', 'sbr.id', '=', 'sb.role_id')
+                        ->whereIn('sbr.slug', ['agen', 'korsal', 'sales', 'sales-kurir-sub', 'sales-kurir'])
+                        ->select('sb.id'));
+            });
+    }
+
+    public function attributedOrders(array $filters): \Illuminate\Database\Query\Builder
+    {
+        $sellerRoles = "'agen','korsal','sales','sales-kurir-sub','sales-kurir'";
+
+        $query = \Illuminate\Support\Facades\DB::table('orders as ao')
+            ->leftJoin('users as ab', 'ab.id', '=', 'ao.konsumen_id')
+            ->leftJoin('roles as abr', 'abr.id', '=', 'ab.role_id')
+            ->select(['ao.id as order_id', 'ao.konsumen_id', 'ao.total_amount'])
+            ->selectRaw("CASE WHEN abr.slug IN ($sellerRoles) THEN ao.konsumen_id ELSE COALESCE(ao.sales_id, ao.korsal_id, ao.agent_id) END as referrer_id");
+        $this->applyDateFilters($query, $filters, 'ao.created_at');
+
+        return $query;
+    }
+
+    /**
      * "Listing semua Korsal beserta Total sales dan Transaksi perkorsal,
      * beserta jumlah fee sales per korsal" — a real ROSTER (every korsal in
      * the branch, unlike salesKorsalFees()'s commission-driven inner join),
@@ -487,19 +544,32 @@ class ReportService
      */
     public function korsalReport(User $actor, array $filters): Builder
     {
-        $stats = Commission::query()
+        // Transactions/sales headcount come from ORDER attribution (not commissions): an unpaid or
+        // commission-free order still counts. Fee stays ledger-derived.
+        // A korsal's network = orders credited to a sales under them AND the korsal's own purchases
+        // (users.korsal_id is NULL for a korsal, so the key is the korsal itself when the referrer is one).
+        $orderStats = \Illuminate\Support\Facades\DB::query()->fromSub($this->attributedOrders($filters), 'att')
+            ->join('users as su', 'su.id', '=', 'att.referrer_id')
+            ->join('roles as sr', 'sr.id', '=', 'su.role_id')
+            ->selectRaw("CASE WHEN sr.slug = 'korsal' THEN su.id ELSE su.korsal_id END as korsal_id")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN sr.slug <> 'korsal' THEN att.referrer_id END) as active_sales_count, COUNT(DISTINCT att.order_id) as transaction_count")
+            ->havingRaw('korsal_id IS NOT NULL')
+            ->groupByRaw("CASE WHEN sr.slug = 'korsal' THEN su.id ELSE su.korsal_id END");
+
+        $feeStats = Commission::query()
             ->join('users as su', 'su.id', '=', 'commissions.beneficiary_user_id')
             ->where('commissions.beneficiary_role', 'sales')
             ->select('su.korsal_id')
-            ->selectRaw('COUNT(DISTINCT su.id) as active_sales_count, COUNT(*) as transaction_count, SUM(commissions.amount) as total_sales_fee')
+            ->selectRaw('SUM(commissions.amount) as total_sales_fee')
             ->groupBy('su.korsal_id');
-        $this->applyDateFilters($stats, $filters, 'commissions.earned_at');
+        $this->applyDateFilters($feeStats, $filters, 'commissions.earned_at');
 
         $query = User::query()
             ->whereHas('role', fn ($q) => $q->where('slug', 'korsal'))
-            ->leftJoinSub($stats, 'stats', 'stats.korsal_id', '=', 'users.id')
+            ->leftJoinSub($orderStats, 'stats', 'stats.korsal_id', '=', 'users.id')
+            ->leftJoinSub($feeStats, 'fee_stats', 'fee_stats.korsal_id', '=', 'users.id')
             ->select(['users.id as korsal_id', 'users.name as korsal_name', 'users.phone as korsal_phone', 'users.status'])
-            ->selectRaw('COALESCE(stats.active_sales_count, 0) as active_sales_count, COALESCE(stats.transaction_count, 0) as transaction_count, COALESCE(stats.total_sales_fee, 0) as total_sales_fee');
+            ->selectRaw('COALESCE(stats.active_sales_count, 0) as active_sales_count, COALESCE(stats.transaction_count, 0) as transaction_count, COALESCE(fee_stats.total_sales_fee, 0) as total_sales_fee');
 
         $this->scopeToActor($query, $actor, 'users.agent_id', null, $filters);
 
@@ -522,30 +592,27 @@ class ReportService
      */
     public function salesReport(User $actor, array $filters): Builder
     {
+        // Transaction + consumer counts are order-attribution based (unique orders / unique konsumen,
+        // self-purchase included, paid or not). Only the fee comes from the commission ledger.
+        $orderStats = \Illuminate\Support\Facades\DB::query()->fromSub($this->attributedOrders($filters), 'att')
+            ->select('att.referrer_id')
+            ->selectRaw('COUNT(DISTINCT att.order_id) as transaction_count, COUNT(DISTINCT att.konsumen_id) as customer_count, SUM(att.total_amount) as transaction_value')
+            ->groupBy('att.referrer_id');
+
         $stats = Commission::query()
             ->where('beneficiary_role', 'sales')
             ->select('beneficiary_user_id')
-            ->selectRaw('COUNT(*) as transaction_count, SUM(amount) as total_fee')
+            ->selectRaw('SUM(amount) as total_fee')
             ->groupBy('beneficiary_user_id');
         $this->applyDateFilters($stats, $filters, 'earned_at');
 
-        // "jumlah konsumen" — distinct konsumen who ordered through this
-        // sales, never a transaction-count restatement (one konsumen with 5
-        // orders still counts as 1 here).
-        $customerStats = Order::query()
-            ->whereNotNull('sales_id')
-            ->select('sales_id')
-            ->selectRaw('COUNT(DISTINCT konsumen_id) as customer_count')
-            ->groupBy('sales_id');
-        $this->applyDateFilters($customerStats, $filters, 'created_at');
-
         $query = User::query()
-            ->whereHas('role', fn ($q) => $q->where('slug', 'sales'))
+            ->whereHas('role', fn ($q) => $q->whereIn('slug', Role::sellerSlugs()))
             ->leftJoin('users as korsal_users', 'korsal_users.id', '=', 'users.korsal_id')
             ->leftJoinSub($stats, 'stats', 'stats.beneficiary_user_id', '=', 'users.id')
-            ->leftJoinSub($customerStats, 'customer_stats', 'customer_stats.sales_id', '=', 'users.id')
+            ->leftJoinSub($orderStats, 'customer_stats', 'customer_stats.referrer_id', '=', 'users.id')
             ->select(['users.id as sales_id', 'users.name as sales_name', 'users.phone as sales_phone', 'users.status', 'korsal_users.name as korsal_name'])
-            ->selectRaw('COALESCE(stats.transaction_count, 0) as transaction_count, COALESCE(stats.total_fee, 0) as total_fee, COALESCE(customer_stats.customer_count, 0) as customer_count');
+            ->selectRaw('COALESCE(customer_stats.transaction_count, 0) as transaction_count, COALESCE(stats.total_fee, 0) as total_fee, COALESCE(customer_stats.customer_count, 0) as customer_count, COALESCE(customer_stats.transaction_value, 0) as transaction_value');
 
         $this->scopeToActor($query, $actor, 'users.agent_id', 'users.korsal_id', $filters);
 
@@ -621,21 +688,32 @@ class ReportService
         $orders = Order::query();
         $this->scopeToActor($orders, $actor, 'agent_id', null, $filters);
         if ($actor->isRole('korsal')) {
-            $orders->where('korsal_id', $actor->id);
-        } elseif ($actor->isRole('sales')) {
-            $orders->where('sales_id', $actor->id);
+            // Same downline rule as korsalReport(): an order stamped with this korsal OR placed by someone
+            // in the korsal's downline (legacy rows may carry korsal_id = NULL).
+            $orders->where(function ($q) use ($actor) {
+                $q->where('korsal_id', $actor->id)
+                    ->orWhereIn('konsumen_id', User::query()->where('korsal_id', $actor->id)->select('id'))
+                    ->orWhere('konsumen_id', $actor->id);
+            });
+        } elseif ($actor->isRole('sales', 'sales-kurir-sub')) {
+            // Canonical network attribution (Owner §7 / BR §15 D1): the actor's
+            // sales network includes orders credited to them AND their own
+            // purchases (buyer-is-seller self-attribution). Legacy self-purchase
+            // orders carry sales_id = NULL but konsumen_id = the seller, so the
+            // dashboard must count exactly what the network report counts.
+            $orders->where(fn ($q) => $this->attributedToSeller($q, $actor->id, 'orders'));
         }
 
         $totalOrders = (clone $orders)->count();
         $totalRevenue = (clone $orders)->where('payment_status', 'paid')->sum('total_amount');
         $totalCustomers = (clone $orders)->distinct('konsumen_id')->count('konsumen_id');
 
-        $countByRole = function (string $role) use ($actor, $filters) {
-            if ($actor->isRole('korsal', 'sales')) {
+        $countByRole = function (string|array $roles) use ($actor, $filters) {
+            if ($actor->isRole('korsal', 'sales', 'sales-kurir-sub')) {
                 return 0;
             }
 
-            $query = User::query()->whereHas('role', fn ($q) => $q->where('slug', $role));
+            $query = User::query()->whereHas('role', fn ($q) => $q->whereIn('slug', (array) $roles));
             $this->scopeToActor($query, $actor, 'agent_id', null, $filters);
 
             return $query->count();
@@ -646,7 +724,7 @@ class ReportService
             'total_revenue' => (float) $totalRevenue,
             'total_customers' => $totalCustomers,
             'total_korsal' => $countByRole('korsal'),
-            'total_sales' => $countByRole('sales'),
+            'total_sales' => $countByRole(Role::sellerSlugs()),
             'total_kurir' => $countByRole('kurir'),
         ];
     }
@@ -662,8 +740,10 @@ class ReportService
      */
     public function salesCustomersReport(User $actor, array $filters): Builder
     {
+        // Canonical attribution: orders credited to the actor AND the actor's own purchases
+        // (legacy self-purchase rows have sales_id = NULL, konsumen_id = the seller).
         $query = Order::query()
-            ->where('orders.sales_id', $actor->id)
+            ->where(fn ($q) => $this->attributedToSeller($q, $actor->id, 'orders'))
             ->join('users as konsumen_users', 'konsumen_users.id', '=', 'orders.konsumen_id')
             ->leftJoin('commissions', function ($join) use ($actor) {
                 $join->on('commissions.order_id', '=', 'orders.id')
@@ -724,21 +804,24 @@ class ReportService
             // order, understating cash actually received.
             'paid_amount' => round((float) (clone $orders)->sum('orders.paid_amount'), 2),
             'outstanding_amount' => round((float) (clone $orders)
-                ->whereIn('orders.payment_status', ['unpaid', 'pending_verification', 'partially_paid'])
-                ->sum('orders.remaining_amount'), 2),
-            'refund_total' => round((float) OrderItemAdjustment::query()
+                ->sum(\Illuminate\Support\Facades\DB::raw(\App\Support\CollectibleReceivable::sql('orders'))), 2),
+            'refund_total' => round(config('refunds.reporting_source') === 'ledger'
+                ? app(RefundMetrics::class)->provenCentsForOrders($orderIds) / 100
+                : (float) OrderItemAdjustment::query()
                 ->join('order_items', 'order_items.id', '=', 'order_item_adjustments.order_item_id')
                 ->whereIn('order_items.order_id', $orderIds)->sum('order_item_adjustments.refund_amount'), 2),
-            'return_refund_total' => round((float) ReturnItem::query()
-                ->join('order_items', 'order_items.id', '=', 'return_items.order_item_id')
-                ->whereIn('order_items.order_id', $orderIds)->sum('return_items.refund_amount'), 2),
+            'return_refund_total' => round(config('refunds.reporting_source') === 'ledger'
+                ? app(RefundMetrics::class)->provenCentsForOrders($orderIds, ['return_stage', 'return_approval']) / 100
+                : (float) ReturnItem::query()
+                    ->join('order_items', 'order_items.id', '=', 'return_items.order_item_id')
+                    ->whereIn('order_items.order_id', $orderIds)->sum('return_items.refund_amount'), 2),
             'additional_payment_total' => round((float) OrderAdditionalPayment::query()
                 ->whereIn('order_id', $orderIds)->sum('amount'), 2),
         ];
 
         $scopeAgentId = $actor->isRole('super_admin') ? ($filters['agent_id'] ?? null) : $actor->agent_id;
-        $countRole = function (string $role) use ($scopeAgentId) {
-            $query = User::query()->whereHas('role', fn ($r) => $r->where('slug', $role));
+        $countRole = function (string|array $roles) use ($scopeAgentId) {
+            $query = User::query()->whereHas('role', fn ($r) => $r->whereIn('slug', (array) $roles));
 
             if ($scopeAgentId) {
                 $query->where('agent_id', $scopeAgentId);
@@ -749,7 +832,7 @@ class ReportService
 
         $counts = [
             'korsal_count' => $countRole('korsal'),
-            'sales_count' => $countRole('sales'),
+            'sales_count' => $countRole(Role::sellerSlugs()),
             'courier_count' => $countRole('kurir'),
             // "Total Sales yang berhasil melakukan penjualan" — sales who
             // actually appear on at least one order in range.
@@ -761,12 +844,12 @@ class ReportService
             ->when($scopeAgentId, fn ($query) => $query->whereKey($scopeAgentId))
             ->pluck('id')->map(fn ($id) => (int) $id)->all();
         $agentNames = User::query()->whereIn('id', $agentIds)->pluck('name', 'id');
-        $countBy = fn (string $role) => User::query()
+        $countBy = fn (string|array $roles) => User::query()
             ->whereIn('agent_id', $agentIds)
-            ->whereHas('role', fn ($r) => $r->where('slug', $role))
+            ->whereHas('role', fn ($r) => $r->whereIn('slug', (array) $roles))
             ->selectRaw('agent_id, COUNT(*) as c')->groupBy('agent_id')->pluck('c', 'agent_id');
         $korsalCounts = $countBy('korsal');
-        $salesCounts = $countBy('sales');
+        $salesCounts = $countBy(Role::sellerSlugs());
         $stockByAgent = $this->sellableStock->projection($agentIds)
             ->selectRaw('agent_id, SUM(quantity) as q')->groupBy('agent_id')->pluck('q', 'agent_id');
         $feeByAgent = Commission::query()
@@ -783,7 +866,7 @@ class ReportService
             ->selectRaw('SUM(CASE WHEN orders.korsal_id IS NOT NULL THEN 1 ELSE 0 END) as korsal_transaction_count')
             ->selectRaw('SUM(orders.total_amount) as total_amount')
             ->selectRaw("SUM(CASE WHEN orders.payment_status = 'paid' THEN orders.total_amount ELSE 0 END) as paid_amount")
-            ->selectRaw("SUM(CASE WHEN orders.payment_status IN ('unpaid','pending_verification','partially_paid') THEN orders.remaining_amount ELSE 0 END) as outstanding_amount")
+            ->selectRaw('SUM('.\App\Support\CollectibleReceivable::sql('orders').') as outstanding_amount')
             ->groupBy('orders.agent_id')
             ->get()
             ->map(fn ($row) => [

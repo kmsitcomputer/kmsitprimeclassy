@@ -4,7 +4,7 @@ use App\Http\Controllers\Api\V1\Address\KonsumenAddressController;
 use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\GoogleAuthSettingController;
 use App\Http\Controllers\Api\V1\Admin\OrderAdjustmentController;
-use App\Http\Controllers\Api\V1\Admin\PaymentGatewayController;
+use App\Http\Controllers\Api\V1\Admin\RefundLedgerController;
 use App\Http\Controllers\Api\V1\Admin\RegionImportExportController;
 use App\Http\Controllers\Api\V1\Admin\ShippingCourierController;
 use App\Http\Controllers\Api\V1\Admin\ShippingProviderController;
@@ -45,6 +45,11 @@ use App\Http\Controllers\Api\V1\Promo\VoucherController;
 use App\Http\Controllers\Api\V1\Referral\ReferralController;
 use App\Http\Controllers\Api\V1\Region\RegionController;
 use App\Http\Controllers\Api\V1\Report\ReportController;
+use App\Http\Controllers\Api\V1\Consent\ConsentController;
+use App\Http\Controllers\Api\V1\Admin\WhatsAppGatewayController;
+use App\Http\Controllers\Api\V1\Auth\WhatsAppNumberController;
+use App\Http\Controllers\Api\V1\Crm\CrmAssistedController;
+use App\Http\Controllers\Api\V1\Crm\CrmController;
 use App\Http\Controllers\Api\V1\Return\ReturnController;
 use App\Http\Controllers\Api\V1\Settings\WebsiteSettingController;
 use App\Http\Controllers\Api\V1\Stock\StockController;
@@ -59,7 +64,6 @@ use App\Http\Controllers\Api\V1\Stock\WarehouseSettingsController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseStockRequestController;
 use App\Http\Controllers\Api\V1\Stock\WarehouseSubLocationController;
 use App\Http\Controllers\Api\V1\User\UserController;
-use App\Http\Controllers\Api\V1\Webhook\PaymentWebhookController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -124,10 +128,6 @@ Route::get('/agents', [AgentContactController::class, 'index']);
 // pattern as ProductController's agent-availability attachment.
 Route::get('/checkout/steps', [CheckoutController::class, 'steps']);
 
-// Gateway callbacks — no session, no CSRF; PaymentService::handleWebhook's
-// per-provider signature check is the only thing that authorizes these.
-// throttle: caps abuse of the (cheap but non-free) signature-check path itself.
-Route::post('/webhooks/payment/{method}', [PaymentWebhookController::class, 'handle'])->middleware('throttle:60,1');
 
 // Public cascading region lookups for the checkout address form.
 Route::get('/regions/provinces', [RegionController::class, 'provinces']);
@@ -148,6 +148,24 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::patch('/profile', [ProfileController::class, 'update']);
+    // WhatsApp number proof (own number only; channel proof, never consent or CRM linking).
+    // WhatsApp device of the signed-in AGEN (Owner 2026-10-29: each Agent manages its own session; Super Admin only has the global ON/OFF).
+    Route::middleware('role:agen')->prefix('/agent/whatsapp')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'show']);
+        Route::get('/messages', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'messages']);
+        Route::middleware('throttle:agent-wa-device')->group(function () {
+            Route::post('/device', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'createDevice']);
+            Route::post('/pair/qr', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'qr']);
+            Route::post('/pair/code', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'pairCode']);
+            Route::post('/reconnect', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'reconnect']);
+            Route::post('/logout', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'logout']);
+            Route::post('/replace', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'replace']);
+        });
+    });
+
+    Route::get('/profile/whatsapp', [WhatsAppNumberController::class, 'show']);
+    Route::post('/profile/whatsapp/verification', [WhatsAppNumberController::class, 'request'])->middleware('throttle:wa-number-request');
+    Route::post('/profile/whatsapp/verification/{challenge}/confirm', [WhatsAppNumberController::class, 'confirm'])->middleware('throttle:wa-number-confirm');
     Route::patch('/profile/password', [ProfileController::class, 'updatePassword']);
 
     // Self-service referral code — agen/korsal/sales only (konsumen/admin/kurir never carry one).
@@ -294,6 +312,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/admin/returns', [ReturnController::class, 'index']);
         Route::get('/admin/returns/{return}', [ReturnController::class, 'show']);
         Route::patch('/admin/returns/{return}/review', [ReturnController::class, 'review']);
+        Route::patch('/admin/returns/{return}/pickup-schedule', [ReturnController::class, 'schedulePickup']);
     });
 
     // Package C / SC-03: add a NEW product/variation line to an existing order. ADMIN ONLY
@@ -305,6 +324,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     });
 
     Route::middleware('role:gudang')->group(function () {
+        Route::get('/warehouse/returns', [ReturnController::class, 'warehouseQueue']);
         Route::post('/warehouse/returns/{item}/inspect', [ReturnController::class, 'inspect']);
     });
     Route::middleware('role:admin')->group(function () {
@@ -322,6 +342,83 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/admin/order-refunds/{adjustment}/status', [OrderAdjustmentController::class, 'markRefundStatus']);
         Route::patch('/admin/additional-payments/{payment}/status', [OrderAdjustmentController::class, 'markAdditionalPaymentStatus']);
         Route::patch('/admin/return-items/{item}/refund', [ReturnController::class, 'markItemRefunded']);
+    });
+
+    // 360° refund ledger work area (design §7). Admission is broad here because the service layer
+    // enforces the split of duties exactly: Finance (keuangan) runs the attempt lifecycle, while
+    // Owner (branch agen / super_admin) approves historical changes, Exit B, deferred
+    // materialization and reinstatement. Admin keeps read-only oversight.
+    Route::middleware('role:super_admin,agen,admin,keuangan')->group(function () {
+        Route::get('/admin/orders/{order}/refunds', [RefundLedgerController::class, 'index']);
+    });
+    Route::middleware('role:super_admin,agen,keuangan')->group(function () {
+        Route::post('/admin/refund-obligations/{obligation}/approve', [RefundLedgerController::class, 'approve']);
+        Route::post('/admin/refund-obligations/{obligation}/attempts', [RefundLedgerController::class, 'storeAttempt']);
+        Route::post('/admin/refund-obligations/{obligation}/needs-verification/resolve', [RefundLedgerController::class, 'resolveVerification']);
+        Route::post('/admin/refund-obligations/{obligation}/deferred/request', [RefundLedgerController::class, 'requestMaterialization']);
+        Route::post('/admin/refund-obligations/{obligation}/deferred/materialize', [RefundLedgerController::class, 'materialize']);
+        Route::post('/admin/refund-attempts/{attempt}/initiate', [RefundLedgerController::class, 'initiate']);
+        Route::post('/admin/refund-attempts/{attempt}/complete', [RefundLedgerController::class, 'complete']);
+        Route::post('/admin/refund-attempts/{attempt}/cancel', [RefundLedgerController::class, 'cancel']);
+        Route::post('/admin/refund-attempts/{attempt}/fail', [RefundLedgerController::class, 'markFailed']);
+        Route::post('/admin/refund-attempts/{attempt}/unknown', [RefundLedgerController::class, 'unknown']);
+        Route::post('/admin/refund-attempts/{attempt}/reconcile', [RefundLedgerController::class, 'reconcile']);
+        Route::post('/admin/order-sales-reductions/{reduction}/reinstate', [RefundLedgerController::class, 'reinstate']);
+        Route::post('/admin/orders/{order}/cancellation/finalize', [RefundLedgerController::class, 'finalizeCancellation']);
+    });
+
+    // IMP-006 slice 1: CRM Customer + visits + follow-ups. Read roles per OD-01 (agen/admin read-only,
+    // korsal downline); writes are owner Sales/SKS only (CrmAccess re-checks per record).
+    Route::middleware(['role:super_admin,agen,admin,korsal,sales,sales-kurir-sub', 'throttle:60,1'])->prefix('crm')->group(function () {
+        Route::get('/customers', [CrmController::class, 'index']);
+        Route::get('/customers/{customer}', [CrmController::class, 'show']);
+        Route::get('/customers/{customer}/visits', [CrmController::class, 'visits']);
+        Route::get('/follow-ups', [CrmController::class, 'followUps']);
+    });
+    Route::middleware(['role:sales,sales-kurir-sub,korsal', 'throttle:60,1'])->prefix('crm')->group(function () {
+        Route::post('/customers', [CrmController::class, 'store']);
+        Route::patch('/customers/{customer}', [CrmController::class, 'update']);
+        Route::post('/customers/{customer}/archive', [CrmController::class, 'archive']);
+        Route::post('/customers/{customer}/visits', [CrmController::class, 'storeVisit']);
+        Route::patch('/visits/{visit}', [CrmController::class, 'updateVisit']);
+    });
+
+    // Phase 2 / G17 (Owner 2026-10-30): Assisted Order, CRM linking, CRM-origin consent + assisted returns,
+    // refund-recipient evidence. Roles gate the route; CrmAccess / ConsentAccess re-check per record.
+    Route::middleware(['role:agen,korsal,sales,sales-kurir-sub', 'throttle:30,1'])->group(function () {
+        Route::post('/crm/customers/{customer}/orders', [CrmAssistedController::class, 'placeOrder']);
+    });
+    Route::middleware(['role:sales,sales-kurir-sub,korsal', 'throttle:30,1'])->group(function () {
+        Route::get('/crm/link-candidates', [CrmAssistedController::class, 'linkCandidates']);
+        Route::post('/crm/customers/{customer}/link-otp', [CrmAssistedController::class, 'linkOtp']);
+        Route::post('/crm/customers/{customer}/link', [CrmAssistedController::class, 'link']);
+        Route::post('/crm/customers/{customer}/consent-otp', [CrmAssistedController::class, 'consentOtp']);
+        Route::post('/crm/customers/{customer}/consent-events', [CrmAssistedController::class, 'captureConsent']);
+        Route::post('/orders/{order}/assisted-returns', [CrmAssistedController::class, 'initiateReturn']);
+    });
+    Route::middleware(['role:sales,sales-kurir-sub,korsal,agen,admin', 'throttle:30,1'])->group(function () {
+        Route::post('/crm/customers/{customer}/unlink', [CrmAssistedController::class, 'unlink']);
+    });
+    Route::middleware(['role:sales,sales-kurir-sub,korsal,agen,admin,keuangan,super_admin', 'throttle:30,1'])->group(function () {
+        Route::get('/orders/{order}/refund-recipient', [CrmAssistedController::class, 'indexRecipient']);
+        Route::post('/orders/{order}/refund-recipient', [CrmAssistedController::class, 'storeRecipient']);
+    });
+
+    // REM-005 / WS-9: OTP-verified, append-only consent evidence. Capturing roles act only inside
+    // their own Agent/referral chain (ConsentAccess); the code is emailed, never returned.
+    Route::middleware(['role:sales,sales-kurir-sub,korsal,agen', 'throttle:20,1'])->group(function () {
+        Route::post('/consent/otp', [ConsentController::class, 'issueOtp']);
+        Route::post('/consent/otp/{challenge}/verify', [ConsentController::class, 'verifyOtp']);
+        Route::post('/consent-events', [ConsentController::class, 'store']);
+    });
+    Route::middleware(['role:konsumen,sales,sales-kurir-sub,korsal,agen,admin,super_admin', 'throttle:30,1'])->group(function () {
+        Route::post('/consent-events/{consentEvent}/withdraw', [ConsentController::class, 'withdraw']);
+        Route::post('/consent-events/{consentEvent}/dispute', [ConsentController::class, 'dispute']);
+        Route::get('/orders/{order}/consent-events', [ConsentController::class, 'indexForOrder']);
+        Route::get('/orders/{order}/consent-context', [ConsentController::class, 'context']);
+    });
+    Route::middleware(['role:agen,admin,super_admin', 'throttle:30,1'])->group(function () {
+        Route::post('/consent-events/{consentEvent}/reinstate', [ConsentController::class, 'reinstate']);
     });
 
     // Konsumen requests a return for their own order (ReturnController::store
@@ -344,6 +441,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     });
     Route::middleware('role:kurir')->group(function () {
         Route::get('/kurir/returns', [CourierDashboardController::class, 'returns']);
+        Route::get('/kurir/returns/pickup-today', [CourierDashboardController::class, 'pickupToday']);
         Route::patch('/kurir/returns/{item}/pickup', [CourierDashboardController::class, 'pickupReturn']);
         Route::patch('/kurir/returns/{item}/confirm', [CourierDashboardController::class, 'confirmReturn']);
         Route::get('/kurir/reports/delivered', [CourierDashboardController::class, 'deliveredReport']);
@@ -557,12 +655,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Payment method on/off + credentials for one Agen's own branch —
     // reachable by the Agen themselves AND that branch's own Admin (never
     // another branch's) — see AgentPaymentMethodController docblock for the
-    // agent_id-not-id scoping this relies on. Separate from super_admin's
-    // global toggle in PaymentGatewayController.
+    // agent_id-not-id scoping this relies on.
     Route::middleware('role:agen,admin')->group(function () {
         Route::get('/agent/payment-methods', [AgentPaymentMethodController::class, 'index']);
         Route::patch('/agent/payment-methods/{method}/toggle', [AgentPaymentMethodController::class, 'toggle']);
-        Route::patch('/agent/payment-methods/{method}/environment', [AgentPaymentMethodController::class, 'setEnvironment']);
         Route::put('/agent/payment-methods/{method}/config', [AgentPaymentMethodController::class, 'updateConfig']);
 
         // Google Auth — the agen's OWN branch config (never another's).
@@ -589,14 +685,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
 
     // Sales' own konsumen roster + fee earned from each — never another
     // sales' customers, never agen-level fee (Blueprint §Sales dashboard).
-    Route::middleware('role:sales,sales-kurir-sub')->group(function () {
+    Route::middleware('role:sales,sales-kurir-sub,korsal')->group(function () {
         Route::get('/reports/my-customers', [ReportController::class, 'salesCustomers']);
     });
 
     // Fee configuration — never kurir ("fee tidak boleh dilihat selain agen
     // dan super admin" for courier_fee specifically; FeeResource narrows it
     // further still for sales — see FeeResource docblock).
-    Route::middleware('role:super_admin,agen,sales,sales-kurir-sub')->group(function () {
+    Route::middleware('role:super_admin,agen,sales,sales-kurir-sub,korsal')->group(function () {
         Route::get('/products/{product}/fees', [FeeController::class, 'showForProduct']);
         Route::get('/products/{product}/variations/{variation}/fees', [FeeController::class, 'showForVariation']);
     });
@@ -610,7 +706,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // CommissionController::allowedBeneficiaryRoles. keuangan sees the same
     // financial slice as admin (sales+courier freely, agent fee only for
     // direct agent referrals).
-    Route::middleware('role:super_admin,agen,sales,sales-kurir-sub,kurir,admin,korsal,keuangan')->group(function () {
+    Route::middleware('role:super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan')->group(function () {
         Route::get('/commissions', [CommissionController::class, 'index']);
         Route::get('/commissions/summary', [CommissionController::class, 'summary']);
     });
@@ -642,8 +738,16 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/reports/korsal', [ReportController::class, 'korsalRoster']);
         Route::get('/reports/couriers', [ReportController::class, 'courierRoster']);
     });
-    Route::middleware('role:super_admin,agen,admin,korsal,sales')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,korsal,sales,sales-kurir-sub')->group(function () {
         Route::get('/dashboard/summary', [ReportController::class, 'dashboardSummary']);
+    });
+    // Owner-approved KPI contracts (agen own fee, korsal team commissions, deals, gudang stock, kurir tasks); role-shaped.
+    Route::middleware('role:agen,korsal,sales,sales-kurir-sub,gudang,kurir')->get('/dashboard/kpis', \App\Http\Controllers\Api\V1\Report\DashboardKpiController::class);
+    // Network transaction totals (§7 owner directive) + CRM visit funnel
+    // (0–7/N) — read-only, order/item-grained; scopes enforced in services.
+    Route::middleware('role:super_admin,agen,admin,korsal,sales,sales-kurir-sub')->group(function () {
+        Route::get('/reports/network-transactions', [ReportController::class, 'networkTransactions']);
+        Route::get('/reports/crm-visits', [ReportController::class, 'crmVisits']);
     });
     // Consolidated network summary — Super Admin (all branches), Agen (own
     // branch) and Keuangan (own branch, financial view). Admin is not given
@@ -699,6 +803,30 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         // Audit Log — read-only browse of every ActivityLogger entry.
         Route::get('/admin/audit-logs', [AuditLogController::class, 'index']);
 
+        // Global SMTP (Super Admin only): the existing mail server, configured from the dashboard. Agents cannot change it.
+        Route::prefix('/admin/integrations/smtp')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\V1\Admin\SmtpSettingsController::class, 'show']);
+            Route::put('/', [\App\Http\Controllers\Api\V1\Admin\SmtpSettingsController::class, 'update']);
+            Route::middleware('throttle:6,1')->group(function () {
+                Route::post('/test-connection', [\App\Http\Controllers\Api\V1\Admin\SmtpSettingsController::class, 'testConnection']);
+                Route::post('/test-email', [\App\Http\Controllers\Api\V1\Admin\SmtpSettingsController::class, 'testEmail']);
+            });
+        });
+
+        // WhatsApp Gateway (GOWA) — Super Admin only. Configures PrimeClassy's own use of the gateway; it never exposes a
+        // secret and cannot administer GOWA devices. Real test messages are limited to Owner-authorised numbers.
+        Route::prefix('/admin/integrations/whatsapp')->group(function () {
+            Route::get('/', [WhatsAppGatewayController::class, 'show']);
+            Route::put('/', [WhatsAppGatewayController::class, 'update']);
+            Route::post('/test-connection', [WhatsAppGatewayController::class, 'testConnection'])->middleware('throttle:20,1');
+            Route::post('/test-message', [WhatsAppGatewayController::class, 'testMessage'])->middleware('throttle:10,1');
+            Route::post('/templates/{event}/preview', [WhatsAppGatewayController::class, 'previewTemplate']);
+            Route::put('/templates/{event}', [WhatsAppGatewayController::class, 'updateTemplate']);
+            Route::delete('/templates/{event}', [WhatsAppGatewayController::class, 'resetTemplate']);
+            Route::get('/messages', [WhatsAppGatewayController::class, 'messages']);
+            Route::post('/messages/{message}/retry', [WhatsAppGatewayController::class, 'retry'])->middleware('throttle:20,1');
+        });
+
         // Website Settings (Blueprint §Website Settings).
         Route::get('/admin/settings', [WebsiteSettingController::class, 'adminShow']);
         Route::put('/admin/settings', [WebsiteSettingController::class, 'update']);
@@ -717,11 +845,6 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/admin/agents/{agentProfile}', [AgentContactController::class, 'update']);
         Route::delete('/admin/agents/{agentProfile}', [AgentContactController::class, 'destroy']);
         Route::patch('/admin/agents/{agent}/toggle-status', [AgentContactController::class, 'toggleStatus']);
-
-        // Payment gateway administration — GLOBAL on/off only. Credentials are
-        // configured per-agen (see Agent\AgentPaymentMethodController).
-        Route::get('/admin/payment-gateways', [PaymentGatewayController::class, 'index']);
-        Route::patch('/admin/payment-gateways/{method}/toggle', [PaymentGatewayController::class, 'toggle']);
 
         // Shipping providers (RajaOngkir/OpenRoute) — GLOBAL on/off only.
         // Credentials/rate rules are configured per-agen (see Agent\AgentShippingProviderController).

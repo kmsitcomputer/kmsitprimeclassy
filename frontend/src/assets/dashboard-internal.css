@@ -1,0 +1,932 @@
+/**
+ * PC-IMP-008 (DB-P01) — Dashboard Visual Isolation Foundation · Premium Maroon.
+ *
+ * HARD ISOLATION CONTRACT:
+ *   Every selector in this file is scoped under a dashboard-only namespace
+ *   (`.pc-internal`, plus the shell markers `.pc-sidebar` / `.pc-drawer` /
+ *   `.pc-topbar` / `.pc-flyout`). Those classes exist ONLY inside
+ *   `layouts/DashboardLayout.vue`. No `html`, `body`, `:root` or bare-element
+ *   global selector may ever be added here — the public storefront keeps
+ *   `assets/main.css` (`@theme` brand + base layer) untouched.
+ *   The collapsed-sidebar flyout is teleported to <body>, OUTSIDE the layout
+ *   root, so it carries the namespace itself (`.pc-internal.pc-flyout`).
+ *   Other teleported overlays (e.g. admin modals that mount on <body>)
+ *   intentionally receive NONE of these rules until their own package —
+ *   styling them here would require leaking a global selector.
+ *
+ * TOKEN SOURCES: `design/design-tokens.json` (theme `premium-maroon`,
+ * Owner-approved visual authority) and `design/FINAL-MOCKDESIGN-SPEC.md` §2/§10.
+ * A drift between these values and the design file is a defect, not a redesign.
+ *
+ * DEFERRED BY DESIGN (later dashboard packages, NOT this foundation):
+ *   - Dark wine canvas `--pc-canvas` on the content area and card restyle:
+ *     flipping the canvas without restyling every view's cards/text would
+ *     break contrast mid-migration. Shell identity first, pages next.
+ *   - Active-nav pill keeps the existing `!bg-brand-50/!text-brand-700`
+ *     important utilities (renders as a light cream pill on the maroon rail).
+ */
+
+.pc-internal {
+  /* palette — design-tokens.json → colors */
+  --pc-canvas: #160D10;
+  --pc-sidebar: #270F16;
+  --pc-surface: #29171C;
+  --pc-surface-elevated: #392027;
+  --pc-border: #543039;
+  --pc-primary: #8B2635;
+  --pc-primary-hover: #A53645;
+  --pc-accent-cream: #F2D0AB;
+  --pc-accent-gold: #D8A66C;
+  --pc-text: #FFF5EC;
+  --pc-muted: #C3A6A7;
+  --pc-success: #36B37E;
+  --pc-warning: #F4AD4B;
+  --pc-danger: #EF6464;
+  --pc-info: #65B7D5;
+
+  /* typography — design-tokens.json → typography (weights 400/500/600/700) */
+  --pc-font-family: system-ui, 'Segoe UI', Arial, sans-serif;
+  --pc-font-regular: 400;
+  --pc-font-medium: 500;
+  --pc-font-semibold: 600;
+  --pc-font-bold: 700;
+
+  /* geometry — design-tokens.json → radius (sm/md/lg) + 4px spacing grid */
+  --pc-radius-sm: 8px;
+  --pc-radius-md: 12px;
+  --pc-radius-lg: 18px;
+  --pc-space-unit: 4px;
+
+  /* shell extras — exact values from design/index.html (canonical mockdesign) */
+  --pc-topbar: #221217;
+  --pc-sidebar-grad: linear-gradient(160deg, #3b141e, #200e14);
+  --pc-card-grad: linear-gradient(150deg, #321b22, #25151a);
+  --pc-control: #301b21;
+  --pc-active-text: #481e26;
+  --pc-td-border: #472a32;
+  --pc-th-text: #c9a9a8;
+  --pc-label-soft: #bd9697;
+
+  font-family: var(--pc-font-family);
+  background-color: var(--pc-canvas);
+  color: var(--pc-text);
+  color-scheme: dark;
+  scrollbar-color: var(--pc-border) transparent;
+}
+
+/* The shell's canvas utility lives on the namespace root itself
+ * (`class="pc-internal ... bg-stone-50"`), so the descendant utility remap
+ * below cannot match it. Keep the final Premium Maroon canvas on that exact
+ * root without leaking into the public storefront. */
+.pc-internal.bg-stone-50,
+.pc-internal.dark\:bg-stone-950 {
+  background-color: var(--pc-canvas);
+}
+
+/* Text selection inside the internal surface only. */
+.pc-internal ::selection {
+  background-color: var(--pc-primary-hover);
+  color: var(--pc-text);
+}
+
+/* Keyboard focus ring — mockdesign `.btn:focus-visible` (3px gold), applied to
+ * every interactive element inside the internal namespace only (incl. the
+ * self-namespaced teleported flyout via its own `.pc-internal` class). */
+.pc-internal :focus-visible,
+.pc-internal:focus-visible {
+  outline: 3px solid var(--pc-accent-gold);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sidebar rail (desktop) + mobile drawer — share the same visuals.   */
+/* ------------------------------------------------------------------ */
+.pc-internal .pc-sidebar,
+.pc-internal .pc-drawer {
+  background-image: var(--pc-sidebar-grad);
+  background-color: var(--pc-sidebar);
+  border-color: var(--pc-border);
+  color: var(--pc-muted);
+}
+
+/* Brand wordmark in the accent cream of the approved palette. */
+.pc-internal .pc-sidebar .font-display,
+.pc-internal .pc-drawer .font-display {
+  color: var(--pc-accent-cream);
+}
+
+/* Nav links + group/logout buttons: muted → cream on interaction. */
+.pc-internal .pc-sidebar a,
+.pc-internal .pc-sidebar button,
+.pc-internal .pc-drawer a,
+.pc-internal .pc-drawer button {
+  color: var(--pc-muted);
+}
+.pc-internal .pc-sidebar a:hover,
+.pc-internal .pc-sidebar button:hover,
+.pc-internal .pc-drawer a:hover,
+.pc-internal .pc-drawer button:hover {
+  background-color: var(--pc-surface-elevated);
+  color: var(--pc-text);
+}
+
+/* Expanded accordion guide rail + sidebar footer divider. */
+.pc-internal .pc-sidebar .ml-4,
+.pc-internal .pc-drawer .ml-4 {
+  border-left-color: var(--pc-border);
+}
+.pc-internal .pc-sidebar > div:last-child,
+.pc-internal .pc-drawer > div:last-child {
+  border-top-color: var(--pc-border);
+}
+
+/* Thin themed scrollbar on the nav column. */
+.pc-internal .pc-sidebar nav,
+.pc-internal .pc-drawer nav {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pc-border) transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Topbar (sticky header).                                            */
+/* ------------------------------------------------------------------ */
+.pc-internal .pc-topbar {
+  background-color: var(--pc-topbar);
+  border-bottom-color: var(--pc-border);
+  color: var(--pc-text);
+}
+.pc-internal .pc-topbar p {
+  color: var(--pc-text);
+}
+.pc-internal .pc-topbar p + p {
+  color: var(--pc-muted);
+}
+.pc-internal .pc-topbar button {
+  color: var(--pc-muted);
+}
+.pc-internal .pc-topbar button:hover {
+  background-color: var(--pc-surface-elevated);
+  color: var(--pc-text);
+}
+
+/* ------------------------------------------------------------------ */
+/* Collapsed-sidebar flyout — teleported to <body>, self-namespaced. */
+/* ------------------------------------------------------------------ */
+.pc-internal.pc-flyout {
+  background-color: var(--pc-surface-elevated);
+  border-color: var(--pc-border);
+  color: var(--pc-muted);
+}
+.pc-internal.pc-flyout > p {
+  color: var(--pc-accent-gold);
+}
+.pc-internal.pc-flyout a {
+  color: var(--pc-muted);
+}
+.pc-internal.pc-flyout a:hover {
+  background-color: var(--pc-sidebar);
+  color: var(--pc-text);
+}
+
+/* ==================================================================== */
+/* IMP-008 shell completion + internal-pages Premium Maroon remap layer  */
+/* (DB-P01 continuation; every selector below stays under .pc-internal) */
+/* ==================================================================== */
+
+/* Active nav item — mockdesign .nav button.active: cream fill, wine text. */
+.pc-internal .pc-active,
+.pc-internal.pc-flyout .pc-active {
+  /* !important is deliberate and dashboard-scoped only: it must beat the
+   * higher-specificity shell hover rules so the ACTIVE item keeps its cream
+   * fill while hovered (mockdesign behaviour). */
+  background-color: var(--pc-accent-cream) !important;
+  color: var(--pc-active-text) !important;
+  font-weight: var(--pc-font-bold);
+}
+
+/* Typography parity — mockdesign uses the system-ui stack everywhere. */
+.pc-internal .font-display {
+  font-family: var(--pc-font-family);
+}
+.pc-internal main {
+  max-width: 1800px; /* mockdesign .content max-width */
+}
+
+/* ---- Surfaces: light/stone utilities -> Premium Maroon surfaces ---- */
+.pc-internal .bg-white,
+.pc-internal .dark\:bg-stone-900,
+.pc-internal .dark\:bg-zinc-900 {
+  background-image: var(--pc-card-grad);
+  background-color: var(--pc-surface);
+}
+.pc-internal .bg-stone-50,
+.pc-internal .dark\:bg-stone-950,
+.pc-internal .bg-stone-100 {
+  background-color: var(--pc-canvas);
+}
+.pc-internal .bg-stone-200,
+.pc-internal .dark\:bg-stone-800,
+.pc-internal .hover\:bg-stone-100:hover,
+.pc-internal .hover\:bg-stone-200:hover,
+.pc-internal .dark\:hover\:bg-stone-800:hover {
+  background-color: var(--pc-surface-elevated);
+}
+/* Solid dark chips/buttons (submit actions) -> maroon primary. */
+.pc-internal .bg-stone-800,
+.pc-internal .bg-stone-900,
+.pc-internal .dark\:bg-stone-100 {
+  background-color: var(--pc-primary);
+}
+.pc-internal .hover\:bg-stone-900:hover,
+.pc-internal .hover\:bg-stone-800:hover {
+  background-color: var(--pc-primary-hover);
+}
+
+/* ---- Brand (berry) utilities -> premium maroon primary ---- */
+.pc-internal .bg-brand-50,
+.pc-internal .dark\:bg-brand-950 {
+  background-color: rgba(139, 38, 53, 0.28);
+}
+.pc-internal .bg-brand-600,
+.pc-internal .bg-brand-700 {
+  background-color: var(--pc-primary);
+}
+.pc-internal .hover\:bg-brand-700:hover,
+.pc-internal .hover\:bg-brand-600:hover {
+  background-color: var(--pc-primary-hover);
+}
+.pc-internal .text-brand-500,
+.pc-internal .text-brand-600,
+.pc-internal .text-brand-700,
+.pc-internal .dark\:text-brand-300,
+.pc-internal .dark\:text-brand-400 {
+  color: var(--pc-accent-cream);
+}
+.pc-internal .border-brand-200,
+.pc-internal .border-brand-300,
+.pc-internal .border-brand-700,
+.pc-internal .hover\:border-brand-300:hover,
+.pc-internal .dark\:hover\:border-brand-700:hover {
+  border-color: var(--pc-accent-gold);
+}
+
+/* ---- Neutral text: stone scale -> cream/muted pairing ---- */
+.pc-internal .text-stone-900,
+.pc-internal .text-stone-800,
+.pc-internal .text-stone-700,
+.pc-internal .dark\:text-stone-50,
+.pc-internal .dark\:text-stone-100,
+.pc-internal .dark\:text-stone-200 {
+  color: var(--pc-text);
+}
+.pc-internal .text-stone-600,
+.pc-internal .text-stone-500,
+.pc-internal .text-stone-400,
+.pc-internal .text-stone-300,
+.pc-internal .dark\:text-stone-300,
+.pc-internal .dark\:text-stone-400,
+.pc-internal .dark\:text-stone-500 {
+  color: var(--pc-muted);
+}
+/* Inverted label that sat on a solid dark button/chip -> cream on maroon. */
+.pc-internal .text-white {
+  color: var(--pc-text);
+}
+
+/* ---- Borders / dividers ---- */
+.pc-internal .border-stone-100,
+.pc-internal .border-stone-200,
+.pc-internal .border-stone-300,
+.pc-internal .border-slate-200,
+.pc-internal .border-slate-300,
+.pc-internal .dark\:border-stone-700,
+.pc-internal .dark\:border-stone-800 {
+  border-color: var(--pc-border);
+}
+.pc-internal .divide-stone-100 > :not([hidden]) ~ :not([hidden]),
+.pc-internal .divide-stone-200 > :not([hidden]) ~ :not([hidden]),
+.pc-internal .dark\:divide-stone-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--pc-border);
+}
+
+/* ---- Functional status colors (mockdesign §2 palette; never color-only) ---- */
+.pc-internal .text-red-500,
+.pc-internal .text-red-600,
+.pc-internal .text-red-700,
+.pc-internal .dark\:text-red-300,
+.pc-internal .dark\:text-red-400 {
+  color: var(--pc-danger);
+}
+.pc-internal .bg-red-50,
+.pc-internal .dark\:bg-red-950 {
+  background-color: rgba(239, 100, 100, 0.16);
+}
+.pc-internal .border-red-200,
+.pc-internal .border-red-300 {
+  border-color: rgba(239, 100, 100, 0.45);
+}
+.pc-internal .text-emerald-500,
+.pc-internal .text-emerald-600,
+.pc-internal .text-emerald-700,
+.pc-internal .dark\:text-emerald-300,
+.pc-internal .dark\:text-emerald-400 {
+  color: var(--pc-success);
+}
+.pc-internal .bg-emerald-50,
+.pc-internal .dark\:bg-emerald-950 {
+  background-color: rgba(54, 179, 126, 0.16);
+}
+.pc-internal .text-amber-500,
+.pc-internal .text-amber-600,
+.pc-internal .text-amber-700,
+.pc-internal .text-amber-800,
+.pc-internal .dark\:text-amber-300,
+.pc-internal .dark\:text-amber-400 {
+  color: var(--pc-warning);
+}
+.pc-internal .bg-amber-50,
+.pc-internal .dark\:bg-amber-950 {
+  background-color: rgba(244, 173, 75, 0.16);
+}
+.pc-internal .text-sky-600,
+.pc-internal .text-sky-700,
+.pc-internal .text-blue-600,
+.pc-internal .text-blue-700,
+.pc-internal .dark\:text-sky-300,
+.pc-internal .dark\:text-blue-300 {
+  color: var(--pc-info);
+}
+.pc-internal .bg-sky-50,
+.pc-internal .bg-blue-50,
+.pc-internal .dark\:bg-sky-950,
+.pc-internal .dark\:bg-blue-950 {
+  background-color: rgba(101, 183, 213, 0.16);
+}
+
+/* ---- Form controls (mockdesign .select/.btn base) ---- */
+.pc-internal input,
+.pc-internal select,
+.pc-internal textarea {
+  background-color: var(--pc-control);
+  border-color: var(--pc-border);
+  color: var(--pc-text);
+}
+.pc-internal input::placeholder,
+.pc-internal textarea::placeholder {
+  color: var(--pc-muted);
+}
+.pc-internal input[type='checkbox'],
+.pc-internal input[type='radio'] {
+  accent-color: var(--pc-primary);
+}
+
+/* ---- Tables (mockdesign th/td) ---- */
+.pc-internal th {
+  color: var(--pc-th-text);
+  border-bottom-color: var(--pc-border);
+}
+.pc-internal td {
+  border-bottom-color: var(--pc-td-border);
+}
+.pc-internal tbody tr:hover td {
+  background-color: rgba(57, 32, 39, 0.55);
+}
+
+/* ---- Named design markers (mockdesign .eyebrow / .notice) ---- */
+.pc-internal .pc-eyebrow {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--pc-accent-gold);
+}
+.pc-internal .pc-notice {
+  border-left: 3px solid var(--pc-accent-gold);
+  background-color: #3d2427;
+  padding: 12px 15px;
+  margin-top: 14px;
+  border-radius: 7px;
+  color: #e9d6cf;
+  font-size: 12px;
+}
+
+/* ---- Coverage top-up (gap scan 2026-10-28) ---- */
+.pc-internal .text-emerald-800,
+.pc-internal .text-emerald-500 {
+  color: var(--pc-success);
+}
+.pc-internal .bg-emerald-50,
+.pc-internal .bg-emerald-100 {
+  background-color: rgba(54, 179, 126, 0.16);
+}
+.pc-internal .border-emerald-200,
+.pc-internal .border-emerald-300 {
+  border-color: rgba(54, 179, 126, 0.45);
+}
+.pc-internal .bg-emerald-600 {
+  background-color: var(--pc-success);
+}
+.pc-internal .hover\:bg-emerald-700:hover {
+  background-color: #2f9c6e;
+}
+.pc-internal .text-amber-800 {
+  color: var(--pc-warning);
+}
+.pc-internal .bg-amber-100 {
+  background-color: rgba(244, 173, 75, 0.18);
+}
+.pc-internal .border-amber-200 {
+  border-color: rgba(244, 173, 75, 0.45);
+}
+.pc-internal .text-rose-700 {
+  color: var(--pc-danger);
+}
+.pc-internal .text-slate-800,
+.pc-internal .text-slate-900 {
+  color: var(--pc-text);
+}
+.pc-internal .text-slate-500,
+.pc-internal .text-slate-400 {
+  color: var(--pc-muted);
+}
+.pc-internal .bg-red-600 {
+  background-color: var(--pc-danger);
+}
+.pc-internal .hover\:bg-red-700:hover {
+  background-color: #d95c5c;
+}
+.pc-internal .text-red-800 {
+  color: var(--pc-danger);
+}
+.pc-internal .bg-brand-500,
+.pc-internal .dark\:bg-brand-500 {
+  background-color: var(--pc-primary);
+}
+.pc-internal .hover\:bg-brand-500:hover {
+  background-color: var(--pc-primary-hover);
+}
+.pc-internal .border-brand-600 {
+  border-color: var(--pc-primary-hover);
+}
+.pc-internal .accent-brand-600 {
+  accent-color: var(--pc-primary);
+}
+.pc-internal .dark\:hover\:bg-stone-700:hover,
+.pc-internal .dark\:bg-stone-700 {
+  background-color: var(--pc-surface-elevated);
+}
+.pc-internal .ring-brand-500,
+.pc-internal .focus\:ring-brand-500:focus {
+  --tw-ring-color: var(--pc-accent-gold);
+}
+
+/* Thin maroon scrollbars (webkit side; standard scrollbar-color set on root). */
+.pc-internal ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.pc-internal ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pc-internal ::-webkit-scrollbar-thumb {
+  background: var(--pc-border);
+  border-radius: 8px;
+}
+.pc-internal ::-webkit-scrollbar-thumb:hover {
+  background: #6d434d;
+}
+
+/* ---- Final gap patch (8 classes, diff-scan 2026-10-28) ---- */
+.pc-internal .text-brand-800 {
+  color: var(--pc-accent-cream);
+}
+.pc-internal .border-brand-500 {
+  border-color: var(--pc-accent-gold);
+}
+.pc-internal .bg-red-100,
+.pc-internal .bg-rose-50 {
+  background-color: rgba(239, 100, 100, 0.18);
+}
+.pc-internal .text-blue-800,
+.pc-internal .text-indigo-800 {
+  color: var(--pc-info);
+}
+.pc-internal .bg-blue-100,
+.pc-internal .bg-indigo-100 {
+  background-color: rgba(101, 183, 213, 0.18);
+}
+
+/* Disabled controls keep a readable maroon-mode look. */
+.pc-internal input:disabled,
+.pc-internal select:disabled,
+.pc-internal textarea:disabled,
+.pc-internal button:disabled {
+  opacity: 0.55;
+}
+
+/* ==================================================================== */
+/* Dashboard home composition — mirrors design/index.html (.header,      */
+/* .kpis, .panels, .lower, .card, .pill, .progressrow). Scoped, additive. */
+/* ==================================================================== */
+.pc-internal main {
+  padding: 28px;
+}
+.pc-internal .pc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 15px;
+  margin-bottom: 23px;
+  flex-wrap: wrap;
+}
+.pc-internal .pc-h1 {
+  font-size: 27px;
+  margin: 4px 0 2px;
+  letter-spacing: -0.6px;
+  font-weight: 700;
+  color: var(--pc-text);
+}
+.pc-internal .pc-subtitle {
+  margin: 0;
+  color: var(--pc-muted);
+}
+.pc-internal .pc-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pc-internal .pc-btn {
+  border: 1px solid var(--pc-border);
+  background: var(--pc-control);
+  color: var(--pc-text);
+  padding: 10px 12px;
+  border-radius: 9px;
+  text-decoration: none;
+  display: inline-block;
+}
+.pc-internal .pc-btn-primary {
+  background: var(--pc-accent-cream);
+  color: #4c2229;
+  border-color: var(--pc-accent-cream);
+  font-weight: 700;
+}
+.pc-internal .pc-card {
+  background: var(--pc-card-grad);
+  border: 1px solid var(--pc-border);
+  border-radius: 14px;
+  padding: 18px;
+  min-width: 0;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+}
+.pc-internal .pc-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.pc-internal .pc-kpi-label {
+  color: #d7b8b2;
+  font-size: 12px;
+}
+.pc-internal .pc-kpi-value {
+  font-size: 25px;
+  display: block;
+  margin: 9px 0 3px;
+  letter-spacing: -0.5px;
+  color: var(--pc-text);
+  overflow-wrap: anywhere;
+}
+.pc-internal .pc-kpi-hint {
+  color: var(--pc-success);
+}
+.pc-internal .pc-kpi-na {
+  color: var(--pc-muted);
+}
+.pc-internal .pc-kpi-symbol {
+  float: right;
+  background: #64303b;
+  color: var(--pc-accent-cream);
+  padding: 8px;
+  border-radius: 9px;
+}
+.pc-internal .pc-kpi-skel {
+  height: 76px;
+}
+.pc-internal .pc-panels {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+.pc-internal .pc-lower {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+.pc-internal .pc-panelhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 17px;
+}
+.pc-internal .pc-panelhead h2 {
+  font-size: 15px;
+  margin: 0;
+  font-weight: 600;
+  color: var(--pc-text);
+}
+.pc-internal .pc-tag {
+  background: #5b2a35;
+  color: #f9d5b8;
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pc-internal .pc-legend {
+  margin-top: 13px;
+  font-size: 11px;
+  color: var(--pc-muted);
+}
+.pc-internal .pc-legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  background: var(--pc-accent-gold);
+  margin-right: 5px;
+  border-radius: 2px;
+}
+.pc-internal .pc-progressrow {
+  display: grid;
+  grid-template-columns: 105px 1fr 74px;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  color: #e9d3cd;
+  font-size: 12px;
+}
+.pc-internal .pc-track {
+  height: 9px;
+  background: #563039;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.pc-internal .pc-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8b2635, #f2d0ab);
+  border-radius: 9px;
+}
+.pc-internal .pc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pc-internal .pc-table th {
+  text-align: left;
+  font-weight: 500;
+  padding: 10px 7px;
+  border-bottom: 1px solid var(--pc-border);
+}
+.pc-internal .pc-table td {
+  padding: 12px 7px;
+  border-bottom: 1px solid var(--pc-td-border);
+}
+.pc-internal .pc-table tr:last-child td {
+  border-bottom: 0;
+}
+.pc-internal .pc-pill {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: #4a342b;
+  color: #ffd08d;
+  white-space: nowrap;
+}
+.pc-internal .pc-pill-ok {
+  background: #173e32;
+  color: #70e6b6;
+}
+.pc-internal .pc-pill-bad {
+  background: #59252d;
+  color: #ff9999;
+}
+.pc-internal .pc-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 120px;
+  justify-content: center;
+  border: 1px dashed var(--pc-border);
+  border-radius: 10px;
+  padding: 16px;
+  color: var(--pc-muted);
+  font-size: 12px;
+}
+.pc-internal .pc-empty strong {
+  color: var(--pc-text);
+  font-size: 13px;
+}
+.pc-internal .pc-queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.pc-internal .pc-queue li {
+  border-bottom: 1px solid var(--pc-border);
+}
+.pc-internal .pc-queue li:last-child {
+  border-bottom: 0;
+}
+.pc-internal .pc-queue-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0;
+  color: #e9d6cf;
+  text-decoration: none;
+}
+.pc-internal .pc-queue-link:hover .pc-tag {
+  background: var(--pc-accent-cream);
+  color: var(--pc-active-text);
+}
+.pc-internal .pc-queue-ico {
+  color: var(--pc-accent-gold);
+  display: grid;
+  place-items: center;
+}
+.pc-internal .pc-queue-label {
+  flex: 1;
+  min-width: 0;
+}
+.pc-internal .pc-section-label {
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  color: var(--pc-label-soft);
+  text-transform: uppercase;
+  padding: 10px 11px 3px;
+}
+.pc-internal .pc-notice {
+  margin: 14px 0 0;
+}
+
+@media (max-width: 1100px) {
+  .pc-internal .pc-kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .pc-internal .pc-panels,
+  .pc-internal .pc-lower {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 700px) {
+  .pc-internal main {
+    padding: 18px 14px;
+  }
+  .pc-internal .pc-kpis {
+    gap: 9px;
+  }
+  .pc-internal .pc-card {
+    padding: 13px;
+  }
+  .pc-internal .pc-kpi-value {
+    font-size: 19px;
+  }
+  .pc-internal .pc-h1 {
+    font-size: 23px;
+  }
+  .pc-internal .pc-progressrow {
+    grid-template-columns: 80px 1fr 64px;
+  }
+}
+
+/* ==================================================================== */
+/* Operational-pages completion (audit of 36 dashboard + 14 admin views) */
+/* Every utility below was found in those views and was unmapped. Scoped. */
+/* ==================================================================== */
+
+/* Contrast fix: label that sat on the inverted `dark:bg-stone-100` button
+ * (remapped to maroon above) must be light, not stone-900. */
+.pc-internal .dark\:text-stone-900 {
+  color: var(--pc-text);
+}
+/* Contrast fix: small overlay buttons on product images were white/90 with a
+ * (now cream) label; keep the label readable on a dark translucent chip. */
+.pc-internal .bg-white\/90 {
+  background-color: rgba(41, 23, 28, 0.9);
+  color: var(--pc-text);
+}
+/* Surfaces / chips */
+.pc-internal .dark\:bg-slate-800,
+.pc-internal .dark\:bg-slate-900.rounded-lg {
+  background-image: var(--pc-card-grad);
+  background-color: var(--pc-surface);
+}
+.pc-internal .dark\:bg-slate-900 {
+  background-color: var(--pc-control);
+}
+.pc-internal .dark\:bg-stone-800\/50,
+.pc-internal .dark\:bg-stone-800\/60,
+.pc-internal .dark\:hover\:bg-stone-800\/50:hover,
+.pc-internal .hover\:bg-stone-50:hover,
+.pc-internal .hover\:bg-stone-300:hover {
+  background-color: var(--pc-surface-elevated);
+}
+.pc-internal .dark\:bg-brand-950\/30,
+.pc-internal .dark\:bg-brand-950\/40 {
+  background-color: rgba(139, 38, 53, 0.28);
+}
+.pc-internal .dark\:bg-red-950\/40,
+.pc-internal .dark\:bg-rose-950,
+.pc-internal .dark\:hover\:bg-red-950:hover,
+.pc-internal .hover\:bg-red-50:hover,
+.pc-internal .hover\:bg-red-100:hover {
+  background-color: rgba(239, 100, 100, 0.16);
+}
+/* Borders */
+.pc-internal .dark\:border-slate-700,
+.pc-internal .hover\:border-stone-300:hover,
+.pc-internal .dark\:border-brand-900 {
+  border-color: var(--pc-border);
+}
+.pc-internal .dark\:border-brand-400 {
+  border-color: var(--pc-accent-gold);
+}
+/* Text */
+.pc-internal .dark\:text-slate-100,
+.pc-internal .hover\:text-stone-800:hover,
+.pc-internal .dark\:hover\:text-stone-200:hover {
+  color: var(--pc-text);
+}
+.pc-internal .dark\:text-stone-700 {
+  color: var(--pc-border);
+}
+.pc-internal .dark\:text-rose-400,
+.pc-internal .hover\:text-red-600:hover {
+  color: var(--pc-danger);
+}
+.pc-internal .hover\:text-brand-600:hover {
+  color: var(--pc-accent-cream);
+}
+
+/* Keyboard focus: beat Tailwind `focus:outline-none` (same specificity, later
+ * order) so every control keeps the 3px gold ring — never removed. */
+.pc-internal :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--pc-accent-gold);
+  outline-offset: 2px;
+}
+
+/* Responsive safety net inside the internal surface only: long unbroken
+ * values (order numbers, emails, rupiah) wrap instead of forcing horizontal
+ * page scroll; media never exceeds its card. */
+.pc-internal main {
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.pc-internal main img,
+.pc-internal main video {
+  max-width: 100%;
+}
+/* Modal-style fixed overlays: always fit the viewport and scroll internally. */
+.pc-internal .fixed.inset-0 > :is(form, div):not(.absolute) {
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+/* Disabled/readonly tables keep header contrast on the elevated header row. */
+.pc-internal thead {
+  background-color: rgba(57, 32, 39, 0.35);
+}
+
+/* Tablet/mobile (<=1023px): drawer is the only nav; keep touch targets >=40px. */
+@media (max-width: 1023px) {
+  .pc-internal .pc-drawer a,
+  .pc-internal .pc-drawer button {
+    min-height: 40px;
+  }
+}
+
+/* ---- Coverage top-up (class diff 2026-10-29, 11 classes) ---- */
+.pc-internal .bg-orange-100,
+.pc-internal .bg-pink-100,
+.pc-internal .bg-purple-100 {
+  background-color: rgba(244, 173, 75, 0.16);
+}
+.pc-internal .text-orange-800,
+.pc-internal .text-red-900,
+.pc-internal .text-pink-800,
+.pc-internal .text-purple-800 {
+  color: var(--pc-warning);
+}
+.pc-internal .bg-red-200 {
+  background-color: rgba(239, 100, 100, 0.22);
+}
+.pc-internal .border-amber-300 {
+  border-color: rgba(244, 173, 75, 0.55);
+}
+.pc-internal .bg-sky-100 {
+  background-color: rgba(101, 183, 213, 0.18);
+}
+.pc-internal .text-sky-800 {
+  color: var(--pc-info);
+}

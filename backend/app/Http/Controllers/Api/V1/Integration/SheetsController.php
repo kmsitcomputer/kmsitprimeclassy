@@ -9,12 +9,15 @@ use App\Models\SheetsDestination;
 use App\Models\SheetsSyncLog;
 use App\Services\GoogleSheets\DatasetRegistry;
 use App\Services\GoogleSheets\GoogleSheetsException;
+use App\Services\GoogleSheets\ReportPeriodFilter;
 use App\Services\GoogleSheets\SheetsClient;
 use App\Services\GoogleSheets\SyncService;
+use App\Services\Report\OrderStaffWorksheetService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class SheetsController extends Controller
 {
@@ -32,6 +35,7 @@ class SheetsController extends Controller
             $configs = $configs->reject(fn (SheetsConfig $config) => $config->dataset === 'financial_summary')->values();
             unset($datasets['financial_summary']);
         }
+        $catalog = $registry->catalog($request->user()->isRole('admin'));
         $logs = SheetsSyncLog::query();
         if (! $request->user()->isRole('super_admin')) {
             $logs->where('agent_scope', $request->user()->agent_id);
@@ -40,7 +44,10 @@ class SheetsController extends Controller
         $credential = app(SheetsClient::class)->credentialInfo();
 
         return $this->ok(['destinations' => $destinations, 'configs' => $configs, 'datasets' => $datasets,
-            'dataset_defaults' => $registry->defaults(),
+            'dataset_catalog' => $catalog,
+            'money_positions' => OrderStaffWorksheetService::MONEY_POSITIONS,
+            'dataset_defaults' => array_intersect_key($registry->defaults(), $datasets),
+            'dataset_filters' => $registry->supportedFilters(),
             'logs' => $logs->orderByDesc('id')->limit(100)->get([
                 'id', 'config_id', 'dataset', 'tab', 'actor_id', 'actor_role', 'agent_scope',
                 'started_at', 'completed_at', 'status', 'rows_processed', 'rows_success', 'rows_failed', 'error_summary',
@@ -181,17 +188,67 @@ class SheetsController extends Controller
             'name' => ['required', 'string', 'max:150'],
             'tab' => ['required', 'string', 'max:100', 'regex:/^[^\[\]:*?\\\\\/]+$/', Rule::unique('sheets_configs')->where('destination_id', $request->integer('destination_id'))->ignore($config)],
             'dataset' => ['required', Rule::in(array_keys($registry->definitions()))],
-            'columns' => ['required', 'array', 'min:1', 'max:30'],
+            'columns' => ['required', 'array', 'min:1', 'max:60'], // Laporan C carries 47 columns.
             'columns.*' => ['array:field,label'],
             'columns.*.field' => ['required', 'string', 'distinct', Rule::in($registry->definitions()[is_string($request->input('dataset')) ? $request->input('dataset') : ''] ?? [])],
             'columns.*.label' => ['required', 'string', 'max:100'],
-            'filters' => ['nullable', 'array:status'],
+            'filters' => ['nullable', 'array:period,from,to,status,category_group'],
+            'filters.category_group' => ['nullable', Rule::in(OrderStaffWorksheetService::CATEGORY_GROUPS)],
+            'filters.period' => ['nullable', Rule::in(ReportPeriodFilter::PERIODS)],
+            'filters.from' => ['nullable', 'date_format:Y-m-d'],
+            'filters.to' => ['nullable', 'date_format:Y-m-d'],
             'filters.status' => ['nullable', 'string', 'max:40'],
         ]);
         $destination = SheetsDestination::findOrFail($data['destination_id']);
         abort_unless($request->user()->isRole('super_admin') || $destination->agent_id === $request->user()->agent_id, 403);
 
+        // Backend enforcement (not menu hiding): Admin can never create or move a
+        // config onto a dataset that carries Agent commission.
+        abort_if(
+            $request->user()->isRole('admin') && in_array($data['dataset'], DatasetRegistry::AGENT_COMMISSION_DATASETS, true),
+            403,
+            'Dataset ini memuat komisi Agen dan tidak tersedia untuk Admin.',
+        );
+
+        if (! empty($data['filters']['category_group']) && $data['dataset'] !== DatasetRegistry::DATASET_STAFF_WORKSHEET) {
+            throw ValidationException::withMessages(['filters.category_group' => 'Filter kategori hanya tersedia pada Laporan C.']);
+        }
+
+        $this->validatedFilters($data['dataset'], $data['filters'] ?? [], $registry);
+
         return $data;
+    }
+
+    /**
+     * A period filter is only meaningful on the two order reports. Accepting it
+     * on any other dataset would silently export everything and look like the
+     * filter worked, so it is rejected instead.
+     */
+    private function validatedFilters(string $dataset, array $filters, DatasetRegistry $registry): void
+    {
+        $periodKeys = array_values(array_filter(
+            array_keys($filters),
+            fn (string $key) => in_array($key, ['period', 'from', 'to'], true) && ! empty($filters[$key]),
+        ));
+
+        if ($periodKeys !== [] && ! $registry->supportsPeriodFilter($dataset)) {
+            throw ValidationException::withMessages([
+                'filters' => 'Filter periode hanya tersedia pada laporan Transaksi Awal dan Posisi Pembayaran Terkini.',
+            ]);
+        }
+
+        if (($filters['period'] ?? null) === ReportPeriodFilter::CUSTOM) {
+            if (empty($filters['from']) || empty($filters['to'])) {
+                throw ValidationException::withMessages([
+                    'filters.from' => 'Periode kustom wajib diisi tanggal mulai dan tanggal sampai.',
+                ]);
+            }
+            if ($filters['from'] > $filters['to']) {
+                throw ValidationException::withMessages([
+                    'filters.to' => 'Tanggal sampai tidak boleh lebih awal dari tanggal mulai.',
+                ]);
+            }
+        }
     }
 
     private function normalizeSpreadsheetId(string $value): string

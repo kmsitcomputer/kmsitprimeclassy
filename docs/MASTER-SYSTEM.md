@@ -22,7 +22,7 @@ Prime Classy Cake & Cookies is a **multi-branch cake and cookies ordering platfo
 
 - **Backend:** PHP 8.2+ (DEV 8.3), Laravel 11.56, Sanctum SPA sessions, MariaDB 10.11 (DEV and production), HTMLPurifier (CMS/product HTML sanitizing), PhpSpreadsheet (XLSX), `google/auth` (Sheets).
 - **Frontend:** Vue 3, Vite 8, TypeScript, Pinia, Vue Router, vue-i18n, Tailwind CSS 4, CKEditor 5, Axios.
-- **Integrations:** OpenRouteService, RajaOngkir/Komerce V2, Xendit/Tripay/Stripe, Google Sheets API, optional Google Maps (public key, frontend only).
+- **Integrations:** OpenRouteService, RajaOngkir/Komerce V2, Google Sheets API, optional Google Maps (public key, frontend only).
 - **Tests:** PHPUnit Feature/Unit against an isolated MariaDB database (`primeclassy_testing`) with a real two-connection concurrency harness. No frontend test framework.
 
 ## 4. Application topology
@@ -34,7 +34,7 @@ flowchart LR
   SPA -. same origin .-> FPM
   FPM --> DB[(MariaDB)]
   FPM --> ST[(storage/app/public<br/>uploads)]
-  FPM --> EXT[ORS · RajaOngkir · Xendit/Tripay/Stripe · Google Sheets]
+  FPM --> EXT[ORS · RajaOngkir · Google Sheets]
 ```
 
 Frontend and backend are separate deployables that run **same-origin** in DEV and production (single-domain layout). In production the web server routes `/api`, `/sanctum` and `/up` to Laravel through `public_html/laravel.php`; everything else is the SPA with history-mode fallback. See [OPERATIONS.md](OPERATIONS.md).
@@ -184,8 +184,8 @@ Super Admin manages homepage blocks, articles and pages (CKEditor 5, server-side
 
 - **OpenRouteService** — Kurir Online price from route distance: `max(0, distance_km − minimum_distance_km) × rate_per_km` (floored by `minimum_charge`); provider failure rejects the order (no straight-line/free fallback).
 - **RajaOngkir/Komerce V2** — expedition rates; per-Agent encrypted key and origin; selection re-verified at order creation.
-- **Payment gateways** — Xendit, Tripay, Stripe; credentials per Agent, stored encrypted, never returned by the API; webhooks signature-verified and idempotent.
-- **Google Sheets** — one-way export of 15 whitelisted datasets, central service account, manual sync (≤ 10,000 rows), sanitized logs; never imports.
+- **Payment methods** — manual bank transfer and COD only (DP/pelunasan are payment schemes). External payment gateways (Xendit/Tripay/Stripe) were removed by Owner decision; no gateway webhooks exist.
+- **Google Sheets** — one-way export of 17 whitelisted datasets, central service account, manual sync (≤ 10,000 rows), sanitized logs; never imports. Two of them are the PrimeClassy reports: **Laporan A "Transaksi Awal"** (immutable per-item snapshot at order creation, 24 columns) and **Laporan B "Posisi Pembayaran Terkini"** (live per-invoice position, 15 columns) — see [BUSINESS-RULES.md](BUSINESS-RULES.md) §20a and [ARCHITECTURE.md](ARCHITECTURE.md) §12.1.
 - Super Admin holds global provider toggles; Agents hold their own credentials and rules.
 
 ## 32. API
@@ -231,3 +231,90 @@ PHPUnit (`tests/Feature`, `tests/Unit`) with real DB, policy, migration, and con
 - Package C (SC-03): **implemented**, reviewed and remediated (immutable request fingerprint, StockRequest lock order, fresh financial response, frontend idempotency lifecycle, secure UUID fallback); adds migrations `2026_10_02_100000_add_idempotency_key_to_order_items_table` and `2026_10_02_110000_add_request_fingerprint_to_order_items_table`, both **pending on production**. DEV UAT = Human PASS and the DEV Stage Gate is CLOSED/APPROVED; **production deployment is pending** and Package C is not production closed.
 - After Package C is production closed, the approved feature roadmap is **complete**. No further package is authorized or planned in this repository; a new package needs an explicit Human change request.
 - Documented, **unauthorized** backlog (implement only on Human request or a concrete defect): warehouse transfer/opname list `variation.label` serialization; language switcher in the dashboard header; frontend automated tests; performance audit; dead `StockService::deduct*`; unreachable `ProductTranslation.description` write path; Laravel 11 framework advisories (upgrade decision); Google Sheets destination sharing and RajaOngkir key rotation (operational).
+
+## 42. SimpleV2 adaptation — feature-state ledger (Owner 2026-10-28)
+
+Owner decisions OD-01…OD-06 (`docs/adaptation/PC-SV2-DOCS-ONLY-CONSOLIDATION-20261028.md`, rules in `docs/BUSINESS-RULES.md` §27/§20b, architecture in `docs/ARCHITECTURE.md` §16) constitute the explicit Human change-request basis referenced above. **Scope approval is not implementation approval**: each feature below still needs its own Owner-authorized package, additive migration design, tests and stage gate. The uploaded source audit `PC-SV2-WORKFLOW-001 / PC-SV2-RBAC-001` (29 workflow groups, 11 roles, 14 gaps) was **not found in the repository** (2026-10-28 search; confirmed by the same day's read-only evidence recovery across full Git history, all refs, stash and worktrees — `ORIGINAL_AUDIT_NOT_RECOVERED`); its `OR-###`/14-gap references remain Owner-provided citations pending the original document itself. The **29-group register itself survives** as an Owner-transcribed, audit-derived record in `design/FINAL-MOCKDESIGN-SPEC.md` §4 (`WF-01…WF-29`, verbatim IDs/names/roles/gates) and serves as the interim preservation reference. Its group boundaries were source-level verified **by sample** against this repo's code and audit records — that is partial verification, not complete per-group verification, and not runtime validation.
+
+| Feature | State | Evidence boundary |
+|---|---|---|
+| Existing PrimeClassy 29 workflow groups | REGISTER RECOVERED (interim, Owner-transcribed `design/FINAL-MOCKDESIGN-SPEC.md` §4) — SOURCE-AUDITED BY SAMPLE / RUNTIME-NOT-VERIFIED — **original audit bodies unavailable** (`ORIGINAL_AUDIT_NOT_RECOVERED`) | 2026-10-28 audits + evidence recovery; interim reference is a derived record, must not be described as the original audit or as complete runtime validation |
+| 11 role workspaces | EXISTING ROUTES WITH TARGET REDESIGN | Dedicated per-role UX is a design goal; backend authorizations preserved unchanged (§2 roles) |
+| CRM Customer CRUD / Visit / prospect / follow-up | OWNER-APPROVED / NOT IMPLEMENTED | `BR` §27; audit refs OR-01/02; `IMP-006 BLOCKED` |
+| CRM-origin assisted order | OWNER-APPROVED / NOT IMPLEMENTED | `BR` §27, `ARCH` §16; audit ref OR-03 |
+| Verified CRM↔Konsumen linking + revocation | OWNER-APPROVED / NOT IMPLEMENTED | `BR` §27 (OD-03/OD-04); audit ref OR-04 |
+| CRM delegated return request (consent-evidenced) | OWNER-APPROVED / NOT IMPLEMENTED | `BR` §27 (OD-02); existing returns still require authenticated Konsumen |
+| Refund ledger complete workbench | INCOMPLETE / NEEDS EVIDENCE | Uncommitted on `feat/refund-ledger-v1`; scoped tests passed (2026-10-28, ledger docs); full suite Owner-run |
+| SimpleV2 Sheets visual parity | NOT VERIFIED | Real exported workbook missing (`EXTERNAL_EVIDENCE_REQUIRED`) |
+| AU-01 no-active-Agen 503 `registration_unavailable` | LOCKED CONTRACT / SOURCE CONTRADICTION | Manual register currently throws `RuntimeException` (HTTP 500); Google path returns `registration_unavailable`; recorded as `G-07`/REM-004 candidate — defect, not fixed by docs |
+| Refund commission adjustment | FORMULA PENDING OWNER APPROVAL | OD-05 authorizes drafting only; no reversal/deduction/posting authorized |
+| SimpleV2 `FU`/`D` stage semantics | SEMANTICS_NOT_VERIFIED | No authoritative definition found in SimpleV2 source; proposed `OD-07` decision required before any visit-module implementation |
+
+## 43. Design reference — Premium Maroon mockdesign (**DESIGN REFERENCE ONLY**)
+
+- Package location: `design/` (Owner-placed, untracked): `design/FINAL-MOCKDESIGN-SPEC.md` (v1.0), `design/README.md`, `design/index.html` (clickable simulation, synthetic data), `design/roles.json`, `design/design-tokens.json`, `design/dependencies.md`, `design/FILE-MANIFEST.json`, `design/assets/prime-logo-reference.png`.
+- Status: Owner-approved **visual direction** (maroon/burgundy `#8B2635`, warm cream `#F2D0AB`, gold `#D8A66C`; Inspinia-inspired density as inspiration only — no proprietary template assets, no new dependencies without repo verification). **Not** authorization to modify any frontend file; every existing PrimeClassy code, policy, workflow, data-authority and security rule overrides the prototype.
+- The mockdesign defines per-role dashboard contracts for all 11 roles and a workflow-preservation matrix; its KPI data contract (metric_id, source query, role/Agent scope, date basis, snapshot basis, exclusions, authorization test) is a mandatory pre-implementation artifact for any future UI package.
+- **Dashboard implementation status (2026-10-28, Owner-authorized continuation of `IMP-008`, LOCAL DEV only, uncommitted):** internal dashboard is now carried by the `.pc-internal` namespace + one scoped stylesheet (`frontend/src/assets/dashboard-internal.css`) implementing the Premium Maroon tokens, shell (sidebar/drawer/topbar/flyout, cream active pill, 3px gold focus, account chip), and a namespaced remap of every legacy stone/brand/status utility found in the 36 dashboard + 14 admin views. Role home (`DashboardHomeView.vue`) composes KPI/panel/chart content per the 10 internal roles from **existing role-authorized endpoints only** (`/dashboard/summary`, `/reports/finance-*`, `/reports/transactions`, `/reports/my-customers`); uncontracted metrics render explicit unavailable states, financial Outstanding/DP keep the KF-1/KF-2 / WS-7 caveat. `chart.js`/`vue-chartjs` (MIT) installed as the first external frontend dependency, bundled into the dashboard route chunk only. Konsumen remains storefront; `main.css`, `ShopLayout.vue`, `AuthLayout.vue`, router, navConfig and shared component defaults unchanged. Visual/runtime browser QA is Owner-side; agent evidence is scoped checks (selector audit, type-check, build, chunk isolation).
+- **Dashboard home recomposition + operational-page completion (2026-10-28, LOCAL DEV, uncommitted):** `DashboardHomeView.vue` now follows the mockdesign composition (header → 4 KPI → chart + distribution → table + queue/quick-access) with real endpoints only (adds `/warehouse/fulfillment-proposals`, `/warehouse/orders/diproses`, `/dispatch*`, `/kurir/orders` reads; no new endpoints, no RBAC change); unavailable KPIs are labelled. A class-by-class audit of the 50 internal views (36 dashboard + 14 admin) found 30 unmapped utilities; all but the `bg-black/*` overlay scrims are now mapped in `dashboard-internal.css` (fixes: `dark:text-stone-900` dark-on-maroon buttons, `bg-white/90` image chips, slate/stone-alpha/red-hover surfaces), focus ring hardened against `focus:outline-none`, overlay max-height, drawer touch targets. All tables sit in `overflow-x-auto` wrappers. Status: IMPLEMENTED + SOURCE VERIFIED (type-check, build, selector audit); **RUNTIME / VISUAL VERIFICATION NOT PERFORMED** (no browser automation available) — breakpoints 1440/1024/768/375 and dark-mode contrast remain Owner-side QA.
+
+## 44. Canonical financial read contract — REM summary (OD-K5-1…OD-K5-5, approved 2026-10-28; **IMPLEMENTED IN SOURCE 2026-10-29 — DEV evidence recorded; production activation still pending Keuangan sign-off**)
+
+- PrimeClassy remains the financial authority. The canonical derivation now exists in source
+  (`App\Support\CollectibleReceivable` = M-2) and every consumer has been switched onto it (financeOrders,
+  networkSummary, per-Agent outstanding, Laporan B, Sheets D17/D13; DEV evidence via
+  `primeclassy:ar-reconciliation-report`, see `docs/PHASE2-CHECKPOINT.md` 2026-10-29 §F). No payment workflow,
+  ledger row or stored field was mutated; production activation remains gated on the reconciliation artifact +
+  Keuangan sign-off.
+- Three distinct metrics preserved and never conflated: **M-1** stored `orders.remaining_amount` (payment
+  lifecycle state; not a receivable-aggregation basis), **M-2** derived running balance
+  `GREATEST(total − COALESCE(paid,0), 0)` (collectible-AR basis with eligibility rules), **M-3** immutable
+  checkout snapshot (`initial_remaining_snapshot`, Laporan A, never recalculated).
+- Locked semantics: cancelled orders never contribute to collectible AR yet remain auditable through separate
+  cancellation/refund reporting; excluding them never extinguishes outstanding refund liabilities. Pending
+  verification is not paid — the balance stays in AR with its own reporting dimension. Overpayment liability is a
+  separate read-model category, never netted against AR and never equated with refundable cash without ledger
+  reconciliation. No backfill of stored `remaining_amount`; canonical reporting derives read-side.
+- Rollout discipline: reconciliation-first (OD-K5-4 seven steps) with Keuangan review/sign-off and explicit Owner
+  approval for any presentation-contract change; the Google Sheets contract remains untouched in the meantime.
+- Canonical detail: `docs/BUSINESS-RULES.md` §20c · `docs/ARCHITECTURE.md` §17 ·
+  `docs/OWNER-DECISION-TRACEABILITY.md` Appendix C · remediation `G-15` (ledger) / `WS-7` (blueprint;
+  IMP/REM label `OWNER_ALLOCATION_REQUIRED`).
+
+## 45. Refund commission-adjustment decisions — OD-05 summary (Owner-approved 2026-10-28; framework **NOT_IMPLEMENTED**)
+
+- Seven Owner decisions OD-05a…OD-05g establish the hybrid commission-adjustment design: deterministic
+  per-unit-snapshot basis; obligation-approved trigger (never request); append-only versioned journal;
+  separate recovery balance for externally-paid commissions without automatic deduction; 2-decimal bounded
+  allocation; recorded schema-readiness needs. **Independent of the OD-K5 receivable contract.**
+- Verified current source remains: refund does not touch commission rows; commission is written once
+  (`pending`) from per-unit fee snapshots; the application has **no payout tracking** — nothing may assume it
+  knows which commissions were paid.
+- Status split: framework APPROVED_DESIGN · exception entries PENDING_OWNER_APPROVAL · adjustment generation,
+  migrations, implementation NOT authorized; workstream/label allocation `OWNER_ALLOCATION_REQUIRED`
+  (blueprint WS-8, working label — no IMP/REM assigned).
+- Canonical detail: `docs/BUSINESS-RULES.md` §15a · `docs/ARCHITECTURE.md` §15/§15a ·
+  `docs/OWNER-DECISION-TRACEABILITY.md` Appendix D · remediation `G-16` (ledger) / `WS-8` (blueprint).
+- Preserved here and unchanged: the 29-workflow preservation register (§42/§43 pointer), the 11-role authority
+  boundaries, and the §44 K-5 financial read contract.
+
+## 46. Customer consent & identity linking — CI decision summary (Owner-approved 2026-10-28; **NOT_IMPLEMENTED**)
+
+- Seven decisions recorded: **CI-01** verified-email + single-use OTP linking (expiry/attempt-limit/replay
+  protection/challenge binding/audit; email or phone match alone never authorizes); **CI-02** digital consent
+  evidence bound to customer/order/return/item-scope/purpose/media/actor/timestamp/Agent/audit; **CI-03**
+  Sales/SKS capture within their scope and may initiate only after valid evidence — no review/inspection/refund/
+  commission authority; **CI-04** append-only withdrawal/dispute with prospective suspension and no silent
+  reversal of completed financial events; **CI-05** cross-Agent linking rejected (transfer needs a separate
+  process); **CI-06** retention period pending — no invented period, no automatic deletion; **CI-07** FU/D
+  semantics remain **OPEN / FU_D_DEFINITION_UNVERIFIED** (no invented meaning).
+- CRM-only Customer remains a **future** Agent-scoped business record — not a fabricated User; the existing
+  Konsumen = authenticated `users` row stays the only buyer today. Buyer-origin contract dependencies remain in
+  `ARCHITECTURE.md` §16 (no schema or nullable-FK authorization here).
+- Status split: approved design = APPROVED_DESIGN; technical dependencies (OTP provider, accepted consent
+  media, retention, transfer process) unresolved; implementation/schema/endpoints = NOT_IMPLEMENTED.
+- Canonical detail: `docs/BUSINESS-RULES.md` §27a · `docs/ARCHITECTURE.md` §16a ·
+  `docs/OWNER-DECISION-TRACEABILITY.md` Appendix E · gaps `G-17…G-23` (ledger) / `WS-5` + `WS-9` (blueprint,
+  working labels — no IMP/REM allocated).
+- Preserved here and unchanged: §42/§43 workflow register & design index, §44 K-5 read contract, §45 OD-05
+  summary, the 11-role boundaries, and all numbering policies (§1a blueprint / G-09).

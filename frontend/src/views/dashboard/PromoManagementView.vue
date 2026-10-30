@@ -266,6 +266,7 @@ onMounted(load)
         </div>
         <div class="mt-3"><AppButton :loading="saving" @click="saveDiscount">Simpan Diskon</AppButton></div>
 
+        <div class="overflow-x-auto">
         <table class="mt-6 w-full text-sm">
           <thead>
             <tr class="border-b text-left text-slate-500">
@@ -284,6 +285,7 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <!-- Vouchers -->
@@ -316,6 +318,7 @@ onMounted(load)
         </div>
         <div class="mt-3"><AppButton :loading="saving" @click="saveVoucher">Simpan Voucher</AppButton></div>
 
+        <div class="overflow-x-auto">
         <table class="mt-6 w-full text-sm">
           <thead>
             <tr class="border-b text-left text-slate-500">
@@ -335,6 +338,7 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   </DashboardLayout>

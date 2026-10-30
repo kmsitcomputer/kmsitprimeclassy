@@ -16,6 +16,8 @@ import { ApiError } from '@/api/client'
 import { formatRupiah } from '@/utils/format'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
 import { secureUuid } from '@/utils/uuid'
+import { createLatestRequestGuard } from '@/utils/latestRequest'
+import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import AddressMapPicker from '@/components/checkout/AddressMapPicker.vue'
 import GoogleMapView from '@/components/maps/GoogleMapView.vue'
 import type {
@@ -213,9 +215,57 @@ function useMyLocation() {
   )
 }
 
-function onMapPicked(picked: { lat: number; lng: number }) {
+/** Apply a matched canonical region chain from reverse geocoding (GPS or map pick). */
+async function applyLocatedRegion(region: {
+  province_id?: string | null
+  regency_id?: string | null
+  district_id?: string | null
+  village_id?: string | null
+  postal_code?: string | null
+}): Promise<void> {
+  if (!region.province_id || !region.regency_id || !region.district_id || !region.village_id) return
+  const [rg, dst, vil] = await Promise.all([
+    listRegencies(region.province_id),
+    listDistricts(region.regency_id),
+    listVillages(region.district_id),
+  ])
+  applyingGpsRegion.value = true
+  try {
+    regencies.value = rg
+    districts.value = dst
+    villages.value = vil
+    selectedProvince.value = destination.province_id = region.province_id
+    selectedRegency.value = destination.regency_id = region.regency_id
+    selectedDistrict.value = destination.district_id = region.district_id
+    destination.village_id = region.village_id
+    destination.postal_code = region.postal_code ?? destination.postal_code
+    await nextTick()
+  } finally {
+    applyingGpsRegion.value = false
+  }
+}
+
+// Only the newest map pick may apply its reverse-geocoded address; a slower
+// response for an older click is discarded (never overwrites newer coords).
+let geocodeSeq = 0
+
+async function onMapPicked(picked: { lat: number; lng: number }) {
   destination.latitude = picked.lat
   destination.longitude = picked.lng
+  const seq = ++geocodeSeq
+  try {
+    const located = await locateByGps(picked.lat, picked.lng)
+    if (seq !== geocodeSeq) return
+    if (located.matched && located.result) {
+      await applyLocatedRegion(located.result)
+    } else {
+      // Coordinates stay authoritative; the manual cascading selectors remain
+      // fully usable (no fabricated administrative data).
+      locationError.value = t('checkout.address.geolocationNoRegion')
+    }
+  } catch {
+    // geocode unavailable — coordinates preserved, manual entry stays open.
+  }
 }
 
 // Available whenever Google Maps is configured — not tied to which shipping
@@ -278,9 +328,20 @@ const addressComplete = computed(
       !!destination.recipient_phone &&
       !!destination.address_line &&
       !!destination.village_id &&
-      destination.latitude !== null &&
-      destination.longitude !== null),
+      hasValidCoordinates()),
 )
+
+/**
+ * A destination is only submit-able with finite, in-range coordinates. A saved
+ * address whose stored lat/lng parses to NaN (or an impossible value) must NOT
+ * reach the server: the customer is asked to re-pick on the map instead of
+ * silently sending a corrupt destination.
+ */
+function hasValidCoordinates(): boolean {
+  const lat = Number(destination.latitude)
+  const lng = Number(destination.longitude)
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+}
 
 /* ---------- Shipping method: "Ekspedisi" (RajaOngkir) vs "Kurir Online" (OpenRoute) ---------- */
 const shippingMethods = computed(() => stepsConfig.value?.shipping_methods ?? [])
@@ -372,21 +433,42 @@ const quote = ref<CheckoutQuote | null>(null)
 const quoting = ref(false)
 const quoteError = ref<string | null>(null)
 
+// Monotonic token: only the NEWEST quote response may be written. A slow,
+// stale response (destination changed meanwhile) is discarded instead of
+// overwriting a fresher quote — and any destination change invalidates the
+// current quote so checkout can never submit an outdated price.
+const quoteGuard = createLatestRequestGuard()
+watch(
+  () => [destination.latitude, destination.longitude, destination.village_id],
+  () => {
+    quoteGuard.invalidate()
+    quote.value = null
+    // The in-flight request (if any) is now stale and will skip its own finally-reset: clear the flag here
+    // so the review step can never stay stuck on "calculating" with Place Order disabled.
+    quoting.value = false
+  },
+)
+
 const orderLines = computed(() =>
   cart.lines.map((l) => ({ product_id: l.productId, product_variation_id: l.variationId, quantity: l.quantity })),
 )
 
 async function loadQuote() {
+  const seq = quoteGuard.begin()
   quoting.value = true
   quoteError.value = null
   try {
-    quote.value = await quoteCheckout(
+    const fresh = await quoteCheckout(
       orderLines.value, destination, selectedShippingMethod.value, selectedKonsumen.value?.id, selectedCourierOption.value, voucherCode.value.trim() || null,
     )
+    if (quoteGuard.isCurrent(seq)) quote.value = fresh
   } catch (e) {
-    quoteError.value = e instanceof ApiError ? e.message : t('checkout.review.quoteError')
+    if (quoteGuard.isCurrent(seq)) {
+      quoteError.value = e instanceof ApiError ? e.message : t('checkout.review.quoteError')
+      quote.value = null
+    }
   } finally {
-    quoting.value = false
+    if (quoteGuard.isCurrent(seq)) quoting.value = false
   }
 }
 
@@ -528,8 +610,10 @@ const uploadingProof = ref(false)
 const proofUploaded = ref(false)
 const proofError = ref<string | null>(null)
 
-function onProofSelected(e: Event) {
-  proofFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
+const proofProgress = ref<number | null>(null)
+let proofAbort: AbortController | null = null
+function cancelProofUpload() {
+  proofAbort?.abort()
 }
 
 async function uploadProof() {
@@ -537,11 +621,16 @@ async function uploadProof() {
   uploadingProof.value = true
   proofError.value = null
   try {
-    await submitBankTransferProof(createdOrder.value.id, proofFile.value)
+    proofAbort = new AbortController()
+    proofProgress.value = null
+    await submitBankTransferProof(createdOrder.value.id, proofFile.value, 'konsumen', {
+      signal: proofAbort.signal,
+      onProgress: (p) => { proofProgress.value = p },
+    })
     proofUploaded.value = true
     createdOrder.value = await getOrder(createdOrder.value.id)
   } catch (e) {
-    proofError.value = e instanceof ApiError ? e.message : t('checkout.confirmation.proofUploadError')
+    proofError.value = (e as { code?: string } | null)?.code === 'ERR_CANCELED' ? 'Upload dibatalkan.' : e instanceof ApiError ? e.message : t('checkout.confirmation.proofUploadError')
   } finally {
     uploadingProof.value = false
   }
@@ -683,6 +772,9 @@ async function refreshOrderStatus() {
               :longitude="destination.longitude"
               @picked="onMapPicked"
             />
+            <p v-else class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status" data-testid="map-picker-unavailable">
+              {{ t('checkout.address.mapUnavailable') }}
+            </p>
 
             <div>
               <button
@@ -1017,8 +1109,18 @@ async function refreshOrderStatus() {
 
             <div v-if="!createdOrder.payment_transaction?.bank_transfer_verification">
               <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('checkout.confirmation.uploadProof') }}</label>
-              <input type="file" accept="image/*" class="block w-full text-xs" @change="onProofSelected" />
-              <p v-if="proofError" class="mt-1 text-xs text-red-600">{{ proofError }}</p>
+              <PrimeFileUpload
+                :model-value="proofFile ? [proofFile] : []"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                :uploading="uploadingProof"
+                :progress="proofProgress"
+                :error="proofError"
+                test-id="checkout-transfer-proof-upload"
+                @update:model-value="proofFile = $event[0] ?? null"
+                @retry="uploadProof"
+                @cancel="cancelProofUpload"
+              />
               <AppButton class="mt-2" size="sm" :disabled="!proofFile || uploadingProof" @click="uploadProof">
                 {{ uploadingProof ? t('checkout.confirmation.uploading') : t('checkout.confirmation.sendProof') }}
               </AppButton>
@@ -1032,13 +1134,6 @@ async function refreshOrderStatus() {
             </div>
           </div>
 
-          <!-- Gateway -->
-          <div v-else-if="createdOrder.payment_method?.type === 'gateway'" class="space-y-2 rounded-lg bg-stone-50 p-3 text-left text-sm dark:bg-stone-800/60">
-            <p class="text-stone-600 dark:text-stone-300">
-              {{ (createdOrder.payment_transaction?.instructions?.instructions as string) || t('checkout.confirmation.gatewayFallback') }}
-            </p>
-            <p class="font-semibold text-stone-800 dark:text-stone-100">{{ t('checkout.confirmation.total', { amount: formatRupiah(createdOrder.total_amount) }) }}</p>
-          </div>
 
           <AppButton variant="secondary" block @click="router.push({ name: 'order-detail', params: { id: createdOrder.id } })">
             {{ t('checkout.confirmation.viewOrderDetail') }}

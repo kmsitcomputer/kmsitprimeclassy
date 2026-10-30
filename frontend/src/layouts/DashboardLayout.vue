@@ -7,6 +7,10 @@ import { useSiteStore } from '@/stores/site'
 import { useI18n } from 'vue-i18n'
 import { buildNavStructure, groupHasVisibleItems, type NavGroup } from '@/dashboard/navConfig'
 import AppIcon from '@/components/ui/AppIcon.vue'
+// PC-IMP-008 (DB-P01): dashboard-only Premium Maroon foundation. Every rule in
+// this stylesheet is scoped to `.pc-internal` / the `.pc-*` shell markers set
+// below — never to `html`/`body`/`:root` — so the public storefront is untouched.
+import '@/assets/dashboard-internal.css'
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -16,6 +20,12 @@ const route = useRoute()
 const { t } = useI18n()
 
 const mobileNavOpen = ref(false)
+
+/** Initials for the topbar account chip (mockdesign .avatar) — display only. */
+const userInitials = computed(() => {
+  const parts = (auth.user?.name ?? '').trim().split(/\s+/).slice(0, 2)
+  return parts.map((p) => p.charAt(0).toUpperCase()).join('')
+})
 
 const COLLAPSE_KEY = 'pc-sidebar-collapsed'
 const collapsed = ref(false)
@@ -113,10 +123,10 @@ async function logout() {
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-stone-50 dark:bg-stone-950">
+  <div class="pc-internal flex min-h-screen bg-stone-50 dark:bg-stone-950" data-surface="internal">
     <!-- Desktop sidebar -->
     <aside
-      class="hidden shrink-0 flex-col border-r border-stone-200 bg-white transition-[width] duration-150 dark:border-stone-800 dark:bg-stone-900 lg:flex"
+      class="pc-sidebar hidden shrink-0 flex-col border-r border-stone-200 bg-white transition-[width] duration-150 dark:border-stone-800 dark:bg-stone-900 lg:flex"
       :class="collapsed ? 'w-16' : 'w-64'"
     >
       <div class="flex h-16 items-center justify-between px-3">
@@ -134,7 +144,8 @@ async function logout() {
         </button>
       </div>
 
-      <nav class="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
+      <nav class="flex-1 space-y-0.5 overflow-y-auto px-2 py-2" aria-label="Menu dashboard">
+        <div v-if="!collapsed" class="pc-section-label">Navigasi</div>
         <template v-for="entry in navStructure" :key="entry.key">
           <!-- Ungrouped single item -->
           <RouterLink
@@ -143,7 +154,7 @@ async function logout() {
             :title="collapsed ? entry.label : undefined"
             class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
             :class="collapsed ? 'justify-center' : ''"
-            active-class="!bg-brand-50 !text-brand-700 dark:!bg-brand-950 dark:!text-brand-300"
+            active-class="pc-active"
           >
             <AppIcon :name="entry.icon" :size="18" />
             <span v-if="!collapsed">{{ entry.label }}</span>
@@ -176,7 +187,7 @@ async function logout() {
                 :key="item.key"
                 :to="{ name: item.routeName }"
                 class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                active-class="!bg-brand-50 !text-brand-700 dark:!bg-brand-950 dark:!text-brand-300"
+                active-class="pc-active"
               >
                 <AppIcon :name="item.icon" :size="16" />
                 <span>{{ item.label }}</span>
@@ -203,7 +214,7 @@ async function logout() {
     <!-- Mobile drawer -->
     <div v-if="mobileNavOpen" class="fixed inset-0 z-40 lg:hidden">
       <div class="absolute inset-0 bg-black/40" @click="mobileNavOpen = false" />
-      <aside class="absolute inset-y-0 left-0 flex w-72 flex-col bg-white dark:bg-stone-900">
+      <aside class="pc-drawer absolute inset-y-0 left-0 flex w-72 flex-col bg-white dark:bg-stone-900">
         <div class="flex h-16 items-center justify-between px-5">
           <span class="flex items-center font-display text-lg font-semibold text-brand-700 dark:text-brand-300">
             <img v-if="site.logoUrl" :src="site.logoUrl" :alt="site.siteTitle" class="h-8 w-auto object-contain" />
@@ -213,13 +224,14 @@ async function logout() {
             <AppIcon name="close" :size="20" />
           </button>
         </div>
-        <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
+        <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2" aria-label="Menu dashboard">
+          <div class="pc-section-label">Navigasi</div>
           <template v-for="entry in navStructure" :key="entry.key">
             <RouterLink
               v-if="entry.type === 'item'"
               :to="{ name: entry.routeName }"
               class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-              active-class="!bg-brand-50 !text-brand-700 dark:!bg-brand-950 dark:!text-brand-300"
+              active-class="pc-active"
               @click="mobileNavOpen = false"
             >
               <AppIcon :name="entry.icon" :size="18" />
@@ -247,7 +259,7 @@ async function logout() {
                   :key="item.key"
                   :to="{ name: item.routeName }"
                   class="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                  active-class="!bg-brand-50 !text-brand-700 dark:!bg-brand-950 dark:!text-brand-300"
+                  active-class="pc-active"
                   @click="mobileNavOpen = false"
                 >
                   <AppIcon :name="item.icon" :size="16" />
@@ -272,7 +284,7 @@ async function logout() {
 
     <div class="flex min-w-0 flex-1 flex-col">
       <header
-        class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-stone-200 bg-white/95 px-4 backdrop-blur sm:px-6 dark:border-stone-800 dark:bg-stone-950/95"
+        class="pc-topbar sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-stone-200 bg-white/95 px-4 backdrop-blur sm:px-6 dark:border-stone-800 dark:bg-stone-950/95"
       >
         <button type="button" class="text-stone-500 lg:hidden" @click="mobileNavOpen = true">
           <AppIcon name="menu" :size="22" />
@@ -281,6 +293,15 @@ async function logout() {
           <p class="truncate text-sm font-semibold text-stone-800 dark:text-stone-100">{{ auth.user?.name }}</p>
           <p class="text-xs text-stone-400 dark:text-stone-500">{{ ROLE_LABELS[auth.user?.role ?? ''] ?? auth.user?.role }}</p>
         </div>
+        <!-- Account identity chip (mockdesign .avatar) — initials of the real
+             signed-in user, display only. -->
+        <span
+          v-if="auth.user?.name"
+          class="hidden h-9 w-9 shrink-0 select-none place-items-center rounded-full bg-brand-600 text-xs font-bold text-white sm:grid"
+          :aria-label="auth.user.name"
+        >
+          {{ userInitials }}
+        </span>
         <button
           type="button"
           class="grid h-9 w-9 shrink-0 place-items-center rounded-full text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"
@@ -301,7 +322,7 @@ async function logout() {
     <Teleport to="body">
       <div
         v-if="flyoutGroup"
-        class="fixed z-50 w-52 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg dark:border-stone-800 dark:bg-stone-900"
+        class="pc-internal pc-flyout fixed z-50 w-52 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg dark:border-stone-800 dark:bg-stone-900"
         :style="{ top: `${flyoutPosition.top}px`, left: `${flyoutPosition.left}px` }"
         @mouseleave="closeFlyout"
       >
@@ -311,7 +332,7 @@ async function logout() {
           :key="item.key"
           :to="{ name: item.routeName }"
           class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-          active-class="!bg-brand-50 !text-brand-700 dark:!bg-brand-950 dark:!text-brand-300"
+          active-class="pc-active"
           @click="closeFlyout"
         >
           <AppIcon :name="item.icon" :size="16" />

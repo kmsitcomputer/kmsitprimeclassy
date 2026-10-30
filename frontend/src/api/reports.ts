@@ -203,6 +203,9 @@ export type ReportKey =
   | 'korsal'
   | 'sales'
   | 'couriers'
+  | 'network-transactions'
+  | 'crm-visits'
+  | 'finance-orders'
 
 /** Opens the .xlsx export in a new tab — the browser handles the download using the active session cookie. */
 export function downloadReportXlsx(report: ReportKey, filters: ReportFilters = {}) {
@@ -234,7 +237,12 @@ export interface CustomerReportRow {
   konsumen_name: string
   konsumen_phone: string
   order_count: number
+  /** Value of FULLY PAID orders (historical meaning, kept for compatibility). */
   total_spent: string
+  /** Non-cancelled order value — what the customer actually ordered. */
+  total_ordered: string
+  /** Money actually collected on non-cancelled orders. */
+  total_paid: string
   last_order_at: string
 }
 
@@ -265,6 +273,7 @@ export interface SalesReportRow {
   status: string
   korsal_name: string | null
   transaction_count: number
+  customer_count: number
   total_fee: string
 }
 
@@ -298,6 +307,45 @@ export interface DashboardSummary {
   total_korsal: number
   total_sales: number
   total_kurir: number
+}
+
+/** Owner-approved KPI contracts — GET /dashboard/kpis (keys are role-shaped; absent = not defined for the caller). */
+export interface LedgerTotals {
+  total: number
+  pending: number
+  approved: number
+  paid: number
+  reversed: number
+  count: number
+}
+export interface TeamCommissionMember {
+  user_id: number
+  name: string
+  role: string | null
+  is_self: boolean
+  account_status: string | null
+  pending: number
+  approved: number
+  paid: number
+  reversed: number
+  total: number
+  order_count: number
+  order_value: number
+}
+export interface DashboardKpis {
+  own_fee?: LedgerTotals & { by_role: Record<string, number> }
+  team_commissions?: { members: TeamCommissionMember[]; totals: Record<'total' | 'pending' | 'approved' | 'paid' | 'reversed', number> }
+  deals?: { count: number; value: number }
+  commission?: LedgerTotals
+  available_stock?: { units: number; targets: number }
+  tasks_today?: { date: string; deliveries: number; return_pickups: number }
+  /** GAP-B: "Perlu Tindakan" = CRM follow-up jatuh tempo + terlambat (Sales/SKS own, Korsal own+downline). */
+  follow_ups?: { due_today: number; overdue: number }
+}
+
+export async function getDashboardKpis(): Promise<DashboardKpis> {
+  const { data } = await http.get<ApiEnvelope<DashboardKpis>>('/dashboard/kpis')
+  return data.data
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -341,6 +389,81 @@ export async function getSalesCustomersReport(filters: ReportFilters = {}): Prom
   }
 }
 
+/* ---- Consolidated network summary (backend: ReportService::networkSummary; roles super_admin/agen/keuangan) ---- */
+
+export interface NetworkTotals {
+  order_count: number
+  item_count: number
+  total_amount: number
+  /** Money actually collected (Order.paid_amount, includes verified DP) — Order-level payment truth. */
+  paid_amount: number
+  outstanding_amount: number
+  refund_total: number
+  return_refund_total: number
+  additional_payment_total: number
+}
+
+export interface PerAgenRow {
+  agent_id: number
+  agent_name: string | null
+  korsal_count: number
+  sales_count: number
+  /** "Total Sales yang berhasil melakukan penjualan" — sales actually on orders in range. */
+  active_sales_count: number
+  sales_transaction_count: number
+  korsal_transaction_count: number
+  order_count: number
+  total_amount: number
+  paid_amount: number
+  outstanding_amount: number
+  stock_quantity: number
+  total_fee: number
+}
+
+export interface NetworkProductRow {
+  product_name_snapshot: string
+  sku_snapshot: string | null
+  quantity: string | number
+  total_amount: string
+  order_count: number
+}
+
+export interface NetworkPaymentMethodRow {
+  method_code: string | null
+  method_name: string | null
+  method_type: string | null
+  order_count: number
+  total_amount: string
+}
+
+export interface NetworkPaymentStatusRow {
+  payment_status: string
+  order_count: number
+  total_amount: string
+}
+
+export interface NetworkSummary {
+  korsal_count: number
+  sales_count: number
+  courier_count: number
+  sales_with_sales_count: number
+  totals: NetworkTotals
+  per_agen: PerAgenRow[]
+  products: NetworkProductRow[]
+  payment_methods: NetworkPaymentMethodRow[]
+  payment_status: NetworkPaymentStatusRow[]
+}
+
+export async function getNetworkSummary(filters: ReportFilters = {}): Promise<NetworkSummary> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
+  }
+  const qs = params.toString()
+  const { data } = await http.get<ApiEnvelope<NetworkSummary>>(`/reports/network-summary${qs ? `?${qs}` : ''}`)
+  return data.data
+}
+
 export function downloadSalesCustomersXlsx(filters: ReportFilters = {}) {
   const apiBase = (window.__APP_CONFIG__?.API_URL ?? import.meta.env.VITE_API_URL ?? '') + '/api/v1'
   const params = new URLSearchParams()
@@ -349,4 +472,48 @@ export function downloadSalesCustomersXlsx(filters: ReportFilters = {}) {
   }
   params.set('export', 'xlsx')
   window.open(`${apiBase}/reports/my-customers?${params.toString()}`, '_blank')
+}
+
+/* ---- Network transactions & CRM funnel (Owner directive 2026-10-29) ---- */
+
+export interface NetworkGroupRow {
+  id: number | null
+  name: string
+  order_count: number
+  total_amount: number
+  paid_amount: number
+  outstanding_amount: number
+}
+
+export interface NetworkTransactionsReport {
+  scope: string
+  totals: { order_count: number; total_amount: number; paid_amount: number; outstanding_amount: number }
+  by_status: { status: string; order_count: number; total_amount: number }[]
+  by_korsal: NetworkGroupRow[] | null
+  by_sales: NetworkGroupRow[] | null
+}
+
+export async function getNetworkTransactions(filters: ReportFilters = {}): Promise<NetworkTransactionsReport> {
+  const { data } = await http.get<ApiEnvelope<NetworkTransactionsReport>>('/reports/network-transactions', { params: filters })
+  return data.data
+}
+
+export interface CrmFunnelRow {
+  owner_id: number
+  owner_name: string
+  customers: number
+  visits: number
+  rk: number
+  buckets: Record<string, number>
+}
+
+export interface CrmFunnelReport {
+  bucket_labels: Record<string, string>
+  totals: { customers: number; visits: number; rk: number; buckets: Record<string, number>; conversion_percent: number }
+  rows: CrmFunnelRow[]
+}
+
+export async function getCrmVisitsReport(filters: ReportFilters = {}): Promise<CrmFunnelReport> {
+  const { data } = await http.get<ApiEnvelope<CrmFunnelReport>>('/reports/crm-visits', { params: filters })
+  return data.data
 }

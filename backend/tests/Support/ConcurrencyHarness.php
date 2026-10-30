@@ -336,9 +336,9 @@ class ConcurrencyHarness
         $aProcess = $this->spawnServiceRaceActor('a', $sideA, $readyA, $readyB, $release, $resultA, $resultB);
 
         try {
-            $this->waitForSignal($readyA, 15);
+            $this->waitForActorSignal($readyA, 15, $aProcess, 'sr-a');
             $bProcess = $this->spawnServiceRaceActor('b', $sideB, $readyA, $readyB, $release, $resultA, $resultB);
-            $this->waitForSignal($readyB, 15);
+            $this->waitForActorSignal($readyB, 15, $bProcess, 'sr-b');
             $this->writeFile($release, 'go');
 
             $aProcess->wait();
@@ -389,14 +389,10 @@ class ConcurrencyHarness
         $aProcess = $this->startProcess($aArgs);
 
         try {
-            $this->waitForSignal($readyA, 15);
+            $this->waitForActorSignal($readyA, 15, $aProcess, 'dr-a');
             $bArgs = $this->dispatchRaceArgs('dr-b', $readyB, $release, $resultB, $sideB);
             $bProcess = $this->startProcess($bArgs);
-            try {
-                $this->waitForSignal($readyB, 15);
-            } catch (\RuntimeException $e) {
-                throw new \RuntimeException($e->getMessage().' actor B: '.substr($bProcess->getErrorOutput().$bProcess->getOutput().(is_file($resultB) ? file_get_contents($resultB) : ''), 0, 2000), previous: $e);
-            }
+            $this->waitForActorSignal($readyB, 15, $bProcess, 'dr-b', $resultB);
             $this->writeFile($release, 'go');
 
             $aProcess->wait();
@@ -698,6 +694,63 @@ class ConcurrencyHarness
         return $environment;
     }
 
+    /**
+     * Readiness wait with evidence. Same budget as waitForSignal, but it also stops early when the actor
+     * process has already exited without signalling, and on failure attaches bounded diagnostics
+     * (actor, signal path, elapsed, process state, exit code, stdout/stderr, runtime signal files).
+     */
+    protected function waitForActorSignal(string $signalPath, int $seconds, Process $process, string $actor, ?string $resultPath = null): void
+    {
+        $startedAt = microtime(true);
+        $deadline = $startedAt + $seconds;
+        while (microtime(true) < $deadline) {
+            if (file_exists($signalPath)) {
+                return;
+            }
+            if (! $process->isRunning()) {
+                // Exited: give the filesystem one last look, then stop waiting for a signal that cannot come.
+                if (file_exists($signalPath)) {
+                    return;
+                }
+                break;
+            }
+            usleep(100000);
+        }
+
+        throw new \RuntimeException($this->actorDiagnostics($signalPath, $startedAt, $process, $actor, $resultPath));
+    }
+
+    protected function actorDiagnostics(string $signalPath, float $startedAt, Process $process, string $actor, ?string $resultPath): string
+    {
+        $running = $process->isRunning();
+        $signals = [];
+        if (is_dir($this->runtimeDir)) {
+            $signals = array_slice(array_map('basename', glob($this->runtimeDir.'/*') ?: []), 0, 30);
+        }
+
+        $secret = (string) (config('database.connections.'.config('database.default').'.password') ?? '');
+        $bounded = static function (string $text) use ($secret): string {
+            if ($secret !== '') {
+                $text = str_replace($secret, '***', $text);
+            }
+
+            return substr($text, 0, 1500);
+        };
+
+        return sprintf(
+            "Timed out waiting for concurrency signal: %s\n  actor=%s elapsed=%.1fs process=%s exit_code=%s\n  stdout=%s\n  stderr=%s\n  result=%s\n  runtime_files=[%s]",
+            $signalPath,
+            $actor,
+            microtime(true) - $startedAt,
+            $running ? 'running' : 'exited',
+            $running ? 'n/a' : var_export($process->getExitCode(), true),
+            $bounded($process->getOutput()),
+            $bounded($process->getErrorOutput()),
+            $resultPath !== null && is_file($resultPath) ? $bounded((string) file_get_contents($resultPath)) : 'n/a',
+            implode(', ', $signals)
+        );
+    }
+
     protected function waitForSignal(string $signalPath, int $seconds): void
     {
         $deadline = microtime(true) + $seconds;
@@ -768,7 +821,7 @@ class ConcurrencyHarness
             return;
         }
 
-        $process->stop(3, SIGTERM);
+        $process->stop(3, defined('SIGTERM') ? SIGTERM : null);
     }
 
     protected function cleanupBarrierDir(): void

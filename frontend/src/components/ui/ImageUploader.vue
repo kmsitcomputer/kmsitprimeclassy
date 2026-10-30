@@ -29,6 +29,9 @@ const emit = defineEmits<{
 
 const isDragging = ref(false)
 const isUploading = ref(false)
+const progress = ref<number | null>(null)
+let abortCtl: AbortController | null = null
+let lastFile: File | null = null
 const error = ref<string | null>(null)
 const localPreview = ref<string | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -57,17 +60,20 @@ async function handleFile(file: File): Promise<void> {
   // Instant local preview while the real upload is in flight.
   localPreview.value = URL.createObjectURL(file)
   isUploading.value = true
+  lastFile = file
+  progress.value = null
+  abortCtl = new AbortController()
 
   try {
     // Replacing an existing image: delete the old one first so it's never orphaned.
     if (props.mediaId) {
       await deleteMedia(props.mediaId).catch(() => undefined)
     }
-    const media = await uploadMedia(file, props.collection)
+    const media = await uploadMedia(file, props.collection, { signal: abortCtl.signal, onProgress: (p) => { progress.value = p } })
     emit('update:mediaId', media.id)
     emit('update:url', media.url)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Upload gagal, coba lagi.'
+    error.value = (e as { code?: string } | null)?.code === 'ERR_CANCELED' ? 'Upload dibatalkan.' : e instanceof ApiError ? e.message : 'Upload gagal, coba lagi.'
     localPreview.value = null
   } finally {
     isUploading.value = false
@@ -84,6 +90,14 @@ function onDrop(event: DragEvent): void {
   isDragging.value = false
   const file = event.dataTransfer?.files?.[0]
   if (file) handleFile(file)
+}
+
+function cancelUpload(): void {
+  abortCtl?.abort()
+}
+
+function retryUpload(): void {
+  if (lastFile) void handleFile(lastFile)
 }
 
 async function removeImage(): Promise<void> {
@@ -149,12 +163,22 @@ async function removeImage(): Promise<void> {
         v-if="isUploading"
         class="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70 text-sm font-medium text-stone-600 dark:bg-stone-950/70 dark:text-stone-300"
       >
-        Mengunggah...
+        <div class="w-2/3 space-y-1 text-center" role="status" aria-live="polite">
+          <div class="h-2 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+            <div v-if="progress != null" class="h-full rounded-full bg-brand-700 transition-all" :style="{ width: `${progress}%` }" role="progressbar" :aria-valuenow="progress" />
+            <div v-else class="h-full w-1/3 animate-pulse rounded-full bg-brand-700" />
+          </div>
+          <span>{{ progress != null ? `Mengunggah… ${Math.round(progress)}%` : 'Mengunggah…' }}</span>
+          <button type="button" class="ml-2 text-red-700 hover:underline" @click="cancelUpload">Batalkan</button>
+        </div>
       </div>
     </div>
 
-    <input ref="inputRef" type="file" :accept="accept" class="hidden" @change="onInputChange" />
+    <input ref="inputRef" type="file" :accept="accept" class="sr-only" tabindex="-1" aria-label="Pilih file gambar" @change="onInputChange" />
 
-    <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+    <p v-if="error" class="text-sm text-red-600 dark:text-red-400" role="alert">
+      {{ error }}
+      <button v-if="lastFile && !isUploading" type="button" class="ml-2 rounded border border-red-300 px-2 py-0.5 text-xs font-medium" @click="retryUpload">Coba lagi</button>
+    </p>
   </div>
 </template>

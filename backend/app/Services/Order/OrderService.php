@@ -7,6 +7,7 @@ use App\Exceptions\ApiException;
 use App\Exceptions\InvalidStateTransitionException;
 use App\Models\AgentProfile;
 use App\Models\Commission;
+use App\Models\CrmCustomer;
 use App\Models\KonsumenAddress;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -26,6 +27,8 @@ use App\Services\Payment\AvailablePaymentMethodService;
 use App\Services\Payment\PaymentService;
 use App\Services\Pricing\PricingService;
 use App\Services\Pricing\VoucherService;
+use App\Services\Refund\CancellationFinancialService;
+use App\Services\Refund\OrderFinancialSnapshotService;
 use App\Services\Shipping\ShippingQuoteService;
 use App\Services\Stock\StockRequestService;
 use App\Services\Stock\StockSourceResolver;
@@ -58,7 +61,10 @@ class OrderService
         private readonly SubStockService $subStockService,
         private readonly StockSourceResolver $stockSourceResolver,
         private readonly PricingService $pricingService,
+        private readonly InvoiceNumberService $invoiceNumberService,
         private readonly VoucherService $voucherService,
+        private readonly OrderFinancialSnapshotService $snapshotService,
+        private readonly CancellationFinancialService $cancellationFinancialService,
     ) {}
 
     /**
@@ -86,8 +92,23 @@ class OrderService
         ?string $stockSource = null,
         ?int $subLocationId = null,
         ?string $voucherCode = null,
+        ?CrmCustomer $crmCustomer = null,
     ): Order {
         $actor ??= $konsumen;
+
+        // G17: exactly ONE authoritative buyer origin per new order. For a CRM-origin order the "konsumen"
+        // argument is only a TRANSIENT attribution carrier (agent/sales/korsal chain, never saved, no id) built by
+        // AssistedOrderService — the CRM customer is the owner of the transaction, never a fabricated User.
+        if ($crmCustomer !== null) {
+            if ($konsumen->exists || $konsumen->id !== null) {
+                throw new \LogicException('A CRM-origin order must not carry a persisted konsumen account.');
+            }
+            if (! empty($destination['address_id'])) {
+                throw new ApiException(__('messages.crm.address_book_not_allowed'), 422);
+            }
+        } elseif (! $konsumen->exists) {
+            throw new \LogicException('An account-origin order requires a persisted konsumen.');
+        }
 
         if (! $konsumen->agent_id) {
             throw new ApiException(__('messages.order.no_agent_branch'), 422);
@@ -98,8 +119,8 @@ class OrderService
         }
 
         if ($idempotencyKey) {
-            $existing = Order::query()
-                ->where('konsumen_id', $konsumen->id)
+            // Origin-scoped key space: a CRM request can never replay against an account buyer's order.
+            $existing = $this->originQuery($konsumen, $crmCustomer)
                 ->where('idempotency_key', $idempotencyKey)
                 ->first();
 
@@ -115,7 +136,7 @@ class OrderService
         $subLocation = $this->stockSourceResolver->resolve($actor, $konsumen, $stockSource, $subLocationId)['sub_location'];
 
         try {
-            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption, $subLocation, $voucherCode) {
+            return DB::transaction(function () use ($konsumen, $lines, $destination, $actor, $paymentMethod, $deliveryDate, $idempotencyKey, $shippingMethod, $dpAmount, $selectedCourierOption, $subLocation, $voucherCode, $crmCustomer) {
                 $agentId = $konsumen->agent_id;
 
                 $agentProfile = AgentProfile::query()->where('user_id', $agentId)->first();
@@ -137,10 +158,19 @@ class OrderService
                     // A shared unique placeholder can deadlock concurrent inserts.
                     'order_no' => 'TEMP-'.bin2hex(random_bytes(12)),
                     'idempotency_key' => $idempotencyKey,
-                    'konsumen_id' => $konsumen->id,
+                    'konsumen_id' => $crmCustomer ? null : $konsumen->id,
                     'sales_id' => $konsumen->sales_id,
                     'korsal_id' => $konsumen->korsal_id,
                     'agent_id' => $agentId,
+                    // G17-D1/D2 (only once the migration exists on this database): exactly-one origin,
+                    // the immutable CRM buyer snapshot, and who actually placed it. The placer is NOT
+                    // the owner or commission beneficiary — attribution stays on sales_id/korsal_id.
+                    ...(Order::supportsBuyerOrigin() ? [
+                        'crm_customer_id' => $crmCustomer?->id,
+                        'placed_by_user_id' => $actor->id,
+                        'buyer_name_snapshot' => $crmCustomer?->name,
+                        'buyer_phone_snapshot' => $crmCustomer?->phone,
+                    ] : []),
                     'payment_method_id' => $paymentMethod->id,
                     'source_address_id' => $destinationSnapshot['address_id'],
                     'status' => $initialStatus,
@@ -263,7 +293,7 @@ class OrderService
                 $total = round($subtotal - $voucherDiscount + $shippingFee + $adminFee, 2);
 
                 $order->update([
-                    'order_no' => 'PC-'.now()->format('ymd').'-'.str_pad((string) $order->id, 6, '0', STR_PAD_LEFT),
+                    'order_no' => $this->invoiceNumberService->next(),
                     'subtotal_amount' => $subtotal,
                     'shipping_fee_amount' => $shippingFee,
                     'admin_fee_amount' => $adminFee,
@@ -361,10 +391,14 @@ class OrderService
 
                 $this->paymentService->initiate($order, $paymentMethod);
 
+                app(\App\Services\Report\OrderInitialSnapshotService::class)->capture($order);
+
                 ActivityLogger::log($actor->id, $order, 'order.created', null, [
                     'total_amount' => $total,
                     'item_count' => count($lines),
                     'konsumen_id' => $konsumen->id,
+                    'crm_customer_id' => $crmCustomer?->id,
+                    'placed_by_user_id' => $actor->id,
                     'shipping_provider' => $quote->providerCode,
                 ]);
 
@@ -374,9 +408,9 @@ class OrderService
             // Two concurrent requests with the same Idempotency-Key both
             // passed the pre-check above — the DB unique index rejected the
             // loser. Return the winner's order instead of a 500.
-            if ($idempotencyKey && str_contains($e->getMessage(), 'orders_konsumen_idempotency_unique')) {
-                return Order::query()
-                    ->where('konsumen_id', $konsumen->id)
+            if ($idempotencyKey && (str_contains($e->getMessage(), 'orders_konsumen_idempotency_unique')
+                || str_contains($e->getMessage(), 'orders_crm_idempotency_unique'))) {
+                return $this->originQuery($konsumen, $crmCustomer)
                     ->where('idempotency_key', $idempotencyKey)
                     ->firstOrFail()
                     ->load(['items', 'shipments.courier.user', 'paymentMethod', 'paymentTransactions.bankTransferVerification']);
@@ -384,6 +418,14 @@ class OrderService
 
             throw $e;
         }
+    }
+
+    /** Orders of ONE buyer origin: the CRM customer, else the konsumen account. */
+    private function originQuery(User $konsumen, ?CrmCustomer $crmCustomer): \Illuminate\Database\Eloquent\Builder
+    {
+        return $crmCustomer
+            ? Order::query()->where('crm_customer_id', $crmCustomer->id)
+            : Order::query()->where('konsumen_id', $konsumen->id);
     }
 
     private function resolvePaymentMethod(?string $code): PaymentMethod
@@ -817,7 +859,7 @@ class OrderService
         // as the "sales" for this konsumen, and earns BOTH their own
         // agent_fee (above, unaffected) AND this sales_fee, as two separate
         // commissions (never merged into one, never double-counted).
-        $salesBeneficiaryId = $konsumen->isRole('agen', 'korsal', 'sales')
+        $salesBeneficiaryId = $konsumen->isRole('agen', 'korsal', 'sales', 'sales-kurir-sub')
             ? $konsumen->id
             : ($konsumen->sales_id ?? $konsumen->korsal_id ?? $agentId);
 
@@ -995,6 +1037,7 @@ class OrderService
             // on the order is kept in sync here regardless of which courier
             // holds it.
             $shipmentIds = [];
+            $handoverOccurred = false;
             foreach ($order->items as $item) {
                 if ($item->canTransitionTo($newStatus)) {
                     // R-03: Sub-sourced goods ship ONLY through the owning Sales-Kurir-Sub's
@@ -1005,11 +1048,26 @@ class OrderService
                     if (in_array($newStatus, ['dikirim', 'terkirim'], true) && $item->isSubSourced()) {
                         throw new ApiException(__('messages.order.sub_item_requires_owner_shipment'), 422);
                     }
-                    $item->update(['status' => $newStatus]);
+                    $attributes = ['status' => $newStatus];
+                    if ($newStatus === 'dikirim' && $item->handed_over_at === null) {
+                        // B-01: first handover is a basis-requiring event; the snapshot is
+                        // created once, atomically, and reused by every later event.
+                        $attributes['handed_over_at'] = now();
+                        $handoverOccurred = true;
+                    }
+                    $item->update($attributes);
                     if ($item->shipment_id) {
                         $shipmentIds[$item->shipment_id] = true;
                     }
                 }
+            }
+
+            if ($handoverOccurred && $this->snapshotService->hasBillableUnits($order)) {
+                $this->snapshotService->ensure(
+                    $order->fresh(),
+                    OrderFinancialSnapshotService::TRIGGER_FIRST_HANDOVER,
+                    $actor,
+                );
             }
 
             if (in_array($newStatus, ['dikirim', 'terkirim'], true)) {
@@ -1075,6 +1133,12 @@ class OrderService
                 'cancelled_by' => $actor->id,
                 'cancellation_reason' => $reason,
             ]);
+
+            // Cancellation request (Step 1) books B -> 0 and then runs financial finalization
+            // (Step 2) in the SAME transaction under the Order lock. If an attempt is in flight
+            // the order stays pending_reconciliation and finalization is re-entered later.
+            $this->cancellationFinancialService->bookCancellationReduction($order->fresh(), $actor);
+            $this->cancellationFinancialService->finalize($order->fresh(), $actor);
 
             // Full audit trail — actor, actor role, timestamp (created_at),
             // reason, and the order itself (subject) — never just a bare

@@ -96,6 +96,35 @@ class AuthTest extends TestCase
         $this->assertNotEquals($inactiveAgen->id, $konsumen->agent_id);
     }
 
+    public function test_registration_without_active_agen_returns_503_registration_unavailable(): void
+    {
+        // REM-004 / AU-01: no active Agen exists -> controlled 503, not a raw 500, and no user is created.
+        $before = User::count();
+
+        $this->postJson('/api/v1/auth/register', [
+            'name' => 'Tanpa Agen',
+            'email' => 'noagen@example.com',
+            'phone' => '081200000001',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ])->assertStatus(503)->assertJsonPath('errors.code.0', 'registration_unavailable');
+
+        $this->assertSame($before, User::count());
+    }
+
+    public function test_registration_skips_inactive_agen_and_returns_503(): void
+    {
+        User::factory()->agen()->create(['status' => 'inactive']);
+
+        $this->postJson('/api/v1/auth/register', [
+            'name' => 'Agen Nonaktif',
+            'email' => 'inactive@example.com',
+            'phone' => '081200000002',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ])->assertStatus(503);
+    }
+
     public function test_registration_fails_with_invalid_referral_code(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [

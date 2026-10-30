@@ -18,11 +18,11 @@ Historical specs, audits and checkpoints live in Git history only.
 
 - **Backend:** PHP 8.2+ (DEV runs 8.3), Laravel 11.56, Laravel Sanctum (SPA cookie sessions), MariaDB 10.11 (DEV and production; MySQL-compatible), HTMLPurifier, PhpSpreadsheet, Google API auth (Sheets export).
 - **Frontend:** Vue 3 (Composition API), Vite 8, TypeScript, Pinia, Vue Router, vue-i18n (id / en / ar / zh), Tailwind CSS 4, CKEditor 5, Axios. Node ^22.18 or ≥24.12.
-- **External services:** OpenRouteService (road-route pricing), RajaOngkir / Komerce V2 (expedition rates), Xendit / Tripay / Stripe (payment gateways, webhooks), Google Sheets (one-way report export), optional Google Maps (frontend picker).
+- **External services:** OpenRouteService (road-route pricing), RajaOngkir / Komerce V2 (expedition rates), Google Sheets (one-way report export), optional Google Maps (frontend picker).
 
 ## Major modules
 
-Catalog & SKU registry · Referral hierarchy (11 roles) · Checkout & orders · Payment (COD, DP, manual transfer, gateways) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
+Catalog & SKU registry · Referral hierarchy (11 roles) · Checkout & orders · Payment (COD, DP, manual transfer) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
 
 ## Repository layout
 
@@ -58,6 +58,8 @@ npm install
 cp .env.example .env                # VITE_API_URL (empty = same origin)
 npm run dev                         # http://localhost:5173
 ```
+
+Frontend package manager is **npm** (G-14, verified 2026-10-30): `frontend/package.json` has no `packageManager` field, the tracked/authoritative lockfile is `frontend/package-lock.json`, and every documented command runs through npm scripts. The untracked, older `frontend/pnpm-lock.yaml` is a legacy local stray — do not install or upgrade with pnpm, and do not delete the file without an Owner instruction.
 
 A first Super Admin is created by the browser installer (`/setup`) on a fresh install, or via `php artisan tinker` — see [docs/OPERATIONS.md](docs/OPERATIONS.md). (`/install` is the public PWA installation landing page.) Sanctum needs both `FRONTEND_URLS` (with scheme) and `SANCTUM_STATEFUL_DOMAINS` (host:port, no scheme) in `backend/.env`.
 

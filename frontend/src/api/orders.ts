@@ -1,5 +1,7 @@
 import { http } from './client'
 import type { ApiEnvelope } from './client'
+import { uploadConfig } from './payments'
+import type { UploadOptions } from './payments'
 import type { CourierSelection, Order, PaginationMeta } from './types'
 
 export interface OrderLine {
@@ -122,14 +124,14 @@ export async function updateOrderStatus(id: number, status: 'diproses' | 'dikiri
   return data.data
 }
 
-export async function submitBankTransferProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen') {
+export async function submitBankTransferProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen', opts?: UploadOptions) {
   const form = new FormData()
   form.append('proof', proof)
   form.append('paid_by', paidBy)
   const { data } = await http.post<ApiEnvelope<{ transaction: Order['payment_transaction'] }>>(
     `/orders/${orderId}/payment/proof`,
     form,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
+    uploadConfig(opts),
   )
   return data.data
 }

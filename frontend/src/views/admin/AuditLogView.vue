@@ -58,6 +58,7 @@ function toggle(id: number) {
     <div v-if="loading" class="text-sm text-stone-500">Memuat...</div>
 
     <div v-else class="overflow-hidden rounded-xl border border-stone-200 dark:border-stone-800">
+      <div class="overflow-x-auto">
       <table class="w-full text-left text-sm">
         <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
           <tr>
@@ -88,6 +89,7 @@ function toggle(id: number) {
           <tr v-if="items.length === 0"><td colspan="5" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <div v-if="lastPage > 1" class="mt-6 flex items-center justify-center gap-2 text-sm">

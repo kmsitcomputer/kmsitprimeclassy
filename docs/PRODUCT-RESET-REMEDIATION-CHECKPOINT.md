@@ -682,3 +682,5 @@ Retained verbatim in substance because the decision below is the reason the FK r
 - Schema introspection is MySQL-only by design; on another driver the gate degrades to nothing.
 
 **Revision 4's EXACT NEXT ACTION** (now superseded by revision 5, kept for traceability): authorize the DEV `products:reset --force` run after a verified backup. The correct order is now `P1 → P2 → products:reset` — see `docs/OPERATIONS.md` §8.3.
+
+> Doc-reference addendum (2026-10-28, Owner-approved documentation hygiene closure): `docs/DEV-SCHEMA-DRIFT-REMEDIATION-PLAN.md` referenced above was deleted. Preservation: byte-identical backup `C:\Users\KMSIT Komputer\AppData\Local\Temp\opencode\doc-backups\DEV-SCHEMA-DRIFT-REMEDIATION-PLAN-20261028.md` (git hash-object `f06a5a1fd85101bcf077969790f56551a9d9c470`); substantive completion facts remain in `docs/OPERATIONS.md` (schema-drift section + §8.3 DEV completion evidence). Source-file docblock references to it in the three `2026_10_08_*restore*` migrations were intentionally left untouched (no source change authorized).

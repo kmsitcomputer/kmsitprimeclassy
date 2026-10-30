@@ -24,7 +24,7 @@ DEV, TEST and PRODUCTION procedures. Governance rules are in [AGENTS.md](../AGEN
 | Mail / storage | `MAIL_*`, `FILESYSTEM_DISK` |
 | Frontend | `frontend/.env` → `VITE_API_URL` (empty = same origin), optional `VITE_GOOGLE_MAPS_API_KEY`; production runtime override in `public_html/config.js` (`window.__APP_CONFIG__.API_URL`) — no rebuild needed |
 
-**Secrets live in the database, not `.env`:** payment-gateway credentials (`agent_payment_gateway_configs`, encrypted, per Agent, entered via the Agent dashboard) and shipping-provider credentials (`agent_shipping_provider_configs`, encrypted; RajaOngkir key, OpenRoute key). Super Admin only toggles providers globally. `.env` is gitignored everywhere; only `.env.example` is committed.
+**Secrets live in the database, not `.env`:** per-Agent bank account settings (`agent_payment_gateway_configs`, legacy table name, encrypted, entered via the Agent dashboard) and shipping-provider credentials (`agent_shipping_provider_configs`, encrypted; RajaOngkir key, OpenRoute key). Super Admin only toggles providers globally. `.env` is gitignored everywhere; only `.env.example` is committed.
 
 ## 3. DEV
 
@@ -56,6 +56,50 @@ Wipes transactional data so UAT can restart from a clean state, keeping every ma
 ```bash
 php artisan primeclassy:reset-dev-transactions --confirm="RESET DEV TRANSACTIONS"
 ```
+
+### 3.2 Local Windows workstation startup (ServBay) — commands and port-conflict safety
+
+Merged 2026-10-28 from `docs/LOCAL-STABILIZATION-CHECKPOINT.md` §9, which remains as historical
+evidence. These commands run the project on the local Windows dev workstation (`C:\ServBay\…`,
+ServBay PHP 8.3). They are environment-distinct from the shared DEV server paths in §3 — do not mix
+the two path sets.
+
+```powershell
+# Backend (Laravel API + SPA bridge) — port 8000
+cd C:\ServBay\www\primeclassy\backend
+php -c C:\ServBay\etc\php\8.3\php.ini artisan serve --host=127.0.0.1 --port=8000
+
+# Frontend dev server (Vite) — port 5174 (5173 may belong to another local project)
+cd C:\ServBay\www\primeclassy\frontend
+$env:VITE_DEV_PROXY_TARGET="http://127.0.0.1:8000"
+npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
+
+# Production-build preview (asset/PWA verification)
+npm run build-only
+npm run preview            # http://localhost:4173
+
+# Tests (scoped first, then full; database rules stay §4)
+cd C:\ServBay\www\primeclassy\backend
+$env:OPENSSL_CONF="C:\ServBay\packages\php\8.3\extras\ssl\openssl.cnf"
+php artisan test --filter=Name
+php artisan test
+
+# Queue worker (only when a queued job must run; drivers are database)
+php artisan queue:work --stop-when-empty
+```
+
+Port-conflict check — always identify the listener before terminating anything:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000 -State Listen |
+    ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)" |
+        Select-Object ProcessId, CommandLine }
+```
+
+Only stop the process when the `CommandLine` points at **this** project
+(`C:\ServBay\www\primeclassy\backend\…server.php`). A different project's dev server on the same port
+is **not** a PrimeClassy fault — move your own server to another port (`--port=8001`, `--port=5174`)
+or ask the Owner. Never kill another project's server automatically.
 
 ## 4. TEST
 
@@ -255,7 +299,7 @@ Never run `transactions:reset` between a `products:reset` dry run and its `--for
 
 #### Schema drift matters here
 
-The unmapped-dependency gate reads the **live** schema, so its verdict is only as strong as the database it runs against. On `primeclassy_dev` the `migrations` table lists all 128 migrations as applied while the schema is missing **97 declared foreign keys** across 24 tables (full inventory and restoration plan: `DEV-SCHEMA-DRIFT-REMEDIATION-PLAN.md`) — the whole warehouse-era constraint set (`warehouse_stocks`, `stock_movements`, `stock_requests*`, `stock_transfers*`, `stock_opnames*`, `sub_stock_*`, `warehouse_migration_*`, `warehouse_stock_requests`) plus `users.*` (self/role/avatar), `user_closures`, `shipping_configurations`, `sheets_*` and `villages.district_id`. **Nothing is pending — the DEV schema simply does not match its migrations. (A further 6 constraints exist on both databases but are declared `NO ACTION` instead of `RESTRICT`; InnoDB-equivalent for deletes, no action required.)**
+The unmapped-dependency gate reads the **live** schema, so its verdict is only as strong as the database it runs against. On `primeclassy_dev` the `migrations` table lists all 128 migrations as applied while the schema is missing **97 declared foreign keys** across 24 tables (full inventory and restoration plan: `DEV-SCHEMA-DRIFT-REMEDIATION-PLAN.md` — deleted 2026-10-28 by Owner-approved documentation hygiene; completion evidence below and the per-constraint lists inside the three `2026_10_08_*restore*` migration files remain the canonical record; verbatim copy: `C:\Users\KMSIT Komputer\AppData\Local\Temp\opencode\doc-backups\DEV-SCHEMA-DRIFT-REMEDIATION-PLAN-20261028.md`, git hash-object `f06a5a1fd85101bcf077969790f56551a9d9c470`) — the whole warehouse-era constraint set (`warehouse_stocks`, `stock_movements`, `stock_requests*`, `stock_transfers*`, `stock_opnames*`, `sub_stock_*`, `warehouse_migration_*`, `warehouse_stock_requests`) plus `users.*` (self/role/avatar), `user_closures`, `shipping_configurations`, `sheets_*` and `villages.district_id`. **Nothing is pending — the DEV schema simply does not match its migrations. (A further 6 constraints exist on both databases but are declared `NO ACTION` instead of `RESTRICT`; InnoDB-equivalent for deletes, no action required.)**
 
 Consequence: a DEV `--force` run is **not** protected by foreign keys, so a child-before-parent mistake would not be caught by the database there. Two safeguards apply instead: the focused regression tests run against the fully migrated `primeclassy_testing` schema (which does enforce every FK), and the command's own row-count verification decides the verdict. Never read "no FK errors on DEV" as evidence that the ordering is correct — read the testing-schema test result. Treat the dry run on DEV as a count report, not as a constraint proof.
 
@@ -309,10 +353,52 @@ php artisan migrate --force --path=database/migrations/2026_10_08_112000_restore
 
 **Production HOLD:** production FK/schema/data state is unknown. Do not include or execute these migrations in production without a separately authorized production package, read-only schema/orphan preflight, verified production backup plus isolated restore, production-clone lock measurement, reviewed pending migration set and explicit Human authorization for each mutation. DEV results do not establish production safety. Do not repair the 220 DEV orphans or remove the 26 files as part of this work.
 
+### 8.4 Refund ledger backfill (P4) and reporting read-switch (P5)
+
+**Current operational boundary (enforced in code for this phase):** `--apply` is hard-refused unless
+the connected database name ends in `_test`/`_testing`. It therefore cannot run on production or on
+DEV today — that is the standing rule, not an oversight. A production apply is **not available** in
+this phase; §8.4's "future production backfill" note below is a design sketch only and grants no
+permission.
+
+1. Migrate (additive) and deploy the code with `REFUNDS_REPORTING_SOURCE=legacy` (default).
+2. Dry-run on a copy/restored snapshot (read-only; writes only the batch row):
+   `php artisan refunds:backfill-ledger --batch=refund-ledger-v1`
+   Review the table: `snapshots_pending/created`, `payouts_pending`, `verification_pending`,
+   `duplicate_keys`, `unallocatable_orders`, `unexplained_cash`.
+3. Acceptance gate: unallocatable/unexplained counts explained; duplicate keys are rerun noise only;
+   `deferred=0` for historical rows; G = P + A checked per order.
+4. Apply on the **isolated test database only**, after explicit Human approval:
+   `php artisan refunds:backfill-ledger --apply --batch=refund-ledger-v1`
+   The same batch key resumes with insert-or-skip; a rerun reports `duplicate_keys` without mutation.
+5. Verify: order `gross_received_amount = paid_amount + Σ(affects_paid_amount payouts)`, payouts are
+   `legacy_unverified`, no `paid_amount`/`total_amount` change, no duplicate legacy keys.
+6. Only then flip `REFUNDS_REPORTING_SOURCE=ledger`, clear config cache and check the four decoupled
+   metrics (gross sales / net sales reduction / net revenue / R_c). Rollback = set `legacy` again;
+   ledger rows remain (insert-or-skip on rerun) and the additive migrations have `down()`.
+   Flipping this flag on DEV or production is its own Owner-gated step; it is not implied by a
+   successful test-database backfill.
+
+**Future production backfill — design only, NOT AUTHORIZED.** Reaching production would require a
+separate approved package that, at minimum: removes/relaxes the `_test`-suffix guard through a
+reviewed code change, takes and restore-tests a verified production backup, reviews a dry-run
+reconciliation on a restored snapshot, schedules a maintenance window, defines rollback/recovery, and
+obtains explicit Human authorization per step. Nothing in this runbook authorizes that window today.
+
+Legacy processed returns become `needs_verification` obligations; they are **not** paid
+automatically. Resolve them through the Owner evidence workflow. A return approved before payment
+leaves a deferred container that only Owner materialization can pay (documented boundary).
+
 ## 9. Integrations — operational notes
 
 - **Google Sheets:** one central service account (Google Cloud project with the Sheets API enabled; key JSON stored privately, e.g. `backend/storage/app/private/google/service-account.json` with restrictive permissions, never in Git/`public/`). Set `GOOGLE_SHEETS_ENABLED=true` + `GOOGLE_SHEETS_CREDENTIALS_PATH`, then `config:cache`. Share each destination spreadsheet with the service-account email as **Editor**. Use **Periksa koneksi** (read-only `spreadsheets.get`) in `/dashboard/google-sheets`. Common errors: `PERMISSION_DENIED` (share missing), `API_DISABLED`, `SPREADSHEET_NOT_FOUND`, `RATE_LIMIT`. Sync is manual, one-way, ≤ 10,000 rows, replaces the tab's values; never a database backup. Rotate the key if exposure is suspected.
-- **RajaOngkir / OpenRoute / payment gateways:** each Agent configures credentials in its dashboard; keys are never returned by the API. Point gateway webhooks at `POST {APP_URL}/api/v1/webhooks/payment/{method}` (`xendit`, `tripay`, `stripe`). OpenRoute base URL is server-controlled. Rotate a RajaOngkir key that was ever exposed in a log or trace.
+- **Dua laporan PrimeClassy (Google Sheets):** dataset `order_initial_transactions` = Laporan A "Transaksi Awal" (snapshot per item, 24 kolom), dataset `order_payment_positions` = Laporan B "Posisi Pembayaran Terkini" (posisi live per faktur, 15 kolom). Kontrak kolom dan aturan uangnya di [BUSINESS-RULES.md](BUSINESS-RULES.md) §20a; arsitekturnya di [ARCHITECTURE.md](ARCHITECTURE.md) §12.1.
+  - Aktivasi di DEV (butuh persetujuan Owner, urutan tidak boleh diacak): (1) jalankan migration `2026_10_21_100000_create_order_initial_report_items_table` + `2026_10_21_110000_add_payment_method_snapshot_to_order_initial_report_items_table` pada database DEV; (2) deploy/refresh kode backend DEV; (3) daftarkan spreadsheet tujuan (destinations) dan bagikan ke service account; (4) buat **dua** konfigurasi (satu per laporan, tab berbeda pada spreadsheet yang sama) dengan dataset + pemetaan kolom default; (5) uji **Periksa koneksi**, lalu **Sync**; (6) verifikasi baris di sheet.
+  - Filter periode (harian/mingguan/bulanan/kustom) diatur per konfigurasi; periode relatif dihitung saat sync pada kalender WIB (Asia/Jakarta) dan batasnya dikonversi ke UTC untuk query (database tetap UTC). Bila sebuah laporan melewati 10.000 baris, sync **gagal** dengan pesan "Persempit periode filter lalu sinkronkan ulang" dan tab **tidak** ditulis — tidak ada pemotongan senyap.
+  - Laporan A hanya memuat order yang dibuat **setelah** snapshot aktif; order lama tidak direkonstruksi. Laporan B memuat order lama dan baru.
+  - Laporan A memakai `ROW_NUMBER()`: deployment memerlukan **MariaDB ≥ 10.2 atau MySQL ≥ 8.0**; catat versi database produksi pada preflight.
+  - `transactions:reset` / `products:reset` ikut menghapus baris snapshot (`order_initial_report_items`) sebagai bagian dari scope order — keduanya sudah dipetakan dan tidak lagi menolak jalan.
+- **RajaOngkir / OpenRoute:** each Agent configures credentials in its dashboard; keys are never returned by the API. External payment gateways and their webhooks were removed (Owner decision). OpenRoute base URL is server-controlled. Rotate a RajaOngkir key that was ever exposed in a log or trace.
 - **Uploads:** stored on the `public` disk (`backend/storage/app/public`), served through the `storage` symlink; a 404 on every uploaded file usually means the symlink is missing.
 
 ## 10. Troubleshooting
@@ -325,7 +411,6 @@ php artisan migrate --force --path=database/migrations/2026_10_08_112000_restore
 | Reload of `/products/foo` → 404 | SPA fallback missing in the web server (`try_files … /index.html` / `.htaccess`) |
 | Uploaded images 404 | `storage` symlink missing or wrong document root |
 | 500 with no detail in production | Expected (`APP_DEBUG=false`); read `backend/storage/logs/laravel.log` |
-| Webhook 401 `invalid_signature` | Gateway secret mismatch between provider and Agent config |
 | RajaOngkir options 422 | Agent key/origin/courier codes, product weight, or incomplete buyer village hierarchy |
 | `MAC is invalid` in old logs | Historical `APP_KEY` change; not an active defect |
 | Stale config after editing `.env` | Run `php artisan config:clear` (and re-cache in production) |
@@ -337,3 +422,26 @@ php artisan migrate --force --path=database/migrations/2026_10_08_112000_restore
 Public Nominatim usage must follow [its usage policy](https://operations.osmfoundation.org/policies/nominatim/): application-wide maximum one outbound request per second, identifying User-Agent, cache and visible OSM attribution. The adapter defaults to shared file cache for this single-host deployment, caches successful coordinates for 24 hours and response failures/no-match for 60 seconds, and falls back immediately when its atomic global lock/rate gate is busy. `GEOCODE_MIN_INTERVAL` cannot lower the one-second floor. Multiple hosts must use one shared Redis/database cache store, not host-local file caches. Shared lock/rate storage failure is manual fallback. No credentials are required or written.
 
 Automated tests fake HTTP and use isolated cache; no live provider is called. Network outage, timeout, non-2xx, malformed/non-Indonesian response, no unique master chain and rate gating preserve manual entry. Canonical ids always come from PrimeClassy master regions; external OSM ids are not persisted. Reverse geocoding is approximate and regional coverage may produce no match; the user can edit the prefill. See [Nominatim reverse API](https://nominatim.org/release-docs/latest/api/Reverse/).
+
+
+## WhatsApp Gateway (GOWA) — operational notes
+
+- **Per-Agent devices (2026-10-29).** Migration `2026_11_01_100000_create_agent_whatsapp_devices_table` (additive) was applied to `primeclassy_dev` after a backup (`C:\Users\KMSIT Komputer\primeclassy-backups\primeclassy_dev-pre-agent-wa-devices-14480518-102657.sql`); production: not applied. Each Agen pairs its own number at `Pengaturan › WhatsApp Saya` (QR or pairing code). The Super Admin only has the global ON/OFF; there is no cross-Agent device management by design. A stale/forgotten slot shows as `Belum terhubung`; messages of an Agent without a paired device are skipped (`agent_device_not_ready`) and visible in its history.
+- **SMTP (2026-10-29).** Super Admin: `Pengaturan › Integrasi · SMTP`. Saving does not switch it on; tick the switch to override `.env`. Turn it off to return to `.env` instantly. Never test with an address that is not your own.
+- **Retention minimisation:** `php artisan primeclassy:whatsapp-retention-minimize` (dry-run). Real run only with explicit Owner authorisation: verified backup first, then `--execute --backup-confirmed`. Do NOT schedule it without a separate approval.
+- **AR evidence:** `php artisan primeclassy:ar-reconciliation-report` (read-only).
+
+- **Retention dry-run:** `php artisan primeclassy:whatsapp-retention-report` (read-only JSON: eligible counts, protected evidence, legal-hold state). There is no execute option and no schedule; do not add one without Owner approval, a verified backup and a fresh dry-run.
+- **Volume limits:** Koneksi tab (`Batas pesan per penerima / jam`, `… seluruh gateway / menit`; defaults 6 and 20). A message held by a cap shows `rate_limited:*` in the Riwayat tab and is retried by its delayed job.
+- **`GoogleAuthTest` in a local CLI:** the test generates an RSA key with PHP OpenSSL. If `OPENSSL_CONF` is unset PHP cannot find `openssl.cnf` (`error:07000072 … no such file`) and the whole class fails with "Unable to generate Google test RSA key". Set it for the session, e.g. PowerShell: `$env:OPENSSL_CONF='C:\ServBay\packages\php\8.3\extras\ssl\openssl.cnf'` (matches the PHP in use; verified: 33/33 `GoogleAuth` tests pass). No application code is involved.
+
+- **Queue worker (DEV, 2026-10-29).** `QUEUE_CONNECTION=database`; no worker is kept running. Inspect first (`jobs`, `failed_jobs` counts, `php.exe` processes), then run a bounded, dedicated one only: `php artisan queue:work database --stop-when-empty --max-jobs=10 --max-time=60 --tries=1`. Never run it against production or another application's queue. A job in backoff keeps its row in `jobs` — delete it deliberately (and close its `whatsapp_messages` row) before restoring a different gateway URL, so it cannot fire at the wrong target.
+- **Migration `2026_10_31_100000_create_whatsapp_messages_table`** was applied to `primeclassy_dev` only (single `--path`, after a backup at `C:\Users\KMSIT Komputer\primeclassy-backups\primeclassy_dev-pre-whatsapp-messages-14480518-070822.sql`). Production: not applied; needs its own backup and authorisation.
+
+- **Where it is configured:** dashboard `Pengaturan › Integrasi · WhatsApp` (Super Admin only) — Base URL, API username/password (encrypted, write-only), optional Device ID. There are no WhatsApp values in `.env`.
+- **Local DEV:** GOWA runs as container `primeclassy-gowa-dev` (`C:\ServBay\www\primeclassy-gowa-dev`, API `http://127.0.0.1:3001`, credentials in that folder's `.env`). Do not touch other GOWA containers (`sapakita-gowa`, `kmsitaics-dev-gowa-1`) or their volumes/sessions.
+- **Production (NOT authorised yet):** plan `https://wagateway.kmsitcomputer.com`. Switching is configuration only: change Base URL/credentials in the console. DNS/VPS/production changes are separate, Owner-approved steps.
+- **Queue worker:** notifications and retries run on the `database` queue; a worker (`php artisan queue:work`) must be running or messages stay `queued`. OTP and test messages are delivered synchronously.
+- **Migration:** `2026_10_31_100000_create_whatsapp_messages_table` (one new table, additive). Until it is approved and applied the notifier is inert and the console shows "migration pending". Before applying: backup, `migrate --pretend`, apply that single file, verify.
+- **Reading the log:** `queued` waiting/retrying · `sent` provider acknowledged · `failed` definite failure · `unknown` may or may not have been delivered (check the phone BEFORE retrying) · `skipped` deliberately not sent (reason shown).
+- **Real messages in DEV** go only to Owner-authorised numbers (console → "Nomor uji yang diizinkan"). Never point DEV at production customers.

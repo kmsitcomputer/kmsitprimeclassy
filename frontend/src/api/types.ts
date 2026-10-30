@@ -166,6 +166,9 @@ export interface Order {
   /** A1-15: server-derived capability — the order's own konsumen or a same-branch financial role. */
   viewer_can_download_invoice?: boolean
   konsumen_id?: number
+  /** G17: which authoritative origin owns this order. 'crm' orders have no account buyer. */
+  buyer_origin?: 'account' | 'crm'
+  crm_customer?: { id: number; name: string | null; phone: string | null }
   shipping_provider: string | null
   /**
    * UAT-005 LOCKED rule (Human 2026-10-07): may an item's requested delivery date be changed?

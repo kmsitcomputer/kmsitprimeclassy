@@ -104,6 +104,7 @@ async function makeDefault(lang: Language) {
     <div v-if="loading" class="text-sm text-stone-500">Memuat...</div>
 
     <div v-else class="overflow-hidden rounded-xl border border-stone-200 dark:border-stone-800">
+      <div class="overflow-x-auto">
       <table class="w-full text-left text-sm">
         <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
           <tr>
@@ -141,10 +142,14 @@ async function makeDefault(lang: Language) {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <Teleport to="body">
-      <div v-if="showForm" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
+      <!-- pc-internal: this overlay mounts on <body> (outside the layout root),
+           so it carries the dashboard namespace itself — styles apply only to
+           this internal dialog, never to the public storefront. -->
+      <div v-if="showForm" class="pc-internal fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
         <form class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-stone-900" @submit.prevent="submit">
           <div class="mb-4 flex items-center justify-between">
             <h2 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{{ editingId ? 'Edit' : 'Tambah' }} Bahasa</h2>

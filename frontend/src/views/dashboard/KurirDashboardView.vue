@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import { useAuthStore } from '@/stores/auth'
 import { updateShipmentItemStatus } from '@/api/shipments'
 import {
@@ -10,6 +11,7 @@ import {
   pickupReturnItem,
   confirmReturnItem,
   courierDeliveredReport,
+  courierReturnPickupsToday,
   type CourierOrder,
   type CourierReturn,
 } from '@/api/courier'
@@ -23,6 +25,7 @@ const auth = useAuthStore()
 /* Sales-Kurir referral visibility (PBR-001) — same code/link/copy UX as ProfileView. */
 const isKoordinator = computed(() => auth.user?.role === 'koordinator-kurir')
 const isExecutorOnly = computed(() => isSalesKurir.value || isKoordinator.value)
+const isCourierRole = computed(() => auth.user?.role === 'kurir')
 const isSalesKurir = computed(() => auth.user?.role === 'sales-kurir-sub')
 const referralLink = computed(() => (auth.user?.referral_code ? `${window.location.origin}/?ref=${auth.user.referral_code}` : ''))
 const referralCopied = ref(false)
@@ -56,8 +59,19 @@ const busyItemId = ref<number | null>(null)
 const busyReturnItemId = ref<number | null>(null)
 const pickupNoteDraft = ref<Record<number, string>>({})
 const pickingUpItemId = ref<number | null>(null)
-const proofInputs = ref<Record<number, HTMLInputElement | null>>({})
+// Delivery proof (Universal Upload Standard): the item whose proof panel is open, its chosen photo,
+// real upload progress and a cancel handle. Selecting a photo is NOT delivery — only the explicit
+// submit below calls the unchanged status endpoint, and Admin verification stays separate.
+const proofItemId = ref<number | null>(null)
+const proofFile = ref<File | null>(null)
+const proofProgress = ref<number | null>(null)
+const proofError = ref<string | null>(null)
+let proofAbort: AbortController | null = null
 const errorMessage = ref('')
+
+// GAP-A KPI: return pickups scheduled for TODAY (WIB) the kurir must act on.
+// Endpoint is kurir-only — never called for executor-only roles.
+const pickupCountToday = ref<number | null>(null)
 
 async function loadOrders(page = ordersPage.value) {
   loading.value = true
@@ -135,25 +149,44 @@ async function pickup(item: { id: number; shipment_id: number | null }) {
   }
 }
 
-function triggerProofPicker(itemId: number | null) {
+function openProofPanel(itemId: number | null) {
   if (itemId === null) return
-  proofInputs.value[itemId]?.click()
+  proofItemId.value = itemId
+  proofFile.value = null
+  proofProgress.value = null
+  proofError.value = null
 }
 
-async function markDelivered(item: { id: number; shipment_id: number | null }, event: Event) {
-  if (item.shipment_id === null) return
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+function cancelProofUpload() {
+  proofAbort?.abort()
+}
+
+function closeProofPanel() {
+  proofAbort?.abort()
+  proofItemId.value = null
+  proofFile.value = null
+}
+
+async function markDelivered(item: { id: number; shipment_id: number | null }) {
+  const file = proofFile.value
+  if (item.shipment_id === null || !file) return
   busyItemId.value = item.id
+  proofError.value = null
+  proofProgress.value = null
+  proofAbort = new AbortController()
   try {
-    await updateShipmentItemStatus(item.shipment_id, item.id, 'terkirim', file)
+    await updateShipmentItemStatus(item.shipment_id, item.id, 'terkirim', file, {
+      signal: proofAbort.signal,
+      onProgress: (p) => { proofProgress.value = p },
+    })
+    proofItemId.value = null
+    proofFile.value = null
     await loadOrders()
   } catch (e) {
-    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menandai order terkirim. Pastikan foto bukti terlampir.'
+    if ((e as { code?: string } | null)?.code === 'ERR_CANCELED') proofError.value = 'Upload dibatalkan.'
+    else proofError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menandai order terkirim. Pastikan foto bukti terlampir.'
   } finally {
     busyItemId.value = null
-    input.value = ''
   }
 }
 
@@ -187,7 +220,17 @@ async function confirmReturn(itemId: number, received: boolean) {
   }
 }
 
-onMounted(() => loadOrders(1))
+onMounted(() => {
+  loadOrders(1)
+  // GAP-A KPI — only the normal-Kurir role has the return-pickup workflow.
+  if (auth.user?.role === 'kurir') {
+    courierReturnPickupsToday()
+      .then((d) => (pickupCountToday.value = d.count))
+      .catch(() => {
+        // KPI is non-essential; a failed read never blocks the rest of the dashboard.
+      })
+  }
+})
 </script>
 
 <template>
@@ -229,6 +272,19 @@ onMounted(() => loadOrders(1))
         <button type="button" class="shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400" @click="copyReferralLink">
           {{ referralLinkCopied ? 'Link referral berhasil disalin.' : 'Salin Link' }}
         </button>
+      </div>
+    </div>
+
+    <!-- GAP-A KPI: pickup retur yang dijadwalkan hari ini (WIB) — giliran Kurir ini. -->
+    <div v-if="isCourierRole && pickupCountToday !== null" class="mb-4 flex items-center gap-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-100 font-display text-lg font-semibold text-brand-700 dark:bg-brand-950 dark:text-brand-300">
+        {{ pickupCountToday }}
+      </div>
+      <div>
+        <p class="text-sm font-medium text-stone-800 dark:text-stone-100">Pickup Retur Hari Ini</p>
+        <p class="text-xs text-stone-500 dark:text-stone-400">
+          {{ pickupCountToday > 0 ? 'Ada penjemputan retur yang dijadwalkan hari ini — cek tab Retur.' : 'Tidak ada penjemputan retur yang dijadwalkan hari ini.' }}
+        </p>
       </div>
     </div>
 
@@ -300,7 +356,7 @@ onMounted(() => loadOrders(1))
             </p>
           </div>
           <ul class="mb-3 space-y-1 text-sm text-stone-600 dark:text-stone-300">
-            <li v-for="item in order.items" :key="item.id" class="flex items-center justify-between gap-2">
+            <li v-for="item in order.items" :key="item.id" class="flex flex-wrap items-center justify-between gap-2">
               <span>
                 {{ item.product_name }}<span v-if="item.variation_label"> — {{ item.variation_label }}</span> × {{ item.quantity }}
                 <span class="block text-xs text-stone-400 dark:text-stone-500">{{ skuLabel(item.sku) }}</span>
@@ -320,24 +376,36 @@ onMounted(() => loadOrders(1))
                   Ambil
                 </button>
                 <template v-else-if="item.shipment_id && item.status === 'dikirim'">
-                  <input
-                    :ref="(el) => (proofInputs[item.id as number] = el as HTMLInputElement)"
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    class="hidden"
-                    @change="markDelivered(item, $event)"
-                  />
                   <button
                     type="button"
                     class="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                     :disabled="busyItemId === item.id"
-                    @click="triggerProofPicker(item.id)"
+                    @click="openProofPanel(item.id)"
                   >
                     <AppIcon name="upload" :size="14" /> Terkirim
                   </button>
                 </template>
               </span>
+              <div v-if="proofItemId === item.id" class="mt-2 w-full basis-full rounded-xl border border-stone-200 bg-stone-50 p-3 dark:border-stone-700 dark:bg-stone-900">
+                <PrimeFileUpload
+                  :model-value="proofFile ? [proofFile] : []"
+                  label="Foto bukti pengiriman"
+                  required
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  :uploading="busyItemId === item.id"
+                  :progress="proofProgress"
+                  :error="proofError"
+                  :test-id="`kurir-delivery-proof-${item.id}`"
+                  @update:model-value="proofFile = $event[0] ?? null"
+                  @retry="markDelivered(item)"
+                  @cancel="cancelProofUpload"
+                />
+                <div class="mt-2 flex gap-2">
+                  <button type="button" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50" :disabled="!proofFile || busyItemId === item.id" @click="markDelivered(item)">Kirim bukti &amp; tandai terkirim</button>
+                  <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300" :disabled="busyItemId === item.id" @click="closeProofPanel">Tutup</button>
+                </div>
+              </div>
             </li>
           </ul>
         </div>
@@ -384,6 +452,9 @@ onMounted(() => loadOrders(1))
                 <span>
                   {{ item.product_name }}<span v-if="item.variation_label"> — {{ item.variation_label }}</span> × {{ item.quantity_returned }}
                   <span class="block text-xs text-stone-400 dark:text-stone-500">{{ skuLabel(item.sku) }}</span>
+                  <span v-if="item.pickup_scheduled_for" class="block text-xs font-medium text-brand-700 dark:text-brand-300">
+                    Jadwal pickup: {{ formatDate(item.pickup_scheduled_for) }}
+                  </span>
                 </span>
                 <span class="flex shrink-0 items-center gap-2">
                   <button

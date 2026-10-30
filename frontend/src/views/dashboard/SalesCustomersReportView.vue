@@ -4,8 +4,10 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getSalesCustomersReport, downloadSalesCustomersXlsx, type SalesCustomerReportRow } from '@/api/reports'
 import { formatRupiah } from '@/utils/format'
+import { useAuthStore } from '@/stores/auth'
 
 /** Sales-only: every konsumen this sales sold to — never another sales' customers, never agen-level fee. */
+const auth = useAuthStore()
 const items = ref<SalesCustomerReportRow[]>([])
 const loading = ref(true)
 const currentPage = ref(1)
@@ -45,6 +47,10 @@ function download() {
     <h1 class="mb-1 font-display text-2xl font-semibold text-stone-800 dark:text-stone-100">Konsumen Saya</h1>
     <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">
       Semua konsumen yang pernah membeli melalui Anda, beserta jumlah order dan fee yang Anda dapatkan dari masing-masing.
+    </p>
+    <p v-if="auth.user?.role === 'korsal'" class="mb-5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="korsal-personal-scope-note">
+      Halaman ini hanya memuat cakupan Sales pribadi Anda (konsumen langsung dan pembelian sendiri). Transaksi tim/downline ada di
+      Laporan Sales, Laporan Jaringan dan dashboard Korsal.
     </p>
 
     <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">

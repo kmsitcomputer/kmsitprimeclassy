@@ -12,11 +12,25 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const form = ref<WebsiteSettings | null>(null)
 
+function normalizeMediaIds(settings: WebsiteSettings): WebsiteSettings {
+  const mediaId = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return {
+    ...settings,
+    site_logo_media_id: mediaId(settings.site_logo_media_id),
+    site_favicon_media_id: mediaId(settings.site_favicon_media_id),
+  }
+}
+
 async function load() {
   loading.value = true
   errorMessage.value = ''
   try {
-    form.value = await getAdminSettings()
+    form.value = normalizeMediaIds(await getAdminSettings())
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat pengaturan website.'
   } finally {
@@ -34,7 +48,7 @@ async function save() {
     // backend's `email` format rule rejects an empty string even though the
     // field is nullable (only an actual null bypasses format validation).
     const payload = { ...form.value, site_contact_email: form.value.site_contact_email || null }
-    form.value = await updateSettings(payload)
+    form.value = normalizeMediaIds(await updateSettings(payload))
     successMessage.value = 'Pengaturan berhasil disimpan.'
   } catch (e) {
     errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menyimpan pengaturan.'

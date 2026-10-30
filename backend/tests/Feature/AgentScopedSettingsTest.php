@@ -41,7 +41,7 @@ class AgentScopedSettingsTest extends TestCase
      * Payment methods
      * ----------------------------------------------------------- */
 
-    public function test_agen_can_list_and_toggle_every_payment_method_including_gateways(): void
+    public function test_agen_can_list_and_toggle_every_offline_payment_method(): void
     {
         $agen = $this->agen();
 
@@ -50,9 +50,9 @@ class AgentScopedSettingsTest extends TestCase
         $codes = collect($response->json('data'))->pluck('code');
         $this->assertTrue($codes->contains('cod'));
         $this->assertTrue($codes->contains('bank_transfer'));
-        $this->assertTrue($codes->contains('xendit'));
-        $this->assertTrue($codes->contains('tripay'));
-        $this->assertTrue($codes->contains('stripe'));
+        $this->assertFalse($codes->contains('xendit'));
+        $this->assertFalse($codes->contains('tripay'));
+        $this->assertFalse($codes->contains('stripe'));
 
         $cod = PaymentMethod::query()->where('code', 'cod')->firstOrFail();
         $this->actingAs($agen)->patchJson("/api/v1/agent/payment-methods/{$cod->id}/toggle")
@@ -64,29 +64,6 @@ class AgentScopedSettingsTest extends TestCase
         $this->assertFalse($row['is_active']);
         // Global switch is untouched by the agen's own toggle.
         $this->assertTrue($cod->fresh()->is_active);
-    }
-
-    public function test_agen_can_toggle_a_gateway_payment_method_and_configure_its_own_credentials(): void
-    {
-        $agen = $this->agen();
-        $xendit = PaymentMethod::query()->where('code', 'xendit')->firstOrFail();
-
-        $this->actingAs($agen)->patchJson("/api/v1/agent/payment-methods/{$xendit->id}/toggle")
-            ->assertOk()
-            ->assertJsonPath('data.is_active', false);
-
-        $this->actingAs($agen)->putJson("/api/v1/agent/payment-methods/{$xendit->id}/config", [
-            'environment' => 'sandbox',
-            'config' => ['secret_key' => 'xnd_key', 'callback_token' => 'tok_abc'],
-        ])->assertOk();
-
-        $this->assertDatabaseHas('agent_payment_gateway_configs', [
-            'agent_id' => $agen->id, 'payment_method_id' => $xendit->id, 'environment' => 'sandbox',
-        ]);
-        // Never echoed back.
-        $this->assertStringNotContainsString('xnd_key', json_encode(
-            $this->actingAs($agen)->getJson('/api/v1/agent/payment-methods')->json()
-        ));
     }
 
     public function test_admin_can_manage_only_its_own_agent_payment_methods_and_payload_cannot_change_scope(): void

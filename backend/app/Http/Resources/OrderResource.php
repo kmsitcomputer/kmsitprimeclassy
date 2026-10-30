@@ -61,7 +61,7 @@ class OrderResource extends JsonResource
             // remaining_amount > 0 always means NOT lunas.
             'dp_amount' => $this->when($seesFinancials, $this->dp_amount),
             'paid_amount' => $this->when($seesFinancials, $this->paid_amount),
-            'remaining_amount' => $this->when($seesFinancials, $this->remaining_amount),
+            'remaining_amount' => $this->when($seesFinancials, fn () => number_format(\App\Support\CollectibleReceivable::forOrder($this->resource), 2, '.', '')),
             // Canonical payment summary (PaymentSummaryService) — the single formula every payment
             // display reads instead of each re-deriving its own.
             'payment_summary' => $this->when($seesFinancials, fn () => PaymentSummaryService::summarize($this->resource)),
@@ -119,6 +119,18 @@ class OrderResource extends JsonResource
                 'name' => $this->konsumen->name,
                 'phone' => $this->konsumen->phone,
             ] : null),
+            // G17: which authoritative origin owns this transaction. The CRM identity is the immutable
+            // snapshot taken at placement; staff-facing only (a konsumen can never view a CRM order).
+            'buyer_origin' => $this->isCrmOrigin() ? 'crm' : 'account',
+            'crm_customer' => $this->when($this->isCrmOrigin(), fn () => [
+                'id' => $this->crm_customer_id,
+                'name' => $this->buyer_name_snapshot,
+                'phone' => $this->buyer_phone_snapshot,
+            ]),
+            'placed_by_user_id' => $this->when(
+                $request->user()?->isRole('konsumen') !== true,
+                $this->placed_by_user_id,
+            ),
             // Who made this sale/manages this branch — needed by korsal's own
             // order view ("identitas siapa sales dan konsumennya"), and by
             // office/agen roles. Never the konsumen's own view of their own

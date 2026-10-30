@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Logging\ActivityLogger;
+use App\Services\Refund\OrderFinancialSnapshotService;
 use App\Services\Stock\StockRequestService;
 use App\Services\Stock\StockService;
 use Illuminate\Database\QueryException;
@@ -39,6 +40,7 @@ class OrderLineAdditionService
         private readonly OrderTotalCalculator $orderTotalCalculator,
         private readonly StockService $stockService,
         private readonly StockRequestService $stockRequestService,
+        private readonly OrderFinancialSnapshotService $snapshotService,
     ) {}
 
     /**
@@ -76,6 +78,10 @@ class OrderLineAdditionService
 
                     return [$existing, true];
                 }
+
+                // D6: once the order-wide financial snapshot exists, adding a line would mutate the
+                // already-frozen money basis, so it is refused (replay above is still served).
+                $this->snapshotService->assertMutable($order);
 
                 if ($order->status !== 'diproses') {
                     throw new ApiException(__('messages.fulfillment.window_closed'), 422);

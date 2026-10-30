@@ -26,9 +26,6 @@ class PaymentMethodSeeder extends Seeder
             // PaymentService::initiateDownPayment), so it needs no credentials
             // of its own and starts active.
             ['code' => 'down_payment', 'name' => 'DP / Down Payment', 'type' => 'manual', 'is_active' => true],
-            ['code' => 'xendit', 'name' => 'Xendit', 'type' => 'gateway', 'is_active' => false],
-            ['code' => 'tripay', 'name' => 'Tripay', 'type' => 'gateway', 'is_active' => false],
-            ['code' => 'stripe', 'name' => 'Stripe', 'type' => 'gateway', 'is_active' => false],
         ];
 
         foreach ($methods as $method) {

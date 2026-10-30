@@ -5,8 +5,11 @@ namespace App\Services\Order;
 use App\Exceptions\ApiException;
 use App\Models\Order;
 use App\Models\OrderAdditionalPayment;
+use App\Models\OrderFinancialSnapshot;
 use App\Models\OrderItem;
 use App\Models\OrderItemAdjustment;
+use App\Models\OrderSalesReduction;
+use App\Models\RefundObligation;
 use App\Models\Shipment;
 use App\Models\StockRequest;
 use App\Models\StockRequestItem;
@@ -14,6 +17,10 @@ use App\Models\User;
 use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Payment\PaymentService;
+use App\Services\Refund\Money;
+use App\Services\Refund\OrderFinancialSnapshotService;
+use App\Services\Refund\RefundLedgerService;
+use App\Services\Refund\RefundMetrics;
 use App\Services\Stock\StockService;
 use App\Services\Stock\SubStockService;
 use Illuminate\Support\Facades\DB;
@@ -40,6 +47,9 @@ class OrderFulfillmentService
         private readonly SubStockService $subStockService,
         private readonly PaymentService $paymentService,
         private readonly OrderTotalCalculator $orderTotalCalculator,
+        private readonly OrderFinancialSnapshotService $snapshotService,
+        private readonly RefundLedgerService $refundLedger,
+        private readonly RefundMetrics $refundMetrics,
     ) {}
 
     public function adjustItemQuantity(OrderItem $item, int $newFulfilledQuantity, User $actor, string $reason, string $additionalPaymentMethod = 'transfer'): OrderItem
@@ -51,6 +61,11 @@ class OrderFulfillmentService
         return DB::transaction(function () use ($item, $newFulfilledQuantity, $actor, $reason, $additionalPaymentMethod) {
             $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
             $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+
+            // D6 safe default: once the order-wide financial snapshot exists, no quantity/voucher/
+            // discount/add-line change is allowed on ANY line (shortfall is handled inside the
+            // snapshot itself and never mutates allocations).
+            $this->snapshotService->assertQuantityAdjustable($order);
 
             if ($order->status !== 'diproses') {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
@@ -101,6 +116,16 @@ class OrderFulfillmentService
             }
         }
 
+        // B-01: the fulfillment shortfall is a basis-requiring event. Snapshot BEFORE the
+        // quantity changes so the frozen unit set is the pre-shortfall order basis; then consume
+        // the shorted units so they can never also be returned.
+        $fromQuantity = (int) $item->fulfilled_quantity;
+        $snapshot = $this->snapshotService->ensure(
+            $order,
+            OrderFinancialSnapshotService::TRIGGER_FULFILLMENT_SHORTFALL,
+            $actor,
+        );
+
         // R-03 / MAJOR-8: the courier fee is not earned until delivery, so it must track the
         // currently active fulfilled quantity. Per-unit rate is derived from the PRE-mutation
         // snapshot (courier_fee_amount is already a historical snapshot — never catalog config).
@@ -127,14 +152,30 @@ class OrderFulfillmentService
             'status' => ($item->fulfilled_quantity - $quantityReduced) <= 0 ? 'dibatalkan' : $item->status,
         ]);
 
+        // A re-increase followed by a second reduction can outrun the frozen unit set: the
+        // snapshot never gains units (Package A/B allows reduce/increase cycles pre-dispatch).
+        // When the line has no unconsumed frozen units left, do NOT invent any — fall back to
+        // the legacy reversal for that movement instead of double-counting a unit.
+        $consumption = $this->snapshotService->availableUnits($snapshot, $item->id) >= $quantityReduced
+            ? $this->snapshotService->consumeUnits(
+                $snapshot,
+                $item->id,
+                $quantityReduced,
+                'fulfillment_shortfall',
+                $item->id,
+            )
+            : null;
+
         $order = $this->orderTotalCalculator->recalculate($order);
         $newOverpaid = max(0.0, $totalValidPaid - (float) $order->total_amount);
         $refundAmount = round($newOverpaid - $previousOverpaid, 2);
 
+        $adjustment = null;
+
         if ($refundAmount > 0.0) {
             $item->update(['refund_quantity' => $item->refund_quantity + $quantityReduced]);
 
-            OrderItemAdjustment::create([
+            $adjustment = OrderItemAdjustment::create([
                 'order_item_id' => $item->id,
                 'adjusted_by' => $actor->id,
                 'quantity_reduced' => $quantityReduced,
@@ -142,6 +183,20 @@ class OrderFulfillmentService
                 'refund_amount' => $refundAmount,
                 'refund_status' => 'pending',
             ]);
+        }
+
+        if ($consumption !== null) {
+            $this->recordShortfallLedger(
+                $order,
+                $item,
+                $snapshot,
+                $consumption['reduction_cents'],
+                $fromQuantity,
+                $fromQuantity - $quantityReduced,
+                $adjustment,
+                $actor,
+                $reason,
+            );
         }
 
         $this->paymentService->reconcileTotals($order);
@@ -713,6 +768,76 @@ class OrderFulfillmentService
     }
 
     /**
+     * Record the shortfall in the 360° ledger: the frozen units were already consumed by the
+     * caller, so this only adds the sales reduction and the resulting refund entitlement.
+     * applied_to_order_total=true because recalculate() has ALREADY lowered total_amount —
+     * marking it false would double-subtract the reduction in RefundMetrics::billable.
+     */
+    private function recordShortfallLedger(
+        Order $order,
+        OrderItem $item,
+        OrderFinancialSnapshot $snapshot,
+        int $reductionCents,
+        int $fromQuantity,
+        int $toQuantity,
+        ?OrderItemAdjustment $adjustment,
+        User $actor,
+        string $reason,
+    ): void {
+        if ($reductionCents <= 0) {
+            return;
+        }
+
+        OrderSalesReduction::create([
+            'order_id' => $order->id,
+            'order_item_id' => $item->id,
+            'source_type' => 'fulfillment_shortfall',
+            'source_id' => $item->id,
+            'amount' => Money::amount($reductionCents),
+            'applied_to_order_total' => true,
+            'provenance' => $snapshot->provenance === 'provisional_legacy' ? 'provisional_legacy' : 'forward',
+            'reason' => $reason,
+            'created_by' => $actor->id,
+        ]);
+
+        $key = $adjustment
+            ? 'adjustment:'.$adjustment->id
+            : 'shortfall:'.$item->id.':'.$fromQuantity.'-'.$toQuantity;
+
+        $attrs = [
+            'source_type' => 'fulfillment_shortfall',
+            'source_id' => $item->id,
+            'obligation_key' => $key,
+            'snapshot_id' => $snapshot->id,
+            'reason' => $reason,
+            'deferred_reason' => 'Shortfall exceeds available cash',
+            // The approving reduction itself is the owner/admin sign-off for this entitlement;
+            // Keuangan only executes the payout.
+            'approval_source' => 'fulfillment_reduction',
+        ];
+
+        if ($snapshot->provenance === 'provisional_legacy') {
+            $this->refundLedger->createVerificationObligation(
+                $order,
+                $attrs,
+                $reductionCents,
+                $actor,
+                'provisional_legacy',
+            );
+
+            return;
+        }
+
+        $this->refundLedger->createForwardObligation(
+            $order,
+            $attrs,
+            $reductionCents,
+            $actor,
+            autoApprove: true,
+        );
+    }
+
+    /**
      * Keuangan marks a fulfillment-shortfall refund as actually processed
      * (money sent back). Idempotent (only valid while still 'pending').
      * Once 'processed', the refunded amount actually leaves Order.paid_amount
@@ -752,7 +877,21 @@ class OrderFulfillmentService
             $adjustment->update(['refund_status' => $status]);
 
             if ($status === 'processed' && $order) {
-                $this->paymentService->reverseAppliedPayment($order, (float) $adjustment->refund_amount);
+                // Once the order has a financial snapshot, the refund is settled through the
+                // ledger so Order.paid_amount keeps exactly ONE writer. A legacy adjustment with
+                // no ledger obligation (pre-snapshot history) keeps the old reversal path.
+                $obligation = RefundObligation::query()
+                    ->where('obligation_key', 'adjustment:'.$adjustment->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                $settled = $obligation
+                    ? $this->refundLedger->settleLegacyConfirmed($obligation, $actor)
+                    : null;
+
+                if (! $settled) {
+                    $this->paymentService->reverseAppliedPayment($order, (float) $adjustment->refund_amount);
+                }
             }
 
             ActivityLogger::log($actor->id, $adjustment, 'order_item_adjustment.refund_status_changed', null, [

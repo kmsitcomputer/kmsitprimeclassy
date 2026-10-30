@@ -13,7 +13,7 @@ class ReturnRequest extends Model
 
     protected $fillable = [
         'order_id', 'requested_by', 'reason', 'evidence_path', 'status',
-        'reviewed_by', 'reviewed_at', 'total_refund_amount',
+        'reviewed_by', 'reviewed_at', 'total_refund_amount', 'consent_event_id',
     ];
 
     protected function casts(): array

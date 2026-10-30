@@ -1,6 +1,6 @@
 # PRIMECLASSY — Change Request: Stock Sync, Payment Authority & Order Filters
 
-**Status:** Ready for implementation in DEV
+**Status:** `HISTORICAL_REQUIRED` — IMPLEMENTED & CLOSED. Original header read "Ready for implementation in DEV" (2026-10-05-era). Implementation is traced in `docs/BUSINESS-RULES.md` §24 "Assisted consumer payment" and §24a order filters, verified by the post-implementation regression in `docs/CODEX-FINAL-INTEGRATED-AUDIT.md` (IMP-001..004 register). Header corrected 2026-10-28 by Owner-approved documentation hygiene closure; the spec text below is preserved unchanged as history.
 **Scope:** PrimeClassy
 **Repository:** `/www/dev/primeclassy`
 **Environment:** DEV first; production is out of scope until Human approval.

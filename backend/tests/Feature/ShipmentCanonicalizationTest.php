@@ -111,7 +111,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, array_map(
             fn (Product $p) => ['product_id' => $p->id, 'quantity' => 2],
             $products
-        ), '2026-10-10');
+        ), $this->futureDate(3));
 
         $items = $this->itemsOf($order);
         $this->assertCount(4, $items);
@@ -124,7 +124,7 @@ class ShipmentCanonicalizationTest extends TestCase
         foreach ($items as $item) {
             $this->assertSame($shipmentIds[0], $item->shipment_id);
             $this->assertSame(2, (int) $item->fulfilled_quantity, 'item quantity is untouched');
-            $this->assertSame('2026-10-10', $item->requested_delivery_date?->toDateString());
+            $this->assertSame($this->futureDate(3), $item->requested_delivery_date?->toDateString());
         }
         $this->assertSame(
             8,
@@ -147,7 +147,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, [
             ['product_id' => $productA->id, 'quantity' => 1],
             ['product_id' => $productB->id, 'quantity' => 1],
-        ], '2026-10-10');
+        ], $this->futureDate(3));
         // Rescheduling is Kurir-Online-only (Human LOCKED rule), so put the shipment in that state.
         Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'openroute']);
 
@@ -157,7 +157,7 @@ class ShipmentCanonicalizationTest extends TestCase
 
         // ...then moving ONE of them to another date must split it onto its own shipment.
         app(\App\Services\Order\OrderFulfillmentService::class)
-            ->rescheduleItemDeliveryDate($items[1], '2026-10-17', $admin, 'later date');
+            ->rescheduleItemDeliveryDate($items[1], $this->futureDate(7), $admin, 'later date');
 
         $items = $this->itemsOf($order);
         $this->assertNotSame($items[0]->shipment_id, $items[1]->shipment_id, 'different dates never share a shipment');
@@ -171,8 +171,8 @@ class ShipmentCanonicalizationTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
 
-        $one = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 1]], '2026-10-10');
-        $two = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 1]], '2026-10-10');
+        $one = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 1]], $this->futureDate(3));
+        $two = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 1]], $this->futureDate(3));
 
         $this->assertNotSame(
             $this->itemsOf($one)[0]->shipment_id,
@@ -191,7 +191,7 @@ class ShipmentCanonicalizationTest extends TestCase
     {
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
-        $order = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 2]], '2026-10-10');
+        $order = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 2]], $this->futureDate(3));
 
         $item = $this->itemsOf($order)[0];
         $standard = Shipment::whereKey($item->shipment_id)->firstOrFail();
@@ -215,7 +215,7 @@ class ShipmentCanonicalizationTest extends TestCase
             'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku,
             'unit_price_snapshot' => 25000, 'subtotal_snapshot' => 25000,
             'original_quantity' => 1, 'fulfilled_quantity' => 1,
-            'requested_delivery_date' => '2026-10-10', 'status' => 'diproses',
+            'requested_delivery_date' => $this->futureDate(3), 'status' => 'diproses',
             'stock_source' => 'sub',
             'sub_location_id' => $subLocation->id,
             'shipment_id' => $subShipment->id,
@@ -243,7 +243,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, array_map(
             fn (Product $p) => ['product_id' => $p->id, 'quantity' => 2],
             $products
-        ), '2026-10-10');
+        ), $this->futureDate(3));
 
         // Reproduce the legacy shape: one shipment per item for the SAME date.
         $items = $this->itemsOf($order);
@@ -293,7 +293,7 @@ class ShipmentCanonicalizationTest extends TestCase
     {
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->branch();
         $product = $this->product($agen, 'A');
-        $order = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 2]], '2026-10-10');
+        $order = $this->placeOrder($konsumen, $agen, [['product_id' => $product->id, 'quantity' => 2]], $this->futureDate(3));
 
         $item = $this->itemsOf($order)[0];
         $keep = Shipment::whereKey($item->shipment_id)->firstOrFail();
@@ -313,7 +313,7 @@ class ShipmentCanonicalizationTest extends TestCase
             'product_name_snapshot' => $product->name, 'sku_snapshot' => $product->sku,
             'unit_price_snapshot' => 25000, 'subtotal_snapshot' => 25000,
             'original_quantity' => 3, 'fulfilled_quantity' => 3,
-            'requested_delivery_date' => '2026-10-10', 'status' => 'diproses',
+            'requested_delivery_date' => $this->futureDate(3), 'status' => 'diproses',
             'shipment_id' => $duplicate->id,
         ]);
 
@@ -351,7 +351,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, [
             ['product_id' => $products[0]->id, 'quantity' => 1],
             ['product_id' => $products[1]->id, 'quantity' => 1],
-        ], '2026-10-10');
+        ], $this->futureDate(3));
 
         $items = $this->itemsOf($order);
         $canonicalId = $items[0]->shipment_id;
@@ -396,7 +396,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, [
             ['product_id' => $products[0]->id, 'quantity' => 1],
             ['product_id' => $products[1]->id, 'quantity' => 1],
-        ], '2026-10-10');
+        ], $this->futureDate(3));
 
         $items = $this->itemsOf($order);
         $legacy = Shipment::create([
@@ -439,7 +439,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, array_map(
             fn (Product $p) => ['product_id' => $p->id, 'quantity' => 2],
             $products
-        ), '2026-10-10');
+        ), $this->futureDate(3));
 
         // Legacy split into four.
         $items = $this->itemsOf($order);
@@ -460,7 +460,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $card = $forOrder->first();
         $this->assertSame($canonicalId, $card['shipment_id']);
         $this->assertCount(4, $card['items'], 'the card lists all four items');
-        $this->assertSame(['2026-10-10'], $card['delivery_date']);
+        $this->assertSame([$this->futureDate(3)], $card['delivery_date']);
         $this->assertSame(
             8,
             (int) collect($card['items'])->sum('quantity'),
@@ -477,7 +477,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, array_map(
             fn (Product $p) => ['product_id' => $p->id, 'quantity' => 2],
             $products
-        ), '2026-10-10');
+        ), $this->futureDate(3));
 
         $items = $this->itemsOf($order);
         $canonicalId = $items[0]->shipment_id;
@@ -501,7 +501,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $this->assertSame($canonicalId, $receipt['shipment_id']);
         $this->assertCount(4, $receipt['items'], 'the resi lists every item of the delivery');
         $this->assertSame(8, (int) $receipt['total_item_count']);
-        $this->assertSame('2026-10-10', \Illuminate\Support\Carbon::parse($receipt['delivery_date'])->toDateString());
+        $this->assertSame($this->futureDate(3), \Illuminate\Support\Carbon::parse($receipt['delivery_date'])->toDateString());
     }
 
     // ---------- 11. SC-03 and courier-assignment guards remain enforced ----------
@@ -516,14 +516,14 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, array_map(
             fn (Product $p) => ['product_id' => $p->id, 'quantity' => 2],
             $products
-        ), '2026-10-10');
+        ), $this->futureDate(3));
 
         // 10 Oct unit: items 1-4. 15 Oct unit: a rescheduled pair.
         $items = $this->itemsOf($order);
         Shipment::where('order_id', $order->id)->update(['shipping_provider_code' => 'openroute']);
         foreach ([$items[2], $items[3]] as $item) {
             app(\App\Services\Order\OrderFulfillmentService::class)
-                ->rescheduleItemDeliveryDate($item->fresh(), '2026-10-15', $admin, 'Later delivery');
+                ->rescheduleItemDeliveryDate($item->fresh(), $this->futureDate(5), $admin, 'Later delivery');
         }
 
         $detail = $this->actingAs($admin)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
@@ -533,7 +533,7 @@ class ShipmentCanonicalizationTest extends TestCase
 
         // Every shipment unit reports exactly ONE canonical date, and the two units differ.
         $byDate = collect($dates)->pluck('delivery_date')->sort()->values()->all();
-        $this->assertSame(['2026-10-10', '2026-10-15'], $byDate, 'each canonical unit exposes its own date');
+        $this->assertSame([$this->futureDate(3), $this->futureDate(5)], $byDate, 'each canonical unit exposes its own date');
 
         // The 10 Oct shipment really carries items 1 and 2; the 15 Oct one carries 3 and 4.
         $shipments = Shipment::where('order_id', $order->id)->orderBy('id')->get();
@@ -541,10 +541,10 @@ class ShipmentCanonicalizationTest extends TestCase
         $oct15 = null;
         foreach ($shipments as $shipment) {
             $d = $dates[(string) $shipment->id]['delivery_date'] ?? null;
-            if ($d === '2026-10-10') {
+            if ($d === $this->futureDate(3)) {
                 $oct10 = $shipment;
             }
-            if ($d === '2026-10-15') {
+            if ($d === $this->futureDate(5)) {
                 $oct15 = $shipment;
             }
         }
@@ -568,12 +568,12 @@ class ShipmentCanonicalizationTest extends TestCase
             'product_name_snapshot' => $products[0]->name, 'sku_snapshot' => $products[0]->sku,
             'unit_price_snapshot' => 25000, 'subtotal_snapshot' => 25000,
             'original_quantity' => 1, 'fulfilled_quantity' => 1,
-            'requested_delivery_date' => '2026-10-20', 'status' => 'diproses',
+            'requested_delivery_date' => $this->futureDate(10), 'status' => 'diproses',
             'shipment_id' => $mixed->id,
         ]);
         $after = $this->actingAs($admin)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data');
         $this->assertSame(
-            '2026-10-20',
+            $this->futureDate(10),
             $after['shipment_delivery_dates'][(string) $mixed->id]['delivery_date'] ?? null,
             'a single-date shipment reports its date',
         );
@@ -588,7 +588,7 @@ class ShipmentCanonicalizationTest extends TestCase
         $order = $this->placeOrder($konsumen, $agen, [
             ['product_id' => $products[0]->id, 'quantity' => 1],
             ['product_id' => $products[1]->id, 'quantity' => 1],
-        ], '2026-10-10');
+        ], $this->futureDate(3));
 
         app(ShipmentCanonicalizationService::class)->reconcileOrder($order);
 

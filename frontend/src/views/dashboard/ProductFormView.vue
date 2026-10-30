@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 /**
  * Product create/edit — standard e-commerce single-page form: basic info,
  * image gallery (multi-upload with previews + default image), and optional
@@ -228,7 +229,7 @@ const imageError = ref('')
 const imageBusy = ref(false)
 const dragOver = ref(false)
 
-function handleFiles(files: FileList | null) {
+function handleFiles(files: FileList | File[] | null) {
   if (!files) return
   for (const file of Array.from(files)) {
     if (!file.type.startsWith('image/')) continue
@@ -240,13 +241,10 @@ function handleFiles(files: FileList | null) {
   }
 }
 
-function onFileInput(event: Event) {
-  handleFiles((event.target as HTMLInputElement).files)
-  ;(event.target as HTMLInputElement).value = ''
-}
-function onDrop(event: DragEvent) {
-  dragOver.value = false
-  handleFiles(event.dataTransfer?.files ?? null)
+function onProductFiles(files: File[]) {
+  if (!files.length) return
+  if (isEditing.value) void uploadFiles(files)
+  else handleFiles(files)
 }
 
 function setStagedDefault(index: number) {
@@ -257,32 +255,12 @@ function unstageImage(index: number) {
   stagedImages.value.splice(index, 1)
 }
 
-async function uploadNow(event: Event) {
-  const files = (event.target as HTMLInputElement).files
-  if (!files || !product.value) return
+async function uploadFiles(files: File[]) {
+  if (!product.value) return
   imageBusy.value = true
   imageError.value = ''
   try {
-    for (const file of Array.from(files)) {
-      await uploadProductImage(product.value.id, file, { is_primary: !product.value.images.length })
-    }
-    await load()
-  } catch (e) {
-    imageError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengunggah gambar.'
-  } finally {
-    imageBusy.value = false
-    ;(event.target as HTMLInputElement).value = ''
-  }
-}
-async function dropNow(event: DragEvent) {
-  dragOver.value = false
-  const files = event.dataTransfer?.files
-  if (!files || !product.value) return
-  imageBusy.value = true
-  imageError.value = ''
-  try {
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) continue
+    for (const file of files) {
       await uploadProductImage(product.value.id, file, { is_primary: !product.value.images.length })
     }
     await load()
@@ -531,7 +509,6 @@ async function submit() {
         <!-- Images -->
         <div>
           <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">Gambar Produk (bisa lebih dari satu)</label>
-          <p v-if="imageError" class="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">{{ imageError }}</p>
 
           <!-- Existing images (edit mode, immediate actions) -->
           <div v-if="isEditing && product && product.images.length" class="mb-3 grid grid-cols-3 gap-3 sm:grid-cols-4">
@@ -567,18 +544,17 @@ async function submit() {
             </div>
           </div>
 
-          <!-- Drop zone -->
-          <label
-            class="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center text-sm transition"
-            :class="dragOver ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30' : 'border-stone-300 text-stone-500 dark:border-stone-700 dark:text-stone-400'"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="isEditing ? dropNow($event) : onDrop($event)"
-          >
-            <AppIcon name="upload" :size="20" class="mb-1" />
-            {{ imageBusy ? 'Mengunggah...' : 'Klik atau seret beberapa gambar ke sini' }}
-            <input type="file" accept="image/jpeg,image/png,image/webp" multiple class="hidden" :disabled="imageBusy" @change="isEditing ? uploadNow($event) : onFileInput($event)" />
-          </label>
+          <!-- Universal Upload Standard: selection/validation/drag-drop here; the gallery above stays the specialized adapter. -->
+          <PrimeFileUpload
+            :model-value="[]"
+            label="Tambah gambar"
+            accept="image/jpeg,image/png,image/webp"
+            :max-files="20"
+            :uploading="imageBusy"
+            :error="imageError || null"
+            test-id="product-images-upload"
+            @update:model-value="onProductFiles"
+          />
         </div>
 
         <!-- Variants -->

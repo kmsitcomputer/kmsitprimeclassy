@@ -71,8 +71,10 @@ class Sc03CanonicalGroupingTest extends TestCase
         ];
     }
 
-    private function placeOrder(array $lines, ?string $deliveryDate = '2026-10-20'): Order
+    private function placeOrder(array $lines, ?string $deliveryDate = null): Order
     {
+        $deliveryDate ??= $this->futureDate(10);
+
         $payload = [
             'payment_method_code' => 'cod',
             'items' => $lines,
@@ -141,7 +143,7 @@ class Sc03CanonicalGroupingTest extends TestCase
         $added = $this->addLine($order, $this->b['products']['B'], null);
 
         $this->assertSame(
-            '2026-10-20',
+            $this->futureDate(10),
             $added->requested_delivery_date->toDateString(),
             'precondition: the added line inherits the order estimate',
         );
@@ -150,14 +152,14 @@ class Sc03CanonicalGroupingTest extends TestCase
 
         $grouping = $this->grouping($order->id);
         $this->assertCount(1, $grouping);
-        $this->assertSame(['2026-10-20'], array_values($grouping)[0]);
+        $this->assertSame([$this->futureDate(10)], array_values($grouping)[0]);
     }
 
     public function test_added_line_on_a_new_date_gets_its_own_canonical_shipment(): void
     {
         $order = $this->placeOrder([['product_id' => $this->b['products']['A']->id, 'quantity' => 2]]);
 
-        $added = $this->addLine($order, $this->b['products']['B'], '2026-10-25');
+        $added = $this->addLine($order, $this->b['products']['B'], $this->futureDate(14));
 
         $existing = OrderItem::query()->where('order_id', $order->id)
             ->where('idempotency_key', null)->firstOrFail();
@@ -165,7 +167,7 @@ class Sc03CanonicalGroupingTest extends TestCase
         $this->assertNotSame($existing->shipment_id, $added->shipment_id, 'a different date is a different delivery');
         $this->assertSame(2, Shipment::where('order_id', $order->id)->count());
         $this->assertSame(
-            ['2026-10-20', '2026-10-25'],
+            [$this->futureDate(10), $this->futureDate(14)],
             collect($this->grouping($order->id))->flatten()->unique()->sort()->values()->all(),
         );
     }
@@ -174,8 +176,8 @@ class Sc03CanonicalGroupingTest extends TestCase
     {
         $order = $this->placeOrder([['product_id' => $this->b['products']['A']->id, 'quantity' => 1]]);
 
-        $b = $this->addLine($order, $this->b['products']['B'], '2026-10-25');
-        $c = $this->addLine($order, $this->b['products']['C'], '2026-10-25');
+        $b = $this->addLine($order, $this->b['products']['B'], $this->futureDate(14));
+        $c = $this->addLine($order, $this->b['products']['C'], $this->futureDate(14));
 
         $this->assertSame($b->shipment_id, $c->shipment_id, 'two added lines on one date share one shipment');
         $this->assertSame(2, Shipment::where('order_id', $order->id)->count(), 'exactly one shipment per distinct date');
@@ -213,17 +215,17 @@ class Sc03CanonicalGroupingTest extends TestCase
         // First move the whole line to 2026-10-25 so a canonical 25-Oct unit exists.
         $this->actingAs($this->b['admin'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
-                'requested_delivery_date' => '2026-10-25', 'reason' => 'pindah tanggal',
+                'requested_delivery_date' => $this->futureDate(14), 'reason' => 'pindah tanggal',
             ])->assertOk();
         $this->assertSame(1, Shipment::where('order_id', $order->id)->count());
 
         // Now add a line on 25 Oct too, then split 2 units of the original onto 25 Oct as well.
-        $this->addLine($order, $this->b['products']['B'], '2026-10-25');
+        $this->addLine($order, $this->b['products']['B'], $this->futureDate(14));
         $parent = OrderItem::query()->where('order_id', $order->id)->whereNull('idempotency_key')->firstOrFail();
 
         $this->actingAs($this->b['admin'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$parent->id}/reschedule", [
-                'requested_delivery_date' => '2026-10-25', 'reason' => 'partial', 'quantity' => 2,
+                'requested_delivery_date' => $this->futureDate(14), 'reason' => 'partial', 'quantity' => 2,
             ])->assertOk();
 
         $this->assertSame(
@@ -233,6 +235,6 @@ class Sc03CanonicalGroupingTest extends TestCase
         );
         $grouping = $this->grouping($order->id);
         $this->assertCount(1, $grouping);
-        $this->assertSame(['2026-10-25'], array_values($grouping)[0]);
+        $this->assertSame([$this->futureDate(14)], array_values($grouping)[0]);
     }
 }

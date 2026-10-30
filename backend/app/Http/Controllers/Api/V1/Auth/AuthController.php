@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
+use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterKonsumenRequest;
@@ -53,8 +54,12 @@ class AuthController extends Controller
                 ->first();
 
             if (!$defaultAgent) {
-                throw new \RuntimeException(
-                    'Agen default tidak ditemukan.'
+                // REM-004 / AU-01: BUSINESS-RULES §27 requires HTTP 503 + registration_unavailable
+                // (same code GoogleAuthService returns), never a raw 500.
+                throw new ApiException(
+                    __('messages.auth.registration_unavailable'),
+                    503,
+                    ['code' => ['registration_unavailable']],
                 );
             }
 

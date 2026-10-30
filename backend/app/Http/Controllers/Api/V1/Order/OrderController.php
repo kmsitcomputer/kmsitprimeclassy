@@ -61,10 +61,13 @@ class OrderController extends Controller
         } elseif ($user->isRole('sales')) {
             $query->where(fn ($scope) => $scope
                 ->where('sales_id', $user->id)
+                ->orWhere('konsumen_id', $user->id)
                 ->orWhereHas('konsumen', fn ($k) => $k->where('sales_id', $user->id)->where('agent_id', $user->agent_id)));
         } elseif ($user->isRole('korsal')) {
             $query->where(fn ($scope) => $scope
                 ->where('korsal_id', $user->id)
+                ->orWhere('sales_id', $user->id)
+                ->orWhere('konsumen_id', $user->id)
                 ->orWhereHas('konsumen', fn ($k) => $k->where('korsal_id', $user->id)->where('agent_id', $user->agent_id)));
         } elseif ($user->isRole('gudang')) {
             // IMP-001 Gap 2: Gudang sees only the warehouse work queue (diproses AND no courier assigned).

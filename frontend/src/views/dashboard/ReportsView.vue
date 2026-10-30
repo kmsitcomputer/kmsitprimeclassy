@@ -33,11 +33,18 @@ const isSuperAdmin = computed(() => auth.user?.role === 'super_admin')
 
 // "Fee Agen" belongs to the agen/super_admin level only — admin (per-agent
 // staff) must never see this fee type, not even as a visible menu tab.
-const visibleTabs = computed(() =>
-  TABS.filter((tab) => tab.key !== 'agent' || ['super_admin', 'agen'].includes(auth.user?.role ?? '')),
-)
+// "Transaksi" follows the HUB's own audience: this page exists for
+// super_admin/agen/admin/keuangan only (korsal uses the Laporan Order
+// page instead), so the tab list omits keuangan (backend 403) AND korsal
+// (not a hub audience; the backend endpoint itself allows korsal).
+const TAB_ROLES: Partial<Record<TabKey, string[]>> = {
+  agent: ['super_admin', 'agen'],
+  transactions: ['super_admin', 'agen', 'admin'],
+}
+const tabAllowed = (tab: TabKey) => !TAB_ROLES[tab] || TAB_ROLES[tab]!.includes(auth.user?.role ?? '')
+const visibleTabs = computed(() => TABS.filter((tab) => tabAllowed(tab.key)))
 
-const activeTab = ref<TabKey>('transactions')
+const activeTab = ref<TabKey>(tabAllowed('transactions') ? 'transactions' : 'payment-status')
 
 const filters = ref({
   from: '',
@@ -239,7 +246,7 @@ const paymentStatusGrouped = computed(() => {
         <p class="border-b border-stone-200 bg-stone-50 px-4 py-2 text-xs font-semibold text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">Per Sales</p>
         <table class="w-full text-left text-sm">
           <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
-            <tr><th class="px-4 py-2">Sales</th><th class="px-4 py-2">Jumlah Transaksi</th><th class="px-4 py-2 text-right">Total Fee</th></tr>
+            <tr><th class="px-4 py-2">Sales</th><th class="px-4 py-2">Transaksi Berkomisi</th><th class="px-4 py-2 text-right">Total Fee</th></tr>
           </thead>
           <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
             <tr v-for="row in salesKorsal.sales" :key="row.sales_id">
@@ -253,7 +260,7 @@ const paymentStatusGrouped = computed(() => {
         <p class="border-y border-stone-200 bg-stone-50 px-4 py-2 text-xs font-semibold text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">Per Korsal (roll-up hierarki)</p>
         <table class="w-full text-left text-sm">
           <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
-            <tr><th class="px-4 py-2">Korsal</th><th class="px-4 py-2">Jumlah Transaksi</th><th class="px-4 py-2">Jumlah Sales Aktif</th><th class="px-4 py-2 text-right">Total Fee</th></tr>
+            <tr><th class="px-4 py-2">Korsal</th><th class="px-4 py-2">Transaksi Berkomisi</th><th class="px-4 py-2">Jumlah Sales Aktif</th><th class="px-4 py-2 text-right">Total Fee</th></tr>
           </thead>
           <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
             <tr v-for="row in salesKorsal.korsal" :key="row.korsal_id">
@@ -270,7 +277,7 @@ const paymentStatusGrouped = computed(() => {
       <!-- Fee Agen -->
       <table v-else-if="activeTab === 'agent'" class="w-full text-left text-sm">
         <thead class="bg-stone-50 text-stone-500 dark:bg-stone-900 dark:text-stone-400">
-          <tr><th class="px-4 py-2">Agen</th><th class="px-4 py-2">Jumlah Transaksi</th><th class="px-4 py-2">Jumlah Sales Aktif</th><th class="px-4 py-2 text-right">Total Fee</th></tr>
+          <tr><th class="px-4 py-2">Agen</th><th class="px-4 py-2">Transaksi Berkomisi</th><th class="px-4 py-2">Jumlah Sales Aktif</th><th class="px-4 py-2 text-right">Total Fee</th></tr>
         </thead>
         <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
           <tr v-for="row in agentFees" :key="row.agent_id">

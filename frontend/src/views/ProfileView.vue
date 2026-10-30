@@ -6,6 +6,7 @@ import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import ImageUploader from '@/components/ui/ImageUploader.vue'
+import WhatsAppNumberVerification from '@/components/WhatsAppNumberVerification.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { googleAuthUrl, updateProfile, updatePassword, updateReferralCode, regenerateReferralCode, deleteReferralCode } from '@/api/auth'
@@ -329,6 +330,8 @@ async function handleLogout() {
       </form>
     </div>
 
+    <WhatsAppNumberVerification />
+
     <div class="mt-4 divide-y divide-stone-100 rounded-2xl border border-stone-200 bg-white dark:divide-stone-800 dark:border-stone-800 dark:bg-stone-900">
       <RouterLink :to="{ name: 'orders' }" class="flex items-center justify-between px-5 py-4 text-sm font-medium text-stone-700 dark:text-stone-200">
         <span class="flex items-center gap-2"><AppIcon name="clock" :size="18" /> {{ t('profile.orderHistory') }}</span>
@@ -352,14 +355,6 @@ async function handleLogout() {
         class="flex items-center justify-between px-5 py-4 text-sm font-medium text-stone-700 dark:text-stone-200"
       >
         <span class="flex items-center gap-2"><AppIcon name="grid" :size="18" /> {{ t('profile.manageHomepage') }}</span>
-        <AppIcon name="chevron-right" :size="17" class="text-stone-400" />
-      </RouterLink>
-      <RouterLink
-        v-if="auth.can('system.payment.manage')"
-        :to="{ name: 'admin-payment-gateways' }"
-        class="flex items-center justify-between px-5 py-4 text-sm font-medium text-stone-700 dark:text-stone-200"
-      >
-        <span class="flex items-center gap-2"><AppIcon name="box" :size="18" /> {{ t('profile.paymentGateway') }}</span>
         <AppIcon name="chevron-right" :size="17" class="text-stone-400" />
       </RouterLink>
       <RouterLink

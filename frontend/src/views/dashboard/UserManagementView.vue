@@ -56,8 +56,12 @@ function canEdit(user: AuthUser): boolean {
 }
 
 /** Reassign referral is only meaningful for these two target roles — see ReferralReassignmentService. */
+function isSalesSeller(user: AuthUser): boolean {
+  return user.role === 'sales' || user.role === 'sales-kurir-sub'
+}
+
 function canReassign(user: AuthUser): boolean {
-  return canEdit(user) && (user.role === 'sales' || user.role === 'konsumen')
+  return canEdit(user) && (isSalesSeller(user) || user.role === 'konsumen')
 }
 
 function canConvertToSalesKurir(user: AuthUser): boolean {
@@ -142,9 +146,9 @@ async function openReassign(user: AuthUser) {
   reassigningUser.value = user
   reassignError.value = ''
   reassignTargetId.value = null
-  const targetRole = user.role === 'sales' ? 'korsal' : 'sales'
-  const { users: candidates } = await listUsers(1, { role: targetRole })
-  reassignCandidates.value = candidates.filter((c) => c.id !== user.id)
+  const targetRoles = isSalesSeller(user) ? ['korsal'] : ['sales', 'sales-kurir-sub']
+  const pages = await Promise.all(targetRoles.map((role) => listUsers(1, { role })))
+  reassignCandidates.value = pages.flatMap((p) => p.users).filter((c) => c.id !== user.id)
 }
 
 function closeReassign() {
@@ -157,7 +161,7 @@ async function submitReassign() {
   reassignError.value = ''
   try {
     const payload =
-      reassigningUser.value.role === 'sales'
+      isSalesSeller(reassigningUser.value)
         ? { korsal_id: reassignTargetId.value }
         : { sales_id: reassignTargetId.value }
     await reassignReferral(reassigningUser.value.id, payload)
@@ -171,7 +175,7 @@ async function submitReassign() {
 }
 
 async function convertSales(user: AuthUser) {
-  if (!confirm(`Ubah ${user.name} menjadi Sales-Kurir?`)) return
+  if (!confirm(`Ubah ${user.name} menjadi Sales-Kurir-Sub?`)) return
   try {
     await convertToSalesKurir(user.id)
     await load()
@@ -369,7 +373,7 @@ onMounted(load)
                 class="mr-2 rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200"
                 @click="openReassign(user)"
               >
-                {{ user.role === 'sales' ? 'Pindah Korsal' : 'Pindah Sales' }}
+                {{ isSalesSeller(user) ? 'Pindah Korsal' : 'Pindah Sales' }}
               </button>
               <button
                 v-if="canConvertToSalesKurir(user)"
@@ -377,7 +381,7 @@ onMounted(load)
                 class="mr-2 rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200"
                 @click="convertSales(user)"
               >
-                Jadikan Sales-Kurir
+                Jadikan Sales-Kurir-Sub
               </button>
               <button
                 v-if="canDelete(user)"
@@ -567,7 +571,7 @@ onMounted(load)
         </h2>
         <p class="mb-4 text-xs text-stone-500 dark:text-stone-400">
           {{
-            reassigningUser.role === 'sales'
+            isSalesSeller(reassigningUser)
               ? 'Pilih Korsal baru untuk sales ini.'
               : 'Pilih Sales baru untuk konsumen ini.'
           }}
@@ -583,7 +587,7 @@ onMounted(load)
           class="block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
         >
           <option :value="null" disabled>
-            — Pilih {{ reassigningUser.role === 'sales' ? 'Korsal' : 'Sales' }} —
+            — Pilih {{ isSalesSeller(reassigningUser) ? 'Korsal' : 'Sales' }} —
           </option>
           <option v-for="c in reassignCandidates" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>

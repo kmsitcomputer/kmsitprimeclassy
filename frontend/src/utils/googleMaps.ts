@@ -74,6 +74,11 @@ export function isGoogleMapsConfigured(): boolean {
   return Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY)
 }
 
+/** Cloud-styled Map ID (required by AdvancedMarkerElement); falls back to Google's demo ID for local DEV. */
+export function getGoogleMapsMapId(): string {
+  return (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined) || 'DEMO_MAP_ID'
+}
+
 /**
  * Google's auth-failure callback (`window.gm_authFailure`) fires for
  * RefererNotAllowedMapError / InvalidKeyMapError / ApiNotActivatedMapError /
@@ -114,7 +119,12 @@ export function loadGoogleMaps(): Promise<GoogleNamespace> {
     const script = document.createElement('script')
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places,marker&callback=${callbackName}&loading=async`
     script.async = true
-    script.onerror = () => reject(new Error('Failed to load Google Maps JS API'))
+    script.onerror = () => {
+      // Allow a later retry to start a fresh load instead of re-using the rejected promise.
+      loadPromise = null
+      script.remove()
+      reject(new Error('Failed to load Google Maps JS API'))
+    }
     document.head.appendChild(script)
   })
 

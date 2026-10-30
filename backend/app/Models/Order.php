@@ -11,24 +11,44 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
 {
+    /** G17: buyer origin / placer / buyer snapshot are write-once once they hold a value. */
+    private const WRITE_ONCE = ['crm_customer_id', 'placed_by_user_id', 'buyer_name_snapshot', 'buyer_phone_snapshot'];
+
     protected static function booted(): void
     {
         static::addGlobalScope(new BelongsToAgentScope);
+
+        static::saving(function (Order $order): void {
+            // Exactly one authoritative origin — never an account AND a CRM customer at once.
+            if ($order->konsumen_id !== null && $order->crm_customer_id !== null) {
+                throw new \LogicException('An order has exactly one buyer origin (konsumen_id XOR crm_customer_id).');
+            }
+
+            if ($order->exists) {
+                foreach (self::WRITE_ONCE as $field) {
+                    if ($order->isDirty($field) && $order->getOriginal($field) !== null) {
+                        throw new \LogicException("orders.{$field} is write-once and cannot be changed after placement.");
+                    }
+                }
+            }
+        });
     }
 
     protected $fillable = [
         'order_no', 'idempotency_key', 'konsumen_id', 'sales_id', 'korsal_id', 'agent_id',
+        'crm_customer_id', 'placed_by_user_id', 'buyer_name_snapshot', 'buyer_phone_snapshot',
         'payment_method_id', 'source_address_id',
         'status', 'payment_status',
         'subtotal_amount', 'discount_amount', 'shipping_fee_amount', 'admin_fee_amount',
-        'dp_amount', 'paid_amount', 'remaining_amount', 'total_amount',
+        'dp_amount', 'paid_amount', 'gross_received_amount', 'remaining_amount', 'total_amount',
         'recipient_name_snapshot', 'recipient_phone_snapshot', 'address_snapshot',
         'village_snapshot', 'district_snapshot', 'regency_snapshot', 'province_snapshot',
         'latitude_snapshot', 'longitude_snapshot',
         // IMP-002: canonical region ids + postal code + voucher attribution.
         'province_id', 'regency_id', 'district_id', 'village_id', 'postal_code', 'voucher_id',
         'delivery_date_estimate', 'delivery_date_actual',
-        'cancelled_at', 'cancelled_by', 'cancellation_reason', 'notes',
+        'cancelled_at', 'cancelled_by', 'cancellation_reason', 'cancellation_financial_status',
+        'cancellation_finalized_at', 'notes',
     ];
 
     /** Valid status transitions — enforced in OrderService, not just documented here. */
@@ -58,6 +78,7 @@ class Order extends Model
             'admin_fee_amount' => 'decimal:2',
             'dp_amount' => 'decimal:2',
             'paid_amount' => 'decimal:2',
+            'gross_received_amount' => 'decimal:2',
             'remaining_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',
             'latitude_snapshot' => 'decimal:7',
@@ -65,6 +86,7 @@ class Order extends Model
             'delivery_date_estimate' => 'date',
             'delivery_date_actual' => 'datetime',
             'cancelled_at' => 'datetime',
+            'cancellation_finalized_at' => 'datetime',
         ];
     }
 
@@ -76,6 +98,41 @@ class Order extends Model
     public function konsumen(): BelongsTo
     {
         return $this->belongsTo(User::class, 'konsumen_id');
+    }
+
+    /** G17: CRM-origin buyer (mutually exclusive with `konsumen_id` for every new order). */
+    public function crmCustomer(): BelongsTo
+    {
+        return $this->belongsTo(CrmCustomer::class, 'crm_customer_id');
+    }
+
+    /** G17-D2: who actually submitted the order. Never implies ownership or commission. */
+    public function placedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'placed_by_user_id');
+    }
+
+    public function isCrmOrigin(): bool
+    {
+        return $this->crm_customer_id !== null;
+    }
+
+    /** Buyer's display name for either origin (account name, else the immutable CRM snapshot). */
+    public function buyerName(): ?string
+    {
+        return $this->konsumen?->name ?? $this->buyer_name_snapshot;
+    }
+
+    /**
+     * Transitional guard: the buyer-origin columns arrive with migration 2026_10_30_100000. Until it is
+     * applied on a given database (e.g. DEV before the Owner approves it) code must keep working
+     * without writing them. Cached per process; remove together with the migration rollout.
+     */
+    public static function supportsBuyerOrigin(): bool
+    {
+        static $supported = null;
+
+        return $supported ??= \Illuminate\Support\Facades\Schema::hasColumn('orders', 'placed_by_user_id');
     }
 
     public function sales(): BelongsTo
@@ -155,6 +212,31 @@ class Order extends Model
         return $this->hasOne(StockRequest::class);
     }
 
+    public function financialSnapshot(): HasOne
+    {
+        return $this->hasOne(OrderFinancialSnapshot::class);
+    }
+
+    public function refundObligations(): HasMany
+    {
+        return $this->hasMany(RefundObligation::class);
+    }
+
+    public function refundPayouts(): HasMany
+    {
+        return $this->hasMany(RefundPayout::class);
+    }
+
+    public function salesReductions(): HasMany
+    {
+        return $this->hasMany(OrderSalesReduction::class);
+    }
+
+    public function ledgerEvents(): HasMany
+    {
+        return $this->hasMany(RefundLedgerEvent::class);
+    }
+
     public function canTransitionTo(string $next): bool
     {
         return in_array($next, self::TRANSITIONS[$this->status] ?? [], true);
@@ -173,6 +255,6 @@ class Order extends Model
 
     public function hasOutstanding(): bool
     {
-        return (float) $this->remaining_amount > 0;
+        return \App\Support\CollectibleReceivable::forOrder($this) > 0;
     }
 }

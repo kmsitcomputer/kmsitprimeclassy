@@ -2,24 +2,19 @@ import { http } from './client'
 import type { ApiEnvelope } from './client'
 import type { Order } from './types'
 
-/** Super Admin's GLOBAL on/off view — credentials are configured per-agen instead (see agentSettings.ts). */
-export interface PaymentGateway {
-  id: number
-  code: string
-  name: string
-  type: 'manual' | 'gateway' | 'cod'
-  is_active: boolean
-  webhook_url: string | null
+export interface UploadOptions {
+  onProgress?: (percent: number) => void
+  signal?: AbortSignal
 }
 
-export async function listPaymentGateways() {
-  const { data } = await http.get<ApiEnvelope<PaymentGateway[]>>('/admin/payment-gateways')
-  return data.data
-}
-
-export async function togglePaymentGateway(methodId: number) {
-  const { data } = await http.patch<ApiEnvelope<PaymentGateway>>(`/admin/payment-gateways/${methodId}/toggle`)
-  return data.data
+export function uploadConfig(opts?: UploadOptions) {
+  return {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    signal: opts?.signal,
+    onUploadProgress: opts?.onProgress
+      ? (e: { loaded: number; total?: number }) => { if (e.total) opts.onProgress!((e.loaded / e.total) * 100) }
+      : undefined,
+  }
 }
 
 /** Admin/Agen (of the order's branch) or Super Admin only — server re-checks this regardless of what the UI shows. */
@@ -37,14 +32,14 @@ export async function markCodPayment(orderId: number, paid: boolean) {
 }
 
 /** Konsumen submits a photo of the cash handed to the kurir, requesting Admin/Agen mark the COD order paid in full. */
-export async function submitCodPaymentProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen') {
+export async function submitCodPaymentProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen', opts?: UploadOptions) {
   const form = new FormData()
   form.append('proof', proof)
   form.append('paid_by', paidBy)
   const { data } = await http.post<ApiEnvelope<{ transaction: Order['payment_transaction'] }>>(
     `/orders/${orderId}/payment/cod-proof`,
     form,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
+    uploadConfig(opts),
   )
   return data.data
 }

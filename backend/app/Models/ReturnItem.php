@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class ReturnItem extends Model
 {
     protected $fillable = [
-        'return_id', 'order_item_id', 'courier_id', 'quantity_returned', 'refund_amount',
+        'return_id', 'order_item_id', 'courier_id', 'pickup_scheduled_for', 'quantity_returned', 'refund_amount',
         'restock', 'condition_note', 'status', 'refund_status',
         'quantity_received', 'good_quantity', 'damaged_quantity', 'condition_status', 'inspected_by', 'inspected_at', 'restock_processed_at', 'disposition_status',
     ];
@@ -24,6 +24,8 @@ class ReturnItem extends Model
             'return_id' => 'integer',
             'order_item_id' => 'integer',
             'courier_id' => 'integer',
+            // GAP-A: WIB business DATE (no time part) — null = not scheduled yet.
+            'pickup_scheduled_for' => 'date',
             'refund_amount' => 'decimal:2',
             'restock' => 'boolean',
             'quantity_received' => 'integer', 'good_quantity' => 'integer', 'damaged_quantity' => 'integer', 'inspected_by' => 'integer', 'inspected_at' => 'datetime', 'restock_processed_at' => 'datetime',

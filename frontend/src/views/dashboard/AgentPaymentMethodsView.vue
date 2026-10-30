@@ -6,17 +6,15 @@ import PasswordInput from '@/components/ui/PasswordInput.vue'
 import {
   getAgentPaymentMethods,
   toggleAgentPaymentMethod,
-  setAgentPaymentMethodEnvironment,
   saveAgentPaymentMethodConfig,
   type AgentPaymentMethodRow,
 } from '@/api/agentSettings'
 import { ApiError } from '@/api/client'
 
 /**
- * Agen-only: enable/disable every payment method (cod/manual/gateway) for
- * this agen's own branch, plus — for manual/gateway types — the agen's own
- * credentials (bank account, or Xendit/Tripay/Stripe API keys) and, for
- * gateway types, which environment is active. Never another agen's branch
+ * Agen-only: enable/disable every payment method (cod/manual) for
+ * this agen's own branch, plus — for manual types — the agen's own
+ * bank account. Never another agen's branch
  * — see AgentPaymentMethodController. A method super_admin has disabled
  * globally stays disabled here regardless of this toggle.
  */
@@ -26,19 +24,6 @@ const CREDENTIAL_FIELDS: Record<string, { key: string; label: string }[]> = {
     { key: 'bank_name', label: 'Nama Bank' },
     { key: 'account_name', label: 'Nama Pemilik Rekening' },
     { key: 'account_number', label: 'Nomor Rekening' },
-  ],
-  xendit: [
-    { key: 'secret_key', label: 'Secret Key' },
-    { key: 'callback_token', label: 'Callback Verification Token' },
-  ],
-  tripay: [
-    { key: 'merchant_code', label: 'Merchant Code' },
-    { key: 'private_key', label: 'Private Key' },
-    { key: 'api_key', label: 'API Key' },
-  ],
-  stripe: [
-    { key: 'secret_key', label: 'Secret Key' },
-    { key: 'webhook_secret', label: 'Webhook Signing Secret' },
   ],
 }
 
@@ -96,11 +81,6 @@ async function toggle(method: AgentPaymentMethodRow) {
   }
 }
 
-async function setEnvironment(method: AgentPaymentMethodRow, environment: 'sandbox' | 'production') {
-  await setAgentPaymentMethodEnvironment(method.id, environment)
-  await load()
-}
-
 function openForm(method: AgentPaymentMethodRow) {
   editingId.value = method.id
   errors.value = {}
@@ -123,7 +103,7 @@ async function submitConfig(method: AgentPaymentMethodRow) {
     for (const field of CREDENTIAL_FIELDS[method.code] ?? []) {
       config[field.key] = formValues[field.key] ?? ''
     }
-    await saveAgentPaymentMethodConfig(method.id, config, method.type === 'gateway' ? (method.active_environment ?? 'sandbox') : undefined)
+    await saveAgentPaymentMethodConfig(method.id, config)
     closeForm()
     await load()
   } catch (e) {
@@ -143,7 +123,7 @@ async function submitConfig(method: AgentPaymentMethodRow) {
   <DashboardLayout>
     <h1 class="mb-1 font-display text-xl font-semibold text-stone-800 dark:text-stone-100">Metode Pembayaran Saya</h1>
     <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">
-      Aktifkan/nonaktifkan metode pembayaran dan atur kredensial Anda sendiri (rekening bank atau API key gateway) —
+      Aktifkan/nonaktifkan metode pembayaran dan atur rekening bank Anda sendiri —
       terpisah dari agen lain, dan tidak memengaruhi status aktif global.
     </p>
 
@@ -193,19 +173,6 @@ async function submitConfig(method: AgentPaymentMethodRow) {
             Atur kredensial
           </button>
 
-          <div v-if="method.type === 'gateway'" class="flex items-center gap-2 text-sm">
-            <span class="text-stone-500 dark:text-stone-400">Environment:</span>
-            <button
-              v-for="env in (['sandbox', 'production'] as const)"
-              :key="env"
-              type="button"
-              class="rounded-full px-2.5 py-1 text-xs font-medium"
-              :class="method.active_environment === env ? 'bg-brand-600 text-white' : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'"
-              @click="setEnvironment(method, env)"
-            >
-              {{ env }}
-            </button>
-          </div>
         </div>
 
         <form

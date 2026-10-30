@@ -79,7 +79,8 @@ function download() {
             <th class="px-4 py-2">Nama</th>
             <th class="px-4 py-2">Telepon</th>
             <th class="px-4 py-2">Jumlah Order</th>
-            <th class="px-4 py-2 text-right">Total Belanja</th>
+            <th class="px-4 py-2 text-right" title="Nilai order tidak dibatalkan, termasuk yang belum dibayar">Nilai Order</th>
+            <th class="px-4 py-2 text-right" title="Uang yang benar-benar sudah diterima">Terbayar</th>
             <th class="px-4 py-2">Order Terakhir</th>
           </tr>
         </thead>
@@ -88,10 +89,11 @@ function download() {
             <td class="px-4 py-2">{{ row.konsumen_name }}</td>
             <td class="px-4 py-2">{{ row.konsumen_phone }}</td>
             <td class="px-4 py-2">{{ row.order_count }}</td>
-            <td class="px-4 py-2 text-right">{{ formatRupiah(row.total_spent) }}</td>
+            <td class="px-4 py-2 text-right">{{ formatRupiah(row.total_ordered) }}</td>
+            <td class="px-4 py-2 text-right">{{ formatRupiah(row.total_paid) }}</td>
             <td class="px-4 py-2">{{ formatDate(row.last_order_at) }}</td>
           </tr>
-          <tr v-if="items.length === 0"><td colspan="5" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
+          <tr v-if="items.length === 0"><td colspan="6" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
         </tbody>
       </table>
     </div>

@@ -41,29 +41,38 @@ class ReferralLinkRegistrationTest extends TestCase
 
     public function test_registration_without_any_referral_code_still_succeeds(): void
     {
+        // HEAD 218db8c ("assign default active agen") deliberately links a referral-less
+        // registration to the first active Agen; this test used to assert NULL linkage, which is
+        // the pre-218db8c behaviour. The client must still not be able to choose the branch.
+        ['agen' => $agen] = $this->makeAgentBranch();
+
         $response = $this->postJson('/api/v1/auth/register', [
-            'name' => 'Konsumen Tanpa Referral', 'email' => 'no-ref-'.uniqid().'@x.com', 'phone' => '0812',
+            'name' => 'Konsumen Tanpa Referral', 'email' => 'no-ref-'.uniqid().'@x.com', 'phone' => '0812'.uniqid(),
             'password' => 'password123', 'password_confirmation' => 'password123',
         ]);
 
         $response->assertCreated();
         $konsumen = User::query()->where('email', $response->json('data.user.email'))->firstOrFail();
-        $this->assertNull($konsumen->agent_id);
+        $this->assertSame($agen->id, $konsumen->agent_id, 'referral-less registration joins the default active Agen');
+        $this->assertSame($agen->id, $konsumen->parent_id);
         $this->assertNull($konsumen->korsal_id);
         $this->assertNull($konsumen->sales_id);
-        $this->assertNull($konsumen->parent_id);
         $this->assertSame('konsumen', $konsumen->role->slug);
     }
 
     public function test_registration_with_an_empty_referral_code_string_still_succeeds(): void
     {
+        ['agen' => $agen] = $this->makeAgentBranch();
+
         $response = $this->postJson('/api/v1/auth/register', [
-            'name' => 'Konsumen Kosong', 'email' => 'empty-ref-'.uniqid().'@x.com', 'phone' => '0812',
+            'name' => 'Konsumen Kosong', 'email' => 'empty-ref-'.uniqid().'@x.com', 'phone' => '0812'.uniqid(),
             'password' => 'password123', 'password_confirmation' => 'password123',
             'referral_code' => '',
         ]);
 
         $response->assertCreated();
+        $konsumen = User::query()->where('email', $response->json('data.user.email'))->firstOrFail();
+        $this->assertSame($agen->id, $konsumen->agent_id, 'an empty referral code behaves like no referral code');
     }
 
     public function test_referral_code_lookup_is_case_insensitive(): void

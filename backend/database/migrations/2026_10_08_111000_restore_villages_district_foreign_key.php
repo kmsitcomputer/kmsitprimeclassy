@@ -237,7 +237,7 @@ return new class extends Migration
     private function columnDefinition(string $table, string $column): array
     {
         $row = DB::selectOne(
-            'select column_type, is_nullable from information_schema.columns
+            'select COLUMN_TYPE as column_type, IS_NULLABLE as is_nullable from information_schema.columns
              where table_schema = ? and table_name = ? and column_name = ?',
             [DB::getDatabaseName(), $table, $column]
         );

@@ -13,11 +13,20 @@ export interface Media {
   created_at: string
 }
 
-export async function uploadMedia(file: File, collection: string): Promise<Media> {
+export async function uploadMedia(
+  file: File,
+  collection: string,
+  opts?: { onProgress?: (percent: number) => void; signal?: AbortSignal },
+): Promise<Media> {
   const form = new FormData()
   form.append('file', file)
   form.append('collection', collection)
-  const { data } = await http.post<ApiEnvelope<Media>>('/media', form)
+  const { data } = await http.post<ApiEnvelope<Media>>('/media', form, {
+    signal: opts?.signal,
+    onUploadProgress: opts?.onProgress
+      ? (e) => { if (e.total) opts.onProgress!((e.loaded / e.total) * 100) }
+      : undefined,
+  })
   return data.data
 }
 

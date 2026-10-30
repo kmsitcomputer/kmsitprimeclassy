@@ -242,6 +242,19 @@ class FulfillmentCancellationConcurrencyTest extends TestCase
                 });
         })->delete();
         InventoryCancellationReversal::where('order_id', $fixture['order']->id)->delete();
+        // Refund-ledger rows (cancellation now books a snapshot/reduction/obligation).
+        DB::table('refund_ledger_events')->where('order_id', $fixture['order']->id)->delete();
+        DB::table('refund_payouts')->where('order_id', $fixture['order']->id)->delete();
+        DB::table('refund_attempts')->whereIn('obligation_id', function ($q) use ($fixture) {
+            $q->select('id')->from('refund_obligations')->where('order_id', $fixture['order']->id);
+        })->delete();
+        DB::table('refund_obligations')->where('order_id', $fixture['order']->id)->delete();
+        DB::table('order_sales_reductions')->where('order_id', $fixture['order']->id)->delete();
+        DB::table('order_item_financial_bases')->where('order_id', $fixture['order']->id)->delete();
+        DB::table('order_financial_snapshot_units')->whereIn('snapshot_id', function ($q) use ($fixture) {
+            $q->select('id')->from('order_financial_snapshots')->where('order_id', $fixture['order']->id);
+        })->delete();
+        DB::table('order_financial_snapshots')->where('order_id', $fixture['order']->id)->delete();
         StockRequestProposalItem::query()->where('stock_request_proposal_id', $fixture['proposal']->id)->delete();
         StockRequestProposal::withoutGlobalScopes()->whereKey($fixture['proposal']->id)->delete();
         DB::table('stock_request_fulfillments')->where('stock_request_id', $fixture['request']->id)->delete();

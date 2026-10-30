@@ -15,7 +15,7 @@ class ReturnRequestResource extends JsonResource
             'id' => $this->id,
             'order_id' => $this->order_id,
             'order_no' => $this->order->order_no,
-            'customer_name' => $this->order->konsumen->name,
+            'customer_name' => $this->order->buyerName(),
             'reason' => $this->reason,
             'evidence_url' => $this->evidence_path ? Storage::disk('public')->url($this->evidence_path) : null,
             'status' => $this->status,
@@ -41,6 +41,7 @@ class ReturnRequestResource extends JsonResource
                 'condition_status' => $item->condition_status,
                 'disposition_status' => $item->disposition_status,
                 'inspected_at' => $item->inspected_at,
+                'pickup_scheduled_for' => $item->pickup_scheduled_for?->format('Y-m-d'),
             ])),
             'created_at' => $this->created_at,
         ];

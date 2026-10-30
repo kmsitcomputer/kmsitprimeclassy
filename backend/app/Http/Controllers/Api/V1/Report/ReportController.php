@@ -63,6 +63,61 @@ class ReportController extends Controller
         );
     }
 
+    /**
+     * Network transaction totals (Owner 2026-10-29 §7): role-scoped network,
+     * order-grained (no double count), TANPA SALES/KORSAL groups kept visible.
+     */
+    public function networkTransactions(Request $request, \App\Services\Report\NetworkTransactionReportService $service)
+    {
+        $report = $service->report($request->user(), $this->filters($request));
+
+        if ($request->string('export')->toString() === 'xlsx') {
+            $rows = [];
+            $t = $report['totals'];
+            $rows[] = ['TOTAL', '', 'Jaringan: '.$report['scope'], $t['order_count'], $t['total_amount'], $t['paid_amount'], $t['outstanding_amount'], ''];
+            foreach ($report['by_status'] as $s) {
+                $rows[] = ['STATUS', '', $s['status'], $s['order_count'], $s['total_amount'], '', '', $s['status']];
+            }
+            foreach (($report['by_korsal'] ?? []) as $k) {
+                $rows[] = ['KORSAL', $k['id'] ?? '', $k['name'], $k['order_count'], $k['total_amount'], $k['paid_amount'], $k['outstanding_amount'], ''];
+            }
+            foreach (($report['by_sales'] ?? []) as $s2) {
+                $rows[] = ['SALES', $s2['id'] ?? '', $s2['name'], $s2['order_count'], $s2['total_amount'], $s2['paid_amount'], $s2['outstanding_amount'], ''];
+            }
+
+            return $this->excelExportService->streamXlsx(
+                'laporan-jaringan-transaksi.xlsx',
+                ['Bagian', 'ID', 'Nama', 'Jumlah Order', 'Nilai Total', 'Dibayar', 'Outstanding', 'Status'],
+                collect($rows),
+            );
+        }
+
+        return $this->ok($report);
+    }
+
+    /** CRM visit funnel 0–7/N (SimpleV2 semantics verbatim; see CrmVisitReportService). */
+    public function crmVisits(Request $request, \App\Services\Report\CrmVisitReportService $service)
+    {
+        $report = $service->funnel($request->user(), $this->filters($request));
+
+        if ($request->string('export')->toString() === 'xlsx') {
+            $rows = [];
+            foreach ($report['rows'] as $r) {
+                $rows[] = array_merge([$r['owner_name'], $r['customers'], $r['visits'], $r['rk']], array_values($r['buckets']));
+            }
+            $totals = $report['totals'];
+            $rows[] = array_merge(['— TOTAL —', $totals['customers'], $totals['visits'], $totals['rk']], array_values($totals['buckets']));
+
+            return $this->excelExportService->streamXlsx(
+                'laporan-kunjungan-crm.xlsx',
+                ['Sales/Pemilik', 'JML Kons', 'JML KJ', 'JML RK', '0%', 'Nolak', 'BS', 'MS', 'IP', 'IH', 'MK', 'MKK', 'Deal'],
+                collect($rows),
+            );
+        }
+
+        return $this->ok($report);
+    }
+
     public function salesKorsalFees(Request $request)
     {
         $data = $this->reportService->salesKorsalFees($request->user(), $this->filters($request));
@@ -73,7 +128,7 @@ class ReportController extends Controller
 
             return $this->excelExportService->streamXlsx(
                 'laporan-fee-sales-korsal.xlsx',
-                ['Role', 'Nama', 'Jumlah Transaksi', 'Total Fee'],
+                ['Role', 'Nama', 'Transaksi Berkomisi', 'Total Fee'],
                 $rows
             );
         }
@@ -87,7 +142,7 @@ class ReportController extends Controller
 
         if ($request->string('export')->toString() === 'xlsx') {
             $rows = collect($data['cancellations'])->map(fn ($o) => [
-                'Batal', $o->order_no, HumanDate::date($o->cancelled_at), $o->konsumen?->name, $o->cancellation_reason, '-',
+                'Batal', $o->order_no, HumanDate::date($o->cancelled_at), $o->buyerName(), $o->cancellation_reason, '-',
             ])
                 ->concat(collect($data['adjustments'])->map(fn ($a) => [
                     'Batal Sebagian (Refund '.($a->refund_status === 'pending' ? 'Pending' : 'Selesai').')',
@@ -131,7 +186,7 @@ class ReportController extends Controller
         if ($request->string('export')->toString() === 'xlsx') {
             return $this->excelExportService->streamXlsx(
                 'laporan-fee-agen.xlsx',
-                ['Agen', 'Jumlah Transaksi', 'Jumlah Sales Aktif', 'Total Fee'],
+                ['Agen', 'Transaksi Berkomisi', 'Jumlah Sales Aktif', 'Total Fee'],
                 $rows->map(fn ($r) => [$r->agent_name, $r->transaction_count, $r->active_sales_count, $r->total_fee])
             );
         }
@@ -165,6 +220,32 @@ class ReportController extends Controller
      */
     public function financeOrders(Request $request)
     {
+        if ($request->string('export')->toString() === 'xlsx') {
+            // Payment-ledger parity (SV2 prime-payments): full filtered set,
+            // one canonical row per order. Date filters apply independently
+            // (unlike the SV2 PaymentExport::byDate defect — both bounds or a
+            // single bound work; no 500 path exists here).
+            $result = $this->reportService->financeOrders(
+                $request->user(),
+                $this->filters($request) + ['per_page' => 10000],
+            );
+            $rows = array_map(fn ($o) => [
+                $o['order_no'], $o['customer'], $o['order_date'], $o['payment_method'],
+                $o['grand_total'], $o['dp_submitted'], $o['dp_paid'], $o['total_paid'], $o['remaining'],
+                $o['payment_status'], $o['verification_status'] ?? '', $o['has_pending_proof'] ? 'ya' : 'tidak',
+                $o['refund'], $o['additional_payment'],
+                implode('; ', array_map(fn ($role, $amount) => "$role=$amount", array_keys($o['fees'] ?? []), array_values($o['fees'] ?? []))),
+            ], $result['orders']);
+
+            return $this->excelExportService->streamXlsx(
+                'laporan-keuangan-order.xlsx',
+                ['No Faktur', 'Pelanggan', 'Tanggal', 'Metode', 'Grand Total', 'DP Diajukan', 'DP Dibayar',
+                    'Total Dibayar', 'Sisa', 'Status Pembayaran', 'Verifikasi', 'Bukti Pending', 'Refund',
+                    'Additional', 'Fee (role=nominal; hanya yang berhak lihat)'],
+                collect($rows),
+            );
+        }
+
         $result = $this->reportService->financeOrders(
             $request->user(),
             $this->filters($request) + ['per_page' => $request->integer('per_page', 15)],
@@ -184,8 +265,8 @@ class ReportController extends Controller
             $request,
             $this->reportService->customersReport($request->user(), $this->filters($request)),
             'laporan-pelanggan.xlsx',
-            ['Nama', 'Telepon', 'Jumlah Order', 'Total Belanja', 'Order Terakhir'],
-            fn ($r) => [$r->konsumen_name, $r->konsumen_phone, $r->order_count, $r->total_spent, HumanDate::date($r->last_order_at)],
+            ['Nama', 'Telepon', 'Jumlah Order', 'Nilai Order', 'Terbayar', 'Order Terakhir'],
+            fn ($r) => [$r->konsumen_name, $r->konsumen_phone, $r->order_count, $r->total_ordered, $r->total_paid, HumanDate::date($r->last_order_at)],
         );
     }
 

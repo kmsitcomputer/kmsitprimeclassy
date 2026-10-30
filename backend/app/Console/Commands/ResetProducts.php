@@ -149,6 +149,9 @@ class ResetProducts extends Command
         'commissions',
         'stock_request_items',
         'stock_requests',
+        // The initial-transaction report snapshot is an order-child row: it is
+        // deleted before the order items it describes, never after.
+        'order_initial_report_items',
         'order_items',
         'sub_stock_request_items',
         'sub_stock_requests',
@@ -239,6 +242,7 @@ class ResetProducts extends Command
         'payment_transactions',
         'order_additional_payments',
         'stock_requests',
+        'order_initial_report_items',
     ];
 
     /** Rows reached through exact deleted order item/return owners. */

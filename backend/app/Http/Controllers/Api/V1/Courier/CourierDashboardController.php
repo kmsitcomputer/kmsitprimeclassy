@@ -140,7 +140,14 @@ class CourierDashboardController extends Controller
         $returns = ReturnRequest::query()
             ->whereHas('order', fn ($q) => $q->where('agent_id', $actor->agent_id))
             ->whereHas('items', function ($q) use ($courierId) {
-                $q->where('status', 'pending')
+                // GAP-A: pickup scheduling normally happens after review approval,
+                // so an item still waiting to be PHYSICALLY collected is kurir work
+                // in both review states (pending = not yet reviewed, approved =
+                // review passed). orderItem.status 'pengembalian' still marks the
+                // not-yet-collected item — once collected it leaves every queue.
+                // The courier claim rules are untouched (unclaimed = everyone in
+                // the branch; claimed = only the claimer).
+                $q->whereIn('status', ['pending', 'approved'])
                     ->whereHas('orderItem', fn ($oq) => $oq->where('status', 'pengembalian'))
                     ->where(function ($cq) use ($courierId) {
                         $cq->whereNull('courier_id')->orWhere('courier_id', $courierId);
@@ -237,6 +244,17 @@ class CourierDashboardController extends Controller
 
         return $this->ok($items->values(), meta: [
             'current_page' => $orders->currentPage(), 'last_page' => $orders->lastPage(), 'total' => $orders->total(),
+        ]);
+    }
+
+    /** GAP-A (OD-P2-A): this kurir's scheduled return pickups for TODAY (WIB) — the shared ReturnService derivation, so dashboard and KPI always agree. */
+    public function pickupToday(Request $request)
+    {
+        $date = now('Asia/Jakarta')->toDateString();
+
+        return $this->ok([
+            'date' => $date,
+            'count' => $this->returnService->scheduledPickupsToday($request->user()),
         ]);
     }
 }

@@ -103,7 +103,9 @@ class PaymentSummaryService
             // informational only, never added to total_paid/verified_dp.
             'submitted_dp' => $submittedDp,
             'total_paid' => $totalPaid,
-            'remaining_balance' => (float) $order->remaining_amount,
+            // Canonical collectible receivable (WS-7 M-2): the stored remaining_amount is 0 for a plain
+            // COD/transfer order that never had a money event, which showed Rp0 "Sisa Pembayaran" on an unpaid order.
+            'remaining_balance' => \App\Support\CollectibleReceivable::forOrder($order),
             'overpaid_amount' => max(0.0, $totalPaid - $grandTotal),
             'payment_status' => $order->payment_status,
             'is_fully_paid' => $order->isFullyPaid(),

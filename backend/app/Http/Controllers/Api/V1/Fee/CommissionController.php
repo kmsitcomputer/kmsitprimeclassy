@@ -31,7 +31,7 @@ class CommissionController extends Controller
             // agent-fee exception to let them verify referral payouts.
             $user->isRole('admin', 'keuangan') => ['sales', 'courier'],
             $user->isRole('sales') => ['sales'],
-            $user->isRole('kurir') => ['courier'],
+            $user->isRole('kurir', 'koordinator-kurir') => ['courier'],
             // Sales-Kurir earns BOTH a Sales Fee (referral attribution) and a
             // Courier Fee (delivery) — both ledgers must stay visible and
             // independently auditable, never merged.

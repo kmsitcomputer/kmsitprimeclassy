@@ -288,7 +288,7 @@ class DevSchemaForeignKeyRestorationTest extends TestCase
                 continue;
             }
 
-            if ((string) $row->parent !== $parent || strtoupper((string) $row->delete_rule) !== $deleteRule) {
+            if ((string) $row->parent !== $parent || $this->normaliseRule((string) $row->delete_rule) !== $deleteRule) {
                 $problems[] = "{$constraint}: expected {$parent} ON DELETE {$deleteRule}, schema has {$row->parent} ON DELETE {$row->delete_rule}";
             }
         }
@@ -439,15 +439,28 @@ class DevSchemaForeignKeyRestorationTest extends TestCase
         return $row === null ? null : [
             'referenced_table' => (string) $row->referenced_table,
             'referenced_column' => (string) $row->referenced_column,
-            'delete_rule' => (string) $row->delete_rule,
-            'update_rule' => (string) $row->update_rule,
+            'delete_rule' => $this->normaliseRule((string) $row->delete_rule),
+            'update_rule' => $this->normaliseRule((string) $row->update_rule),
         ];
+    }
+
+    /**
+     * InnoDB treats NO ACTION and RESTRICT identically, and MySQL 8 reports an
+     * unspecified rule as NO ACTION where MariaDB reports RESTRICT. This is the
+     * same equivalence the restore migrations apply; CASCADE / SET NULL are never
+     * folded together, so a genuinely different rule is still a mismatch.
+     */
+    private function normaliseRule(string $rule): string
+    {
+        $rule = strtoupper(trim($rule));
+
+        return $rule === 'NO ACTION' ? 'RESTRICT' : $rule;
     }
 
     private function columnType(string $table, string $column): ?string
     {
         $row = DB::selectOne(
-            'select column_type from information_schema.columns
+            'select column_type as column_type from information_schema.columns
               where table_schema = ? and table_name = ? and column_name = ?',
             [DB::getDatabaseName(), $table, $column]
         );

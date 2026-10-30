@@ -14,7 +14,7 @@ class OrderItemAdjustmentResource extends JsonResource
             'id' => $this->id,
             'order_id' => $this->orderItem->order_id,
             'order_no' => $this->orderItem->order->order_no,
-            'customer_name' => $this->orderItem->order->konsumen->name,
+            'customer_name' => $this->orderItem->order->buyerName(),
             'item' => $this->orderItem->product_name_snapshot,
             'variation_label' => $this->orderItem->variation_label_snapshot,
             'sku' => $this->orderItem->sku_snapshot,

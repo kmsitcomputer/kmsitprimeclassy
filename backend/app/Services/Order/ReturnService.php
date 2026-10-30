@@ -11,7 +11,12 @@ use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
+use App\Models\OrderSalesReduction;
+use App\Models\RefundObligation;
 use App\Services\Logging\ActivityLogger;
+use App\Services\Refund\Money;
+use App\Services\Refund\OrderFinancialSnapshotService;
+use App\Services\Refund\RefundLedgerService;
 use App\Services\Stock\StockService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +38,11 @@ class ReturnService
 
     private const EVIDENCE_DIRECTORY = 'returns/evidence';
 
-    public function __construct(private readonly StockService $stockService) {}
+    public function __construct(
+        private readonly StockService $stockService,
+        private readonly OrderFinancialSnapshotService $snapshotService,
+        private readonly RefundLedgerService $refundLedger,
+    ) {}
 
     /** @param  array<int, array{order_item_id:int, quantity:int, restock?:bool}>  $items */
     public function requestReturn(Order $order, User $actor, array $items, string $reason, ?UploadedFile $evidence): ReturnRequest
@@ -111,12 +120,27 @@ class ReturnService
             throw new ApiException(__('messages.return.already_reviewed'), 422);
         }
 
-        return DB::transaction(function () use ($return, $actor, $approved, $note) {
+        $orderId = ReturnRequest::query()->whereKey($return->id)->value('order_id');
+
+        return DB::transaction(function () use ($return, $actor, $approved, $note, $orderId) {
+            // Canonical Order-first lock order (AGENTS.md §11).
+            $order = Order::query()->whereKey($orderId)->lockForUpdate()->firstOrFail();
             $return = ReturnRequest::query()->whereKey($return->id)->lockForUpdate()->firstOrFail();
 
             if (! in_array($return->status, ['requested', 'under_review'], true)) {
                 throw new ApiException(__('messages.return.already_reviewed'), 422);
             }
+
+            // Approval is a basis-requiring event: freeze the order's financial snapshot BEFORE
+            // consuming any returned unit, so the same unit can never also become a cancellation
+            // or shortfall refund.
+            $snapshot = $approved
+                ? $this->snapshotService->ensure(
+                    $order,
+                    OrderFinancialSnapshotService::TRIGGER_RETURN_APPROVAL,
+                    $actor,
+                )
+                : null;
 
             foreach ($return->items()->lockForUpdate()->get() as $returnItem) {
                 if ($returnItem->status !== 'pending') {
@@ -127,6 +151,10 @@ class ReturnService
 
                 if ($approved) {
                     $returnItem->update(['status' => 'approved', 'refund_status' => 'pending']);
+
+                    if ($orderItem && $snapshot) {
+                        $this->recordReturnLedger($order, $orderItem, $returnItem, $snapshot, $actor);
+                    }
 
                     // Physical restock is deliberately deferred until Gudang
                     // records the received condition inspection.
@@ -272,12 +300,100 @@ class ReturnService
         ]);
     }
 
+    /**
+     * Book one approved return line into the 360° ledger: consume the exact frozen units and
+     * create the refund entitlement. total_amount is NOT recalculated for returns, so the
+     * reduction is flagged applied_to_order_total=false (RefundMetrics derives B from it).
+     */
+    private function recordReturnLedger(
+        Order $order,
+        OrderItem $orderItem,
+        ReturnItem $returnItem,
+        \App\Models\OrderFinancialSnapshot $snapshot,
+        User $actor,
+    ): void {
+        $quantity = (int) $returnItem->quantity_returned;
+        $hasUnits = $this->snapshotService->availableUnits($snapshot, $orderItem->id) >= $quantity;
+
+        // A line that was added/mutated after the snapshot has no frozen units to consume. Never
+        // invent a unit: this return claim is unverifiable and must be reconciled by a human.
+        $consumption = $hasUnits
+            ? $this->snapshotService->consumeUnits(
+                $snapshot,
+                $orderItem->id,
+                $quantity,
+                'return_approval',
+                $returnItem->id,
+            )
+            : ['reduction_cents' => 0, 'route' => 'missing_basis'];
+
+        // returned_quantity was already incremented when the return was REQUESTED, so the
+        // approved stage is (current - quantity) .. current — unique per return line.
+        $stageTo = (int) $orderItem->returned_quantity;
+        $stageFrom = $stageTo - $quantity;
+        $key = 'return_item:'.$returnItem->id.':stage:'.$stageFrom.'-'.$stageTo;
+
+        $attrs = [
+            'source_type' => 'return_stage',
+            'source_id' => $returnItem->id,
+            'obligation_key' => $key,
+            'snapshot_id' => $snapshot->id,
+            'reason' => 'Return approved',
+            'deferred_reason' => 'Return exceeds available cash',
+            'approval_source' => 'return_approval',
+        ];
+
+        if ($snapshot->provenance === 'provisional_legacy' || $consumption['reduction_cents'] <= 0) {
+            // Unallocatable historical basis: never invent an auto-refund. Book the entitlement as
+            // a verification obligation (not capped by C) at the requested refund value.
+            $eventCents = Money::cents($returnItem->refund_amount);
+
+            if ($eventCents > 0) {
+                $this->refundLedger->createVerificationObligation(
+                    $order,
+                    $attrs,
+                    $eventCents,
+                    $actor,
+                    $snapshot->provenance === 'provisional_legacy' ? 'provisional_legacy' : 'forward',
+                );
+            }
+
+            return;
+        }
+
+        OrderSalesReduction::create([
+            'order_id' => $order->id,
+            'order_item_id' => $orderItem->id,
+            'source_type' => 'return_stage',
+            'source_id' => $returnItem->id,
+            'amount' => Money::amount($consumption['reduction_cents']),
+            'applied_to_order_total' => false,
+            'provenance' => $snapshot->provenance === 'provisional_legacy' ? 'provisional_legacy' : 'forward',
+            'reason' => 'Return approved',
+            'created_by' => $actor->id,
+        ]);
+
+        $this->refundLedger->createForwardObligation(
+            $order,
+            $attrs,
+            $consumption['reduction_cents'],
+            $actor,
+            autoApprove: true,
+            provenance: $snapshot->provenance === 'provisional_legacy' ? 'provisional_legacy' : 'forward',
+        );
+    }
+
     /** Admin confirms the refund for one return line was actually sent — "sudah dikembalikan dana". */
     public function markItemRefunded(ReturnItem $returnItem, User $actor): ReturnItem
     {
         if ($returnItem->status !== 'approved' || $returnItem->refund_status === 'processed') {
             throw new ApiException(__('messages.return.already_reviewed'), 422);
         }
+
+        // G17-D4: CRM-origin orders need recorded recipient + authorization evidence before money moves.
+        \App\Services\Refund\RefundRecipientGuard::assertReady(
+            \App\Models\Order::withoutGlobalScopes()->findOrFail($returnItem->returnRequest->order_id),
+        );
 
         return DB::transaction(function () use ($returnItem, $actor) {
             $returnItem = ReturnItem::query()->whereKey($returnItem->id)->lockForUpdate()->firstOrFail();
@@ -289,10 +405,31 @@ class ReturnService
             // A refund is a POST-PAID financial adjustment: the money can only
             // be given back once it was actually received. An unsettled DP (or
             // a COD order never marked paid) is refused, not silently refunded.
-            $order = $returnItem->returnRequest?->order;
+            $orderId = $returnItem->returnRequest?->order_id;
+            $order = $orderId
+                ? Order::query()->whereKey($orderId)->lockForUpdate()->first()
+                : null;
 
             if ($order && ! $order->isFullyPaid()) {
                 throw new ApiException(__('messages.payment.not_fully_paid'), 422);
+            }
+
+            // Settle the approved return entitlement through the ledger when it carries payable
+            // value. A zero-amount deferred container is left for the Owner materialization path;
+            // the legacy status flip below never moves money on its own.
+            $obligation = $order
+                ? RefundObligation::query()
+                    ->where('order_id', $order->id)
+                    ->where('source_type', 'return_stage')
+                    ->where('source_id', $returnItem->id)
+                    ->whereIn('status', RefundObligation::OPEN_STATUSES)
+                    ->orderByDesc('id')
+                    ->lockForUpdate()
+                    ->first()
+                : null;
+
+            if ($obligation) {
+                $this->refundLedger->settleLegacyConfirmed($obligation, $actor);
             }
 
             $returnItem->update(['refund_status' => 'processed']);
@@ -310,6 +447,13 @@ class ReturnService
             if ($return && $return->items()->where('refund_status', '!=', 'processed')->where('status', 'approved')->doesntExist()) {
                 $return->update(['status' => 'completed']);
             }
+
+            // WS-8 (Owner 2026-10-30, FINAL): the ONLY point a refund becomes proven ("sudah
+            // dikembalikan dana") for this line — exactly there the Sales fee for the refunded
+            // units is cancelled, into the signed commission_adjustments ledger (`per unit ×
+            // fee snapshot`). Rejected returns / unprocessed lines never run it; the service is
+            // idempotent (unique (commission, return_item)) and clamps to the outstanding fee.
+            app(\App\Services\Commission\SalesFeeRefundAdjuster::class)->adjustForProcessedReturn($returnItem, $actor);
 
             ActivityLogger::log($actor->id, $returnItem, 'return_item.refund_marked', null, [
                 'actor_role' => $actor->role?->slug,
@@ -387,6 +531,40 @@ class ReturnService
 
             return $returnItem->fresh();
         });
+    }
+
+    /**
+     * GAP-A (OD-P2-A): a scheduled return pickup a kurir still has to act on.
+     * One derivation, shared by CourierDashboardController::pickupToday and
+     * DashboardKpiService (kurir `return_pickups`): the item is scheduled for
+     * TODAY (WIB business date), has NOT been physically collected yet (order
+     * item still 'pengembalian'), and is either still unclaimed in the kurir's
+     * own branch (claim-on-first-action — the same visibility as the return
+     * queue, so it is every branch kurir's task until one of them claims it)
+     * or already claimed by this kurir.
+     */
+    public function scheduledPickupsQuery(User $actor)
+    {
+        $courierId = $actor->courierProfile?->id;
+
+        return ReturnItem::query()
+            ->whereIn('return_items.status', ['pending', 'approved'])
+            ->whereDate('pickup_scheduled_for', now('Asia/Jakarta')->toDateString())
+            ->whereHas('orderItem', function ($oiq) use ($actor) {
+                $oiq->where('order_items.status', 'pengembalian')
+                    ->whereHas('order', fn ($oq) => $oq->where('agent_id', $actor->agent_id));
+            })
+            ->where(function ($q) use ($courierId) {
+                $q->whereNull('courier_id');
+                if ($courierId !== null) {
+                    $q->orWhere('courier_id', $courierId);
+                }
+            });
+    }
+
+    public function scheduledPickupsToday(User $actor): int
+    {
+        return $this->scheduledPickupsQuery($actor)->count();
     }
 
     /**

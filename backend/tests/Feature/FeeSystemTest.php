@@ -250,7 +250,13 @@ class FeeSystemTest extends TestCase
         $this->assertArrayNotHasKey('agent_fee', $salesResponse->json('data'));
         $this->assertArrayNotHasKey('courier_fee', $salesResponse->json('data'));
 
-        foreach (['korsal', 'admin', 'konsumen'] as $role) {
+        // Phase 2: a Korsal acts as Sales, so it reads the Sales fee only (never agent/courier fee).
+        $korsalResponse = $this->actingAs($branch['korsal'])->getJson("/api/v1/products/{$product->id}/fees");
+        $korsalResponse->assertOk()->assertJsonPath('data.sales_fee', 4000);
+        $this->assertArrayNotHasKey('agent_fee', $korsalResponse->json('data'));
+        $this->assertArrayNotHasKey('courier_fee', $korsalResponse->json('data'));
+
+        foreach (['admin', 'konsumen'] as $role) {
             $this->actingAs($branch[$role])
                 ->getJson("/api/v1/products/{$product->id}/fees")
                 ->assertStatus(403);

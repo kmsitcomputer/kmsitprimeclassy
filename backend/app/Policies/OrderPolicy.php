@@ -35,7 +35,9 @@ class OrderPolicy
         }
 
         if ($user->isRole('korsal')) {
-            if ($order->korsal_id === $user->id) {
+            // Team (downline) orders, plus orders where the Korsal is the Sales-fee recipient itself
+            // (e.g. an assisted order for its own CRM customer carries sales_id = the Korsal).
+            if ($order->korsal_id === $user->id || $order->sales_id === $user->id) {
                 return true;
             }
 
@@ -247,6 +249,15 @@ class OrderPolicy
     {
         if (! $user->isRole('korsal', 'sales', 'sales-kurir-sub')) {
             return false;
+        }
+
+        // G17: a CRM-origin order has no account buyer. The seller whose commission snapshot the order carries
+        // (the owning Sales/SKS) may submit the payment proof; verification stays finance-only (§13/§24).
+        if ($order->isCrmOrigin()) {
+            return $user->isRole('sales', 'sales-kurir-sub')
+                && $user->agent_id !== null
+                && $order->agent_id === $user->agent_id
+                && $order->sales_id === $user->id;
         }
 
         $konsumen = $order->konsumen;

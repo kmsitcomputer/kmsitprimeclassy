@@ -86,6 +86,15 @@ vi.mock('@/api/orderAdjustments', () => ({
 vi.mock('@/api/invoice', () => ({ downloadInvoice: api.downloadInvoice }))
 vi.mock('@/api/catalog', () => ({ listProducts: api.listProducts }))
 vi.mock('@/api/returns', () => ({ requestReturn: api.requestReturn }))
+// REM-005: the embedded ConsentPanel is out of scope here — keep it inert (no network).
+vi.mock('@/api/crm', () => ({
+  getConsentContext: vi.fn().mockResolvedValue({ can_capture: false, purposes: [] }),
+  listConsentEvents: vi.fn().mockResolvedValue([]),
+  issueConsentOtp: vi.fn(),
+  verifyConsentOtp: vi.fn(),
+  captureConsent: vi.fn(),
+  consentAction: vi.fn(),
+}))
 
 // The component only needs ApiError from here; mocking it cuts the real
 // client → connectivity → i18n import chain (no backend, no network).

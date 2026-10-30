@@ -68,7 +68,9 @@ class OrderTransactionReportService
             $query->where('o.agent_id', $agentId);
         }
         if ($korsalScopeId !== null) {
-            $query->where('o.korsal_id', $korsalScopeId);
+            // Korsal network = orders stamped with this korsal OR the korsal's own purchases (orders.korsal_id is
+            // the BUYER's upline, NULL when the buyer is the korsal).
+            $query->where(fn ($q) => $q->where('o.korsal_id', $korsalScopeId)->orWhere('o.konsumen_id', $korsalScopeId));
         }
         if (! empty($filters['from'])) {
             $query->whereDate('o.created_at', '>=', $filters['from']);

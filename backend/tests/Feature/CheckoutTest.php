@@ -177,7 +177,7 @@ class CheckoutTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('payment_method_code');
 
-        // xendit is seeded but inactive — selecting it must also fail.
+        // Removed external gateways are never selectable, even when a leftover row exists.
         $this->actingAs($konsumen)
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
@@ -222,10 +222,74 @@ class CheckoutTest extends TestCase
 
         $this->assertSame($firstOrderId, $second->json('data.id'));
         $this->assertDatabaseCount('orders', 1);
+        $this->assertDatabaseCount('order_initial_report_items', 1);
+        $this->assertDatabaseHas('order_initial_report_items', [
+            'order_id' => $firstOrderId,
+            'agent_id' => $agen->id,
+            'initial_quantity' => 2,
+            'initial_payment_status' => 'unpaid',
+            'item_position' => 1,
+        ]);
 
         // Stock was only ever reserved once, not twice.
         $stock = ProductStock::withoutGlobalScopes()->where('product_id', $product->id)->first();
         $this->assertSame(2, $stock->quantity_reserved);
+    }
+
+    public function test_checkout_captures_immutable_initial_snapshot_for_each_original_item(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $firstProduct = $this->makeProduct($agen, price: 100000, stockQty: 10);
+        $secondProduct = $this->makeProduct($agen, price: 75000, stockQty: 10);
+
+        $response = $this->actingAs($konsumen)
+            ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', [
+                'payment_method_code' => 'cod',
+                'items' => [
+                    ['product_id' => $firstProduct->id, 'quantity' => 2],
+                    ['product_id' => $secondProduct->id, 'quantity' => 3],
+                ],
+                ...$this->destination(),
+            ]);
+
+        $response->assertCreated();
+        $orderId = $response->json('data.id');
+
+        $snapshots = \App\Models\OrderInitialReportItem::withoutGlobalScopes()
+            ->where('order_id', $orderId)
+            ->orderBy('item_position')
+            ->get();
+
+        $this->assertCount(2, $snapshots);
+        $this->assertSame([1, 2], $snapshots->pluck('item_position')->all());
+        $this->assertSame(
+            [$firstProduct->id, $secondProduct->id],
+            $snapshots->pluck('product_id')->all()
+        );
+        $this->assertSame([2, 3], $snapshots->pluck('initial_quantity')->all());
+        $this->assertEquals(200000, (float) $snapshots[0]->item_subtotal_snapshot);
+        $this->assertEquals(225000, (float) $snapshots[1]->item_subtotal_snapshot);
+
+        foreach ($snapshots as $snapshot) {
+            $this->assertSame($agen->id, $snapshot->agent_id);
+            $this->assertSame('Budi', $snapshot->recipient_name_snapshot);
+            $this->assertSame('unpaid', $snapshot->initial_payment_status);
+            $this->assertEquals(0, (float) $snapshot->initial_paid_snapshot);
+            $this->assertEquals(
+                (float) $snapshot->invoice_total_snapshot,
+                (float) $snapshot->initial_remaining_snapshot
+            );
+        }
+
+        $this->assertEquals(
+            (float) $response->json('data.total_amount'),
+            (float) $snapshots[0]->invoice_total_snapshot
+        );
+        $this->assertEquals(
+            (float) $snapshots[0]->invoice_total_snapshot,
+            (float) $snapshots[1]->invoice_total_snapshot
+        );
     }
 
     public function test_cod_order_creates_a_pending_transaction_with_no_verification_required(): void
@@ -284,6 +348,18 @@ class CheckoutTest extends TestCase
 
         $this->assertSame('BCA', $orderResponse->json('data.payment_transaction.instructions.bank_name'));
 
+        $initialSnapshotBeforePayment = \App\Models\OrderInitialReportItem::withoutGlobalScopes()
+            ->where('order_id', $orderId)
+            ->firstOrFail()
+            ->only([
+                'order_no', 'initial_quantity', 'item_subtotal_snapshot',
+                'invoice_total_snapshot', 'initial_paid_snapshot',
+                'initial_remaining_snapshot', 'initial_payment_status',
+            ]);
+
+        $this->assertSame('unpaid', $initialSnapshotBeforePayment['initial_payment_status']);
+        $this->assertEquals(0, (float) $initialSnapshotBeforePayment['initial_paid_snapshot']);
+
         $proof = UploadedFile::fake()->image('proof.jpg');
         $proofResponse = $this->actingAs($konsumen)->postJson("/api/v1/orders/{$orderId}/payment/proof", ['proof' => $proof]);
         $proofResponse->assertOk();
@@ -304,6 +380,14 @@ class CheckoutTest extends TestCase
             'paid',
             $this->actingAs($konsumen)->getJson("/api/v1/orders/{$orderId}")->json('data.payment_status')
         );
+
+        $initialSnapshotAfterPayment = \App\Models\OrderInitialReportItem::withoutGlobalScopes()
+            ->where('order_id', $orderId)
+            ->firstOrFail()
+            ->only(array_keys($initialSnapshotBeforePayment));
+
+        $this->assertSame($initialSnapshotBeforePayment, $initialSnapshotAfterPayment);
+        $this->assertDatabaseCount('order_initial_report_items', 1);
 
         // A second verification attempt on the same, already-resolved transaction is rejected.
         $this->actingAs($keuangan)->postJson("/api/v1/orders/{$orderId}/payment/verify", ['approved' => true])->assertStatus(422);

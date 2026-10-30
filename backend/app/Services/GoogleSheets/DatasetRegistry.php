@@ -2,6 +2,7 @@
 
 namespace App\Services\GoogleSheets;
 
+use App\Services\Report\OrderStaffWorksheetService;
 use App\Services\Report\OrderTransactionReportService;
 use App\Services\Stock\SellableStockService;
 use Illuminate\Database\Query\Builder;
@@ -10,9 +11,26 @@ use Illuminate\Validation\ValidationException;
 
 class DatasetRegistry
 {
+    /** Laporan C — Staf Worksheet (47-column SimpleV2 staff sheet geometry; manual cells protected). */
+    public const DATASET_STAFF_WORKSHEET = 'transaction_worksheet';
+
+    /**
+     * WP-04 (Owner 2026-10-30): Laporan A (`order_initial_transactions`) and Laporan B
+     * (`order_payment_positions`) are RETIRED from the sync dataset surface — the sheet
+     * export is redundant with the in-app reports and both kept diverging from Laporan C.
+     * The data stays RETAINED: the snapshot writer still fills
+     * `order_initial_report_items`, the `OrderInitialReportService` /
+     * `OrderPaymentPositionReportService` classes remain on disk intact (usable for a
+     * future reactivation or a one-off historical export), and existing sheets configs
+     * that still reference the retired datasets fail their sync EXPLICITLY
+     * (SyncService logs `failed`, "Dataset tidak diizinkan") instead of silently
+     * truncating. Laporan C (`transaction_worksheet`) is untouched.
+     */
     public function __construct(
         private readonly OrderTransactionReportService $orderTransactionReport,
+        private readonly OrderStaffWorksheetService $orderStaffWorksheetReport,
         private readonly SellableStockService $sellableStock,
+        private readonly ReportPeriodFilter $periodFilter,
     ) {}
 
     /** Public keys never become arbitrary SQL identifiers. */
@@ -24,6 +42,7 @@ class DatasetRegistry
             'transactions' => array_keys(OrderTransactionReportService::COLUMNS),
             // Backward-compatible dataset key; both now use the same canonical item-level rows.
             'transaction_items' => array_keys(OrderTransactionReportService::COLUMNS),
+            self::DATASET_STAFF_WORKSHEET => array_keys(OrderStaffWorksheetService::COLUMNS),
             'sales' => ['id', 'name', 'korsal_id', 'status'],
             'korsal' => ['id', 'name', 'status'],
             'courier_deliveries' => ['id', 'order_no', 'courier_id', 'tracking_number', 'status', 'delivered_at'],
@@ -41,16 +60,163 @@ class DatasetRegistry
 
     public function defaults(): array
     {
-        $columns = collect(OrderTransactionReportService::COLUMNS)
-            ->map(fn (string $label, string $field) => compact('field', 'label'))->values()->all();
+        return [
+            'transactions' => $this->defaultColumns(OrderTransactionReportService::COLUMNS),
+            'transaction_items' => $this->defaultColumns(OrderTransactionReportService::COLUMNS),
+            self::DATASET_STAFF_WORKSHEET => $this->defaultColumns(OrderStaffWorksheetService::COLUMNS),
+        ];
+    }
 
-        return ['transactions' => $columns, 'transaction_items' => $columns];
+    /**
+     * Filter keys a dataset understands. Period filters only exist on the two
+     * order reports; accepting them anywhere else would be a silent no-op.
+     *
+     * @return array<string,array<int,string>>
+     */
+    public function supportedFilters(): array
+    {
+        return [
+            self::DATASET_STAFF_WORKSHEET => ['period', 'from', 'to', 'category_group'],
+        ];
+    }
+
+    public function supportsPeriodFilter(string $dataset): bool
+    {
+        return isset($this->supportedFilters()[$dataset]);
+    }
+
+    /**
+     * Column keys the sync must never clear/overwrite in the destination tab —
+     * staff-owned entries survive (Laporan C manual geometry, SV2 adaptation).
+     *
+     * @return array<int,string>
+     */
+    public function manualColumns(string $dataset): array
+    {
+        return $dataset === self::DATASET_STAFF_WORKSHEET
+            ? OrderStaffWorksheetService::MANUAL_FIELDS
+            : [];
+    }
+
+    /**
+     * Data-validation rules for manual columns (Implementasi §12.3: a real
+     * Google Sheets dropdown, not just a dashboard hint). Keyed by field name.
+     *
+     * @return array<string,array<int,string>>
+     */
+    public function validationRules(string $dataset): array
+    {
+        return $dataset === self::DATASET_STAFF_WORKSHEET
+            ? ['update_money_position' => OrderStaffWorksheetService::MONEY_POSITIONS]
+            : [];
+    }
+
+    /** Datasets whose rows expose Agent commission - Admin must never see or configure them. */
+    public const AGENT_COMMISSION_DATASETS = ['financial_summary'];
+
+    /**
+     * Owner-facing description of every selectable dataset: name, purpose,
+     * column geometry and SYSTEM/DERIVED/MANUAL classification, so the UI
+     * never has to guess from raw keys. Admin never receives a dataset that
+     * carries Agent commission.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    public function catalog(bool $forAdmin = false): array
+    {
+        $meta = [
+            'products' => ['Produk', 'Master produk (SKU, nama, harga, status).'],
+            'stock' => ['Stok Produk', 'Stok tersedia dan tercadangkan per produk.'],
+            'transactions' => ['Transaksi (per item)', 'Baris transaksi per item produk, kontrak kanonik laporan transaksi.'],
+            'transaction_items' => ['Transaksi (alias lama)', 'Alias kompatibilitas untuk konfigurasi lama; gunakan "Transaksi (per item)".'],
+            self::DATASET_STAFF_WORKSHEET => ['Laporan C - Worksheet Transaksi Staf (47 kolom)', 'Format worksheet staf SimpleV2: satu baris per item, nilai faktur hanya pada baris item pertama. Kolom MANUAL dilindungi dan tidak pernah ditimpa sinkronisasi.'],
+            'sales' => ['Daftar Sales/SKS', 'Roster Sales dan Sales-Kurir.'],
+            'korsal' => ['Daftar Korsal', 'Roster Korsal.'],
+            'courier_deliveries' => ['Pengiriman Kurir', 'Pengiriman beserta kurir dan nomor resi.'],
+            'sales_fees' => ['Komisi Sales', 'Komisi Sales per pesanan beserta statusnya.'],
+            'korsal_fees' => ['Komisi Korsal', 'Agregasi komisi Sales dalam hierarki Korsal.'],
+            'courier_fees' => ['Komisi Kurir', 'Komisi Kurir per pesanan beserta statusnya.'],
+            'payment_status' => ['Status Pembayaran', 'Status bayar dan sisa tagihan per pesanan.'],
+            'refunds' => ['Refund', 'Refund per item return.'],
+            'additional_payments' => ['Pembayaran Tambahan', 'Pembayaran tambahan per pesanan.'],
+            'transaction_report' => ['Ringkasan Transaksi', 'Satu baris ringkasan jumlah pesanan dan omzet.'],
+            'financial_summary' => ['Ringkasan Keuangan', 'Ringkasan keuangan termasuk komisi Agen (tidak tersedia untuk Admin).'],
+        ];
+        $labels = [
+            self::DATASET_STAFF_WORKSHEET => OrderStaffWorksheetService::COLUMNS,
+            'transactions' => OrderTransactionReportService::COLUMNS,
+            'transaction_items' => OrderTransactionReportService::COLUMNS,
+        ];
+        $defaults = $this->defaults();
+        $filters = $this->supportedFilters();
+        $catalog = [];
+        foreach ($this->definitions() as $key => $fields) {
+            if ($forAdmin && in_array($key, self::AGENT_COMMISSION_DATASETS, true)) {
+                continue;
+            }
+            $isWorksheet = $key === self::DATASET_STAFF_WORKSHEET;
+            $columns = [];
+            foreach ($fields as $field) {
+                $column = [
+                    'field' => $field,
+                    'label' => $labels[$key][$field] ?? $field,
+                    'classification' => $isWorksheet ? OrderStaffWorksheetService::classification($field) : 'SYSTEM',
+                ];
+                if ($isWorksheet && in_array($field, OrderStaffWorksheetService::MONEY_POSITION_FIELDS, true)) {
+                    $column['allowed_values'] = OrderStaffWorksheetService::MONEY_POSITIONS;
+                }
+                $columns[] = $column;
+            }
+            $catalog[$key] = [
+                'key' => $key,
+                'name' => $meta[$key][0] ?? $key,
+                'description' => $meta[$key][1] ?? '',
+                'column_count' => count($fields),
+                'default_column_count' => count($defaults[$key] ?? []),
+                'columns' => $columns,
+                'filters' => $filters[$key] ?? [],
+                'legacy_alias' => $key === 'transaction_items',
+                'suggested_tabs' => $isWorksheet ? ['COOKIES_2026' => 'cookies', 'CAKE_2026' => 'cake'] : (object) [],
+                'protected_columns' => $this->manualColumns($key),
+                'restricted_for_admin' => in_array($key, self::AGENT_COMMISSION_DATASETS, true),
+            ];
+        }
+
+        return $catalog;
+    }
+
+    /**
+     * Columns that must be exported as numbers instead of text.
+     *
+     * @return array<int,string>
+     */
+    public function numericFields(string $dataset): array
+    {
+        return match ($dataset) {
+            self::DATASET_STAFF_WORKSHEET => OrderStaffWorksheetService::NUMERIC_FIELDS,
+            default => [],
+        };
     }
 
     public function query(string $dataset, ?int $agentId, array $filters = []): Builder
     {
         if (! isset($this->definitions()[$dataset])) {
             throw ValidationException::withMessages(['dataset' => 'Dataset tidak diizinkan.']);
+        }
+        if ($dataset === self::DATASET_STAFF_WORKSHEET) {
+            // Derived table like the locked reports: SyncService may select any
+            // subset/order of the 47 keys without ever touching raw SQL.
+            $worksheet = DB::query()->fromSub(
+                $this->orderStaffWorksheetReport->query(
+                    $agentId,
+                    $this->periodFilter->resolve($filters),
+                    in_array($filters['category_group'] ?? null, OrderStaffWorksheetService::CATEGORY_GROUPS, true) ? $filters['category_group'] : null,
+                ),
+                'staff_worksheet',
+            );
+            $worksheet->orderBy('no');
+
+            return $worksheet;
         }
         if (in_array($dataset, ['transactions', 'transaction_items'], true)) {
             $canonical = $this->orderTransactionReport->query($agentId, null, [
@@ -116,11 +282,20 @@ class DatasetRegistry
                 $salesFees->where('sfo.agent_id', $agentId);
                 $courierFees->where('cfo.agent_id', $agentId);
             }
+            if (config('refunds.reporting_source') === 'ledger') {
+                // Same ledger semantics as ReportService::financeSummary so the
+                // dashboard, the JSON report and this sheet can never diverge
+                // once the ledger source is activated. Default stays 'legacy'.
+                $ledgerOrderIds = DB::table('orders as o')->when($agentId !== null, fn ($q) => $q->where('o.agent_id', $agentId))->pluck('o.id');
+                $metrics = app(\App\Services\Refund\RefundMetrics::class);
+                $refunds = DB::raw('('.(($metrics->provenCentsForOrders($ledgerOrderIds)
+                    + $metrics->provenCentsForOrders($ledgerOrderIds, ['return_stage', 'return_approval'])) / 100).')');
+            }
             $q = DB::table('orders as o')
                 ->selectRaw('COUNT(*) as transaction_count')
                 ->selectRaw('COALESCE(SUM(o.total_amount), 0) as gross_revenue')
                 ->selectRaw('COALESCE(SUM(o.paid_amount), 0) as paid_amount')
-                ->selectRaw('COALESCE(SUM(o.remaining_amount), 0) as outstanding_amount')
+                ->selectRaw('COALESCE(SUM('.\App\Support\CollectibleReceivable::sql('o').'), 0) as outstanding_amount')
                 ->selectSub($refunds, 'refund_amount')
                 ->selectSub($additional, 'additional_payment_amount')
                 ->selectSub($agentFees, 'agent_fee')
@@ -135,7 +310,7 @@ class DatasetRegistry
                 $q->where('o.agent_id', $agentId);
             }
             match ($dataset) {
-                'payment_status' => $q->select(['o.id', 'o.order_no', 'o.payment_status', 'o.paid_amount', 'o.remaining_amount']),
+                'payment_status' => $q->select(['o.id', 'o.order_no', 'o.payment_status', 'o.paid_amount'])->selectRaw(\App\Support\CollectibleReceivable::sql('o').' as remaining_amount'),
                 'courier_deliveries' => $q->join('shipments as s', 's.order_id', '=', 'o.id')->select(['s.id', 'o.order_no', 's.courier_id', 's.tracking_number', 's.status', 's.delivered_at']),
                 'sales_fees', 'courier_fees' => $q->join('commissions as c', 'c.order_id', '=', 'o.id')->where('c.beneficiary_role', $dataset === 'sales_fees' ? 'sales' : 'courier')->select(['c.id', 'o.order_no', 'c.beneficiary_user_id as beneficiary_id', 'c.amount', 'c.status', 'c.earned_at']),
                 'refunds' => $q->join('order_items as i', 'i.order_id', '=', 'o.id')->join('return_items as r', 'r.order_item_id', '=', 'i.id')->select(['r.id', 'o.order_no', 'r.refund_amount', 'r.refund_status']),
@@ -149,5 +324,15 @@ class DatasetRegistry
         }
 
         return $result;
+    }
+
+    /**
+     * @param  array<string,string>  $columns
+     * @return array<int,array{field:string,label:string}>
+     */
+    private function defaultColumns(array $columns): array
+    {
+        return collect($columns)
+            ->map(fn (string $label, string $field) => compact('field', 'label'))->values()->all();
     }
 }

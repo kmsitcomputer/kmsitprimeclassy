@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\WarehouseSubLocation;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Media\MediaService;
+use App\Services\Refund\OrderFinancialSnapshotService;
 use App\Services\Stock\SubStockService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
@@ -34,7 +35,11 @@ use Illuminate\Support\Facades\DB;
  */
 class CourierService
 {
-    public function __construct(private readonly MediaService $mediaService, private readonly SubStockService $subStockService) {}
+    public function __construct(
+        private readonly MediaService $mediaService,
+        private readonly SubStockService $subStockService,
+        private readonly OrderFinancialSnapshotService $snapshotService,
+    ) {}
 
     /**
      * "Kurir wajib berada di bawah Agen" — a courier may only ever be
@@ -464,9 +469,15 @@ class CourierService
             $items = OrderItem::query()->where('shipment_id', $shipment->id)->lockForUpdate()->get();
 
             $anyTransitioned = false;
+            $handoverOccurred = false;
             foreach ($items as $item) {
                 if ($item->canTransitionTo($newStatus)) {
-                    $item->update(['status' => $newStatus]);
+                    $attributes = ['status' => $newStatus];
+                    if ($newStatus === 'dikirim' && $item->handed_over_at === null) {
+                        $attributes['handed_over_at'] = now();
+                        $handoverOccurred = true;
+                    }
+                    $item->update($attributes);
                     if ($newStatus === 'dikirim' && $item->isSubSourced()) {
                         // Actual shipment of Sub-sourced goods: Sub physical -= qty, reservation consumed (once).
                         $this->subStockService->consume($item, $actor);
@@ -477,6 +488,14 @@ class CourierService
 
             if (! $anyTransitioned) {
                 throw new InvalidStateTransitionException($items->first()?->status ?? $shipment->status, $newStatus, 'shipment');
+            }
+
+            if ($handoverOccurred && $this->snapshotService->hasBillableUnits($order)) {
+                $this->snapshotService->ensure(
+                    $order->fresh(),
+                    OrderFinancialSnapshotService::TRIGGER_FIRST_HANDOVER,
+                    $actor,
+                );
             }
 
             if ($proof && $newStatus === 'terkirim') {
@@ -544,10 +563,24 @@ class CourierService
                 throw new InvalidStateTransitionException($item->status, $newStatus, 'order_item');
             }
 
-            $item->update(['status' => $newStatus]);
+            $attributes = ['status' => $newStatus];
+            $handoverOccurred = false;
+            if ($newStatus === 'dikirim' && $item->handed_over_at === null) {
+                $attributes['handed_over_at'] = now();
+                $handoverOccurred = true;
+            }
+            $item->update($attributes);
             if ($newStatus === 'dikirim' && $item->isSubSourced()) {
                 // Actual shipment of Sub-sourced goods: Sub physical -= qty, reservation consumed (once).
                 $this->subStockService->consume($item, $actor);
+            }
+
+            if ($handoverOccurred && $this->snapshotService->hasBillableUnits($order)) {
+                $this->snapshotService->ensure(
+                    $order->fresh(),
+                    OrderFinancialSnapshotService::TRIGGER_FIRST_HANDOVER,
+                    $actor,
+                );
             }
 
             if ($proof && $newStatus === 'terkirim') {
@@ -690,6 +723,20 @@ class CourierService
      *                              to them instead of the (nonexistent) Courier profile owner.
      */
     public function recordCommissionsForItems(iterable $items, ?Courier $courier, ?User $beneficiary = null): void
+    {
+        $items = collect($items);
+
+        try {
+            $this->writeCourierCommissions($items, $courier, $beneficiary);
+        } finally {
+            // Owner rule: a fee is Pending until ITS item is delivered, then final. Agent / sales rows (written at checkout) and the
+            // courier rows just written all finalise here, per item — even when this delivery earns no courier fee at all.
+            app(\App\Services\Commission\CommissionFinalizer::class)->finalizeItems($items->pluck('id'));
+        }
+    }
+
+    /** @param  \Illuminate\Support\Collection<int, OrderItem>  $items */
+    private function writeCourierCommissions(\Illuminate\Support\Collection $items, ?Courier $courier, ?User $beneficiary): void
     {
         $beneficiaryUserId = $beneficiary?->id ?? $courier?->user_id;
 

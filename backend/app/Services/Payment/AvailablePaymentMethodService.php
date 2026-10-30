@@ -30,6 +30,7 @@ class AvailablePaymentMethodService
     {
         $methods = PaymentMethod::query()
             ->where('is_active', true)
+            ->where('type', '!=', 'gateway')
             ->when($agentId, fn ($q) => $q->whereNotIn('id', AgentPaymentMethodSetting::query()
                 ->where('agent_id', $agentId)->where('is_active', false)->pluck('payment_method_id')))
             ->orderBy('id')

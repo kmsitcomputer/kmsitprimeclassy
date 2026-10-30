@@ -11,9 +11,11 @@ use Illuminate\Support\Facades\DB;
 /**
  * "Referral change" (Blueprint §Audit Log) — moving a sales to a different
  * korsal, or a konsumen to a different sales, within the SAME agent branch
- * only. Deliberately never offered for agen/korsal themselves — re-parenting
- * a whole branch or an entire sales team is a much larger operation with no
- * business case requested here, and this stays a leaf-level move.
+ * only. Deliberately never offered for agen/korsal themselves (G-20 Owner
+ * decision 2026-10-30: the individual leaf-level transfer above stays in
+ * scope and is verified; a MASS agent-branch transfer of an entire Agen/
+ * korsal node is OUT_OF_SCOPE_PHASE_2 — no such feature is built and no
+ * historical transaction, referral referee or ledger row is remapped here).
  * Historical orders are untouched (their sales_id/korsal_id are a
  * point-in-time snapshot — see OrderService/Order model docblocks); only
  * the user's own current attachment and `user_closures` change.
@@ -24,7 +26,7 @@ class ReferralReassignmentService
 
     public function reassignSalesToKorsal(User $sales, int $newKorsalId, User $actor): User
     {
-        if (! $sales->isRole('sales')) {
+        if (! $sales->isRole('sales', 'sales-kurir-sub')) {
             throw new ApiException(__('messages.referral.unsupported_role'), 422);
         }
 
@@ -62,7 +64,7 @@ class ReferralReassignmentService
 
         $newSales = User::query()->where('agent_id', $konsumen->agent_id)->find($newSalesId);
 
-        if (! $newSales || ! $newSales->isRole('sales')) {
+        if (! $newSales || ! $newSales->isRole('sales', 'sales-kurir-sub')) {
             throw new ApiException(__('messages.referral.invalid_target'), 422);
         }
 

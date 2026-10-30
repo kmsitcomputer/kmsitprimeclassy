@@ -14,7 +14,7 @@ class OrderAdditionalPaymentResource extends JsonResource
             'id' => $this->id,
             'order_id' => $this->order_id,
             'order_no' => $this->order->order_no,
-            'customer_name' => $this->order->konsumen->name,
+            'customer_name' => $this->order->buyerName(),
             'method' => $this->method,
             'amount' => $this->amount,
             'reason' => $this->reason,

@@ -212,6 +212,45 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'map-pin',
         show: (auth) => isRole(auth, 'agen'),
       },
+      {
+        // The Agen's own WhatsApp device (QR / pairing code, reconnect, replace). Agen only; the Super Admin has just the global switch.
+        key: 'agent-whatsapp',
+        label: 'WhatsApp Saya',
+        routeName: 'agent-whatsapp',
+        icon: 'globe',
+        show: (auth) => isRole(auth, 'agen'),
+      },
+    ],
+  },
+  {
+    key: 'crm',
+    label: 'CRM',
+    icon: 'users',
+    color: 'text-brand-700 dark:text-brand-400',
+    items: [
+      {
+        key: 'crm-customers',
+        label: 'Pelanggan CRM',
+        routeName: 'crm-customers',
+        icon: 'users',
+        // Mirrors backend: sales/SKS own + write; korsal downline, agen, admin read-only (OD-01).
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'),
+      },
+      {
+        key: 'crm-follow-ups',
+        label: 'Tindak Lanjut',
+        routeName: 'crm-follow-ups',
+        icon: 'map-pin',
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'),
+      },
+      {
+        key: 'crm-funnel',
+        label: 'Funnel Kunjungan',
+        routeName: 'crm-funnel',
+        icon: 'chart-bar',
+        // SimpleV2 funnel 0–7/N report; read scope mirrors CrmVisitReportService.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'),
+      },
     ],
   },
   {
@@ -272,11 +311,29 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal'),
       },
       {
+        key: 'network-report',
+        label: 'Transaksi Jaringan',
+        routeName: 'network-report',
+        icon: 'chart-bar',
+        // Owner §7: network totals for every seller role; server locks the scope.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'korsal', 'sales', 'sales-kurir-sub'),
+      },
+      {
+        key: 'network-summary',
+        label: 'Ringkasan Jaringan',
+        routeName: 'network-summary',
+        icon: 'chart-bar',
+        // Mirrors the backend gate: super_admin/agen/keuangan. Admin is
+        // intentionally excluded — the per-agen rollup carries agent fee
+        // data, and admin never sees agent fee.
+        show: (auth) => isRole(auth, 'super_admin', 'agen', 'keuangan'),
+      },
+      {
         key: 'sales-customers-report',
         label: 'Konsumen Saya',
         routeName: 'sales-customers-report',
         icon: 'users',
-        show: (auth) => isRole(auth, 'sales', 'sales-kurir-sub'),
+        show: (auth) => isRole(auth, 'sales', 'sales-kurir-sub', 'korsal'),
       },
     ],
   },
@@ -307,13 +364,6 @@ export const NAV_GROUPS: NavGroup[] = [
         routeName: 'admin-refunds',
         icon: 'cash',
         show: (auth) => auth.can('orders.manage.fulfillment') || auth.can('finance.refund.manage'),
-      },
-      {
-        key: 'payment-gateways',
-        label: 'Payment Gateway',
-        routeName: 'admin-payment-gateways',
-        icon: 'credit-card',
-        show: (auth) => auth.can('system.payment.manage'),
       },
       {
         key: 'shipping-settings',
@@ -454,6 +504,22 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'super_admin'),
       },
       {
+        // Pengaturan › Integrasi › WhatsApp Gateway. Super Admin only; the backend re-authorizes every call.
+        key: 'whatsapp-gateway',
+        label: 'Integrasi · WhatsApp',
+        routeName: 'whatsapp-gateway',
+        icon: 'globe',
+        show: (auth) => isRole(auth, 'super_admin'),
+      },
+      {
+        // Pengaturan › Integrasi › SMTP. Super Admin only; the backend re-authorizes every call.
+        key: 'smtp-settings',
+        label: 'Integrasi · SMTP',
+        routeName: 'smtp-settings',
+        icon: 'globe',
+        show: (auth) => isRole(auth, 'super_admin'),
+      },
+      {
         key: 'audit-logs',
         label: 'Audit Log',
         routeName: 'admin-audit-logs',
@@ -470,7 +536,7 @@ const VIEW_WEBSITE_ITEM: NavItem = {
   label: 'Lihat Website',
   routeName: 'home',
   icon: 'globe',
-  show: (auth) => isRole(auth, 'super_admin', 'agen', 'korsal', 'sales'),
+  show: (auth) => isRole(auth, 'super_admin', 'agen', 'korsal', 'sales', 'sales-kurir-sub'),
 }
 
 const PROFILE_ITEM: NavItem = {

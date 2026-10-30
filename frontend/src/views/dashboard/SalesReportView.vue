@@ -97,6 +97,7 @@ function download() {
             <th class="px-4 py-2">Korsal</th>
             <th class="px-4 py-2">Status</th>
             <th class="px-4 py-2">Jumlah Transaksi</th>
+            <th class="px-4 py-2">Jumlah Konsumen</th>
             <th class="px-4 py-2 text-right">Total Fee</th>
           </tr>
         </thead>
@@ -107,9 +108,10 @@ function download() {
             <td class="px-4 py-2">{{ row.korsal_name ?? '-' }}</td>
             <td class="px-4 py-2 capitalize">{{ row.status }}</td>
             <td class="px-4 py-2">{{ row.transaction_count }}</td>
+            <td class="px-4 py-2">{{ row.customer_count }}</td>
             <td class="px-4 py-2 text-right">{{ formatRupiah(row.total_fee) }}</td>
           </tr>
-          <tr v-if="items.length === 0"><td colspan="6" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
+          <tr v-if="items.length === 0"><td colspan="7" class="px-4 py-6 text-center text-stone-400">Tidak ada data.</td></tr>
         </tbody>
       </table>
     </div>
