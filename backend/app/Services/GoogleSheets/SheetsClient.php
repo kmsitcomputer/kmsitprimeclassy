@@ -27,6 +27,7 @@ class SheetsClient
                 'sheets' => collect($response->json('sheets', []))->map(fn ($sheet) => [
                     'id' => $sheet['properties']['sheetId'],
                     'title' => $sheet['properties']['title'],
+                    'column_count' => (int) ($sheet['properties']['gridProperties']['columnCount'] ?? 26),
                 ])->values()->all(),
             ];
         } catch (ConnectionException) {
@@ -111,17 +112,31 @@ class SheetsClient
         $token = $this->token();
         $base = 'https://sheets.googleapis.com/v4/spreadsheets/'.rawurlencode($spreadsheet);
         try {
+            $totalCols = max(count($rows[0] ?? []), 1);
             $metadata = $this->metadata($spreadsheet, $token);
             $sheet = collect($metadata['sheets'])->firstWhere('title', $tab);
             if (! $sheet) {
                 $response = Http::withToken($token)->timeout(config('google_sheets.timeout'))->post($base.':batchUpdate', [
-                    'requests' => [['addSheet' => ['properties' => ['title' => $tab]]]],
+                    'requests' => [['addSheet' => ['properties' => [
+                        'title' => $tab,
+                        'gridProperties' => ['columnCount' => $totalCols],
+                    ]]]],
                 ]);
                 $this->check($response);
                 $sheet = [
                     'id' => $response->json('replies.0.addSheet.properties.sheetId'),
                     'title' => $tab,
+                    'column_count' => $totalCols,
                 ];
+            }
+            $capacityRequests = [];
+            $columnCount = (int) ($sheet['column_count'] ?? 26);
+            if ($columnCount < $totalCols) {
+                $capacityRequests[] = ['appendDimension' => [
+                    'sheetId' => $sheet['id'],
+                    'dimension' => 'COLUMNS',
+                    'length' => $totalCols - $columnCount,
+                ]];
             }
             $protected = array_values(array_unique(array_map('intval', $protectedColumnIndexes)));
             if (! $protected) {
@@ -129,7 +144,7 @@ class SheetsClient
                 // Both operations are one Sheets batch: clear stale cells, then write
                 // the current export. A dedicated tab never retains rows from an
                 // older, larger dataset after a successful sync.
-                $response = Http::withToken($token)->timeout(config('google_sheets.timeout'))->post($base.':batchUpdate', ['requests' => [
+                $requests = array_merge($capacityRequests, [
                     [
                         'repeatCell' => [
                             'range' => ['sheetId' => $sheet['id']],
@@ -144,7 +159,8 @@ class SheetsClient
                             'fields' => 'userEnteredValue',
                         ],
                     ],
-                ]]);
+                ]);
+                $response = Http::withToken($token)->timeout(config('google_sheets.timeout'))->post($base.':batchUpdate', ['requests' => $requests]);
                 $this->check($response);
 
                 return;
@@ -163,7 +179,6 @@ class SheetsClient
                 throw new GoogleSheetsException('PROTECT_IDENTITY', 'Identitas baris tidak cocok dengan payload — sinkronisasi aman dibatalkan.');
             }
             $header = $rows[0] ?? [];
-            $totalCols = max(count($header), 1);
 
             $existing = $this->values($spreadsheet, sprintf('%s!A1:%s', $this->quoteTab($tab), $this->columnLetter($totalCols)));
             $oldRows = array_slice($existing, 1);
@@ -198,7 +213,7 @@ class SheetsClient
             }
 
             $protectedSet = array_flip($protected);
-            $requests = [];
+            $requests = $capacityRequests;
             // 1) Header (all columns — labels are ours to own; the row-1 header
             //    text for manual columns is stable and contains no data).
             $requests[] = ['updateCells' => [
@@ -337,7 +352,7 @@ class SheetsClient
             $status === 403 => ['PERMISSION_DENIED', 'Spreadsheet belum dibagikan ke Service Account atau aksesnya ditolak.'],
             $status === 404 => ['SPREADSHEET_NOT_FOUND', 'Spreadsheet tidak ditemukan atau tidak dapat diakses oleh Service Account.'],
             $status === 429 => ['RATE_LIMIT', 'Batas permintaan Google Sheets API tercapai.'],
-            $status === 400 => ['INVALID_SPREADSHEET_ID', 'Spreadsheet ID tidak valid.'],
+            $status === 400 => ['INVALID_REQUEST', 'Google Sheets menolak format atau jangkauan permintaan sinkronisasi.'],
             default => ['UNKNOWN_GOOGLE_API_ERROR', 'Google Sheets API mengembalikan kegagalan yang tidak dikenal.'],
         };
 

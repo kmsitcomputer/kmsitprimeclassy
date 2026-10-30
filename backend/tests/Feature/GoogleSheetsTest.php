@@ -278,6 +278,31 @@ class GoogleSheetsTest extends TestCase
         }
     }
 
+    public function test_client_does_not_misclassify_every_bad_request_as_an_invalid_spreadsheet_id(): void
+    {
+        Http::fake([
+            'sheets.googleapis.com/*' => Http::response([
+                'error' => ['status' => 'INVALID_ARGUMENT', 'message' => 'Range exceeds grid limits'],
+            ], 400),
+        ]);
+        $client = new class extends SheetsClient
+        {
+            public function token(): string
+            {
+                return 'test-token';
+            }
+        };
+
+        try {
+            $client->metadata('sheet-id');
+            $this->fail('Expected GoogleSheetsException');
+        } catch (GoogleSheetsException $e) {
+            $this->assertSame('INVALID_REQUEST', $e->errorCode);
+            $this->assertSame('Google Sheets menolak format atau jangkauan permintaan sinkronisasi.', $e->getMessage());
+            $this->assertStringNotContainsString('Range exceeds grid limits', $e->getMessage());
+        }
+    }
+
     public function test_admin_cannot_export_financial_summary_but_agent_can_see_it(): void
     {
         $agent = $this->agent();

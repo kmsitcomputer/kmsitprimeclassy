@@ -146,6 +146,9 @@ function datasetName(key: string) {
 function lastLog(config: Config) {
   return logs.value.find((l) => l.config_id === config.id) ?? null
 }
+function configDestination(config: Config) {
+  return destinations.value.find((destination) => destination.id === config.destination_id)
+}
 const statusText: Record<string, string> = {
   success: 'Berhasil',
   failed: 'Gagal',
@@ -200,13 +203,13 @@ function applyDestinationStatus(destination?: Destination) {
   lastTestedAt.value = destination?.last_tested_at ?? ''
   connectionErrorCode.value = destination?.last_error_code ?? ''
 }
-async function testConnection() {
+async function testConnection(destinationId = form.value.destination_id) {
   busy.value = true
   error.value = ''
   connectionErrorCode.value = ''
   try {
     const { data } = await http.post('/google-sheets/connection', {
-      destination_id: form.value.destination_id,
+      destination_id: destinationId,
     })
     connection.value = data.data.status
     spreadsheetTitle.value = data.data.spreadsheet_title
@@ -348,7 +351,7 @@ onMounted(() =>
         <button
           :disabled="busy || !form.destination_id"
           class="rounded-lg bg-stone-800 px-4 py-2 text-white disabled:opacity-50"
-          @click="testConnection"
+          @click="testConnection()"
         >
           Periksa koneksi
         </button>
@@ -540,6 +543,11 @@ onMounted(() =>
             <strong>{{ config.tab }}</strong>
             <span v-if="config.filters?.category_group"> · kelompok {{ config.filters.category_group }}</span>
           </p>
+          <p class="text-sm" data-testid="config-destination">
+            Spreadsheet konfigurasi:
+            <strong>{{ configDestination(config)?.spreadsheet_id ?? `destination #${config.destination_id}` }}</strong>
+            · koneksi {{ configDestination(config)?.connection_status ?? 'tidak diketahui' }}
+          </p>
           <p class="my-2 text-sm" data-testid="config-status">
             Status konfigurasi: Tersimpan · Sync terakhir:
             {{ lastLog(config) ? (statusText[lastLog(config)!.status] ?? lastLog(config)!.status) : 'Belum pernah' }}
@@ -549,6 +557,14 @@ onMounted(() =>
             Kesalahan sinkronisasi: {{ lastLog(config)!.error_summary }}
           </p>
           <div class="flex gap-4">
+            <button
+              :disabled="busy"
+              type="button"
+              :data-testid="`config-connection-${config.id}`"
+              @click="testConnection(config.destination_id)"
+            >
+              Periksa koneksi konfigurasi</button
+            >
             <button
               :disabled="busy"
               class="rounded-lg bg-stone-800 px-3 py-2 text-white"

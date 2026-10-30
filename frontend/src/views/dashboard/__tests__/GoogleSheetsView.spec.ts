@@ -139,6 +139,25 @@ describe('GoogleSheetsView', () => {
     expect(wrapper.text()).toContain('Kesalahan sinkronisasi: Invalid mapping')
     expect(wrapper.text()).toContain('5 kolom')
     expect(wrapper.text()).toContain('COOKIES_2026')
+    expect(wrapper.get('[data-testid="config-destination"]').text()).toContain('abc')
+    expect(wrapper.get('[data-testid="config-destination"]').text()).toContain('not_checked')
+  })
+
+  it('tests the destination saved on the clicked config, not the editor selection', async () => {
+    http.get.mockResolvedValue(payload({
+      destinations: [
+        { id: 1, spreadsheet_id: 'stale-marker', agent_id: 9, spreadsheet_title: null, connection_status: 'not_checked', last_tested_at: null, last_error_code: null },
+        { id: 2, spreadsheet_id: 'live-sheet', agent_id: 9, spreadsheet_title: 'TEST', connection_status: 'connected', last_tested_at: '2026-10-30T01:00:00Z', last_error_code: null },
+      ],
+      configs: [{ id: 5, name: 'Cookies 2026', destination_id: 2, tab: 'COOKIES_2026', dataset: 'transaction_worksheet', columns: FIELDS.map((f) => ({ field: f, label: LABELS[f] })), filters: { category_group: 'cookies' } }],
+    }))
+    http.post.mockResolvedValue({ data: { data: { status: 'connected', spreadsheet_title: 'TEST', service_account_email: 'svc@example.test', last_tested_at: '2026-10-30T02:00:00Z' } } })
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-testid="config-connection-5"]').trigger('click')
+    await flushPromises()
+
+    expect(http.post).toHaveBeenCalledWith('/google-sheets/connection', { destination_id: 2 })
   })
 
   it('does not offer the Agent-commission dataset when the API withholds it (Admin)', async () => {

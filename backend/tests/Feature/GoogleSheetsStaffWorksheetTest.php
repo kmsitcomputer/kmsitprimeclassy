@@ -216,7 +216,7 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
     {
         Http::fake([
             'sheets.googleapis.com/v4/spreadsheets/ws-id*' => Http::sequence()
-                ->push(['sheets' => [['properties' => ['sheetId' => 9, 'title' => 'COOKIES_2026']]]])   // metadata
+                ->push(['sheets' => [['properties' => ['sheetId' => 9, 'title' => 'COOKIES_2026', 'gridProperties' => ['columnCount' => 26]]]]])   // metadata
                 ->push(['values' => [                                                                    // values.get
                     ['OLD-HDR', 'B', 'DP', 'C', 'D'],
                     ['1', 'oldB', 'STAFF-50000', 'oldC', 'oldD'],   // existing transaction: manual cell survives
@@ -266,6 +266,163 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
             return str_contains($body, 'newB') && str_contains($body, 'STAFF') === false
                 && str_contains($body, 'kept') && str_contains($body, 'fresh');
         });
+    }
+
+    public function test_client_expands_a_default_grid_before_writing_47_columns(): void
+    {
+        Http::fake([
+            'sheets.googleapis.com/v4/spreadsheets/ws-id*' => Http::sequence()
+                ->push(['sheets' => [['properties' => [
+                    'sheetId' => 9,
+                    'title' => 'COOKIES_2026',
+                    'gridProperties' => ['columnCount' => 26],
+                ]]]])
+                ->push(['values' => []])
+                ->push([]),
+        ]);
+        $client = new class extends SheetsClient
+        {
+            public function token(): string
+            {
+                return 'test-token';
+            }
+        };
+        $header = array_map(fn (int $i) => 'Column '.$i, range(1, 47));
+
+        $client->replace('ws-id', 'COOKIES_2026', [$header], [25], []);
+
+        Http::assertSent(function ($request) {
+            if ($request->method() !== 'POST') {
+                return false;
+            }
+            $requests = $request->data()['requests'] ?? [];
+
+            return ($requests[0]['appendDimension'] ?? null) === [
+                'sheetId' => 9,
+                'dimension' => 'COLUMNS',
+                'length' => 21,
+            ] && ($requests[1]['updateCells']['range']['endColumnIndex'] ?? null) === 47;
+        });
+    }
+
+    public function test_client_does_not_expand_when_the_grid_already_has_enough_columns(): void
+    {
+        Http::fake([
+            'sheets.googleapis.com/v4/spreadsheets/ws-id*' => Http::sequence()
+                ->push(['sheets' => [['properties' => [
+                    'sheetId' => 9,
+                    'title' => 'COOKIES_2026',
+                    'gridProperties' => ['columnCount' => 47],
+                ]]]])
+                ->push(['values' => []])
+                ->push([]),
+        ]);
+        $client = new class extends SheetsClient
+        {
+            public function token(): string
+            {
+                return 'test-token';
+            }
+        };
+        $header = array_map(fn (int $i) => 'Column '.$i, range(1, 47));
+
+        $client->replace('ws-id', 'COOKIES_2026', [$header], [25], []);
+
+        // Capacity 47 == needed 47: NO appendDimension anywhere in the write batch.
+        Http::assertSent(function ($request) {
+            if ($request->method() !== 'POST') {
+                return false;
+            }
+            $requests = $request->data()['requests'] ?? [];
+            $hasAppend = collect($requests)->contains(fn ($r) => isset($r['appendDimension']));
+
+            return ! $hasAppend && ($requests[0]['updateCells']['range']['endColumnIndex'] ?? null) === 47;
+        });
+    }
+
+    public function test_client_creates_a_new_worksheet_with_the_needed_capacity_and_without_extra_expansion(): void
+    {
+        Http::fake([
+            'sheets.googleapis.com/v4/spreadsheets/ws-id*' => Http::sequence()
+                // metadata: only an unrelated tab exists -> the worksheet is new
+                ->push(['sheets' => [['properties' => [
+                    'sheetId' => 1,
+                    'title' => 'OTHER_TAB',
+                    'gridProperties' => ['columnCount' => 26],
+                ]]]])
+                ->push(['replies' => [['addSheet' => ['properties' => ['sheetId' => 55, 'title' => 'COOKIES_2026']]]]])
+                ->push(['values' => []])
+                ->push([]),
+        ]);
+        $client = new class extends SheetsClient
+        {
+            public function token(): string
+            {
+                return 'test-token';
+            }
+        };
+        $header = array_map(fn (int $i) => 'Column '.$i, range(1, 47));
+
+        $client->replace('ws-id', 'COOKIES_2026', [$header], [25], []);
+
+        $posts = collect(Http::recorded())->filter(
+            fn ($pair) => $pair[0]->method() === 'POST' && str_contains($pair[0]->url(), ':batchUpdate')
+        );
+        $this->assertCount(2, $posts, 'addSheet batch + write batch');
+
+        // The addSheet request carries the needed grid capacity.
+        $addSheet = $posts->first()[0]->data()['requests'][0]['addSheet']['properties'];
+        $this->assertSame('COOKIES_2026', $addSheet['title']);
+        $this->assertSame(47, $addSheet['gridProperties']['columnCount']);
+
+        // The write batch never re-expands a sheet it just created at capacity.
+        $writeRequests = $posts->last()[0]->data()['requests'];
+        $this->assertFalse(collect($writeRequests)->contains(fn ($r) => isset($r['appendDimension'])));
+    }
+
+    public function test_client_expansion_is_idempotent_across_repeated_syncs(): void
+    {
+        Http::fake([
+            'sheets.googleapis.com/v4/spreadsheets/ws-id*' => Http::sequence()
+                // 1st sync: default 26-column grid -> expands by 21
+                ->push(['sheets' => [['properties' => [
+                    'sheetId' => 9,
+                    'title' => 'COOKIES_2026',
+                    'gridProperties' => ['columnCount' => 26],
+                ]]]])
+                ->push(['values' => []])
+                ->push([])
+                // 2nd sync: Google now reports the expanded 47-column grid
+                ->push(['sheets' => [['properties' => [
+                    'sheetId' => 9,
+                    'title' => 'COOKIES_2026',
+                    'gridProperties' => ['columnCount' => 47],
+                ]]]])
+                ->push(['values' => []])
+                ->push([]),
+        ]);
+        $client = new class extends SheetsClient
+        {
+            public function token(): string
+            {
+                return 'test-token';
+            }
+        };
+        $header = array_map(fn (int $i) => 'Column '.$i, range(1, 47));
+
+        $client->replace('ws-id', 'COOKIES_2026', [$header], [25], []);
+        $client->replace('ws-id', 'COOKIES_2026', [$header], [25], []);
+
+        $posts = collect(Http::recorded())->filter(
+            fn ($pair) => $pair[0]->method() === 'POST' && str_contains($pair[0]->url(), ':batchUpdate')
+        );
+        $this->assertCount(2, $posts, 'one write batch per sync');
+
+        $first = collect($posts->first()[0]->data()['requests']);
+        $this->assertTrue($first->contains(fn ($r) => isset($r['appendDimension'])), 'first sync expands');
+
+        $second = collect($posts->last()[0]->data()['requests']);
+        $this->assertFalse($second->contains(fn ($r) => isset($r['appendDimension'])), 'second sync never expands again');
     }
 
     public function test_merge_requires_row_identity_for_protected_datasets(): void
