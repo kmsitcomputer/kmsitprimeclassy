@@ -184,6 +184,8 @@ export default {
     name: 'Nama',
     email: 'Email',
     phone: 'No. Telepon',
+    korsalName: 'Nama Korsal',
+    korsalUnassigned: 'Belum ditugaskan',
     avatar: 'Foto Profil',
     save: 'Simpan',
     saving: 'Menyimpan...',

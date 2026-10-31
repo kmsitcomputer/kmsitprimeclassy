@@ -73,7 +73,7 @@ class OrderInventoryTargetResolutionTest extends TestCase
     /** @param array<int, array<string, mixed>> $lines */
     private function order(array $f, array $lines): Order
     {
-        return app(OrderService::class)->createOrder($f['buyer'], $lines, self::DESTINATION, $f['buyer'], 'cod', null, 'tr-'.Str::uuid(), null, null, null, null, null);
+        return app(OrderService::class)->createOrder($f['buyer'], $lines, self::DESTINATION, $f['agent'], 'cod', null, 'tr-'.Str::uuid(), null, null, null, null, null);
     }
 
     public function test_simple_product_with_a_supplied_variation_id_is_rejected_without_an_order_or_reservation(): void

@@ -186,6 +186,8 @@ export default {
     name: 'Name',
     email: 'Email',
     phone: 'Phone Number',
+    korsalName: 'Korsal Name',
+    korsalUnassigned: 'Not assigned yet',
     avatar: 'Profile Photo',
     save: 'Save',
     saving: 'Saving...',

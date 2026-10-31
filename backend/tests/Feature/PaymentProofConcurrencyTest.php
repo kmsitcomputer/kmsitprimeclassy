@@ -77,7 +77,8 @@ class PaymentProofConcurrencyTest extends TestCase
                 'address_line' => 'Race Address', 'village_id' => null,
                 'latitude' => -6.2, 'longitude' => 106.8,
             ],
-            $konsumen,
+            // COD is staff-only (Improvement 04): the branch agen places it for the konsumen.
+            $method === 'bank_transfer' ? $konsumen : $agen,
             $method,
             null,
             'ppc-'.Str::uuid(),

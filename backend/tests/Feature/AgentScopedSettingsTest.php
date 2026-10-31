@@ -153,37 +153,39 @@ class AgentScopedSettingsTest extends TestCase
      * Checkout enforcement — the whole point of these toggles
      * ----------------------------------------------------------- */
 
-    public function test_disabling_cod_for_this_agen_removes_it_from_checkout_steps_for_their_own_konsumen(): void
+    // Owner rule (Improvement 04): a konsumen is never offered COD, so the per-agen COD
+    // toggle is observed through branch staff who place orders (Sales keeps COD).
+    public function test_disabling_cod_for_this_agen_removes_it_from_checkout_steps_for_their_own_branch(): void
     {
         $agen = $this->agen();
-        $konsumen = User::factory()->create([
-            'role_id' => Role::where('slug', 'konsumen')->value('id'), 'agent_id' => $agen->id,
+        $sales = User::factory()->create([
+            'role_id' => Role::where('slug', 'sales')->value('id'), 'agent_id' => $agen->id,
         ]);
 
-        $before = $this->actingAs($konsumen)->getJson('/api/v1/checkout/steps');
+        $before = $this->actingAs($sales)->getJson('/api/v1/checkout/steps');
         $this->assertTrue(collect($before->json('data.payment_methods'))->pluck('code')->contains('cod'));
 
         $cod = PaymentMethod::query()->where('code', 'cod')->firstOrFail();
         $this->actingAs($agen)->patchJson("/api/v1/agent/payment-methods/{$cod->id}/toggle")->assertOk();
 
-        $after = $this->actingAs($konsumen)->getJson('/api/v1/checkout/steps');
+        $after = $this->actingAs($sales)->getJson('/api/v1/checkout/steps');
         $codes = collect($after->json('data.payment_methods'))->pluck('code');
         $this->assertFalse($codes->contains('cod'));
         $this->assertTrue($codes->contains('bank_transfer'));
     }
 
-    public function test_disabling_cod_for_one_agen_never_affects_another_agens_konsumen(): void
+    public function test_disabling_cod_for_one_agen_never_affects_another_agens_branch(): void
     {
         $agenA = $this->agen();
         $agenB = $this->agen();
-        $konsumenB = User::factory()->create([
-            'role_id' => Role::where('slug', 'konsumen')->value('id'), 'agent_id' => $agenB->id,
+        $salesB = User::factory()->create([
+            'role_id' => Role::where('slug', 'sales')->value('id'), 'agent_id' => $agenB->id,
         ]);
 
         $cod = PaymentMethod::query()->where('code', 'cod')->firstOrFail();
         $this->actingAs($agenA)->patchJson("/api/v1/agent/payment-methods/{$cod->id}/toggle")->assertOk();
 
-        $response = $this->actingAs($konsumenB)->getJson('/api/v1/checkout/steps');
+        $response = $this->actingAs($salesB)->getJson('/api/v1/checkout/steps');
         $this->assertTrue(collect($response->json('data.payment_methods'))->pluck('code')->contains('cod'));
     }
 

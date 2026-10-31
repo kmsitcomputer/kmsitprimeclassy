@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Role;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -27,6 +28,17 @@ class UserResource extends JsonResource
             'google_linked' => $this->when(
                 $request->user()?->id === $this->id,
                 fn () => $this->socialIdentities()->where('provider', 'google')->exists(),
+            ),
+            // Akun Saya: a Sales / Sales-Kurir-Sub sees the name of their assigned Korsal — own record
+            // only, read from the canonical korsal_id and only when it really is a Korsal of the same
+            // branch (null = not assigned). Read-only: ProfileController::update never accepts korsal_id.
+            'korsal_name' => $this->when(
+                $request->user()?->id === $this->id && $this->isRole('sales', Role::SALES_KURIR_SUB),
+                fn () => $this->korsal_id === null ? null : User::query()
+                    ->whereKey($this->korsal_id)
+                    ->where('agent_id', $this->agent_id)
+                    ->whereHas('role', fn ($q) => $q->where('slug', 'korsal'))
+                    ->value('name'),
             ),
             'created_at' => $this->created_at,
         ];

@@ -62,6 +62,9 @@ async function copyReferralLink() {
   setTimeout(() => (referralLinkCopied.value = false), 2000)
 }
 
+/* Read-only assigned Korsal for Sales / Sales-Kurir-Sub (UserResource korsal_name); never part of the profile update. */
+const showKorsal = computed(() => ['sales', 'sales-kurir-sub'].includes(auth.user?.role ?? ''))
+
 /* Self-service referral code CRUD — agen/korsal/sales/sales-kurir-sub (see ProfileController route gate). */
 const canManageReferralCode = computed(() => ['agen', 'korsal', 'sales', 'sales-kurir-sub'].includes(auth.user?.role ?? ''))
 const editingReferralCode = ref(false)
@@ -228,6 +231,12 @@ async function handleLogout() {
             <label class="block text-sm font-medium text-stone-700 dark:text-stone-300">{{ t('profile.email') }}</label>
             <input v-model="profileForm.email" type="email" class="mt-1 block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
             <p v-if="profileErrors.email" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ profileErrors.email[0] }}</p>
+          </div>
+          <div v-if="showKorsal" data-testid="profile-korsal">
+            <span class="block text-sm font-medium text-stone-700 dark:text-stone-300">{{ t('profile.korsalName') }}</span>
+            <p class="mt-1 block w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
+              {{ auth.user?.korsal_name || t('profile.korsalUnassigned') }}
+            </p>
           </div>
           <div class="flex items-center gap-3">
             <AppButton type="submit" :disabled="profileSaving">{{ profileSaving ? t('profile.saving') : t('profile.save') }}</AppButton>

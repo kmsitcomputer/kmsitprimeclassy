@@ -26,6 +26,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -36,6 +37,7 @@ class RefundLedgerUatTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -240,8 +242,7 @@ class RefundLedgerUatTest extends TestCase
             $payload['voucher_code'] = Voucher::query()->where('agent_id', $agen->id)->value('code');
         }
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload)->assertCreated()->json('data.id');
+        $orderId = $this->postOrderAs($konsumen, $payload)->assertCreated()->json('data.id');
 
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
         $item = OrderItem::query()->where('order_id', $orderId)->firstOrFail();

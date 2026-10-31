@@ -19,6 +19,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ class DashboardKpiContractTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -66,7 +68,7 @@ class DashboardKpiContractTest extends TestCase
 
     private function place(User $buyer, Product $product, int $qty = 1): Order
     {
-        $r = $this->actingAs($buyer)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $r = $this->postOrderAs($buyer, [
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => $qty]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

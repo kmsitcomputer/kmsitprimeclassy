@@ -28,6 +28,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,7 @@ class OrderLineAdditionTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -101,7 +103,7 @@ class OrderLineAdditionTest extends TestCase
     /** @param array<int, array{product_id:int, product_variation_id?:?int, quantity:int}> $items */
     private function placeOrder(User $konsumen, array $items, string $paymentMethodCode = 'cod'): Order
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->postOrderAs($konsumen, [
             'payment_method_code' => $paymentMethodCode,
             'items' => $items,
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

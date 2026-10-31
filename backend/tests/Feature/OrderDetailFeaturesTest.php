@@ -20,6 +20,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ class OrderDetailFeaturesTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -65,7 +67,7 @@ class OrderDetailFeaturesTest extends TestCase
         ]);
         ProductStock::create(['agent_id' => $konsumen->agent_id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->postOrderAs($konsumen, [
             'payment_method_code' => $paymentMethod,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

@@ -17,6 +17,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ class ShipmentReceiptPrintTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -84,7 +86,7 @@ class ShipmentReceiptPrintTest extends TestCase
 
     private function placeOrder(User $konsumen, array $lines, string $paymentMethod = 'cod'): Order
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->postOrderAs($konsumen, [
             'payment_method_code' => $paymentMethod,
             'items' => $lines,
             'recipient_name' => 'Budi Penerima', 'recipient_phone' => '081234567890', 'address_line' => 'Jl. Sudirman No. 10',

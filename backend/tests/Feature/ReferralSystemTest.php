@@ -13,12 +13,14 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 class ReferralSystemTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -236,7 +238,7 @@ class ReferralSystemTest extends TestCase
             'agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0,
         ]);
 
-        $orderResponse = $this->actingAs($konsumenC)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderResponse = $this->postOrderAs($konsumenC, [
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0813', 'address_line' => 'Jl. C',
@@ -297,7 +299,7 @@ class ReferralSystemTest extends TestCase
             'agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0,
         ]);
 
-        $orderId = $this->actingAs($konsumenOfB)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->postOrderAs($konsumenOfB, [
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'B', 'recipient_phone' => '0813', 'address_line' => 'Jl. B',

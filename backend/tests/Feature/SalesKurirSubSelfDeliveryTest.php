@@ -24,6 +24,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -35,6 +36,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     private array $b;
 
@@ -176,9 +178,8 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
 
     public function test_sales_kurir_sub_cannot_operate_a_standard_agent_shipment(): void
     {
-        // An Agent-sourced order (referred consumer self-checkout) creates a STANDARD shipment.
-        $id = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload(1))
+        // An Agent-sourced order for the referred consumer creates a STANDARD shipment.
+        $id = $this->postOrderAs($this->b['referred'], $this->payload(1))
             ->assertCreated()->json('data.id');
         $shipment = OrderItem::where('order_id', $id)->firstOrFail()->shipment;
 
@@ -244,8 +245,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
     {
         $own = $this->placeSubOrder($this->b['sub'], 1);
         $other = $this->placeSubOrder($this->b['otherSub'], 1);
-        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+        $agentOrderId = $this->postOrderAs($this->b['referred'], $this->payload(1))->assertCreated()->json('data.id');
 
         $ids = fn (User $actor) => collect($this->actingAs($actor)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->pluck('id');
 
@@ -263,8 +263,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
     public function test_normal_kurir_queue_never_lists_a_self_sub_shipment(): void
     {
         $subOrder = $this->placeSubOrder($this->b['sub'], 1);
-        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+        $agentOrderId = $this->postOrderAs($this->b['referred'], $this->payload(1))->assertCreated()->json('data.id');
 
         foreach (['/api/v1/kurir/orders', '/api/v1/kurir/orders?status=diproses'] as $url) {
             $ids = collect($this->actingAs($this->b['kurir'])->getJson($url)->assertOk()->json('data'))->pluck('id');
@@ -288,8 +287,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         $this->assertSame('self_sub', $subItem['delivery_mode']);
         $this->assertSame($this->b['sub']->id, $subItem['self_delivered_by_user_id']);
 
-        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+        $agentOrderId = $this->postOrderAs($this->b['referred'], $this->payload(1))->assertCreated()->json('data.id');
         $agentItem = $this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$agentOrderId}")->assertOk()->json('data.items.0');
         $this->assertSame('standard', $agentItem['delivery_mode']);
         $this->assertNull($agentItem['self_delivered_by_user_id']);
@@ -315,8 +313,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
     {
         $own = $this->placeSubOrder($this->b['sub'], 1);
         $other = $this->placeSubOrder($this->b['otherSub'], 1);
-        $agentOrderId = $this->actingAs($this->b['referred'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload(1))->assertCreated()->json('data.id');
+        $agentOrderId = $this->postOrderAs($this->b['referred'], $this->payload(1))->assertCreated()->json('data.id');
         $unrelatedAgentId = $this->secondBranchDeliveredOrder();
 
         $ids = fn (User $actor, string $status) => collect(
@@ -361,8 +358,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         $product2 = Product::create(['sku' => 'X-'.Str::uuid(), 'name' => 'Other Cake', 'slug' => 'other-'.uniqid(), 'has_variations' => false, 'base_price' => 10000, 'weight_grams' => 500, 'status' => 'active']);
         ProductStock::create(['agent_id' => $agen2->id, 'product_id' => $product2->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
 
-        $id = $this->actingAs($konsumen2)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', [
+        $id = $this->postOrderAs($konsumen2, [
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $product2->id, 'quantity' => 1]],
                 'recipient_name' => 'Other Buyer', 'recipient_phone' => '0812', 'address_line' => 'Jl. Other',

@@ -186,6 +186,8 @@ export default {
     name: '姓名',
     email: '邮箱',
     phone: '手机号码',
+    korsalName: 'Korsal 名称',
+    korsalUnassigned: '尚未分配',
     avatar: '头像',
     save: '保存',
     saving: '保存中...',

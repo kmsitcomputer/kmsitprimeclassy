@@ -17,6 +17,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -34,6 +35,7 @@ class OrderPaymentBadgeTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -91,9 +93,7 @@ class OrderPaymentBadgeTest extends TestCase
             $payload['dp_amount'] = $dpAmount;
         }
 
-        $response = $this->actingAs($konsumen)
-            ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload);
+        $response = $this->postOrderAs($konsumen, $payload);
         $response->assertCreated();
 
         return Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));

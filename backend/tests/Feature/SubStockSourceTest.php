@@ -26,6 +26,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -36,6 +37,7 @@ class SubStockSourceTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     private array $b;
 
@@ -133,11 +135,15 @@ class SubStockSourceTest extends TestCase
 
     public function test_referred_consumer_self_checkout_uses_agent_stock_and_cannot_request_sub(): void
     {
-        $this->order($this->b['referred'], $this->payload(2, null, ['stock_source' => 'sub']))->assertForbidden();
+        // A konsumen's own checkout is Bank Transfer only (Improvement 04).
+        $this->configureBankTransfer($this->b['agen']->id);
+        $bankTransfer = ['payment_method_code' => 'bank_transfer'];
+
+        $this->order($this->b['referred'], $bankTransfer + $this->payload(2, null, ['stock_source' => 'sub']))->assertForbidden();
         $this->assertSame(0, OrderItem::query()->count());
         $this->assertSame(0, SubStockReservation::query()->count());
 
-        $this->order($this->b['referred'], $this->payload(2))->assertCreated();
+        $this->order($this->b['referred'], $bankTransfer + $this->payload(2))->assertCreated();
         $item = OrderItem::query()->firstOrFail();
         $this->assertSame('agent', $item->stock_source);
         $this->assertNull($item->sub_location_id);
@@ -322,7 +328,8 @@ class SubStockSourceTest extends TestCase
 
     public function test_stock_source_consistency_is_enforced_by_the_database(): void
     {
-        $id = $this->order($this->b['referred'], $this->payload(1))->assertCreated()->json('data.id');
+        $this->configureBankTransfer($this->b['agen']->id);
+        $id = $this->order($this->b['referred'], ['payment_method_code' => 'bank_transfer'] + $this->payload(1))->assertCreated()->json('data.id');
 
         $this->expectException(QueryException::class);
         OrderItem::query()->where('order_id', $id)->update(['stock_source' => 'sub', 'sub_location_id' => null]);

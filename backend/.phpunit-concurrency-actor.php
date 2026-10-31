@@ -570,10 +570,14 @@ if (str_starts_with($role, 'sr-')) {
                 // reversed-line order genuinely exercises the pre-lock canonicalisation, racing a
                 // real Transit -> Sub execution in the sibling op. `stock_source`/`sub_location_id`
                 // drive the Sub-sourced MAJOR C race through the same real path.
-                // Improvement 04: COD is staff-only, so the branch's agen is the acting user
-                // while the BUYER stays the konsumen (createOrder's first argument).
+                // Improvement 04: COD is staff-only, so for a konsumen buyer the branch's agen is the
+                // acting user while the BUYER stays the konsumen (createOrder's first argument). A staff
+                // buyer (e.g. a Sales-Kurir-Sub checking out from its own Sub stock) keeps the requested
+                // actor — Sub stock is usable only by the owning Sales-Kurir-Sub (StockSourceResolver).
                 $buyer = User::withoutGlobalScopes()->findOrFail((int) $extra['buyer_id']);
-                $agenActor = User::withoutGlobalScopes()->findOrFail((int) $buyer->agent_id);
+                $agenActor = $buyer->isRole('konsumen')
+                    ? User::withoutGlobalScopes()->findOrFail((int) $buyer->agent_id)
+                    : User::withoutGlobalScopes()->findOrFail($actorId);
                 $result = app(OrderService::class)->createOrder(
                     $buyer,
                     $extra['lines'],

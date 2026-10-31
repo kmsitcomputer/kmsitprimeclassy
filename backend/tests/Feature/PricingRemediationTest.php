@@ -28,6 +28,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -51,6 +52,7 @@ class PricingRemediationTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     private array $b;
 
@@ -92,8 +94,7 @@ class PricingRemediationTest extends TestCase
             $payload['voucher_code'] = $voucherCode;
         }
 
-        return $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload);
+        return $this->postOrderAs($this->b['konsumen'], $payload);
     }
 
     private function postQuote(array $items, ?string $voucherCode = null)
@@ -264,7 +265,7 @@ class PricingRemediationTest extends TestCase
             WarehouseStock::create(['agent_id' => $b['agen']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 50]);
             $this->actingAs($super)->putJson("/api/v1/products/{$product->id}/fees", ['agent_fee' => 1000, 'sales_fee' => 500, 'courier_fee' => 200])->assertOk();
         }
-        $r = $this->actingAs($b['konsumen'])->postJson('/api/v1/orders', ['recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Integration', 'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6] + ['items' => [['product_id' => $b['productA']->id, 'quantity' => 1]], 'payment_method_code' => 'down_payment', 'dp_amount' => 40000, 'voucher_code' => 'DPQA'], ['Idempotency-Key' => 'audit-dp-integrated'])->assertCreated();
+        $r = $this->postOrderAs($b['konsumen'], ['recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Integration', 'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6] + ['items' => [['product_id' => $b['productA']->id, 'quantity' => 1]], 'payment_method_code' => 'down_payment', 'dp_amount' => 40000, 'voucher_code' => 'DPQA'], 'audit-dp-integrated')->assertCreated();
         $o = Order::findOrFail($r->json('data.id'));
         $pay = app(PaymentService::class);
         $proof = $pay->submitBankTransferProof($o->paymentTransactions()->first(), UploadedFile::fake()->image('dp.jpg'), $b['konsumen']);

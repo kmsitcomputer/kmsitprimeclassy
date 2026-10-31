@@ -78,7 +78,7 @@ class MediaSystemTest extends TestCase
         $superAdmin = User::factory()->superAdmin()->create();
 
         $response = $this->actingAs($superAdmin)->post('/api/v1/media', [
-            'file' => UploadedFile::fake()->image('huge.jpg')->size(5000), // homepage_block caps at 2MB
+            'file' => UploadedFile::fake()->image('huge.jpg')->size(11000), // homepage_block (promotional banner) caps at 10 MiB
             'collection' => 'homepage_block',
         ]);
 

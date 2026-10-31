@@ -13,12 +13,14 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 class SensitiveFieldMassAssignmentTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -31,11 +33,13 @@ class SensitiveFieldMassAssignmentTest extends TestCase
     {
         $fixture = $this->fixture();
         $stock = ProductStock::withoutGlobalScopes()->where('product_id', $fixture['product']->id)->firstOrFail();
+        // The injecting actor is the konsumen themselves, whose own checkout is Bank Transfer only.
+        $this->configureBankTransfer($fixture['agent']->id);
 
         $response = $this->actingAs($fixture['buyer'])
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
-                'payment_method_code' => 'cod',
+                'payment_method_code' => 'bank_transfer',
                 'items' => [[
                     'product_id' => $fixture['product']->id,
                     'quantity' => 1,
@@ -80,9 +84,7 @@ class SensitiveFieldMassAssignmentTest extends TestCase
     public function test_konsumen_cannot_mark_cod_paid_or_mutate_payment_authority(): void
     {
         $fixture = $this->fixture();
-        $order = $this->actingAs($fixture['buyer'])
-            ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', [
+        $order = $this->postOrderAs($fixture['buyer'], [
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $fixture['product']->id, 'quantity' => 1]],
                 ...$this->destination(),

@@ -13,6 +13,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /** Sales-Kurir-Sub inherits every Sales capability; these tests pin that parity and its cross-Sales isolation. */
@@ -20,6 +21,7 @@ class SalesKurirSubParityTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -66,7 +68,7 @@ class SalesKurirSubParityTest extends TestCase
 
     private function orderFor(User $buyer, Product $product): int
     {
-        $response = $this->actingAs($buyer)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->postOrderAs($buyer, [
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'P', 'recipient_phone' => '0812', 'address_line' => 'Jl. P',

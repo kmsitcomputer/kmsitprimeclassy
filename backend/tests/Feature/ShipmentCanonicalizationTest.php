@@ -16,6 +16,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -34,6 +35,7 @@ class ShipmentCanonicalizationTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -87,9 +89,7 @@ class ShipmentCanonicalizationTest extends TestCase
             $payload['delivery_date'] = $deliveryDate;
         }
 
-        $response = $this->actingAs($konsumen)
-            ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload);
+        $response = $this->postOrderAs($konsumen, $payload);
         $response->assertCreated();
 
         return Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));

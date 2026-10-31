@@ -52,12 +52,20 @@ class GoogleAuthTest extends TestCase
             return;
         }
 
-        $key = openssl_pkey_new([
+        $options = [
             'private_key_type' => OPENSSL_KEYTYPE_RSA,
             'private_key_bits' => 2048,
-        ]);
+        ];
+        // Windows PHP builds without OPENSSL_CONF cannot locate openssl.cnf, so key
+        // generation fails; fall back to the config bundled next to the PHP binary.
+        $bundledConfig = dirname(PHP_BINARY).DIRECTORY_SEPARATOR.'extras'.DIRECTORY_SEPARATOR.'ssl'.DIRECTORY_SEPARATOR.'openssl.cnf';
+        if (! getenv('OPENSSL_CONF') && is_file($bundledConfig)) {
+            $options['config'] = $bundledConfig;
+        }
 
-        if ($key === false || ! openssl_pkey_export($key, $privateKey)) {
+        $key = openssl_pkey_new($options);
+
+        if ($key === false || ! openssl_pkey_export($key, $privateKey, null, $options)) {
             throw new \RuntimeException('Unable to generate Google test RSA key.');
         }
 

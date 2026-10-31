@@ -14,6 +14,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,7 @@ class SelfPurchaseAndFeeAttributionTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -93,7 +95,7 @@ class SelfPurchaseAndFeeAttributionTest extends TestCase
 
     private function checkoutAs(User $actor, array $payload)
     {
-        return $this->actingAs($actor)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', $payload);
+        return $this->postOrderAs($actor, $payload);
     }
 
     /* ---------------- Checkout matrix (§29) ---------------- */
@@ -102,8 +104,10 @@ class SelfPurchaseAndFeeAttributionTest extends TestCase
     {
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 10000, 5000);
+        $this->configureBankTransfer($branch['agen']->id);
 
-        $this->checkoutAs($branch['konsumen'], $this->checkoutPayload($product))->assertCreated();
+        // A konsumen's own checkout is Bank Transfer only (Improvement 04).
+        $this->checkoutAs($branch['konsumen'], ['payment_method_code' => 'bank_transfer'] + $this->checkoutPayload($product))->assertCreated();
     }
 
     public function test_agent_can_checkout(): void
@@ -375,7 +379,10 @@ class SelfPurchaseAndFeeAttributionTest extends TestCase
         // controller at all for a konsumen actor (resolveKonsumen returns
         // the actor itself unconditionally); the commission still resolves
         // from the konsumen's own persisted referral chain.
+        // The forging actor must stay the konsumen, whose own checkout is Bank Transfer only.
+        $this->configureBankTransfer($branch['agen']->id);
         $payload = $this->checkoutPayload($product);
+        $payload['payment_method_code'] = 'bank_transfer';
         $payload['konsumen_id'] = $branch['sales']->id; // arbitrary — must be ignored
         $payload['agent_id'] = 999999;
         $payload['sales_id'] = 999999;

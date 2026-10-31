@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ class CheckoutCoordinateTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -79,8 +81,7 @@ class CheckoutCoordinateTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload($product, -6.9467471, 107.6737923));
+        $response = $this->postOrderAs($konsumen, $this->payload($product, -6.9467471, 107.6737923));
 
         $response->assertCreated();
     }
@@ -124,8 +125,7 @@ class CheckoutCoordinateTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload($product, -6.9467471, 107.6737923));
+        $response = $this->postOrderAs($konsumen, $this->payload($product, -6.9467471, 107.6737923));
 
         $response->assertCreated();
         $this->assertDatabaseHas('orders', [
@@ -159,8 +159,7 @@ class CheckoutCoordinateTest extends TestCase
             'routes' => [['summary' => ['distance' => 12345, 'duration' => 600]]],
         ], 200)]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload($product, $pickedLat, $pickedLng));
+        $response = $this->postOrderAs($konsumen, $this->payload($product, $pickedLat, $pickedLng));
 
         $response->assertCreated();
 

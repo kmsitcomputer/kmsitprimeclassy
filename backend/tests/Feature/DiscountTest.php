@@ -17,6 +17,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ class DiscountTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     private array $b;
 
@@ -69,8 +71,7 @@ class DiscountTest extends TestCase
             $payload['voucher_code'] = $voucherCode;
         }
 
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload)->assertCreated()->json('data.id');
+        $id = $this->postOrderAs($this->b['konsumen'], $payload)->assertCreated()->json('data.id');
 
         return Order::withoutGlobalScopes()->findOrFail($id);
     }

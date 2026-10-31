@@ -23,6 +23,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -37,6 +38,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     private array $b;
 
@@ -115,8 +117,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
 
     private function placeOrder(User $actor, int $qty, array $extra = []): Order
     {
-        $id = $this->actingAs($actor)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $this->payload($qty, $extra))
+        $id = $this->postOrderAs($actor, $this->payload($qty, $extra))
             ->assertCreated()->json('data.id');
 
         return Order::withoutGlobalScopes()->findOrFail($id);

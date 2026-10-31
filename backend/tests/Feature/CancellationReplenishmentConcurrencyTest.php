@@ -71,10 +71,11 @@ class CancellationReplenishmentConcurrencyTest extends TestCase
         $buyer = User::factory()->konsumen()->create(['agent_id' => $agent->id]);
 
         // Items created in [B, A] order — the reversal's pre-fix lock order.
+        // COD is staff-only (Improvement 04): the branch agen places it for the buyer.
         $order = app(OrderService::class)->createOrder($buyer, [
             ['product_id' => $products['b']->id, 'quantity' => 5],
             ['product_id' => $products['a']->id, 'quantity' => 5],
-        ], self::DESTINATION, $buyer, 'cod', null, 'cr-'.Str::uuid(), null, null, null, null, null);
+        ], self::DESTINATION, $agent, 'cod', null, 'cr-'.Str::uuid(), null, null, null, null, null);
 
         $service = app(SubStockRequestService::class);
         $request = $service->create($sub, 'replenish', [

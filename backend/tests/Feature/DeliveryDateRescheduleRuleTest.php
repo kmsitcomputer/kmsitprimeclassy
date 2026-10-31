@@ -15,6 +15,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     /** KURIR ONLINE (OpenRoute) canonical provider code. */
     private const COURIER_ONLINE = Shipment::PROVIDER_COURIER_ONLINE;
@@ -101,9 +103,7 @@ class DeliveryDateRescheduleRuleTest extends TestCase
             $payload['delivery_date'] = $items[0]['date'];
         }
 
-        $response = $this->actingAs($konsumen)
-            ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload);
+        $response = $this->postOrderAs($konsumen, $payload);
         $response->assertCreated();
 
         return Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));

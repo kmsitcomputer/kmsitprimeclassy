@@ -364,6 +364,8 @@ export interface AuthUser {
   status: string
   /** IMP-001: present only on the signed-in user's own record. */
   google_linked?: boolean
+  /** Akun Saya: present only on a Sales / Sales-Kurir-Sub's own record; null = no Korsal assigned. */
+  korsal_name?: string | null
   created_at: string
 }
 

@@ -27,6 +27,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,7 @@ class RefundLedgerInvariantTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -489,8 +491,7 @@ class RefundLedgerInvariantTest extends TestCase
             'type' => 'fixed', 'value' => 30000, 'is_active' => true,
         ]);
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', [
+        $orderId = $this->postOrderAs($konsumen, [
                 'payment_method_code' => 'cod',
                 'voucher_code' => 'ROW27',
                 'items' => [
@@ -517,8 +518,7 @@ class RefundLedgerInvariantTest extends TestCase
 
         $product = $this->product(100000, 20);
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', [
+        $orderId = $this->postOrderAs($konsumen, [
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $product->id, 'quantity' => 3]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',

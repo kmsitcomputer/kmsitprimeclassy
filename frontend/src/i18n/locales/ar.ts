@@ -186,6 +186,8 @@ export default {
     name: 'الاسم',
     email: 'البريد الإلكتروني',
     phone: 'رقم الهاتف',
+    korsalName: 'اسم الكورسال',
+    korsalUnassigned: 'لم يتم التعيين بعد',
     avatar: 'صورة الملف الشخصي',
     save: 'حفظ',
     saving: 'جارٍ الحفظ...',

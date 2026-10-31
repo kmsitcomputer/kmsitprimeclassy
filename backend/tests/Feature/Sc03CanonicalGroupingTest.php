@@ -14,6 +14,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ class Sc03CanonicalGroupingTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     /** @var array{agen:User, admin:User, konsumen:User, products:array<string, Product>} */
     private array $b;
@@ -85,9 +87,7 @@ class Sc03CanonicalGroupingTest extends TestCase
             $payload['delivery_date'] = $deliveryDate;
         }
 
-        $this->actingAs($this->b['konsumen'])
-            ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', $payload)->assertCreated();
+        $this->postOrderAs($this->b['konsumen'], $payload)->assertCreated();
 
         $order = Order::withoutGlobalScopes()->latest('id')->firstOrFail();
 

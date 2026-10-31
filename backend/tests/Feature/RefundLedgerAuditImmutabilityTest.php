@@ -25,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\Concerns\HasTestRegion;
+use Tests\Concerns\ResolvesCheckoutActor;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,7 @@ class RefundLedgerAuditImmutabilityTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use ResolvesCheckoutActor;
 
     protected function setUp(): void
     {
@@ -188,8 +190,7 @@ class RefundLedgerAuditImmutabilityTest extends TestCase
         ProductStock::create(['agent_id' => $this->owner->id, 'product_id' => $product->id, 'quantity_on_hand' => 0, 'quantity_reserved' => 0]);
         WarehouseStock::create(['agent_id' => $this->owner->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => 10]);
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
-            ->postJson('/api/v1/orders', [
+        $orderId = $this->postOrderAs($konsumen, [
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $product->id, 'quantity' => 3]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
