@@ -570,12 +570,15 @@ if (str_starts_with($role, 'sr-')) {
                 // reversed-line order genuinely exercises the pre-lock canonicalisation, racing a
                 // real Transit -> Sub execution in the sibling op. `stock_source`/`sub_location_id`
                 // drive the Sub-sourced MAJOR C race through the same real path.
+                // Improvement 04: COD is staff-only, so the branch's agen is the acting user
+                // while the BUYER stays the konsumen (createOrder's first argument).
                 $buyer = User::withoutGlobalScopes()->findOrFail((int) $extra['buyer_id']);
+                $agenActor = User::withoutGlobalScopes()->findOrFail((int) $buyer->agent_id);
                 $result = app(OrderService::class)->createOrder(
                     $buyer,
                     $extra['lines'],
                     $extra['destination'],
-                    $buyer,
+                    $agenActor,
                     'cod',
                     null,
                     'concurrency-'.bin2hex(random_bytes(8)),
@@ -603,6 +606,21 @@ if (str_starts_with($role, 'sr-')) {
                 $result = app(\App\Services\Payment\PaymentService::class)->verifyBankTransfer(
                     $verification, $actor, (bool) ($extra['approved'] ?? true), null,
                 );
+                break;
+            case 'invoice-ensure':
+                // PC-V2-GLM-AUDIT-CONTINUATION-001 (A): two concurrent lazy legacy
+                // issuances of the SAME order (invoice_issued_at stripped to
+                // simulate a pre-tracking order). The locked re-read inside
+                // ensureIssuedIfEligible serializes them: exactly one stamps
+                // invoice_issued_at and appends snapshot version 1; the loser
+                // sees the committed timestamp and neither re-issues nor
+                // duplicates a snapshot.
+                $order = \App\Models\Order::withoutGlobalScopes()->findOrFail($subjectId);
+                $issued = app(\App\Services\Invoice\InvoiceIssuanceService::class)->ensureIssuedIfEligible($order);
+                // The common tail reads $result?->status; keep $result untouched
+                // (this op returns a boolean) and report through the payload.
+                $result = null;
+                $payload['invoice_issued'] = $issued;
                 break;
             case 'submit-bank-proof':
                 // Finding #3 (bank-transfer leg): a proof submission racing a concurrent

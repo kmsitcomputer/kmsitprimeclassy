@@ -30,6 +30,10 @@ class OrderTest extends TestCase
     private function makeAgentBranch(): array
     {
         $agen = User::factory()->agen()->create();
+        // Codemod switched the order actor to the agen (staff-only COD), which
+        // exposes this fixture's missing self agent_id (OrderPolicy compares
+        // agent ids); every other branch fixture already sets it.
+        $agen->update(['agent_id' => $agen->id]);
         AgentProfile::create([
             'user_id' => $agen->id,
             'store_name' => 'Toko Kue Jaya',
@@ -81,7 +85,8 @@ class OrderTest extends TestCase
         ['agen' => $agen, 'sales' => $sales, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen, price: 150000, stockQty: 10, agentFee: 10000, salesFee: 5000);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [
                 // A malicious client also sends fabricated price/fee/total fields —
@@ -119,7 +124,8 @@ class OrderTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen, price: 100000, stockQty: 1);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 5]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -146,7 +152,8 @@ class OrderTest extends TestCase
         ProductStock::create(['agent_id' => $branchA['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
         ProductStock::create(['agent_id' => $branchB['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 25, 'quantity_reserved' => 0]);
 
-        $this->actingAs($branchA['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $this->actingAs($branchA['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branchA['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 4]],
             'recipient_name' => 'A', 'recipient_phone' => '0811', 'address_line' => 'Jl. A',
@@ -170,7 +177,8 @@ class OrderTest extends TestCase
         $branchB = $this->makeAgentBranch();
         $product = $this->makeProduct($branchA['agen'], price: 50000, stockQty: 10);
 
-        $order = $this->actingAs($branchA['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $order = $this->actingAs($branchA['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branchA['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'A', 'recipient_phone' => '0811', 'address_line' => 'Jl. A',
@@ -239,7 +247,8 @@ class OrderTest extends TestCase
         $agen->update(['agent_id' => $agen->id]);
         $product = $this->makeProduct($agen, price: 50000, stockQty: 5);
 
-        $created = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $created = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. A',

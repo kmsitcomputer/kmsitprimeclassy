@@ -18,6 +18,7 @@ use App\Services\Stock\SellableStockService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
+use Carbon\Carbon;
 
 /**
  * Every management report (Blueprint §Reports, repeated near-verbatim across
@@ -92,8 +93,32 @@ class ReportService
             $query->where('status', $filters['order_status']);
         }
         if (! empty($filters['search'])) {
-            $query->where('order_no', 'like', '%'.$filters['search'].'%');
+            $term = '%'.$filters['search'].'%';
+            $query->where(fn ($q) => $q->where('order_no', 'like', $term)
+                ->orWhere('recipient_name_snapshot', 'like', $term)
+                ->orWhereHas('konsumen', fn ($u) => $u->where('name', 'like', $term)));
         }
+        if (! empty($filters['receivable'])) {
+            $query->whereRaw(\App\Support\CollectibleReceivable::sql('orders').' > 0');
+        }
+        $businessToday = Carbon::now('Asia/Jakarta')->toDateString();
+        if (($filters['due_filter'] ?? null) === 'due') {
+            $query->whereDate('due_date', $businessToday);
+        } elseif (($filters['due_filter'] ?? null) === 'overdue') {
+            $query->whereDate('due_date', '<', $businessToday);
+        }
+        if (! empty($filters['due_date_from'])) {
+            $query->whereDate('due_date', '>=', $filters['due_date_from']);
+        }
+        if (! empty($filters['due_date_to'])) {
+            $query->whereDate('due_date', '<=', $filters['due_date_to']);
+        }
+
+        $summaryQuery = clone $query;
+        $summary = [
+            'count' => (clone $summaryQuery)->count(),
+            'outstanding' => (float) (clone $summaryQuery)->selectRaw('COALESCE(SUM('.\App\Support\CollectibleReceivable::sql('orders').'), 0) as aggregate')->value('aggregate'),
+        ];
 
         $paginated = $query->orderByDesc('created_at')->orderByDesc('id')
             ->paginate((int) ($filters['per_page'] ?? 15));
@@ -125,6 +150,12 @@ class ReportService
                 'total_paid' => $summary['total_paid'],
                 'remaining' => $summary['remaining_balance'],
                 'payment_status' => $summary['payment_status'],
+                // Improvement 10 (Owner-approved centralized Piutang view): the
+                // per-order due date travels with the same row so the menu can
+                // filter Belum Lunas / Jatuh Tempo / Terlambat without a second
+                // financial source — this stays the SAME finance-orders truth.
+                'due_date' => $order->due_date?->toDateString(),
+                'is_overdue' => $order->due_date !== null && $order->due_date->toDateString() < Carbon::now('Asia/Jakarta')->toDateString(),
                 'refund' => $summary['refund_amount'],
                 'additional_payment' => $summary['additional_payment_amount'],
                 'fees' => collect($allowedFeeRoles)->mapWithKeys(fn ($role) => [$role => (float) ($fees[$role] ?? 0)])->all(),
@@ -137,6 +168,8 @@ class ReportService
                 'current_page' => $paginated->currentPage(),
                 'last_page' => $paginated->lastPage(),
                 'total' => $paginated->total(),
+                'per_page' => $paginated->perPage(),
+                'summary' => $summary,
             ],
         ];
     }

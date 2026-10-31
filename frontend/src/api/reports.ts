@@ -37,6 +37,10 @@ export interface ReportFilters {
   search?: string
   page?: number
   per_page?: number
+  receivable?: boolean
+  due_filter?: 'due' | 'overdue'
+  due_date_from?: string
+  due_date_to?: string
 }
 
 function reportUrl(path: string, filters: ReportFilters, exportXlsx: boolean): string {
@@ -165,6 +169,10 @@ export interface FinanceOrderRow {
   total_paid: number
   remaining: number
   payment_status: string
+  /** Improvement 10: per-order due date for the centralized Piutang menu. */
+  due_date: string | null
+  /** Improvement 10: due date already in the past (outstanding orders only flagged by the backend when relevant). */
+  is_overdue: boolean
   refund: number
   additional_payment: number
   /** Allowed fee totals by beneficiary role (agent/sales/courier) per finance authority. */
@@ -173,7 +181,7 @@ export interface FinanceOrderRow {
 
 export interface FinanceOrdersResult {
   orders: FinanceOrderRow[]
-  meta: { current_page: number; last_page: number; total: number }
+  meta: { current_page: number; last_page: number; total: number; per_page: number; summary: { count: number; outstanding: number } }
 }
 
 export async function getFinanceOrders(filters: ReportFilters = {}): Promise<FinanceOrdersResult> {

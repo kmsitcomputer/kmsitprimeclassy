@@ -55,6 +55,7 @@ class VoucherTest extends TestCase
     private function placeOrder(array $items, ?string $voucherCode = null): Order
     {
         $payload = [
+            'konsumen_id' => $this->b['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => $items,
             'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
@@ -64,7 +65,7 @@ class VoucherTest extends TestCase
             $payload['voucher_code'] = $voucherCode;
         }
 
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', $payload)->assertCreated()->json('data.id');
 
         return Order::withoutGlobalScopes()->findOrFail($id);
@@ -108,8 +109,9 @@ class VoucherTest extends TestCase
 
     private function placeOrderWithVoucherExpectingFailure(string $code): void
     {
-        $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['productA']->id, 'quantity' => 1]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
@@ -121,8 +123,9 @@ class VoucherTest extends TestCase
     {
         Voucher::create(['agent_id' => $this->b['agen']->id, 'code' => 'AONLY', 'name' => 'Kue A only', 'type' => 'fixed', 'value' => 10000, 'is_active' => true, 'product_id' => $this->b['productA']->id]);
 
-        $response = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $response = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['productB']->id, 'quantity' => 1]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',

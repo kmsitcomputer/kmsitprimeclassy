@@ -46,6 +46,19 @@ export interface HomepageBlockContent {
   articles?: HomepageContentArticle[]
   categories?: HomepageContentCategory[]
   products?: HomepageContentProduct[]
+
+  // Native CMS blocks: social media, WhatsApp, marketplace
+  layout?: 'cards' | 'compact'
+  mode?: 'card' | 'floating'
+  phone?: string
+  message?: string
+  platforms?: Partial<Record<
+    'instagram' | 'tiktok' | 'facebook' | 'tokopedia' | 'shopee',
+    {
+      url?: string
+      enabled?: boolean
+    }
+  >>
 }
 
 export interface HomepageBlock {

@@ -31,6 +31,7 @@ class ReportController extends Controller
             'sales_id', 'korsal_id', 'courier_id', 'status', 'item_status', 'order_status', 'search',
             // Report dimensions for the consolidated network summary.
             'payment_method', 'product_id',
+            'receivable', 'due_filter', 'due_date_from', 'due_date_to',
             // super_admin-only narrowing — see ReportService::scopeToActor's
             // docblock; every other actor's own agent_id filter is never
             // overridable by this, no matter what a request sends.

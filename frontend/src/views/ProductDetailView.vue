@@ -74,6 +74,22 @@ const unitPrice = computed(() => {
   return product.value.base_price ? parseFloat(product.value.base_price) : 0
 })
 
+/**
+ * Price shown to everyone, including anonymous visitors. A product with several variations shows its
+ * range until a variation is picked (never "Rp 0"); a single variation shows its own price; a picked
+ * variation shows its actual price. Checkout re-validates the real price server-side.
+ */
+const priceLabel = computed(() => {
+  const p = product.value
+  if (!p) return ''
+  if (!p.has_variations || selectedVariation.value) return formatRupiah(unitPrice.value)
+  const prices = (p.variations ?? []).map((v) => parseFloat(v.price)).filter((n) => !Number.isNaN(n))
+  if (!prices.length) return '—'
+  const lo = Math.min(...prices)
+  const hi = Math.max(...prices)
+  return lo === hi ? formatRupiah(lo) : `${formatRupiah(lo)} – ${formatRupiah(hi)}`
+})
+
 const stockQuantity = computed<number | undefined>(() => {
   if (!product.value) return undefined
   return product.value.has_variations ? selectedVariation.value?.stock?.available : product.value.stock?.available
@@ -169,7 +185,7 @@ function goToLoginToBuy() {
           {{ product.category.name }}
         </p>
         <h1 class="mt-1 font-display text-2xl font-semibold text-stone-900 dark:text-stone-50">{{ product.name }}</h1>
-        <p class="mt-2 font-display text-2xl font-semibold text-brand-700 dark:text-brand-300">{{ formatRupiah(unitPrice) }}</p>
+        <p class="mt-2 font-display text-2xl font-semibold text-brand-700 dark:text-brand-300">{{ priceLabel }}</p>
 
         <div class="mt-3">
           <StockBadge :quantity="stockQuantity" :logged-in="auth.isLoggedIn" />

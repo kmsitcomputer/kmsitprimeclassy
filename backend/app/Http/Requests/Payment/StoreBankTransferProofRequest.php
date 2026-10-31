@@ -14,7 +14,7 @@ class StoreBankTransferProofRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'proof' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
+            'proof' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ];
     }
 }

@@ -290,6 +290,14 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'keuangan'] },
     },
     {
+      // Improvement 10 / Owner-approved centralized Piutang menu (§8B): Admin +
+      // Keuangan outstanding receivables list.
+      path: '/dashboard/piutang',
+      name: 'receivables',
+      component: () => import('@/views/dashboard/ReceivablesView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'admin', 'keuangan'] },
+    },
+    {
       path: '/dashboard/reports/customers',
       name: 'customers-report',
       component: () => import('@/views/dashboard/CustomersReportView.vue'),

@@ -304,7 +304,8 @@ class AgentShippingCourierSettingsTest extends TestCase
             ['name' => 'JNE', 'code' => 'jne', 'service' => 'REG', 'description' => 'Reguler', 'cost' => 20000, 'etd' => '1-2'],
         ]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'courier' => 'sicepat', 'service' => 'REG', ...$this->destination(),
         ]);

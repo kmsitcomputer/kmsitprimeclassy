@@ -97,6 +97,14 @@ export interface PaymentTransaction {
   bank_transfer_verification: {
     status: string
     proof_url: string | null
+    proof_private?: boolean
+    channel?: 'transfer' | 'cash'
+    submitted_amount?: string | null
+    verified_amount?: string | null
+    amount_adjustment_reason?: string | null
+    cash_received_by?: PaymentPayer | null
+    cash_received_at?: string | null
+    receipt_reference?: string | null
     rejection_reason: string | null
     submitted_on_behalf?: boolean
     submitted_by?: PaymentPayer | null
@@ -165,6 +173,11 @@ export interface Order {
   voucher_id?: number | null
   /** A1-15: server-derived capability — the order's own konsumen or a same-branch financial role. */
   viewer_can_download_invoice?: boolean
+  /** Set once, when the invoice is issued (COD: at creation; transfer: first verified payment). Invoice number = order_no. */
+  invoice_issued_at?: string | null
+  /** Per-order due date (YYYY-MM-DD) and its overdue flag. */
+  due_date?: string | null
+  is_overdue?: boolean
   konsumen_id?: number
   /** G17: which authoritative origin owns this order. 'crm' orders have no account buyer. */
   buyer_origin?: 'account' | 'crm'

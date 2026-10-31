@@ -6,7 +6,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Laporan C — Staf Worksheet (SimpleV2 47-column staff sheet adapted to PrimeClassy).
+ * Laporan C — Staf Worksheet (SimpleV2 47 columns plus AV Status Pesanan).
  *
  * Mirrors the SimpleV2 Google-Sheets payload geometry (verified against
  * simpelv2.git HEAD: TransactionExport.php:117-161 / TransactionService.php:937-985):
@@ -89,6 +89,7 @@ class OrderStaffWorksheetService
         'regency' => 'Kota/Kabupaten',
         'district' => 'Kecamatan',
         'village' => 'Kelurahan/Desa',
+        'order_status' => 'Status Pesanan',
     ];
 
     /**
@@ -221,7 +222,8 @@ class OrderStaffWorksheetService
             ->selectRaw("COALESCE(o.province_snapshot, '-') as province")
             ->selectRaw("COALESCE(o.regency_snapshot, '-') as regency")
             ->selectRaw("COALESCE(o.district_snapshot, '-') as district")
-            ->selectRaw("COALESCE(o.village_snapshot, '-') as village");
+            ->selectRaw("COALESCE(o.village_snapshot, '-') as village")
+            ->selectRaw('o.status as order_status');
 
         if ($agentId !== null) {
             $query->where('o.agent_id', $agentId);

@@ -16,7 +16,7 @@ return [
         'cms_article_cover' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
             'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'max_size' => 4 * 1024 * 1024,
+            'max_size' => 5 * 1024 * 1024,
             'max_width' => 4000,
             'max_height' => 4000,
         ],
@@ -24,7 +24,7 @@ return [
         'cms_page_cover' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
             'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'max_size' => 4 * 1024 * 1024,
+            'max_size' => 5 * 1024 * 1024,
             'max_width' => 4000,
             'max_height' => 4000,
         ],
@@ -32,9 +32,9 @@ return [
         // Images inserted inline by CKEditor 5's own upload adapter — no
         // fixed owner at upload time (see the migration's mediable_* docblock).
         'cms_content' => [
-            'mimes' => ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-            'extensions' => ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-            'max_size' => 4 * 1024 * 1024,
+            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
+            'max_size' => 5 * 1024 * 1024,
             'max_width' => 4000,
             'max_height' => 4000,
         ],
@@ -42,7 +42,7 @@ return [
         'product_image' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
             'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'max_size' => 4 * 1024 * 1024,
+            'max_size' => 5 * 1024 * 1024,
             'max_width' => 4000,
             'max_height' => 4000,
         ],
@@ -50,7 +50,7 @@ return [
         'homepage_block' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
             'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'max_size' => 2 * 1024 * 1024,
+            'max_size' => 10 * 1024 * 1024,
             'max_width' => 4000,
             'max_height' => 4000,
         ],
@@ -79,18 +79,18 @@ return [
         'shipment_proof' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
             'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'max_size' => 4 * 1024 * 1024,
-            'max_width' => 4000,
-            'max_height' => 4000,
+            'max_size' => 5 * 1024 * 1024,
+            'max_width' => 8000,
+            'max_height' => 8000,
         ],
 
         // "Konsumen dapat memasukan bukti pembayaran COD" — the photo a konsumen submits, pending Admin/Agen confirmation.
         'cod_payment_proof' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
             'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'max_size' => 4 * 1024 * 1024,
-            'max_width' => 4000,
-            'max_height' => 4000,
+            'max_size' => 5 * 1024 * 1024,
+            'max_width' => 8000,
+            'max_height' => 8000,
         ],
 
         // Profile photo — the one collection every authenticated role may

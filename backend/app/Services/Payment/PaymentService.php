@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\PaymentTransaction;
 use App\Models\User;
+use App\Services\Invoice\InvoiceIssuanceService;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Media\MediaService;
 use Illuminate\Http\UploadedFile;
@@ -29,12 +30,16 @@ use Illuminate\Support\Str;
  *   - manual (bank transfer): requires Super Admin to have configured a
  *     destination account first — never fabricates one. A submitted proof
  *     puts the order at 'pending_verification'; only an explicit
- *     Admin/Agen verifyBankTransfer() call can move it to 'paid'/'failed'.
+ *     server-authorized verification can move it to 'paid'/'failed'.
  *     The order cannot advance to 'diproses' until then.
  */
 class PaymentService
 {
+    /** Legacy proofs live on this PUBLIC disk (kept readable); NEW proofs use PRIVATE_DISK. */
     private const DISK = 'public';
+
+    /** Private disk (storage/app) — served only through the authorized proof endpoint. */
+    public const PRIVATE_DISK = 'local';
 
     private const PROOF_DIRECTORY = 'payments/bank-transfer-proofs';
 
@@ -211,7 +216,7 @@ class PaymentService
             }
 
             $onBehalf = $submittedBy !== null && $submittedBy->id !== $order->konsumen_id;
-            $path = $proof->store(self::PROOF_DIRECTORY, self::DISK);
+            $path = $proof->store(self::PROOF_DIRECTORY, self::PRIVATE_DISK);
             $payload = $current->raw_payload ?? [];
 
             $verification = BankTransferVerification::updateOrCreate(
@@ -221,6 +226,8 @@ class PaymentService
                     'account_name' => $payload['account_name'] ?? '-',
                     'account_number' => $payload['account_number'] ?? '-',
                     'proof_image_path' => $path,
+                    'proof_disk' => self::PRIVATE_DISK,
+                    'submitted_amount' => $current->amount,
                     'status' => 'pending',
                     'verified_by' => null,
                     'verified_at' => null,
@@ -252,7 +259,7 @@ class PaymentService
     }
 
     /**
-     * Admin/Agen-only action (authorized in the controller) — the sole way a manual transfer ever becomes 'paid'.
+     * Server-policy-authorized action (currently Super Admin/Keuangan) — the sole way a manual transfer becomes paid.
      *
      * Concurrency-hardened (audit finding): the verification row is LOCKED and re-read inside the
      * transaction, and the order row lock is taken on the same row OrderService::cancel serializes on.
@@ -260,9 +267,9 @@ class PaymentService
      * second one re-reads the (now non-pending) persisted row under the lock and refuses — the amount
      * is applied exactly once.
      */
-    public function verifyBankTransfer(BankTransferVerification $verification, User $actor, bool $approved, ?string $rejectionReason = null): BankTransferVerification
+    public function verifyBankTransfer(BankTransferVerification $verification, User $actor, bool $approved, ?string $rejectionReason = null, ?float $verifiedAmount = null, ?string $adjustmentReason = null): BankTransferVerification
     {
-        return DB::transaction(function () use ($verification, $actor, $approved, $rejectionReason) {
+        return DB::transaction(function () use ($verification, $actor, $approved, $rejectionReason, $verifiedAmount, $adjustmentReason) {
             // Locking re-read of the verification row: serialize on the SAME row the proof
             // submission (and a concurrent verify) already locks, so a stale in-memory model
             // can never be double-applied. Repeated processing of an already-finalized
@@ -274,17 +281,48 @@ class PaymentService
                 throw new ApiException(__('messages.payment.already_verified'), 422);
             }
 
-            $verification->update([
-                'status' => $approved ? 'verified' : 'rejected',
-                'verified_by' => $actor->id,
-                'verified_at' => now(),
-                'rejection_reason' => $approved ? null : $rejectionReason,
-            ]);
+            // Separation of duties: whoever submitted the record or received the cash can never approve it.
+            if ($approved && in_array($actor->id, array_filter([$verification->submitted_by_user_id, $verification->cash_received_by_user_id]), true)) {
+                throw new ApiException(__('messages.payment.self_verification_forbidden'), 403);
+            }
 
             $transaction = PaymentTransaction::query()->findOrFail($verification->payment_transaction_id);
             // Locking re-read of the ORDER too — same row cancel() locks — so a concurrent
             // cancellation cannot race between the money application and its status write.
             $order = Order::query()->whereKey($transaction->order_id)->lockForUpdate()->firstOrFail();
+
+            // The submitted nominal is preserved untouched (payment_transactions.amount); what Keuangan
+            // actually confirmed is stored separately. Validation runs BEFORE any write.
+            $submitted = round((float) $transaction->amount, 2);
+            $applied = $submitted;
+            if ($approved && $verifiedAmount !== null) {
+                $applied = round($verifiedAmount, 2);
+                if ($applied <= 0) {
+                    throw new ApiException(__('messages.system.validation_failed'), 422, ['verified_amount' => __('messages.system.field_invalid')]);
+                }
+                $outstanding = round((float) PaymentSummaryService::summarize($order)['remaining_balance'], 2);
+                if ($applied > $outstanding + 0.004) {
+                    // The locked Order is the current financial boundary. A submitted
+                    // amount is evidence, not authority to exceed what is still owed.
+                    throw new ApiException(__('messages.payment.verified_amount_exceeds_remaining'), 422, ['verified_amount' => __('messages.payment.verified_amount_exceeds_remaining')]);
+                }
+                if ($applied > $submitted + 0.004) {
+                    throw new ApiException(__('messages.payment.verified_amount_exceeds_submitted'), 422, ['verified_amount' => __('messages.payment.verified_amount_exceeds_submitted')]);
+                }
+                if ($applied !== $submitted && trim((string) $adjustmentReason) === '') {
+                    throw new ApiException(__('messages.payment.adjustment_reason_required'), 422, ['amount_adjustment_reason' => __('messages.system.field_required')]);
+                }
+            }
+
+            $verification->update([
+                'status' => $approved ? 'verified' : 'rejected',
+                'verified_by' => $actor->id,
+                'verified_at' => now(),
+                'rejection_reason' => $approved ? null : $rejectionReason,
+                'submitted_amount' => $verification->submitted_amount ?? $submitted,
+                'verified_amount' => $approved ? $applied : null,
+                'amount_adjustment_reason' => $approved && $applied !== $submitted ? $adjustmentReason : null,
+            ]);
 
             $transaction->update([
                 'status' => $approved ? PaymentTransactionStatus::PAID->value : PaymentTransactionStatus::FAILED->value,
@@ -292,11 +330,9 @@ class PaymentService
             ]);
 
             if ($approved) {
-                // Accumulate the verified amount onto the order. A full
-                // bank_transfer settles it in one step (paid == total => PAID);
-                // a DP only ever reaches 'partially_paid' until the outstanding
-                // balance is settled — DP is never marked PAID here.
-                $this->applyPaymentToOrder($order, (float) $transaction->amount);
+                // Accumulate the VERIFIED amount onto the order. remaining > 0 => 'partially_paid';
+                // a DP only ever reaches 'partially_paid' until the outstanding balance is settled.
+                $this->applyPaymentToOrder($order, $applied);
             } elseif ((float) $order->paid_amount > 0) {
                 // A rejected *settlement* proof on an already partially-paid
                 // order must not mark the order 'failed' — it just stops being
@@ -308,10 +344,19 @@ class PaymentService
 
             ActivityLogger::log($actor->id, $order, 'payment.bank_transfer_verified', $rejectionReason, [
                 'approved' => $approved, 'payment_transaction_id' => $transaction->id,
-                'amount' => (float) $transaction->amount,
+                'amount' => $submitted,
+                'submitted_amount' => $submitted,
+                'verified_amount' => $approved ? $applied : null,
+                'amount_adjustment_reason' => $approved && $applied !== $submitted ? $adjustmentReason : null,
+                'channel' => $verification->channel,
                 'paid_amount' => (float) $order->paid_amount,
                 'remaining_amount' => (float) $order->remaining_amount,
             ]);
+
+            if ($approved) {
+                // First verified payment issues the (single) invoice; later ones only append a snapshot.
+                app(InvoiceIssuanceService::class)->syncAfterChange($order, 'payment_verified', $actor->id);
+            }
 
             return $verification->fresh();
         });
@@ -570,6 +615,138 @@ private function pendingSettlementFor(int $orderId): ?PaymentTransaction
         ->lockForUpdate()
         ->first();
 }
+
+    /**
+     * Improvement 05/06/08 — post-order installment / payoff / cash receipt. Creates ONE pending
+     * payment transaction for an explicit nominal; the money reaches the order only when Keuangan
+     * verifies it (verifyBankTransfer), so a pending or rejected record never reduces the receivable.
+     *
+     * Rules (all re-checked under the canonical Order lock, never trusting the route-bound model):
+     *  - not COD (COD is collected via the COD proof flow), not cancelled, and the order must already
+     *    be in fulfilment (diproses/dikirim/terkirim) — the FIRST payment goes through the checkout flow;
+     *  - 0 < amount <= remaining receivable (no silent overpayment);
+     *  - at most one unresolved manual record per order (a pending installment with the same nominal is
+     *    returned as an idempotent replay; any other pending record refuses with already_processed);
+     *  - `cash` additionally records who physically received the money and when; the recorder can never
+     *    verify it (see verifyBankTransfer).
+     *
+     * @param  array{receipt_reference?:?string, received_at?:?string, received_by_user_id?:?int}  $cash
+     * @return array{0: PaymentTransaction, 1: bool} [transaction, wasReplay]
+     */
+    public function requestInstallment(Order $order, User $actor, float $amount, string $channel = 'transfer', array $cash = [], ?UploadedFile $cashPhoto = null): array
+    {
+        $amount = round($amount, 2);
+
+        return DB::transaction(function () use ($order, $actor, $amount, $channel, $cash, $cashPhoto) {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($order->paymentMethod?->type === 'cod') {
+                throw new ApiException(__('messages.payment.installment_not_for_cod'), 422);
+            }
+            if (! in_array($order->status, ['diproses', 'dikirim', 'terkirim'], true)) {
+                throw new ApiException(__('messages.payment.installment_not_allowed_yet'), 422);
+            }
+
+            $remaining = round((float) $order->remaining_amount, 2);
+            if ($remaining <= 0) {
+                throw new ApiException(__('messages.payment.nothing_to_settle'), 422);
+            }
+            if ($amount <= 0 || $amount > $remaining) {
+                throw new ApiException(__('messages.payment.installment_amount_invalid'), 422, ['amount' => __('messages.payment.installment_amount_invalid')]);
+            }
+
+            $methodId = PaymentMethod::query()->where('code', 'bank_transfer')->value('id');
+            $pending = PaymentTransaction::query()
+                ->where('order_id', $order->id)->where('payment_method_id', $methodId)
+                ->where('type', 'payment')->where('status', PaymentTransactionStatus::PENDING->value)
+                ->orderByDesc('id')->lockForUpdate()->first();
+
+            if ($pending) {
+                $sameNominal = round((float) $pending->amount, 2) === $amount
+                    && ($pending->raw_payload['note'] ?? null) === 'installment'
+                    && ($pending->raw_payload['channel'] ?? 'transfer') === $channel
+                    && (int) ($pending->raw_payload['requested_by'] ?? 0) === $actor->id;
+                if ($sameNominal) {
+                    return [$pending, true];
+                }
+
+                throw new ApiException(__('messages.payment.already_processed'), 422);
+            }
+
+            $method = PaymentMethod::query()->where('code', 'bank_transfer')->firstOrFail();
+            $config = $this->activeConfigFor($method, $order->agent_id);
+
+            $transaction = PaymentTransaction::create([
+                'order_id' => $order->id,
+                'payment_method_id' => $method->id,
+                'type' => 'payment',
+                'amount' => $amount,
+                'status' => PaymentTransactionStatus::PENDING->value,
+                'gateway_reference' => ($channel === 'cash' ? 'CS-' : 'IN-').strtoupper(Str::random(10)),
+                'raw_payload' => [
+                    'bank_name' => $config->config['bank_name'] ?? null,
+                    'account_name' => $config->config['account_name'] ?? null,
+                    'account_number' => $config->config['account_number'] ?? null,
+                    'note' => 'installment',
+                    'channel' => $channel,
+                    'requested_by' => $actor->id,
+                    'cash' => $channel === 'cash' ? $cash : null,
+                ],
+            ]);
+
+            if ($channel === 'cash') {
+                // The cash receipt is recorded together with the request: who physically received the money
+                // and when. It is pending until Keuangan verifies it — the recorder/receiver can never do so.
+                BankTransferVerification::create([
+                    'payment_transaction_id' => $transaction->id,
+                    'bank_name' => 'TUNAI', 'account_name' => '-', 'account_number' => '-',
+                    'proof_image_path' => $cashPhoto ? $cashPhoto->store(self::PROOF_DIRECTORY, self::PRIVATE_DISK) : '',
+                    'proof_disk' => self::PRIVATE_DISK,
+                    'status' => 'pending',
+                    'channel' => 'cash',
+                    'submitted_amount' => $amount,
+                    'submitted_by_user_id' => $actor->id,
+                    'submitted_on_behalf' => $actor->id !== $order->konsumen_id,
+                    'paid_by_role' => $actor->isRole('korsal') ? 'korsal' : ($actor->isRole('sales', 'sales-kurir-sub') ? 'sales' : 'konsumen'),
+                    'submitted_at' => now(),
+                    'cash_received_by_user_id' => $cash['received_by_user_id'] ?? $actor->id,
+                    'cash_received_at' => $cash['received_at'] ?? now(),
+                    'receipt_reference' => $cash['receipt_reference'] ?? null,
+                ]);
+                $order->update(['payment_status' => 'pending_verification']);
+            }
+
+            ActivityLogger::log($actor->id, $order, 'payment.installment_requested', null, [
+                'payment_transaction_id' => $transaction->id, 'amount' => $amount, 'channel' => $channel,
+                'remaining_amount' => $remaining, 'actor_role' => $actor->role?->slug,
+            ]);
+
+            return [$transaction, false];
+        });
+    }
+
+    /** Per-order due date (Admin/Keuangan). Audited: old value, new value, reason, actor, timestamp. */
+    public function setDueDate(Order $order, User $actor, string $dueDate, string $reason): Order
+    {
+        return DB::transaction(function () use ($order, $actor, $dueDate, $reason) {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $new = \Illuminate\Support\Carbon::parse($dueDate)->toDateString();
+            $old = $order->due_date?->toDateString();
+
+            if ($old === $new) {
+                return $order;
+            }
+
+            $order->forceFill(['due_date' => $new])->save();
+            \App\Models\OrderDueDateChange::create([
+                'order_id' => $order->id, 'old_due_date' => $old, 'new_due_date' => $new,
+                'reason' => $reason, 'changed_by' => $actor->id,
+            ]);
+            ActivityLogger::log($actor->id, $order, 'order.due_date_changed', $reason, ['old' => $old, 'new' => $new]);
+
+            return $order->fresh();
+        });
+    }
 
     /**
      * Adds a verified payment amount onto the order's running paid_amount and

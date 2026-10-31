@@ -95,14 +95,26 @@ class ReportSystemTest extends TestCase
 
     private function placeOrder(User $konsumen, Product $product, int $qty): Order
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        // Improvement 04: a real konsumen buyer cannot use COD — the branch agen
+        // places the order on their behalf. A staff buyer (agen/korsal/sales/SKS
+        // self-purchase, as several report fixtures here use) must act AS
+        // THEMSELVES: OrderPolicy's on-behalf branch only accepts a
+        // konsumen-role target, while the self-purchase branch covers staff.
+        $payload = [
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => $qty]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
             'village_id' => $this->seedTestVillage(),
             'latitude' => -6.914744, 'longitude' => 107.609810,
             'delivery_date' => now()->addDays(3)->toDateString(),
-        ]);
+        ];
+        $actor = $konsumen;
+        if ($konsumen->isRole('konsumen')) {
+            $actor = User::query()->findOrFail($konsumen->agent_id);
+            $payload['konsumen_id'] = $konsumen->id;
+        }
+        $response = $this->actingAs($actor)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', $payload);
         $response->assertCreated();
 
         return Order::withoutGlobalScopes()->findOrFail($response->json('data.id'));
@@ -209,7 +221,8 @@ class ReportSystemTest extends TestCase
             'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
         ]);
 
-        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderResponse = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 200000,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -251,7 +264,8 @@ class ReportSystemTest extends TestCase
             'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
         ]);
 
-        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderResponse = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => 5],
@@ -475,7 +489,8 @@ class ReportSystemTest extends TestCase
         $productA = $this->makeProduct($branch['agen'], 'Brownies', 40000, 10);
         $productB = $this->makeProduct($branch['agen'], 'Cake', 60000, 10);
 
-        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => 1],
@@ -532,7 +547,8 @@ class ReportSystemTest extends TestCase
             'agent_fee' => 1000, 'sales_fee' => 1000, 'courier_fee' => 4000,
         ])->assertOk();
 
-        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => 1],
@@ -742,7 +758,8 @@ class ReportSystemTest extends TestCase
             'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
         ]);
 
-        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderResponse = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 300000,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

@@ -71,7 +71,11 @@ class OrderFulfillmentTest extends TestCase
      */
     private function placeTwoProductOrder(User $agen, User $konsumen, Product $productA, int $qtyA, Product $productB, int $qtyB, string $paymentMethodCode = 'cod', bool $splitDeliveryDates = false): array
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        // Improvement 04: COD/DP are staff-only — the branch agen places those on
+        // behalf of the buyer; bank_transfer stays the buyer's own method.
+        $staffOnly = in_array($paymentMethodCode, ['cod', 'down_payment'], true);
+        $response = $this->actingAs($staffOnly ? $agen : $konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            ...($staffOnly ? ['konsumen_id' => $konsumen->id] : []),
             'payment_method_code' => $paymentMethodCode,
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => $qtyA],
@@ -131,7 +135,12 @@ class OrderFulfillmentTest extends TestCase
     /** @return array{order: Order, item: OrderItem} */
     private function placeSingleItemOrder(User $konsumen, Product $product, int $quantity, string $paymentMethodCode = 'cod'): array
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        // Improvement 04: COD/DP are staff-only — the buyer's branch agen places
+        // those on behalf of the buyer; bank_transfer stays the buyer's own method.
+        $staffOnly = in_array($paymentMethodCode, ['cod', 'down_payment'], true);
+        $actor = $staffOnly ? User::query()->findOrFail($konsumen->agent_id) : $konsumen;
+        $response = $this->actingAs($actor)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            ...($staffOnly ? ['konsumen_id' => $konsumen->id] : []),
             'payment_method_code' => $paymentMethodCode,
             'items' => [['product_id' => $product->id, 'quantity' => $quantity]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -149,7 +158,11 @@ class OrderFulfillmentTest extends TestCase
     /** @return array{order: Order, item: OrderItem} */
     private function placeDpOrder(User $konsumen, Product $product, float $dpAmount): array
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        // Codemod left $agen undefined here: resolve the buyer's branch agen
+        // (staff-only DP per Improvement 04) instead of the missing parameter.
+        $agen = User::query()->findOrFail($konsumen->agent_id);
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => $dpAmount,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -529,7 +542,8 @@ class OrderFulfillmentTest extends TestCase
         $productA = $this->makeProduct($agen, 'Produk Utama', 400000, 10);
         $productB = $this->makeProduct($agen, 'Produk Tambahan', 100000, 10);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 200000,
             'items' => [['product_id' => $productA->id, 'quantity' => 1], ['product_id' => $productB->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -564,7 +578,8 @@ class OrderFulfillmentTest extends TestCase
         $productA = $this->makeProduct($agen, 'Produk Utama', 400000, 10);
         $productB = $this->makeProduct($agen, 'Produk Kurang', 100000, 10);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 200000,
             'items' => [['product_id' => $productA->id, 'quantity' => 1], ['product_id' => $productB->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -596,7 +611,8 @@ class OrderFulfillmentTest extends TestCase
         $productA = $this->makeProduct($agen, 'Produk Tetap', 200000, 10);
         $productB = $this->makeProduct($agen, 'Produk Dibatalkan', 300000, 10);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 300000,
             'items' => [['product_id' => $productA->id, 'quantity' => 1], ['product_id' => $productB->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

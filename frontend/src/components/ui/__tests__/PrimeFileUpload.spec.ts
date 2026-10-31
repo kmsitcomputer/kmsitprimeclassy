@@ -24,9 +24,9 @@ describe('PrimeFileUpload', () => {
   it('rejects an unsupported MIME type and an oversize file without emitting', async () => {
     const w = mount(PrimeFileUpload, { props: { modelValue: [], maxSizeMb: 1 } })
     await pick(w, [img('x.pdf', 10, 'application/pdf')])
-    expect(w.find('[data-testid="pfu-error"]').text()).toContain('Jenis file tidak didukung')
+    expect(w.find('[data-testid="pfu-error"]').text()).toContain('Format gambar yang diizinkan: JPG, JPEG, PNG, WebP.')
     await pick(w, [img('big.jpg', 2 * 1024 * 1024)])
-    expect(w.find('[data-testid="pfu-error"]').text()).toContain('maksimal 1MB')
+    expect(w.find('[data-testid="pfu-error"]').text()).toContain('Ukuran gambar maksimal 1 MB.')
     expect(w.emitted('update:modelValue')).toBeUndefined()
   })
 

@@ -88,6 +88,17 @@ class CheckoutTest extends TestCase
         $this->assertFalse($authSteps['account']['active']);
     }
 
+    public function test_referral_is_never_a_standalone_checkout_step_for_staff(): void
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+
+        $response = $this->actingAs($agen)->getJson('/api/v1/checkout/steps')->assertOk();
+        $steps = collect($response->json('data.steps'))->keyBy('key');
+        $this->assertFalse($steps['referral']['active']);
+        $this->assertTrue($response->json('data.on_behalf_of_konsumen'));
+    }
+
     public function test_steps_endpoint_keeps_shipping_step_active_for_pickup_without_carrier_provider(): void
     {
         ['konsumen' => $konsumen] = $this->makeAgentBranch();
@@ -193,7 +204,8 @@ class CheckoutTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen, price: 100000, stockQty: 5);
 
-        $this->actingAs($konsumen)->postJson('/api/v1/orders', [
+        $this->actingAs($agen)->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),
@@ -206,18 +218,23 @@ class CheckoutTest extends TestCase
         $product = $this->makeProduct($agen, price: 100000, stockQty: 5);
         $key = (string) Str::uuid();
 
+        // The codemod pattern used throughout this file: COD is staff-only, so
+        // the branch agen places the order on behalf of the buyer. The test's
+        // intent (same key => replay returns the original order, nothing doubles)
+        // is unchanged.
         $payload = [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 2]],
             ...$this->destination(),
         ];
 
-        $first = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => $key])->postJson('/api/v1/orders', $payload);
+        $first = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => $key])->postJson('/api/v1/orders', $payload);
         $first->assertCreated();
         $firstOrderId = $first->json('data.id');
 
-        // Same key, same konsumen, resubmitted (e.g. a retried network request).
-        $second = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => $key])->postJson('/api/v1/orders', $payload);
+        // Same key, same actor, resubmitted (e.g. a retried network request).
+        $second = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => $key])->postJson('/api/v1/orders', $payload);
         $second->assertCreated();
 
         $this->assertSame($firstOrderId, $second->json('data.id'));
@@ -242,9 +259,10 @@ class CheckoutTest extends TestCase
         $firstProduct = $this->makeProduct($agen, price: 100000, stockQty: 10);
         $secondProduct = $this->makeProduct($agen, price: 75000, stockQty: 10);
 
-        $response = $this->actingAs($konsumen)
+        $response = $this->actingAs($agen)
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
                 'payment_method_code' => 'cod',
                 'items' => [
                     ['product_id' => $firstProduct->id, 'quantity' => 2],
@@ -297,7 +315,8 @@ class CheckoutTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen, price: 100000, stockQty: 5);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),
@@ -399,7 +418,8 @@ class CheckoutTest extends TestCase
         $product = $this->makeProduct($agen, price: 100000, stockQty: 5);
 
         // Neither RajaOngkir nor OpenRoute is active (the seeded default) -> free shipping.
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),

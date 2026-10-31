@@ -91,7 +91,11 @@ class CourierSystemTest extends TestCase
 
     private function placeOrder(User $konsumen, Product $product, int $qty): Order
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        // Codemod left $agen undefined here: resolve the buyer's branch agen
+        // (staff-only COD per Improvement 04) instead of the missing parameter.
+        $agen = User::query()->findOrFail($konsumen->agent_id);
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => $qty]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -695,7 +699,8 @@ class CourierSystemTest extends TestCase
         $productA = $this->makeProduct($branch['agen'], 'Kue A', 40000, 10);
         $productB = $this->makeProduct($branch['agen'], 'Kue B', 30000, 10);
 
-        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => 1],
@@ -764,7 +769,8 @@ class CourierSystemTest extends TestCase
         $productA = $this->makeProduct($branch['agen'], 'Kue X', 40000, 10);
         $productB = $this->makeProduct($branch['agen'], 'Kue Y', 30000, 10);
 
-        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => 1],
@@ -848,7 +854,8 @@ class CourierSystemTest extends TestCase
         $productA = $this->makeProduct($branch['agen'], 'Kue A Diambil', 40000, 10);
         $productB = $this->makeProduct($branch['agen'], 'Kue B Belum Diambil', 30000, 10);
 
-        $response = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [
                 ['product_id' => $productA->id, 'quantity' => 1],

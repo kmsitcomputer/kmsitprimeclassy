@@ -101,7 +101,8 @@ class FeeSystemTest extends TestCase
             'quantity_on_hand' => 10, 'quantity_reserved' => 0,
         ]);
 
-        $order = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $order = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'product_variation_id' => $variationId, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',
@@ -189,7 +190,8 @@ class FeeSystemTest extends TestCase
             'agent_fee' => 10000, 'sales_fee' => 8000, 'courier_fee' => 1000,
         ])->assertOk();
 
-        $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderResponse = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',
@@ -212,7 +214,8 @@ class FeeSystemTest extends TestCase
         $this->assertDatabaseMissing('order_items', ['order_id' => $orderId, 'sales_fee_amount' => 15000]);
 
         // A brand NEW order, placed after the change, uses the new configuration.
-        $secondOrder = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $secondOrder = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',
@@ -303,7 +306,8 @@ class FeeSystemTest extends TestCase
 
         // Two orders in Branch A.
         foreach ([1, 1] as $qty) {
-            $this->actingAs($branchA['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            $this->actingAs($branchA['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branchA['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $productA->id, 'quantity' => $qty]],
                 'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',
@@ -383,8 +387,17 @@ class FeeSystemTest extends TestCase
             ->assertStatus(403);
 
         // 3. Their own order's item never reveals fee amounts, even though it's their own order.
+        // The buyer posts it themselves with Bank Transfer (their only method — Improvement 04),
+        // so the create-response viewer is the konsumen exactly as this leak test requires;
+        // COD would force a staff actor and change whose view is being asserted.
+        \App\Models\AgentPaymentGatewayConfig::create([
+            'agent_id' => $branch['agen']->id,
+            'payment_method_id' => \App\Models\PaymentMethod::query()->where('code', 'bank_transfer')->firstOrFail()->id,
+            'environment' => 'sandbox',
+            'config' => ['bank_name' => 'BCA', 'account_name' => 'PT Prime', 'account_number' => '123456'],
+        ]);
         $orderResponse = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
-            'payment_method_code' => 'cod',
+            'payment_method_code' => 'bank_transfer',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',
             'village_id' => $this->seedTestVillage(),
@@ -423,7 +436,8 @@ class FeeSystemTest extends TestCase
             'agent_fee' => 20000, 'sales_fee' => 10000, 'courier_fee' => 1000,
         ])->assertOk();
 
-        $orderId = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',

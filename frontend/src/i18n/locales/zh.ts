@@ -1,6 +1,24 @@
 import type id from './id'
 
 export default {
+  receivables: {
+    title: '应收账款',
+    loadError: '加载应收账款失败。',
+    searchPlaceholder: '搜索订单号 / 客户...',
+    filterAll: '全部',
+    filterUnpaid: '未结清',
+    filterDue: '今日到期',
+    filterOverdue: '逾期',
+    summary: '{count} 笔订单 · 未结 {amount}',
+    empty: '没有匹配的订单。',
+    colOrder: '订单号',
+    colCustomer: '客户',
+    colTotal: '总额',
+    colPaid: '已付',
+    colOutstanding: '未结',
+    colDue: '到期日',
+    colStatus: '状态',
+  },
   common: {
     loading: '加载中...',
     cancel: '取消',
@@ -521,6 +539,8 @@ export default {
       manualHint: '人工转账,需要审核',
       gatewayHint: '自动支付说明',
       dpHint: '先支付一部分,余款稍后结清',
+      payFull: '全额支付',
+      payDp: '支付定金 (DP)',
       dpLabel: '定金金额(现在支付)',
       dpInputHint: '请输入定金金额,余款稍后结清。',
       dpInvalid: '请输入有效的定金金额(大于 0)。',

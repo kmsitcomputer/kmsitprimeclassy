@@ -221,6 +221,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // "Konsumen dapat memasukan bukti pembayaran COD" — same ownership shape
     // as the bank-transfer proof upload above.
     Route::post('/orders/{order}/payment/cod-proof', [PaymentController::class, 'submitCodProof']);
+    // Installment / payoff / cash receipt record (verification stays Keuangan/super_admin only).
+    Route::post('/orders/{order}/payment/installment', [PaymentController::class, 'installment']);
+    // Authorization-checked proof download (new proofs are stored privately).
+    Route::get('/payment-proofs/{verification}', [PaymentController::class, 'proofFile']);
     // Payment verification/settlement is KEUANGAN's authority — never ADMIN's
     // (separation of duties: Admin owns transaction operations, Keuangan owns
     // financial operations). super_admin keeps platform-wide override.
@@ -230,6 +234,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // assertMayVerifyPayment re-checks that scope server-side (route gate
     // is never the authority). The direct COD paid/unpaid toggle (markCod)
     // stays keuangan-only: it flips payment state with no proof workflow.
+    // Per-order due date: Admin / Keuangan (and super_admin) only; reason + old/new + actor are audited.
+    Route::middleware('role:super_admin,admin,keuangan')->group(function () {
+        Route::put('/orders/{order}/due-date', [PaymentController::class, 'setDueDate']);
+    });
     Route::middleware('role:super_admin,keuangan')->group(function () {
         Route::patch('/orders/{order}/payment/cod', [PaymentController::class, 'markCod']);
     });

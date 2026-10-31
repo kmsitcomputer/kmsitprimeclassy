@@ -138,7 +138,8 @@ class AssistedOrderTest extends TestCase
         $this->assertNotSame($first, $other);
 
         // ...and never collides with an account buyer's order using the same key.
-        $accountOrder = $this->actingAs($b['konsumen'])->withHeaders(['Idempotency-Key' => $key])->postJson('/api/v1/orders', [
+        $accountOrder = $this->actingAs($b['agen'])->withHeaders(['Idempotency-Key' => $key])->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. X',
             'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,

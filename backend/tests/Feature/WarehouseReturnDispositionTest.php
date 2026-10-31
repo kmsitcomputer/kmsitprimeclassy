@@ -60,7 +60,8 @@ class WarehouseReturnDispositionTest extends TestCase
         WarehouseStock::create(['agent_id' => $b['agen']->id, 'product_id' => $product->id, 'stock_type' => 'transit', 'quantity' => $transit]);
         WarehouseSetting::create(['agent_id' => $b['agen']->id, 'factory_plan_enabled' => false]);
 
-        $orderId = $this->actingAs($b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => $qty]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -222,7 +223,8 @@ class WarehouseReturnDispositionTest extends TestCase
         }
         WarehouseSetting::create(['agent_id' => $b['foreign']->id, 'factory_plan_enabled' => false]);
 
-        $orderId = $this->actingAs($b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'product_variation_id' => $small->id, 'quantity' => 2]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

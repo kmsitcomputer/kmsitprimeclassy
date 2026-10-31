@@ -82,9 +82,10 @@ class DispatchDateFilterTest extends TestCase
             $products[$tag] = $this->product($b['agen'], $tag);
         }
 
-        $response = $this->actingAs($b['konsumen'])
+        $response = $this->actingAs($b['agen'])
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => array_map(fn (Product $p) => ['product_id' => $p->id, 'quantity' => 1], array_values($products)),
                 'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

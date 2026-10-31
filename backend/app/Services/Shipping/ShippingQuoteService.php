@@ -223,7 +223,7 @@ class ShippingQuoteService
     /** @return array<int, array{code:string, label:string}> */
     public function availableShippingMethods(?int $agentId = null): array
     {
-        $labels = ['rajaongkir' => 'Ekspedisi', 'openroute' => 'Kurir Online'];
+        $labels = ['rajaongkir' => 'Ekspedisi', 'openroute' => 'Kurir Toko'];
 
         $methods = $this->activeProviders($agentId)
             ->sortBy('code')
@@ -231,7 +231,7 @@ class ShippingQuoteService
             ->values();
 
         if ($this->isPickupAvailable($agentId)) {
-            $methods->push(['code' => 'pickup', 'label' => 'Pickup']);
+            $methods->push(['code' => 'pickup', 'label' => 'Ambil ke Toko']);
         }
 
         return $methods->all();

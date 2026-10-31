@@ -19,7 +19,7 @@ const props = withDefaults(
     accept?: string
     label?: string
   }>(),
-  { mediaId: null, url: null, maxSizeMb: 4, accept: 'image/jpeg,image/png,image/webp', label: 'Gambar' },
+  { mediaId: null, url: null, maxSizeMb: 5, accept: 'image/jpeg,image/png,image/webp', label: 'Gambar' },
 )
 
 const emit = defineEmits<{
@@ -44,7 +44,7 @@ function validate(file: File): string | null {
     return 'Jenis file tidak didukung. Gunakan JPG, PNG, atau WEBP.'
   }
   if (file.size > props.maxSizeMb * 1024 * 1024) {
-    return `Ukuran file maksimal ${props.maxSizeMb}MB.`
+    return `Ukuran gambar maksimal ${props.maxSizeMb} MB.`
   }
   return null
 }
@@ -156,7 +156,7 @@ async function removeImage(): Promise<void> {
             pilih file
           </button>
         </p>
-        <p class="mt-1 text-xs text-stone-400">JPG/PNG/WEBP, maks {{ maxSizeMb }}MB</p>
+        <p class="mt-1 text-xs text-stone-400">Format: JPG, JPEG, PNG, WebP. Maks {{ maxSizeMb }} MB</p>
       </template>
 
       <div

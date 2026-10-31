@@ -145,7 +145,8 @@ class ShippingProviderTest extends TestCase
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),
@@ -308,7 +309,8 @@ class ShippingProviderTest extends TestCase
             ->push(['routes' => [['summary' => ['distance' => 10000, 'duration' => 1200]]]], 200)]);
 
         // Below the 5km threshold -> free.
-        $near = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $near = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),
         ]);
@@ -319,7 +321,8 @@ class ShippingProviderTest extends TestCase
         // At/above the threshold -> (distance - minimum) * price_per_km. A
         // different destination so this doesn't hit the first call's cached
         // distance.
-        $far = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $far = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(), 'latitude' => -6.900000, 'longitude' => 107.650000,
         ]);
@@ -365,7 +368,8 @@ class ShippingProviderTest extends TestCase
         foreach ($cases as $i => [$meters, $expectedFee, $expectedKm, $label]) {
             // Each case targets a distinct destination so the 5-minute route
             // cache never serves a stale distance from a previous case.
-            $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
                 'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
                 ...$this->destination(),
                 'latitude' => -6.2 - ($i + 1) * 0.01,
@@ -388,7 +392,8 @@ class ShippingProviderTest extends TestCase
             ['routes' => [['summary' => ['distance' => 8700, 'duration' => 900]]]], 200
         )]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
@@ -406,7 +411,8 @@ class ShippingProviderTest extends TestCase
             ['routes' => [['summary' => ['distance' => 10500, 'duration' => 1100]]]], 200
         )]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
@@ -430,14 +436,16 @@ class ShippingProviderTest extends TestCase
         )]);
 
         // Agent A: (10 - 3) * 2500 = 17500.
-        $orderA = $this->actingAs($konsumenA)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderA = $this->actingAs($agenA)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumenA->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $productA->id, 'quantity' => 1]], ...$this->destination(),
         ]);
         $orderA->assertCreated();
         $this->assertEquals(17500, (float) $orderA->json('data.shipping_fee_amount'));
 
         // Agent B: (10 - 5) * 4000 = 20000 — not Agent A's rate/minimum.
-        $orderB = $this->actingAs($konsumenB)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderB = $this->actingAs($agenB)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumenB->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $productB->id, 'quantity' => 1]], ...$this->destination(),
         ]);
         $orderB->assertCreated();
@@ -473,7 +481,8 @@ class ShippingProviderTest extends TestCase
             'routes' => [['summary' => ['distance' => 10000, 'duration' => 1200]]],
         ], 200)]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'shipping_method' => 'openroute',
             'distance_km' => 0.01, 'shipping_fee' => 1,
             'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
@@ -492,7 +501,8 @@ class ShippingProviderTest extends TestCase
 
         Http::fake(['api.openrouteservice.org/*' => Http::response([], 500)]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'shipping_method' => 'openroute', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
@@ -609,7 +619,8 @@ class ShippingProviderTest extends TestCase
             ['name' => 'JNE', 'code' => 'jne', 'service' => 'OKE', 'description' => 'Ekonomis', 'cost' => 18000, 'etd' => '2-3'],
         ]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'courier' => 'jne', 'service' => 'YES', ...$this->destination(),
         ]);
@@ -638,7 +649,8 @@ class ShippingProviderTest extends TestCase
             ->where('agent_id', $agen->id)
             ->update(['config' => 'not-a-valid-encrypted-payload']);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
@@ -711,7 +723,8 @@ class ShippingProviderTest extends TestCase
         $this->configureOpenRoute($agen);
         Http::fake(['api.openrouteservice.org/*' => Http::response(['routes' => [['summary' => ['distance' => 5000, 'duration' => 720]]]], 200)]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
 
@@ -744,7 +757,7 @@ class ShippingProviderTest extends TestCase
 
         $both = collect($this->actingAs($konsumen)->getJson('/api/v1/checkout/steps')->json('data.shipping_methods'))->keyBy('code');
         $this->assertSame('Ekspedisi', $both['rajaongkir']['label']);
-        $this->assertSame('Kurir Online', $both['openroute']['label']);
+        $this->assertSame('Kurir Toko', $both['openroute']['label']);
     }
 
     public function test_konsumen_can_pick_kurir_online_even_though_rajaongkir_would_normally_win_by_precedence(): void
@@ -755,7 +768,8 @@ class ShippingProviderTest extends TestCase
 
         Http::fake(['api.openrouteservice.org/*' => Http::response(['routes' => [['summary' => ['distance' => 10000, 'duration' => 1200]]]], 200)]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'shipping_method' => 'openroute',
             'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
@@ -796,7 +810,8 @@ class ShippingProviderTest extends TestCase
         // switch to OpenRoute (the konsumen never agreed to that price).
         $this->fakeRajaOngkir([], 500);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'shipping_method' => 'rajaongkir',
             'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ]);
@@ -812,7 +827,8 @@ class ShippingProviderTest extends TestCase
         // Only RajaOngkir active — OpenRoute is not.
         $this->configureRajaOngkir($agen);
 
-        $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'shipping_method' => 'openroute',
             'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ])->assertStatus(422);
@@ -827,7 +843,8 @@ class ShippingProviderTest extends TestCase
         $this->configureOpenRoute($agen);
         Http::fake(['api.openrouteservice.org/*' => Http::response(['routes' => [['summary' => ['distance' => 10000, 'duration' => 1200]]]], 200)]);
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 1]], ...$this->destination(),
         ])->json('data.id');
 

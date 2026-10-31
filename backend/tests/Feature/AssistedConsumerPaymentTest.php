@@ -80,8 +80,12 @@ class AssistedConsumerPaymentTest extends TestCase
         ]);
         ProductStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
 
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        // Improvement 04: COD/DP are staff-only — the branch agen places those
+        // on behalf of the buyer; bank_transfer stays the buyer's own method.
+        $staffOnly = in_array($method, ['cod', 'down_payment'], true);
+        $response = $this->actingAs($staffOnly ? $agen : $konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+                ...($staffOnly ? ['konsumen_id' => $konsumen->id] : []),
                 'payment_method_code' => $method,
                 'items' => [['product_id' => $product->id, 'quantity' => 1]],
                 'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -322,7 +326,8 @@ class AssistedConsumerPaymentTest extends TestCase
             'has_variations' => false, 'base_price' => 1000000, 'weight_grams' => 1000, 'status' => 'active',
         ]);
         ProductStock::create(['agent_id' => $agen->id, 'product_id' => $product->id, 'quantity_on_hand' => 10, 'quantity_reserved' => 0]);
-        $created = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $created = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 300000,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

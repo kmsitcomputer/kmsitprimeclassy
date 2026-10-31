@@ -19,6 +19,9 @@ const BLOCK_TYPES = [
   { value: 'article', label: 'Artikel' },
   { value: 'cta', label: 'CTA' },
   { value: 'custom', label: 'Custom HTML' },
+  { value: 'social_media', label: 'Media Sosial' },
+  { value: 'whatsapp_chat', label: 'WhatsApp Chat' },
+  { value: 'marketplace_links', label: 'Marketplace' },
 ] as const
 
 const IMAGE_TYPES = new Set(['hero', 'banner', 'promotional', 'image'])
@@ -33,7 +36,7 @@ const submitting = ref(false)
 const generalError = ref<string | null>(null)
 const errors = ref<Record<string, string[]>>({})
 
-const form = reactive({
+const form = reactive<Record<string, any>>({
   type: 'text' as string,
   heading: '',
   subheading: '',
@@ -51,6 +54,15 @@ const form = reactive({
   category_id: '',
   article_ids: '',
   limit: '',
+  layout: 'cards',
+  mode: 'card',
+  phone: '',
+  message: '',
+  instagram_url: '', instagram_enabled: true,
+  tiktok_url: '', tiktok_enabled: true,
+  facebook_url: '', facebook_enabled: true,
+  tokopedia_url: '', tokopedia_enabled: true,
+  shopee_url: '', shopee_enabled: true,
 })
 
 const imageFile = ref<File | null>(null)
@@ -89,6 +101,14 @@ async function load() {
     form.category_id = c.category_id != null ? String(c.category_id) : ''
     form.article_ids = (c.article_ids ?? []).join(',')
     form.limit = c.limit != null ? String(c.limit) : ''
+    form.layout = c.layout ?? 'cards'
+    form.mode = c.mode ?? 'card'
+    form.phone = c.phone ?? ''
+    form.message = c.message ?? ''
+    for (const key of ['instagram', 'tiktok', 'facebook', 'tokopedia', 'shopee'] as const) {
+      form[`${key}_url`] = c.platforms?.[key]?.url ?? ''
+      form[`${key}_enabled`] = c.platforms?.[key]?.enabled ?? true
+    }
     existingImageUrl.value = block.image_url
   }
 
@@ -122,6 +142,15 @@ function clearImage() {
   removeImage.value = true
 }
 
+function normalizeWhatsappPhone(raw: string): string {
+  // Backend requires normalized international digits (^[1-9][0-9]{7,14}$):
+  // strip separators/signs and repair the common local prefix (08… → 628…).
+  // Invalid shapes still fail validation server-side — never guessed away.
+  const digits = raw.replace(/[^\d]/g, '')
+  if (digits.startsWith('0')) return '62' + digits.slice(1)
+  return digits
+}
+
 function buildContent(): Record<string, unknown> {
   const toIntArray = (s: string) => s.split(',').map((v) => v.trim()).filter(Boolean).map(Number)
 
@@ -150,6 +179,22 @@ function buildContent(): Record<string, unknown> {
       return { heading: form.heading, button_label: form.button_label, button_url: form.button_url }
     case 'custom':
       return { html: form.html }
+    case 'social_media':
+      return { heading: form.heading || undefined, description: form.description || undefined, layout: form.layout, platforms: {
+        instagram: { enabled: form.instagram_enabled, url: form.instagram_url || undefined },
+        tiktok: { enabled: form.tiktok_enabled, url: form.tiktok_url || undefined },
+        facebook: { enabled: form.facebook_enabled, url: form.facebook_url || undefined },
+      } }
+    case 'whatsapp_chat':
+      // Backend requires normalized international digits (^[1-9][0-9]{7,14}$):
+      // strip separators/signs and repair a common local prefix (08… → 628…).
+      // Invalid shapes still fail validation server-side — never guessed away.
+      return { heading: form.heading || undefined, description: form.description || undefined, phone: normalizeWhatsappPhone(form.phone), message: form.message || undefined, button_label: form.button_label, mode: form.mode }
+    case 'marketplace_links':
+      return { heading: form.heading || undefined, description: form.description || undefined, layout: form.layout, platforms: {
+        tokopedia: { enabled: form.tokopedia_enabled, url: form.tokopedia_url || undefined },
+        shopee: { enabled: form.shopee_enabled, url: form.shopee_url || undefined },
+      } }
     default:
       return {}
   }
@@ -232,7 +277,7 @@ async function submit() {
             </select>
           </div>
 
-          <template v-if="['hero', 'promotional', 'text', 'category', 'product', 'article', 'cta'].includes(form.type)">
+          <template v-if="['hero', 'promotional', 'text', 'category', 'product', 'article', 'cta', 'social_media', 'whatsapp_chat', 'marketplace_links'].includes(form.type)">
             <div>
               <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">Judul</label>
               <input v-model="form.heading" type="text" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
@@ -258,6 +303,24 @@ async function submit() {
           <div v-if="form.type === 'custom'">
             <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">HTML (akan disaring server-side)</label>
             <textarea v-model="form.html" rows="5" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 font-mono text-xs dark:border-stone-700 dark:bg-stone-950" />
+          </div>
+
+          <div v-if="['social_media', 'whatsapp_chat', 'marketplace_links'].includes(form.type)" class="space-y-3">
+            <div><label class="mb-1 block text-sm font-medium">Deskripsi</label><textarea v-model="form.description" rows="2" class="w-full rounded-lg border px-3 py-2 text-sm dark:bg-stone-950" /></div>
+            <template v-if="form.type === 'social_media'">
+              <select v-model="form.layout" class="w-full rounded-lg border px-3 py-2 dark:bg-stone-950"><option value="cards">3 kartu</option><option value="compact">Ikon horizontal</option></select>
+              <div v-for="key in (['instagram','tiktok','facebook'] as const)" :key="key" class="flex items-center gap-2"><input v-model="form[`${key}_enabled`]" type="checkbox" /><span class="w-24 capitalize">{{ key }}</span><input v-model="form[`${key}_url`]" type="url" placeholder="https://..." class="flex-1 rounded-lg border px-3 py-2 dark:bg-stone-950" /></div>
+            </template>
+            <template v-else-if="form.type === 'whatsapp_chat'">
+              <input v-model="form.phone" type="text" placeholder="628123456789" class="w-full rounded-lg border px-3 py-2 dark:bg-stone-950" />
+              <textarea v-model="form.message" placeholder="Pesan awal" class="w-full rounded-lg border px-3 py-2 dark:bg-stone-950" />
+              <input v-model="form.button_label" type="text" placeholder="Chat via WhatsApp" class="w-full rounded-lg border px-3 py-2 dark:bg-stone-950" />
+              <select v-model="form.mode" class="w-full rounded-lg border px-3 py-2 dark:bg-stone-950"><option value="card">Kartu homepage</option><option value="floating">Tombol floating sitewide</option></select>
+            </template>
+            <template v-else>
+              <select v-model="form.layout" class="w-full rounded-lg border px-3 py-2 dark:bg-stone-950"><option value="cards">Kartu</option><option value="horizontal">Tombol horizontal</option></select>
+              <div v-for="key in (['tokopedia','shopee'] as const)" :key="key" class="flex items-center gap-2"><input v-model="form[`${key}_enabled`]" type="checkbox" /><span class="w-24 capitalize">{{ key }}</span><input v-model="form[`${key}_url`]" type="url" placeholder="https://..." class="flex-1 rounded-lg border px-3 py-2 dark:bg-stone-950" /></div>
+            </template>
           </div>
 
           <div v-if="form.type === 'promotional'">
@@ -311,7 +374,7 @@ async function submit() {
               :model-value="imageFile ? [imageFile] : []"
               label="Gambar"
               accept="image/jpeg,image/png,image/webp"
-              :max-size-mb="2"
+              :max-size-mb="10"
               :existing="existingImageUrl && !removeImage && !imageFile ? [{ url: existingImageUrl, name: 'Gambar saat ini' }] : []"
               test-id="cms-block-image-upload"
               @update:model-value="onImageChange"

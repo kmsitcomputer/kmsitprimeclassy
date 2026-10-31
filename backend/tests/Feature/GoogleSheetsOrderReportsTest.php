@@ -67,9 +67,13 @@ class GoogleSheetsOrderReportsTest extends TestCase
 
     private function checkout(User $konsumen, array $items): array
     {
-        $response = $this->actingAs($konsumen)
+        // Codemod left $agen undefined here: resolve the buyer's branch agen
+        // (staff-only COD per Improvement 04) instead of the missing parameter.
+        $agen = User::query()->findOrFail($konsumen->agent_id);
+        $response = $this->actingAs($agen)
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
                 'payment_method_code' => 'cod',
                 'items' => $items,
                 'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

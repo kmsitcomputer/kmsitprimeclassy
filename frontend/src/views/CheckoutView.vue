@@ -407,6 +407,18 @@ const selectedPaymentCode = ref<string | null>(null)
 const paymentMethods = computed<PaymentMethod[]>(() => stepsConfig.value?.payment_methods ?? [])
 const selectedPaymentMethod = computed(() => paymentMethods.value.find((m) => m.code === selectedPaymentCode.value) ?? null)
 const isDpSelected = computed(() => selectedPaymentCode.value === 'down_payment')
+/** COD + Transfer Bank only; `down_payment` is exposed as a Transfer Bank sub-option, never a top-level method. */
+const topLevelPaymentMethods = computed(() => paymentMethods.value.filter((m) => m.code !== 'down_payment'))
+const dpMethodOffered = computed(() => paymentMethods.value.some((m) => m.code === 'down_payment'))
+const topLevelPaymentCode = computed(() => (isDpSelected.value ? 'bank_transfer' : selectedPaymentCode.value))
+function chooseTopLevelPayment(code: string) {
+  selectedPaymentCode.value = code
+  dpAmount.value = ''
+}
+function chooseTransferScheme(dp: boolean) {
+  selectedPaymentCode.value = dp ? 'down_payment' : 'bank_transfer'
+  if (!dp) dpAmount.value = ''
+}
 /** DP nominal paid now — the server re-validates it against the recomputed total (0 < dp < total). */
 const dpAmount = ref<string>('')
 
@@ -687,6 +699,27 @@ async function refreshOrderStatus() {
         <div v-else-if="currentStep === 'address'" class="space-y-4">
           <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">{{ t('checkout.address.title') }}</h2>
 
+          <!-- Staff customer attribution lives inside this existing step; there is no Info Agen step. -->
+          <div v-if="needsKonsumenSelection" class="space-y-3 rounded-xl border border-stone-200 p-3 dark:border-stone-700">
+            <div class="flex gap-2">
+              <button type="button" class="flex-1 rounded-lg border p-2 text-sm" :class="buyingForSelf ? 'border-brand-500 bg-brand-50' : 'border-stone-200'" @click="buyingForSelf = true">{{ t('checkout.referral.forMyself') }}</button>
+              <button type="button" class="flex-1 rounded-lg border p-2 text-sm" :class="!buyingForSelf ? 'border-brand-500 bg-brand-50' : 'border-stone-200'" @click="buyingForSelf = false">{{ t('checkout.referral.forCustomer') }}</button>
+            </div>
+            <template v-if="!buyingForSelf">
+              <div v-if="selectedKonsumen" class="flex items-center justify-between rounded-lg bg-brand-50 p-2 text-sm">
+                <span>{{ selectedKonsumen.name }} · {{ selectedKonsumen.phone }}</span>
+                <button type="button" class="text-xs text-brand-600" @click="selectedKonsumen = null">{{ t('checkout.referral.change') }}</button>
+              </div>
+              <template v-else>
+                <input v-model="konsumenSearch" type="search" :placeholder="t('checkout.referral.searchPlaceholder')" class="w-full rounded-lg border px-3 py-2 text-sm dark:bg-stone-950" />
+                <p v-if="searchingKonsumen" class="text-xs text-stone-400">{{ t('checkout.referral.searching') }}</p>
+                <ul v-else class="divide-y rounded-lg border">
+                  <li v-for="k in konsumenResults" :key="k.id"><button type="button" class="flex w-full justify-between p-2 text-sm" @click="pickKonsumen(k)"><span>{{ k.name }}</span><span>{{ k.phone }}</span></button></li>
+                </ul>
+              </template>
+            </template>
+          </div>
+
           <!-- Saved address picker (konsumen only) -->
           <div v-if="savedAddresses.length" class="space-y-2">
             <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('checkout.address.savedAddressLabel') }}</label>
@@ -714,6 +747,20 @@ async function refreshOrderStatus() {
           </div>
 
           <template v-if="selectedSavedAddressId === 'new'">
+            <!-- "Gunakan Lokasi Saya" sits at the very top of the address form, right above Nama Penerima. -->
+            <div>
+              <button
+                type="button"
+                class="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-sm font-medium text-stone-700 sm:w-auto dark:border-stone-700 dark:text-stone-200"
+                :disabled="locating"
+                data-testid="use-my-location"
+                @click="useMyLocation"
+              >
+                <AppIcon name="map-pin" :size="16" />
+                {{ locating ? t('checkout.address.detectingLocation') : t('checkout.address.useMyLocation') }}
+              </button>
+              <p v-if="locationError" class="mt-1.5 text-xs text-red-600">{{ locationError }}</p>
+            </div>
             <div>
               <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('checkout.address.recipientName') }}</label>
               <input v-model="destination.recipient_name" type="text" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
@@ -776,19 +823,6 @@ async function refreshOrderStatus() {
               {{ t('checkout.address.mapUnavailable') }}
             </p>
 
-            <div>
-              <button
-                type="button"
-                class="flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-sm font-medium text-stone-700 dark:border-stone-700 dark:text-stone-200"
-                :disabled="locating"
-                @click="useMyLocation"
-              >
-                <AppIcon name="map-pin" :size="16" />
-                {{ locating ? t('checkout.address.detectingLocation') : t('checkout.address.useMyLocation') }}
-              </button>
-              <p v-if="locationError" class="mt-1.5 text-xs text-red-600">{{ locationError }}</p>
-            </div>
-
             <div v-if="destination.latitude !== null" class="grid grid-cols-2 gap-3">
               <div>
                 <label class="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">{{ t('checkout.address.latitude') }}</label>
@@ -808,7 +842,7 @@ async function refreshOrderStatus() {
           </template>
         </div>
 
-        <!-- Step: Referral — either read-only agent-context info (konsumen ordering for themselves), or a konsumen picker (agen/korsal/sales ordering on behalf of one of their own downline konsumen). -->
+        <!-- Legacy renderer retained for backward-compatible stale step payloads; current backend never activates it. -->
         <div v-else-if="currentStep === 'referral'" class="space-y-3">
           <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">{{ t('checkout.referral.title') }}</h2>
 
@@ -989,18 +1023,30 @@ async function refreshOrderStatus() {
           <p v-if="selectedShippingMethod === 'rajaongkir' && paymentMethods.length" class="rounded-lg bg-stone-50 p-2.5 text-xs text-stone-500 dark:bg-stone-800/60 dark:text-stone-400">
             {{ t('checkout.payment.expeditionRestriction') }}
           </p>
+          <!-- Top level: COD / Transfer Bank. DP is not a method of its own — it is a sub-option of Transfer Bank. -->
           <label
-            v-for="method in paymentMethods"
+            v-for="method in topLevelPaymentMethods"
             :key="method.code"
             class="flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm"
-            :class="selectedPaymentCode === method.code ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40' : 'border-stone-200 dark:border-stone-700'"
+            :class="topLevelPaymentCode === method.code ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40' : 'border-stone-200 dark:border-stone-700'"
           >
-            <input v-model="selectedPaymentCode" type="radio" :value="method.code" class="accent-brand-600" />
+            <input :checked="topLevelPaymentCode === method.code" type="radio" name="payment-method" :value="method.code" class="accent-brand-600" @change="chooseTopLevelPayment(method.code)" />
             <span class="font-medium text-stone-800 dark:text-stone-100">{{ method.name }}</span>
             <span class="text-xs text-stone-400">
-              {{ method.code === 'down_payment' ? t('checkout.payment.dpHint') : method.type === 'cod' ? t('checkout.payment.codHint') : method.type === 'manual' ? t('checkout.payment.manualHint') : t('checkout.payment.gatewayHint') }}
+              {{ method.type === 'cod' ? t('checkout.payment.codHint') : method.type === 'manual' ? t('checkout.payment.manualHint') : t('checkout.payment.gatewayHint') }}
             </span>
           </label>
+
+          <div v-if="topLevelPaymentCode === 'bank_transfer' && dpMethodOffered" class="ml-6 space-y-2" data-testid="transfer-scheme">
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
+              <input :checked="!isDpSelected" type="radio" name="transfer-scheme" class="accent-brand-600" @change="chooseTransferScheme(false)" />
+              {{ t('checkout.payment.payFull') }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
+              <input :checked="isDpSelected" type="radio" name="transfer-scheme" class="accent-brand-600" @change="chooseTransferScheme(true)" />
+              {{ t('checkout.payment.payDp') }}
+            </label>
+          </div>
 
           <div v-if="isDpSelected" class="rounded-xl border border-brand-200 bg-brand-50/60 p-3 dark:border-brand-800 dark:bg-brand-950/30">
             <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('checkout.payment.dpLabel') }}</label>
@@ -1149,7 +1195,7 @@ async function refreshOrderStatus() {
           <AppButton
             v-if="currentStep !== 'review' && currentStep !== 'account'"
             :disabled="
-              (currentStep === 'address' && !addressComplete) ||
+              (currentStep === 'address' && (!addressComplete || !konsumenSelected)) ||
               (currentStep === 'referral' && !konsumenSelected) ||
               (currentStep === 'shipping' && shippingMethods.length > 1 && !selectedShippingMethod) ||
               (currentStep === 'shipping' &&

@@ -104,7 +104,7 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
         $fields = $registry->definitions()[DatasetRegistry::DATASET_STAFF_WORKSHEET];
         $labels = array_values(OrderStaffWorksheetService::COLUMNS);
 
-        $this->assertCount(47, $fields);
+        $this->assertCount(48, $fields);
         $this->assertSame(array_keys(OrderStaffWorksheetService::COLUMNS), $fields);
         // SV2 anchor positions (TransactionExport.php:117-161 headings).
         $this->assertSame('No', $labels[0]);
@@ -115,6 +115,7 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
         $this->assertSame('Tgl Kirim', $labels[33]);
         $this->assertSame('Hampers', $labels[42]);
         $this->assertSame(['Provinsi', 'Kota/Kabupaten', 'Kecamatan', 'Kelurahan/Desa'], array_slice($labels, 43, 4));
+        $this->assertSame('Status Pesanan', $labels[47]);
 
         // Owner mapping 2026-10-29 (WS2/WS3/WS10): only 3 columns lack a source.
         $this->assertCount(3, $registry->manualColumns(DatasetRegistry::DATASET_STAFF_WORKSHEET));
@@ -159,7 +160,8 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
         $write = $this->sheetWrites[0];
         [$header, $rows] = [$write['rows'][0], array_slice($write['rows'], 1)];
 
-        $this->assertCount(47, $header);
+        $this->assertCount(48, $header);
+        $this->assertSame('Status Pesanan', $header[47]);
         $this->assertCount(2, $rows);
         $idx = array_flip($header);
         // System columns carry real DB values.
@@ -180,6 +182,7 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
         $this->assertSame('tidak', $rows[0][$idx['Hampers']]);
         // WS3: 'Update Status Pembayaran' is the SYSTEM latest canonical status.
         $this->assertSame('unpaid', $rows[0][$idx['Update Status Pembayaran']]);
+        $this->assertSame('diproses', $rows[0][$idx['Status Pesanan']]);
         // WS2: initial money position is DERIVED from the payment method —
         // this fixture has no payment method, so it is unresolved (null), not invented.
         $this->assertNull($rows[0][$idx['Posisi Uang (Saat Transaksi)']]);

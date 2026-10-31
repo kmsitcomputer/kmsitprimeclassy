@@ -28,7 +28,7 @@ class UpdateHomepageBlockRequest extends BaseFormRequest
 
         return array_merge([
             'content' => ['nullable', 'array'],
-            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
             'remove_image' => ['sometimes', 'boolean'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['sometimes', 'boolean'],

@@ -305,7 +305,8 @@ class WhatsAppOtpTest extends TestCase
     private function deliveredAccountOrder(array $b): \App\Models\Order
     {
         $product = $this->stockedProduct($b['agen']);
-        $id = $this->actingAs($b['konsumen'])->withHeaders(['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()])->postJson('/api/v1/orders', [
+        $id = $this->actingAs($b['agen'])->withHeaders(['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $product->id, 'quantity' => 2]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. X',
             'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,

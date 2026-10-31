@@ -60,7 +60,7 @@ beforeEach(() => {
   catalog.listProducts.mockResolvedValue({ products: [product], meta: {} })
   checkout.getCheckoutSteps.mockResolvedValue({
     payment_methods: [{ id: 1, code: 'cod', name: 'COD', type: 'cod' }],
-    shipping_methods: [{ code: 'rajaongkir', label: 'Ekspedisi' }, { code: 'pickup', label: 'Pickup' }],
+    shipping_methods: [{ code: 'rajaongkir', label: 'Ekspedisi' }, { code: 'pickup', label: 'Ambil ke Toko' }],
   })
   regions.listProvinces.mockResolvedValue([{ id: 'P1', name: 'Jabar' }])
   regions.listRegencies.mockResolvedValue([{ id: 'R1', name: 'Bandung' }])
@@ -114,7 +114,8 @@ describe('CrmAssistedOrderView', () => {
   it('offers no Ekspedisi, auto-selects a single supported shipping method, and blocks when only Ekspedisi exists', async () => {
     let w = await mountView()
     expect(w.text()).toContain('Metode pengiriman:')
-    expect(w.text()).toContain('Pickup')
+    // Improvement 03: the Pickup label is now "Ambil ke Toko" (Owner decision).
+    expect(w.text()).toContain('Ambil ke Toko')
     expect(w.text()).not.toContain('Ekspedisi')
 
     checkout.getCheckoutSteps.mockResolvedValue({

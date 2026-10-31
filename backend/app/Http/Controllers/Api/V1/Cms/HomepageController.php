@@ -64,8 +64,8 @@ class HomepageController extends Controller
                 'categories' => ProductCategory::query()
                     ->whereIn('id', $content['category_ids'] ?? [])
                     ->where('is_active', true)
-                    ->orderBy('sort_order')
                     ->get(['id', 'name', 'slug'])
+                    ->sortBy(fn (ProductCategory $category) => array_search($category->id, $content['category_ids'] ?? [], true))
                     ->values(),
             ],
             HomepageBlockTypes::PRODUCT => [

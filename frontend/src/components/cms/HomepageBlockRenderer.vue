@@ -11,6 +11,9 @@ import ImageBlock from './blocks/ImageBlock.vue'
 import ArticleBlock from './blocks/ArticleBlock.vue'
 import CtaBlock from './blocks/CtaBlock.vue'
 import CustomBlock from './blocks/CustomBlock.vue'
+import SocialMediaBlock from './blocks/SocialMediaBlock.vue'
+import WhatsappChatBlock from './blocks/WhatsappChatBlock.vue'
+import MarketplaceLinksBlock from './blocks/MarketplaceLinksBlock.vue'
 
 const props = defineProps<{ block: HomepageBlock }>()
 
@@ -30,6 +33,9 @@ const COMPONENTS: Record<string, unknown> = {
   article: ArticleBlock,
   cta: CtaBlock,
   custom: CustomBlock,
+  social_media: SocialMediaBlock,
+  whatsapp_chat: WhatsappChatBlock,
+  marketplace_links: MarketplaceLinksBlock,
 }
 
 const component = computed(() => COMPONENTS[props.block.type] ?? null)

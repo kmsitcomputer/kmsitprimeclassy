@@ -71,7 +71,14 @@ class OrderResource extends JsonResource
             // capability: the order's own konsumen + same-branch financial
             // roles. No ownership id is broadcast — matching the Invoice
             // controller's own gate exactly (viewer::kapabilitas).
-            'viewer_can_download_invoice' => $this->when($request->user() !== null, fn () => $this->viewerCanDownloadInvoice($request->user())),
+            'viewer_can_download_invoice' => $this->when($request->user() !== null, fn () => $this->viewerCanDownloadInvoice($request->user()) && ($this->invoice_issued_at !== null || app(\App\Services\Invoice\InvoiceIssuanceService::class)->isEligible($this->resource))),
+            // Invoice issuance metadata + per-order due date (Improvements 10/11). The invoice number is order_no.
+            'invoice_issued_at' => $this->when($seesFinancials, $this->invoice_issued_at),
+            'due_date' => $this->when($seesFinancials, fn () => $this->due_date?->toDateString()),
+            'is_overdue' => $this->when($seesFinancials, fn () => $this->due_date !== null
+                && $this->due_date->isBefore(now()->startOfDay())
+                && \App\Support\CollectibleReceivable::forOrder($this->resource) > 0
+                && $this->status !== 'dibatalkan'),
             'recipient_name' => $this->recipient_name_snapshot,
             'recipient_phone' => $this->recipient_phone_snapshot,
             'address' => $this->address_snapshot,

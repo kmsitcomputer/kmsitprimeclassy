@@ -42,6 +42,12 @@ class InvoiceController extends Controller
             throw new ApiException(__('messages.system.unauthorized_action'), 403);
         }
 
+        // Owner-locked policy: no invoice before it is issued (COD at creation, transfer after the first
+        // verified payment). Legacy eligible orders are stamped lazily; the number is always orders.order_no.
+        if (! app(\App\Services\Invoice\InvoiceIssuanceService::class)->ensureIssuedIfEligible($order)) {
+            throw new ApiException(__('messages.payment.invoice_not_issued'), 409);
+        }
+
         $agentId = (int) ($order->agent_id);
         $config = InvoiceConfigService::resolved($agentId);
 

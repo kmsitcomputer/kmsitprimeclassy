@@ -144,7 +144,8 @@ class PaymentGatewayTest extends TestCase
         ['konsumen' => $konsumen, 'agen' => $agen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen);
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),
@@ -159,7 +160,8 @@ class PaymentGatewayTest extends TestCase
         ['agen' => $agen, 'admin' => $admin, 'konsumen' => $konsumen] = $this->makeAgentBranch();
         $product = $this->makeProduct($agen);
 
-        $orderId = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),

@@ -20,7 +20,7 @@ class CaptureConsentRequest extends BaseFormRequest
             'order_id' => ['required', 'integer', 'exists:orders,id'],
             'purpose' => ['required', 'string', Rule::in(ConsentService::PURPOSES)],
             'otp_challenge_id' => ['required', 'integer', 'exists:identity_otp_challenges,id'],
-            'evidence' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
+            'evidence' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'note' => ['required', 'string', 'max:1000'],
             'scope' => ['required', 'array', 'min:1'],
             'scope.*.order_item_id' => ['required', 'integer'],

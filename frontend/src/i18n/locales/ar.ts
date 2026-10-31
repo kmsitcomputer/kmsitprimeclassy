@@ -1,6 +1,24 @@
 import type id from './id'
 
 export default {
+  receivables: {
+    title: 'الذمم المدينة',
+    loadError: 'تعذر تحميل الذمم المدينة.',
+    searchPlaceholder: 'ابحث برقم الطلب / العميل...',
+    filterAll: 'الكل',
+    filterUnpaid: 'غير مسدد',
+    filterDue: 'يستحق اليوم',
+    filterOverdue: 'متأخر',
+    summary: '{count} طلبًا · المتبقي {amount}',
+    empty: 'لا توجد طلبات مطابقة.',
+    colOrder: 'رقم الطلب',
+    colCustomer: 'العميل',
+    colTotal: 'الإجمالي',
+    colPaid: 'المدفوع',
+    colOutstanding: 'المتبقي',
+    colDue: 'تاريخ الاستحقاق',
+    colStatus: 'الحالة',
+  },
   common: {
     loading: 'جارٍ التحميل...',
     cancel: 'إلغاء',
@@ -521,6 +539,8 @@ export default {
       manualHint: 'تحويل يدوي، يتطلب التحقق',
       gatewayHint: 'تعليمات دفع آلية',
       dpHint: 'ادفع جزءًا الآن، والباقي يُسوَّى لاحقًا',
+      payFull: 'ادفع المبلغ كاملًا',
+      payDp: 'ادفع دفعة مقدمة (DP)',
       dpLabel: 'مبلغ الدفعة المقدمة (يُدفع الآن)',
       dpInputHint: 'أدخل مبلغ الدفعة المقدمة، ويُسوَّى الرصيد المتبقي لاحقًا.',
       dpInvalid: 'أدخل مبلغ دفعة مقدمة صالحًا (أكبر من 0).',

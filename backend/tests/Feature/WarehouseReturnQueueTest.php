@@ -73,7 +73,8 @@ class WarehouseReturnQueueTest extends TestCase
             $lines[] = ['product_id' => $second->id, 'quantity' => $qty];
         }
 
-        $orderId = $this->actingAs($b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $orderId = $this->actingAs($b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => $lines,
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

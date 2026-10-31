@@ -115,8 +115,9 @@ function readDimensions(file: File): Promise<{ w: number; h: number }> {
 }
 
 async function validate(file: File): Promise<string | null> {
-  if (!matchesAccept(file)) return `Jenis file tidak didukung. Gunakan ${acceptLabel.value}.`
-  if (file.size > props.maxSizeMb * 1024 * 1024) return `Ukuran file maksimal ${props.maxSizeMb}MB.`
+  const imagesOnly = acceptList.value.every((a) => a.startsWith('image/'))
+  if (!matchesAccept(file)) return imagesOnly ? 'Format gambar yang diizinkan: JPG, JPEG, PNG, WebP.' : `Jenis file tidak didukung. Gunakan ${acceptLabel.value}.`
+  if (file.size > props.maxSizeMb * 1024 * 1024) return `${imagesOnly ? 'Ukuran gambar' : 'Ukuran file'} maksimal ${props.maxSizeMb} MB.`
   if (isImage(file) && (props.minWidth || props.minHeight)) {
     try {
       const { w, h } = await readDimensions(file)
@@ -292,7 +293,7 @@ const showDropzone = computed(() => interactive.value && props.modelValue.length
           Ambil foto
         </button>
       </div>
-      <p class="text-xs text-stone-400">{{ hint || `${acceptLabel}, maks ${maxSizeMb}MB${multiple ? `, hingga ${maxFiles} file` : ''}` }}</p>
+      <p class="text-xs text-stone-400">{{ hint || `Format: ${acceptLabel}. Maks ${maxSizeMb} MB${multiple ? `, hingga ${maxFiles} file` : ''}` }}</p>
     </div>
 
     <input

@@ -79,7 +79,11 @@ class KeuanganReportingTest extends TestCase
 
     private function placeCodOrder(User $konsumen, Product $product): Order
     {
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        // Codemod left $agen undefined here: resolve the buyer's branch agen
+        // (staff-only COD per Improvement 04) instead of the missing parameter.
+        $agen = User::query()->findOrFail($konsumen->agent_id);
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -205,5 +209,50 @@ class KeuanganReportingTest extends TestCase
             collect($list->json('data'))->contains(fn ($c) => (float) $c['amount'] === 5000.0),
             'korsal must see their own direct-referral commission'
         );
+    }
+
+    /**
+     * Improvement 10 + Owner-approved centralized Piutang menu (§8B): the
+     * finance-orders rows carry the per-order due date and overdue flag so the
+     * Admin/Keuangan receivables view can filter Belum Lunas / Jatuh Tempo /
+     * Terlambat from the SAME financial source — no second truth.
+     */
+    public function test_finance_orders_rows_carry_due_date_and_overdue_flag_for_the_piutang_menu(): void
+    {
+        $branch = $this->branch();
+        $product = $this->makeProduct($branch['agen']);
+        $withDue = $this->placeCodOrder($branch['directKonsumen'], $product);
+        $noDue = $this->placeCodOrder($branch['salesKonsumen'], $this->makeProduct($branch['agen']));
+        for ($i = 0; $i < 14; $i++) {
+            $this->placeCodOrder($branch['directKonsumen'], $product);
+        }
+
+        // Due-date authority is Admin/Keuangan (MasterV2 #10), not the agen.
+        $this->actingAs($branch['keuangan'])->putJson("/api/v1/orders/{$withDue->id}/due-date", [
+            'due_date' => now()->subDay()->toDateString(), 'reason' => 'Piutang jatuh tempo kemarin',
+        ])->assertOk();
+
+        $resp = $this->actingAs($branch['keuangan'])->getJson('/api/v1/reports/finance-orders?per_page=20');
+        $rows = collect($resp->json('data'))->keyBy('order_id');
+
+        $this->assertTrue($rows->has($withDue->id) && $rows->has($noDue->id));
+        $this->assertSame(now()->subDay()->toDateString(), $rows[$withDue->id]['due_date']);
+        $this->assertTrue($rows[$withDue->id]['is_overdue'], 'a past due date must be flagged overdue');
+        $this->assertNull($rows[$noDue->id]['due_date']);
+        $this->assertFalse($rows[$noDue->id]['is_overdue']);
+        $this->assertGreaterThan(0, (float) $rows[$withDue->id]['remaining'], 'receivables row must expose outstanding balance');
+
+        $paged = $this->actingAs($branch['keuangan'])->getJson('/api/v1/reports/finance-orders?receivable=1&per_page=15');
+        $paged->assertOk()->assertJsonCount(15, 'data');
+        $this->assertSame(16, $paged->json('meta.total'));
+        $this->assertSame(16, $paged->json('meta.summary.count'));
+        $this->assertGreaterThan(0, (float) $paged->json('meta.summary.outstanding'));
+
+        $overdue = $this->actingAs($branch['keuangan'])->getJson('/api/v1/reports/finance-orders?receivable=1&due_filter=overdue');
+        $overdue->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.order_id', $withDue->id);
+
+        // The centralized menu is Admin/Keuangan territory: a plain korsal
+        // never reaches the finance-orders source.
+        $this->actingAs($branch['korsal'])->getJson('/api/v1/reports/finance-orders')->assertStatus(403);
     }
 }

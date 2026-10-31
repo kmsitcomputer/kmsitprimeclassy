@@ -47,7 +47,9 @@ class CheckoutStepResolver
         $activeMap = [
             CheckoutSteps::ACCOUNT => ! $isAuthenticated,
             CheckoutSteps::ADDRESS => true,
-            CheckoutSteps::REFERRAL => true,
+            // Attribution stays server-side and staff customer selection belongs
+            // inside the existing account/address form, never a standalone step.
+            CheckoutSteps::REFERRAL => false,
             CheckoutSteps::PRODUCTS => true,
             CheckoutSteps::SHIPPING => $shippingEnabled,
             CheckoutSteps::DELIVERY_DATE => true,
@@ -92,7 +94,7 @@ class CheckoutStepResolver
             // either way, so an empty list here is correct — never a raw
             // QueryException (see SafeSchema's docblock).
             'payment_methods' => SafeSchema::hasTable('payment_methods')
-                ? $this->availablePaymentMethodService->availableMethods($agentId, $shippingMethod)
+                ? $this->availablePaymentMethodService->availableMethods($agentId, $shippingMethod, $actor)
                     ->map(fn ($m) => ['id' => $m->id, 'code' => $m->code, 'name' => $m->name, 'type' => $m->type])
                     ->values()
                     ->toArray()

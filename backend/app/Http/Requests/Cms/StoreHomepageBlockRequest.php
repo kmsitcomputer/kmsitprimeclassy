@@ -20,7 +20,7 @@ class StoreHomepageBlockRequest extends BaseFormRequest
             'type' => ['required', 'string', 'in:'.implode(',', HomepageBlockTypes::slugs())],
             'content' => ['nullable', 'array'],
             // A real uploaded file only — never a URL string as a substitute.
-            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['sometimes', 'boolean'],
             'starts_at' => ['nullable', 'date'],

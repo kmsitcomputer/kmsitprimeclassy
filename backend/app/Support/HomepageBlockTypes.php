@@ -38,6 +38,12 @@ class HomepageBlockTypes
 
     public const CUSTOM = 'custom';
 
+    public const SOCIAL_MEDIA = 'social_media';
+
+    public const WHATSAPP_CHAT = 'whatsapp_chat';
+
+    public const MARKETPLACE_LINKS = 'marketplace_links';
+
     public static function definitions(): array
     {
         return [
@@ -117,6 +123,45 @@ class HomepageBlockTypes
                 'content_rules' => [
                     // Sanitized server-side before storage — see HomepageBlockService.
                     'content.html' => ['required', 'string', 'max:20000'],
+                ],
+            ],
+            self::SOCIAL_MEDIA => [
+                'image' => false,
+                'content_rules' => [
+                    'content.heading' => ['nullable', 'string', 'max:150'],
+                    'content.description' => ['nullable', 'string', 'max:500'],
+                    'content.layout' => ['required', 'in:cards,compact'],
+                    'content.platforms' => ['required', 'array'],
+                    'content.platforms.instagram.enabled' => ['required', 'boolean'],
+                    'content.platforms.instagram.url' => ['nullable', 'url:https', 'regex:/^https:\/\/(?:www\.)?instagram\.com\//i', 'max:500'],
+                    'content.platforms.tiktok.enabled' => ['required', 'boolean'],
+                    'content.platforms.tiktok.url' => ['nullable', 'url:https', 'regex:/^https:\/\/(?:www\.)?tiktok\.com\//i', 'max:500'],
+                    'content.platforms.facebook.enabled' => ['required', 'boolean'],
+                    'content.platforms.facebook.url' => ['nullable', 'url:https', 'regex:/^https:\/\/(?:www\.)?facebook\.com\//i', 'max:500'],
+                ],
+            ],
+            self::WHATSAPP_CHAT => [
+                'image' => false,
+                'content_rules' => [
+                    'content.heading' => ['nullable', 'string', 'max:150'],
+                    'content.description' => ['nullable', 'string', 'max:500'],
+                    'content.phone' => ['required', 'regex:/^[1-9][0-9]{7,14}$/'],
+                    'content.message' => ['nullable', 'string', 'max:1000'],
+                    'content.button_label' => ['required', 'string', 'max:50'],
+                    'content.mode' => ['required', 'in:card,floating'],
+                ],
+            ],
+            self::MARKETPLACE_LINKS => [
+                'image' => false,
+                'content_rules' => [
+                    'content.heading' => ['nullable', 'string', 'max:150'],
+                    'content.description' => ['nullable', 'string', 'max:500'],
+                    'content.layout' => ['required', 'in:cards,horizontal'],
+                    'content.platforms' => ['required', 'array'],
+                    'content.platforms.tokopedia.enabled' => ['required', 'boolean'],
+                    'content.platforms.tokopedia.url' => ['nullable', 'url:https', 'regex:/^https:\/\/(?:www\.)?tokopedia\.com\//i', 'max:500'],
+                    'content.platforms.shopee.enabled' => ['required', 'boolean'],
+                    'content.platforms.shopee.url' => ['nullable', 'url:https', 'regex:/^https:\/\/(?:www\.)?shopee\.co\.id\//i', 'max:500'],
                 ],
             ],
         ];

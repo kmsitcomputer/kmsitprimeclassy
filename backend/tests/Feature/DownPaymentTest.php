@@ -88,8 +88,14 @@ class DownPaymentTest extends TestCase
 
     private function placeDpOrder(User $konsumen, Product $product, mixed $dpAmount, bool $includeDp = true): TestResponse
     {
+        // Owner rule (Improvement 04): DP is staff-only — a konsumen sees full Bank
+        // Transfer only. These are genuine DP business tests, so the branch's
+        // agen places the order on behalf of the buyer (konsumen_id), keeping
+        // the buyer and the DP validation semantics unchanged.
+        $actor = User::query()->findOrFail($konsumen->agent_id);
         $payload = [
             'payment_method_code' => 'down_payment',
+            'konsumen_id' => $konsumen->id,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             ...$this->destination(),
         ];
@@ -98,7 +104,7 @@ class DownPaymentTest extends TestCase
             $payload['dp_amount'] = $dpAmount;
         }
 
-        return $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        return $this->actingAs($actor)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', $payload);
     }
 
@@ -291,7 +297,8 @@ class DownPaymentTest extends TestCase
 
         // Two items so cancelling the smaller one still leaves 700k of total —
         // enough to cover the 300k DP already paid, so never overpaid.
-        $response = $this->actingAs($konsumen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
             'payment_method_code' => 'down_payment', 'dp_amount' => 300000,
             'items' => [['product_id' => $productA->id, 'quantity' => 1], ['product_id' => $productB->id, 'quantity' => 1]],
             ...$this->destination(),

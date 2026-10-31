@@ -51,8 +51,9 @@ class DeliveryDateGroupingTest extends TestCase
 
     private function placeOrder(): Order
     {
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'delivery_date' => '2026-11-01',
                 'items' => [

@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class DatasetRegistry
 {
-    /** Laporan C — Staf Worksheet (47-column SimpleV2 staff sheet geometry; manual cells protected). */
+    /** Laporan C — Staf Worksheet (47 legacy columns + AV order status; manual cells protected). */
     public const DATASET_STAFF_WORKSHEET = 'transaction_worksheet';
 
     /**
@@ -129,7 +129,7 @@ class DatasetRegistry
             'stock' => ['Stok Produk', 'Stok tersedia dan tercadangkan per produk.'],
             'transactions' => ['Transaksi (per item)', 'Baris transaksi per item produk, kontrak kanonik laporan transaksi.'],
             'transaction_items' => ['Transaksi (alias lama)', 'Alias kompatibilitas untuk konfigurasi lama; gunakan "Transaksi (per item)".'],
-            self::DATASET_STAFF_WORKSHEET => ['Laporan C - Worksheet Transaksi Staf (47 kolom)', 'Format worksheet staf SimpleV2: satu baris per item, nilai faktur hanya pada baris item pertama. Kolom MANUAL dilindungi dan tidak pernah ditimpa sinkronisasi.'],
+            self::DATASET_STAFF_WORKSHEET => ['Laporan C - Worksheet Transaksi Staf (48 kolom)', 'Format worksheet staf SimpleV2 plus kolom AV Status Pesanan: satu baris per item, nilai faktur hanya pada baris item pertama. Kolom MANUAL dilindungi dan tidak pernah ditimpa sinkronisasi.'],
             'sales' => ['Daftar Sales/SKS', 'Roster Sales dan Sales-Kurir.'],
             'korsal' => ['Daftar Korsal', 'Roster Korsal.'],
             'courier_deliveries' => ['Pengiriman Kurir', 'Pengiriman beserta kurir dan nomor resi.'],
@@ -205,7 +205,7 @@ class DatasetRegistry
         }
         if ($dataset === self::DATASET_STAFF_WORKSHEET) {
             // Derived table like the locked reports: SyncService may select any
-            // subset/order of the 47 keys without ever touching raw SQL.
+            // subset/order of the 48 keys without ever touching raw SQL.
             $worksheet = DB::query()->fromSub(
                 $this->orderStaffWorksheetReport->query(
                     $agentId,

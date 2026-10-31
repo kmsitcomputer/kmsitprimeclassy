@@ -537,7 +537,8 @@ class ProductSystemTest extends TestCase
         // Own agent has NO stock; the other agent has plenty — must not "fall back" to it.
         ProductStock::create(['agent_id' => $otherBranch['agen']->id, 'product_id' => $product->id, 'quantity_on_hand' => 100, 'quantity_reserved' => 0]);
 
-        $response = $this->actingAs($ownBranch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $response = $this->actingAs($ownBranch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $ownBranch['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
             'recipient_name' => 'C', 'recipient_phone' => '0812', 'address_line' => 'Jl. C',
@@ -596,6 +597,9 @@ class ProductSystemTest extends TestCase
             'agent_id' => $branch['agen']->id, 'korsal_id' => $branch['korsal']->id, 'sales_id' => $branch['sales']->id,
         ]);
 
+        // Improvement 04: COD is staff-only — the branch agen places both racing
+        // orders for the two DIFFERENT buyers; the oversell race semantics are
+        // unchanged (distinct buyers, distinct idempotency keys, one unit).
         $payload = [
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
@@ -604,8 +608,10 @@ class ProductSystemTest extends TestCase
             'latitude' => -6.9, 'longitude' => 107.6,
         ];
 
-        $first = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', $payload);
-        $second = $this->actingAs($konsumen2)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', $payload);
+        $first = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', ['konsumen_id' => $branch['konsumen']->id] + $payload);
+        $second = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/v1/orders', ['konsumen_id' => $konsumen2->id] + $payload);
 
         $statuses = collect([$first->status(), $second->status()])->sort()->values();
         $this->assertSame([201, 422], $statuses->all());

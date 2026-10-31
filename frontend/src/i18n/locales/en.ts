@@ -1,6 +1,24 @@
 import type id from './id'
 
 export default {
+  receivables: {
+    title: 'Receivables',
+    loadError: 'Failed to load receivables.',
+    searchPlaceholder: 'Search order no. / customer...',
+    filterAll: 'All',
+    filterUnpaid: 'Outstanding',
+    filterDue: 'Due Today',
+    filterOverdue: 'Overdue',
+    summary: '{count} orders · outstanding {amount}',
+    empty: 'No matching orders.',
+    colOrder: 'Order No.',
+    colCustomer: 'Customer',
+    colTotal: 'Total',
+    colPaid: 'Paid',
+    colOutstanding: 'Outstanding',
+    colDue: 'Due Date',
+    colStatus: 'Status',
+  },
   common: {
     loading: 'Loading...',
     cancel: 'Cancel',
@@ -521,6 +539,8 @@ export default {
       manualHint: 'Manual transfer, requires verification',
       gatewayHint: 'Automated payment instructions',
       dpHint: 'Pay part now, settle the rest later',
+      payFull: 'Pay in full',
+      payDp: 'Pay down payment (DP)',
       dpLabel: 'Down payment amount (paid now)',
       dpInputHint: 'Enter the DP nominal. The remaining balance is settled later.',
       dpInvalid: 'Enter a valid DP amount (greater than 0).',

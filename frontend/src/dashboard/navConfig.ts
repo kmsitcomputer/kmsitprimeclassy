@@ -274,6 +274,15 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'super_admin', 'agen', 'admin', 'keuangan'),
       },
       {
+        // Improvement 10 / Owner-approved centralized Piutang menu (§8B):
+        // outstanding receivables for Admin + Keuangan.
+        key: 'receivables',
+        label: 'Piutang',
+        routeName: 'receivables',
+        icon: 'cash',
+        show: (auth) => isRole(auth, 'super_admin', 'admin', 'keuangan'),
+      },
+      {
         key: 'customers-report',
         label: 'Laporan Pelanggan',
         routeName: 'customers-report',

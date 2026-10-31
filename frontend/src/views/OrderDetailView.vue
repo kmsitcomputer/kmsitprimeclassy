@@ -7,9 +7,10 @@ import AppButton from '@/components/ui/AppButton.vue'
 import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import ConsentPanel from '@/components/dashboard/ConsentPanel.vue'
 import RefundRecipientPanel from '@/components/dashboard/RefundRecipientPanel.vue'
+import OrderPaymentTools from '@/components/orders/OrderPaymentTools.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
-import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
+import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement, openPaymentProof } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { listEligibleCouriers, type EligibleCourier } from '@/api/dispatch'
 import { recordDeliveryVerification } from '@/api/deliveries'
@@ -71,6 +72,9 @@ const paymentActionError = ref<string | null>(null)
 const verifying = ref(false)
 const codUpdating = ref(false)
 const rejectionReason = ref('')
+/** Finance: money actually received (blank = confirm the submitted nominal) and why it differs. */
+const verifiedAmountInput = ref('')
+const adjustmentReason = ref('')
 /** Pembayar — who actually supplied the money (Konsumen by default; Sales/Korsal only when they paid). */
 const paidBy = ref<'konsumen' | 'sales' | 'korsal'>('konsumen')
 const paidByOptions = computed(() => {
@@ -644,7 +648,14 @@ async function actOnVerification(approved: boolean) {
   verifying.value = true
   paymentActionError.value = null
   try {
-    await verifyBankTransfer(props.id, approved, approved ? undefined : rejectionReason.value)
+    await verifyBankTransfer(
+      props.id,
+      approved,
+      approved ? undefined : rejectionReason.value,
+      approved && verifiedAmountInput.value !== '' ? { verifiedAmount: Number(verifiedAmountInput.value), reason: adjustmentReason.value } : undefined,
+    )
+    verifiedAmountInput.value = ''
+    adjustmentReason.value = ''
     await load()
   } catch (e) {
     paymentActionError.value = e instanceof ApiError ? e.message : t('orders.errors.verify')
@@ -1433,6 +1444,8 @@ async function submitReturn(item: OrderItem) {
 
         <p v-if="paymentActionError" class="mt-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-400">{{ paymentActionError }}</p>
 
+        <OrderPaymentTools v-if="auth.user" :order="order" :role="auth.user.role" @changed="load()" />
+
         <!-- Manual transfer: bank details + proof upload (konsumen) -->
         <template v-if="order.payment_method?.type === 'manual'">
           <div v-if="order.payment_transaction?.instructions" class="mt-3 rounded-lg bg-stone-50 p-2.5 text-sm dark:bg-stone-800/60">
@@ -1473,12 +1486,23 @@ async function submitReturn(item: OrderItem) {
               {{ t('orders.paidOnBehalfBy', { name: order.payment_transaction.bank_transfer_verification.submitted_by.name }) }}
             </p>
             <dl class="mt-1 space-y-0.5 text-xs text-stone-500 dark:text-stone-400">
+              <div v-if="order.payment_transaction.bank_transfer_verification.channel === 'cash'">Metode: <strong>Tunai</strong><span v-if="order.payment_transaction.bank_transfer_verification.cash_received_by"> — diterima {{ order.payment_transaction.bank_transfer_verification.cash_received_by.name }}</span><span v-if="order.payment_transaction.bank_transfer_verification.receipt_reference"> (ref {{ order.payment_transaction.bank_transfer_verification.receipt_reference }})</span></div>
+              <div v-if="order.payment_transaction.bank_transfer_verification.submitted_amount">Nominal diajukan: <strong>{{ formatRupiah(Number(order.payment_transaction.bank_transfer_verification.submitted_amount)) }}</strong></div>
+              <div v-if="order.payment_transaction.bank_transfer_verification.verified_amount">Nominal terverifikasi: <strong>{{ formatRupiah(Number(order.payment_transaction.bank_transfer_verification.verified_amount)) }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.amount_adjustment_reason"> — {{ order.payment_transaction.bank_transfer_verification.amount_adjustment_reason }}</span></div>
               <div>Pembayar: <strong>{{ paidByLabel(order.payment_transaction.bank_transfer_verification.paid_by) }}</strong></div>
               <div v-if="order.payment_transaction.bank_transfer_verification.submitted_by">Bukti di-upload oleh: <strong>{{ roleLabel(order.payment_transaction.bank_transfer_verification.submitted_by.role) }} — {{ order.payment_transaction.bank_transfer_verification.submitted_by.name }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.submitted_at"> ({{ formatDate(order.payment_transaction.bank_transfer_verification.submitted_at) }})</span></div>
               <div v-if="order.payment_transaction.bank_transfer_verification.verified_by">Diverifikasi oleh: <strong>{{ roleLabel(order.payment_transaction.bank_transfer_verification.verified_by.role) }} — {{ order.payment_transaction.bank_transfer_verification.verified_by.name }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.verified_at"> ({{ formatDate(order.payment_transaction.bank_transfer_verification.verified_at) }})</span></div>
             </dl>
+            <button
+              v-if="order.payment_transaction.bank_transfer_verification.proof_url && order.payment_transaction.bank_transfer_verification.proof_private"
+              type="button"
+              class="text-xs font-medium text-brand-600 dark:text-brand-400"
+              @click="openPaymentProof(order.payment_transaction.bank_transfer_verification.proof_url!)"
+            >
+              {{ t('orders.viewTransferProof') }}
+            </button>
             <a
-              v-if="order.payment_transaction.bank_transfer_verification.proof_url"
+              v-else-if="order.payment_transaction.bank_transfer_verification.proof_url"
               :href="order.payment_transaction.bank_transfer_verification.proof_url"
               target="_blank" rel="noopener noreferrer"
               class="text-xs font-medium text-brand-600 dark:text-brand-400"
@@ -1495,6 +1519,9 @@ async function submitReturn(item: OrderItem) {
               class="mt-2 space-y-2 rounded-lg bg-stone-50 p-3 dark:bg-stone-800/60"
             >
               <p class="text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.verifyTransfer') }}</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">Nominal diajukan: <strong>{{ formatRupiah(Number(order.payment_transaction.bank_transfer_verification.submitted_amount ?? order.payment_transaction.amount)) }}</strong></p>
+              <input v-model="verifiedAmountInput" type="number" min="1" inputmode="numeric" placeholder="Nominal diterima sebenarnya (kosongkan jika sama)" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs dark:border-stone-700 dark:bg-stone-950" data-testid="verified-amount" />
+              <input v-if="verifiedAmountInput !== ''" v-model="adjustmentReason" type="text" maxlength="255" placeholder="Alasan selisih nominal" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs dark:border-stone-700 dark:bg-stone-950" data-testid="adjustment-reason" />
               <input
                 v-model="rejectionReason"
                 type="text"

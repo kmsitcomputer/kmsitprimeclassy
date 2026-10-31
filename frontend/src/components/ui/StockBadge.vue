@@ -30,7 +30,8 @@ const state = computed<'hidden' | 'out' | 'low' | 'in'>(() => {
   </span>
   <span
     v-else-if="state === 'out'"
-    class="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-950 dark:text-red-400"
+    class="inline-flex max-w-full items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-base font-bold uppercase leading-tight tracking-wide text-white sm:text-lg"
+    data-testid="stock-out-label"
   >
     {{ t('stockBadge.outOfStock') }}
   </span>

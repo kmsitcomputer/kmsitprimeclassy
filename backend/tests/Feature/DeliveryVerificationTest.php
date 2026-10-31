@@ -53,8 +53,9 @@ class DeliveryVerificationTest extends TestCase
 
     private function deliveredShipment(array $branch): Shipment
     {
-        $id = $this->actingAs($branch['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($branch['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $branch['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $branch['product']->id, 'quantity' => 2]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
@@ -146,8 +147,9 @@ class DeliveryVerificationTest extends TestCase
 
     public function test_cannot_verify_a_shipment_that_has_not_been_delivered(): void
     {
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['product']->id, 'quantity' => 1]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',

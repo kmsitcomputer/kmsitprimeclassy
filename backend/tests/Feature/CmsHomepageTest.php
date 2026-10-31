@@ -101,7 +101,9 @@ class CmsHomepageTest extends TestCase
         $this->actingAs($superAdmin)->post('/api/v1/cms/homepage-blocks', [
             'type' => 'banner',
             'content' => [],
-            'image' => UploadedFile::fake()->image('huge.jpg')->size(4096), // 4MB > 2MB limit
+            // Banner contract (Improvement 13): 10 MiB per homepage_block.
+            // 11 MiB must be rejected; 4 MiB is legal now.
+            'image' => UploadedFile::fake()->image('huge.jpg')->size(11264), // 11MB > 10MB limit
         ])->assertStatus(422)->assertJsonValidationErrors('image');
     }
 
@@ -136,6 +138,37 @@ class CmsHomepageTest extends TestCase
             'content' => [],
         ])->assertStatus(422)
             ->assertJsonValidationErrors(['content.heading', 'content.button_label', 'content.button_url']);
+    }
+
+    public function test_native_contact_and_marketplace_blocks_validate_safe_destinations(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->postJson('/api/v1/cms/homepage-blocks', [
+            'type' => 'social_media', 'content' => ['layout' => 'cards', 'platforms' => [
+                'instagram' => ['enabled' => true, 'url' => 'https://instagram.com/primeclassy'],
+                'tiktok' => ['enabled' => false, 'url' => null],
+                'facebook' => ['enabled' => false, 'url' => null],
+            ]],
+        ])->assertCreated();
+
+        $this->actingAs($superAdmin)->postJson('/api/v1/cms/homepage-blocks', [
+            'type' => 'whatsapp_chat', 'content' => ['phone' => '628123456789', 'message' => 'Halo', 'button_label' => 'Chat', 'mode' => 'floating'],
+        ])->assertCreated();
+
+        $this->actingAs($superAdmin)->postJson('/api/v1/cms/homepage-blocks', [
+            'type' => 'marketplace_links', 'content' => ['layout' => 'cards', 'platforms' => [
+                'tokopedia' => ['enabled' => true, 'url' => 'https://tokopedia.com/primeclassy'],
+                'shopee' => ['enabled' => true, 'url' => 'https://shopee.co.id/primeclassy'],
+            ]],
+        ])->assertCreated();
+
+        $this->actingAs($superAdmin)->postJson('/api/v1/cms/homepage-blocks', [
+            'type' => 'marketplace_links', 'content' => ['layout' => 'cards', 'platforms' => [
+                'tokopedia' => ['enabled' => true, 'url' => 'https://tokopedia.example/typo'],
+                'shopee' => ['enabled' => false, 'url' => null],
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('content.platforms.tokopedia.url');
     }
 
     public function test_custom_block_html_is_sanitized_before_storage(): void
@@ -262,7 +295,12 @@ class CmsHomepageTest extends TestCase
         $response = $this->getJson('/api/v1/homepage');
 
         $names = collect($response->json('data.0.content.categories'))->pluck('name')->all();
-        $this->assertEqualsCanonicalizing(['Cake', 'Cookies'], $names);
+        $this->assertSame(['Cake', 'Cookies'], $names);
+
+        $block = CmsHomepageBlock::query()->firstOrFail();
+        $block->update(['content' => ['category_ids' => [$cat2->id, $cat1->id]]]);
+        $reordered = collect($this->getJson('/api/v1/homepage')->json('data.0.content.categories'))->pluck('name')->all();
+        $this->assertSame(['Cookies', 'Cake'], $reordered);
     }
 
     public function test_public_homepage_resolves_product_references_by_category(): void

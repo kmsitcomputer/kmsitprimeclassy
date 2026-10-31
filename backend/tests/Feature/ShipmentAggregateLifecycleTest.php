@@ -89,9 +89,10 @@ class ShipmentAggregateLifecycleTest extends TestCase
             $products[] = $p;
         }
 
-        $this->actingAs($this->b['konsumen'])
+        $this->actingAs($this->b['agen'])
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => array_map(fn (Product $p) => ['product_id' => $p->id, 'quantity' => 1], $products),
                 'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

@@ -25,6 +25,9 @@ abstract class TestCase extends BaseTestCase
         // header. Test requests send neither by default, so every test that
         // touches an authenticated or session-backed route needs one.
         $this->withHeader('Referer', config('app.url'));
+
+        // New payment proofs are stored on the PRIVATE ('local') disk; never write test uploads into the real storage.
+        \Illuminate\Support\Facades\Storage::fake('local');
     }
 
     /**

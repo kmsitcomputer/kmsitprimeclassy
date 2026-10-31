@@ -257,9 +257,11 @@ class OrderService
                 // (ShippingQuoteService may fall back/differ from what was
                 // requested). Also re-enforces the agent's own enabled/disabled
                 // payment methods, which nothing before this point checked.
-                if (! $this->availablePaymentMethodService->isAvailable($agentId, $quote->providerCode, $paymentMethod)) {
+                if (! $this->availablePaymentMethodService->isAvailable($agentId, $quote->providerCode, $paymentMethod, $actor)) {
+                    // Distinguish a role restriction (konsumen => Bank Transfer only) from a shipping one.
+                    $roleBlocked = $this->availablePaymentMethodService->isAvailable($agentId, $quote->providerCode, $paymentMethod);
                     throw new ApiException(
-                        __('messages.payment.method_not_available_for_shipping'),
+                        __($roleBlocked ? 'messages.payment.method_not_available_for_role' : 'messages.payment.method_not_available_for_shipping'),
                         422,
                         ['payment_method_code' => __('messages.system.field_invalid')],
                     );
@@ -390,6 +392,12 @@ class OrderService
                 }
 
                 $this->paymentService->initiate($order, $paymentMethod);
+
+                // Owner rule: a COD invoice is issued as soon as the order exists; transfer invoices wait for the
+                // first verified payment (InvoiceIssuanceService).
+                if ($paymentMethod->type === 'cod') {
+                    app(\App\Services\Invoice\InvoiceIssuanceService::class)->syncAfterChange($order->fresh(['paymentMethod']), 'order_created_cod', $actor->id);
+                }
 
                 app(\App\Services\Report\OrderInitialSnapshotService::class)->capture($order);
 

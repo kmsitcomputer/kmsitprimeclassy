@@ -4,6 +4,7 @@ namespace App\Services\Payment;
 
 use App\Models\AgentPaymentMethodSetting;
 use App\Models\PaymentMethod;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -25,8 +26,14 @@ class AvailablePaymentMethodService
     /** Payment method codes allowed when shipping_method = 'rajaongkir' (Ekspedisi). */
     private const EXPEDITION_ALLOWED_CODES = ['bank_transfer'];
 
+    /**
+     * Owner rule (Improvement 04): a konsumen checking out for themselves only ever sees full Bank
+     * Transfer — no COD and no DP. Staff roles keep COD + Bank Transfer (+ DP as a Transfer sub-option).
+     */
+    private const KONSUMEN_ALLOWED_CODES = ['bank_transfer'];
+
     /** @return Collection<int, PaymentMethod> */
-    public function availableMethods(?int $agentId, ?string $shippingMethod): Collection
+    public function availableMethods(?int $agentId, ?string $shippingMethod, ?User $actor = null): Collection
     {
         $methods = PaymentMethod::query()
             ->where('is_active', true)
@@ -36,6 +43,10 @@ class AvailablePaymentMethodService
             ->orderBy('id')
             ->get();
 
+        if ($actor?->isRole('konsumen')) {
+            $methods = $methods->whereIn('code', self::KONSUMEN_ALLOWED_CODES)->values();
+        }
+
         if ($shippingMethod === 'rajaongkir') {
             return $methods->whereIn('code', self::EXPEDITION_ALLOWED_CODES)->values();
         }
@@ -43,8 +54,8 @@ class AvailablePaymentMethodService
         return $methods;
     }
 
-    public function isAvailable(?int $agentId, ?string $shippingMethod, PaymentMethod $method): bool
+    public function isAvailable(?int $agentId, ?string $shippingMethod, PaymentMethod $method, ?User $actor = null): bool
     {
-        return $this->availableMethods($agentId, $shippingMethod)->contains('id', $method->id);
+        return $this->availableMethods($agentId, $shippingMethod, $actor)->contains('id', $method->id);
     }
 }

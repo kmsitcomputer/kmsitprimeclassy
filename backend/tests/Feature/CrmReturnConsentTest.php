@@ -349,7 +349,8 @@ class CrmReturnConsentTest extends TestCase
         $other = $this->branch();
         $this->actingAs($other['keuangan'])->getJson("/api/v1/orders/{$order->id}/refund-recipient")->assertNotFound();
 
-        $accountOrder = $this->actingAs($b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+        $accountOrder = $this->actingAs($b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $b['konsumen']->id,
             'payment_method_code' => 'cod', 'items' => [['product_id' => $order->items()->first()->product_id, 'quantity' => 1]],
             'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. X',
             'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,

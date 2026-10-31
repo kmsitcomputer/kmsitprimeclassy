@@ -8,6 +8,7 @@ use App\Http\Requests\Payment\ConfirmCodPaymentRequest;
 use App\Http\Requests\Payment\MarkCodPaymentRequest;
 use App\Http\Requests\Payment\StoreBankTransferProofRequest;
 use App\Http\Requests\Payment\StoreCodPaymentProofRequest;
+use App\Http\Requests\Payment\StoreInstallmentRequest;
 use App\Http\Requests\Payment\VerifyBankTransferRequest;
 use App\Http\Resources\OrderResource;
 use App\Http\Resources\PaymentTransactionResource;
@@ -47,6 +48,97 @@ class PaymentController extends Controller
         ], __('messages.payment.proof_submitted'));
     }
 
+    /**
+     * Improvement 05/06/08 - record an installment / payoff / cash receipt against an order that is already
+     * in fulfilment. Konsumen (own order), branch staff, and Korsal/Sales/Sales-Kurir-Sub inside their
+     * payOnBehalf scope may record it; NONE of them can verify it (Keuangan/super_admin only).
+     */
+    public function installment(StoreInstallmentRequest $request, Order $order)
+    {
+        $this->authorizeProofSubmission($request, $order);
+        $actor = $request->user();
+        $channel = $request->input('channel', 'transfer');
+
+        // Cash is a field-collection channel: the konsumen themselves never "receive" cash.
+        if ($channel === 'cash' && $actor->id === $order->konsumen_id) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        $cash = [];
+        if ($channel === 'cash') {
+            if (! $request->filled('receipt_reference') && ! $request->hasFile('receipt_photo')) {
+                throw new ApiException(__('messages.system.validation_failed'), 422, ['receipt_reference' => __('messages.system.field_required')]);
+            }
+            $receiverId = $request->integer('received_by_user_id') ?: $actor->id;
+            if ($receiverId !== $actor->id) {
+                $receiver = User::query()->whereKey($receiverId)->first();
+                if (! $receiver || $receiver->agent_id !== $order->agent_id || ! $receiver->isRole('korsal', 'sales', 'sales-kurir-sub', 'agen', 'admin', 'keuangan')) {
+                    throw new ApiException(__('messages.system.validation_failed'), 422, ['received_by_user_id' => __('messages.system.field_invalid')]);
+                }
+            }
+            $cash = [
+                'received_by_user_id' => $receiverId,
+                'received_at' => $request->input('received_at'),
+                'receipt_reference' => $request->input('receipt_reference'),
+            ];
+        }
+
+        [$transaction, $replay] = $this->paymentService->requestInstallment(
+            $order, $actor, (float) $request->input('amount'), $channel, $cash, $request->file('receipt_photo')
+        );
+
+        return $this->ok([
+            'transaction' => new PaymentTransactionResource($transaction->fresh('bankTransferVerification')),
+            'replay' => $replay,
+        ], $replay ? __('messages.payment.settlement_replayed') : __('messages.payment.settlement_requested'));
+    }
+
+    /** Improvement 10 - set/change the due date of ONE order. Never touches the invoice issue date. */
+    public function setDueDate(Request $request, Order $order)
+    {
+        $actor = $request->user();
+        if (! $actor->isRole('super_admin') && $order->agent_id !== $actor->agent_id) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        $data = $request->validate([
+            'due_date' => ['required', 'date'],
+            'reason' => ['required', 'string', 'max:255'],
+        ]);
+
+        $order = $this->paymentService->setDueDate($order, $actor, $data['due_date'], $data['reason']);
+
+        return $this->ok(['order_id' => $order->id, 'due_date' => $order->due_date?->toDateString()]);
+    }
+
+    /** Authorization-checked download of a PRIVATE (or legacy public) transfer/cash proof. */
+    public function proofFile(Request $request, \App\Models\BankTransferVerification $verification)
+    {
+        // Scope-free load: BelongsToAgentScope would null out the order for a
+        // cross-branch actor BEFORE the 403 below could fire (property-on-null
+        // → HTTP 500). The explicit gate below is the authority, not the scope.
+        $order = \App\Models\Order::withoutGlobalScopes()
+            ->where('id', $verification->paymentTransaction->order_id)
+            ->firstOrFail();
+        $actor = $request->user();
+
+        $allowed = $actor->isRole('super_admin')
+            || $actor->id === $order->konsumen_id
+            || ($actor->isRole('agen', 'admin', 'keuangan') && $actor->agent_id === $order->agent_id)
+            || ($actor->isRole('korsal', 'sales', 'sales-kurir-sub') && $actor->can('payOnBehalf', $order));
+
+        if (! $allowed || ! $verification->proof_image_path) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        $disk = \Illuminate\Support\Facades\Storage::disk($verification->proof_disk === 'local' ? 'local' : 'public');
+        if (! $disk->exists($verification->proof_image_path)) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 404);
+        }
+
+        return $disk->response($verification->proof_image_path, null, ['Cache-Control' => 'private, no-store']);
+    }
+
     public function verify(VerifyBankTransferRequest $request, Order $order)
     {
         $actor = $request->user();
@@ -72,6 +164,8 @@ class PaymentController extends Controller
             $actor,
             $request->boolean('approved'),
             $request->input('rejection_reason'),
+            $request->filled('verified_amount') ? (float) $request->input('verified_amount') : null,
+            $request->input('amount_adjustment_reason'),
         );
 
         return $this->ok([

@@ -94,9 +94,10 @@ class SettlementRequestIdempotencyTest extends TestCase
     /** A DP order whose DP has been verified, so a real outstanding balance remains. */
     private function dpOrderWithOutstandingBalance(float $dp = 40000): Order
     {
-        $this->actingAs($this->b['konsumen'])
+        $this->actingAs($this->b['agen'])
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'down_payment', 'dp_amount' => $dp,
                 'items' => [['product_id' => $this->b['product']->id, 'quantity' => 1]],
                 'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',
@@ -399,9 +400,10 @@ class SettlementRequestIdempotencyTest extends TestCase
 
     public function test_settlement_is_still_refused_for_a_non_dp_order(): void
     {
-        $this->actingAs($this->b['konsumen'])
+        $this->actingAs($this->b['agen'])
             ->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['product']->id, 'quantity' => 1]],
                 'recipient_name' => 'Budi', 'recipient_phone' => '0811', 'address_line' => 'Jl. Sudirman',

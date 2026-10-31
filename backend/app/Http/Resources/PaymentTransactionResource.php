@@ -26,9 +26,21 @@ class PaymentTransactionResource extends JsonResource
                     'status' => $this->bankTransferVerification->status,
                     // The actual photo — an admin verifying a transfer must be
                     // able to look at it, not just know one was submitted.
+                    // Legacy proofs keep their public URL; new ones are private and fetched through an
+                    // authorization-checked endpoint (never a public storage URL).
                     'proof_url' => $this->bankTransferVerification->proof_image_path
-                        ? Storage::disk('public')->url($this->bankTransferVerification->proof_image_path)
+                        ? ($this->bankTransferVerification->proof_disk === 'local'
+                            ? url('/api/v1/payment-proofs/'.$this->bankTransferVerification->id)
+                            : Storage::disk('public')->url($this->bankTransferVerification->proof_image_path))
                         : null,
+                    'proof_private' => $this->bankTransferVerification->proof_disk === 'local',
+                    'channel' => $this->bankTransferVerification->channel,
+                    'submitted_amount' => $this->bankTransferVerification->submitted_amount ?? $this->amount,
+                    'verified_amount' => $this->bankTransferVerification->verified_amount,
+                    'amount_adjustment_reason' => $this->bankTransferVerification->amount_adjustment_reason,
+                    'cash_received_by' => $this->payerSummary($this->bankTransferVerification->cashReceivedBy),
+                    'cash_received_at' => $this->bankTransferVerification->cash_received_at,
+                    'receipt_reference' => $this->bankTransferVerification->receipt_reference,
                     'rejection_reason' => $this->bankTransferVerification->rejection_reason,
                     // IMP-001: payer actor vs. order owner (the konsumen) — the owner is never rewritten.
                     'submitted_on_behalf' => (bool) $this->bankTransferVerification->submitted_on_behalf,

@@ -70,8 +70,9 @@ class CourierFeeSplitTest extends TestCase
 
     private function placeAgentItem(int $qty): OrderItem
     {
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['product']->id, 'quantity' => $qty]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',

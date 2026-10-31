@@ -61,9 +61,9 @@ class GoogleSheetsCatalogTest extends TestCase
             $data = $this->actingAs($actor)->getJson('/api/v1/google-sheets')->assertOk()->json('data');
             $entry = $data['dataset_catalog'][self::WORKSHEET];
 
-            $this->assertSame(47, $entry['column_count']);
-            $this->assertSame(47, $entry['default_column_count']);
-            $this->assertCount(47, $entry['columns']);
+            $this->assertSame(48, $entry['column_count']);
+            $this->assertSame(48, $entry['default_column_count']);
+            $this->assertCount(48, $entry['columns']);
             $this->assertSame(array_keys(OrderStaffWorksheetService::COLUMNS), array_column($entry['columns'], 'field'));
             $this->assertSame(
                 OrderStaffWorksheetService::MANUAL_FIELDS,

@@ -75,8 +75,9 @@ class R04OrderProjectionTest extends TestCase
 
     private function placeTwoItemOrder(): Order
     {
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [
                     ['product_id' => $this->b['productA']->id, 'quantity' => 1],

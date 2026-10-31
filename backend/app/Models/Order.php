@@ -85,6 +85,8 @@ class Order extends Model
             'longitude_snapshot' => 'decimal:7',
             'delivery_date_estimate' => 'date',
             'delivery_date_actual' => 'datetime',
+            'due_date' => 'date',
+            'invoice_issued_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'cancellation_finalized_at' => 'datetime',
         ];

@@ -59,6 +59,7 @@ class StructuredAddressTest extends TestCase
     private function placeOrder(array $extra = []): Order
     {
         $payload = array_merge([
+            'konsumen_id' => $this->b['konsumen']->id,
             'payment_method_code' => 'cod',
             'items' => [['product_id' => $this->b['product']->id, 'quantity' => 1]],
             'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
@@ -66,7 +67,7 @@ class StructuredAddressTest extends TestCase
             'postal_code' => '40135',
         ], $extra);
 
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', $payload)->assertCreated()->json('data.id');
 
         return Order::withoutGlobalScopes()->findOrFail($id);
@@ -92,8 +93,9 @@ class StructuredAddressTest extends TestCase
         $village2 = Village::create(['id' => '32730201', 'district_id' => $otherDistrict->id, 'name' => 'Sukajadi']);
 
         // village_id belongs to a different district than the supplied district_id
-        $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['product']->id, 'quantity' => 1]],
                 'recipient_name' => 'Buyer', 'recipient_phone' => '0811', 'address_line' => 'Jl. Buyer',
@@ -112,8 +114,9 @@ class StructuredAddressTest extends TestCase
             'latitude' => -6.9, 'longitude' => 107.6,
         ]);
 
-        $id = $this->actingAs($this->b['konsumen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+        $id = $this->actingAs($this->b['agen'])->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
             ->postJson('/api/v1/orders', [
+            'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
                 'items' => [['product_id' => $this->b['product']->id, 'quantity' => 1]],
                 'address_id' => $address->id,
