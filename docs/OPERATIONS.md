@@ -191,7 +191,7 @@ Also preserve `public_html/storage` (symlink to `../backend/storage/app/public`)
 
 ### 7.3 Deployment and migration procedure
 
-1. **Preflight (read-only):** confirm branch/commit to ship, DEV UAT + Human Stage Gate recorded, working tree clean, full backend suite + frontend type-check/build green. Check production `php artisan migrate:status` for the Pending set and review each migration (additive? MariaDB 10.11-compatible? production data impact?).
+1. **Preflight (read-only):** confirm branch/commit to ship, DEV UAT + Human Stage Gate recorded, working tree clean, scoped backend tests for every changed area + frontend type-check/build green. Full Test is **not** a release gate (Owner decision, 2026-11-02); the Owner may run it at their discretion. Check production `php artisan migrate:status` for the Pending set and review each migration (additive? MariaDB 10.11-compatible? production data impact?).
 2. **Backup** (§6): database + `backend` + `public_html`; verify.
 3. **Maintenance mode ON** for any incompatible code/schema window: `php artisan down`.
 4. **Deploy backend by whitelist** (never copy DEV `.env`, `storage/`, uploads, sessions or logs); `composer install --no-dev --optimize-autoloader`.
@@ -477,3 +477,11 @@ Automated tests fake HTTP and use isolated cache; no live provider is called. Ne
 ### WhatsApp management by Agen / Admin Agen (2026-11-04, DEV implemented)
 - Routes `/agent/whatsapp/*` now allow `agen` and `admin` (scope resolved server-side, see BUSINESS-RULES §28); new: `scope`, `events`, `test-numbers`, `test-send` (registered-number allow-list, the target Agen's own paired slot only, 3/min & 20/day, ≤5 numbers). Migration `2026_11_04_100100_create_agent_whatsapp_scoped_settings` (two additive tables) is applied to DEV (batch 42) and **pending on production** — apply it with this release; until then scoped settings fail closed (503) and the legacy global behaviour continues unchanged.
 - The Super Admin console no longer has the Notifikasi (templates/events) tab; its backend endpoints remain only as the platform-default fallback.
+
+### Notification contract — email & in-app (2026-11-02, branch `docs/notification-contract-v1`)
+Contract and status: [PRIMECLASSY-MASTER-NOTIFICATION-CONTRACT.md](PRIMECLASSY-MASTER-NOTIFICATION-CONTRACT.md) §24.
+- **Migrations (additive, pending on production):** `2026_11_05_100000_create_email_messages_table`, `2026_11_05_100100_create_admin_notifications_table`. Until applied, e-mail and the in-app centre stay inert (the API answers `migration_pending`).
+- **Transactional e-mail:** Super Admin → SMTP → "Kirim email transaksi" (`smtp.transactional_enabled`, **default OFF**; also needs SMTP ON + complete). Recipients are branch admins and order creators with a **verified** e-mail only. Jobs run on `primeclassy-notify` (same worker); no automatic retry — failures stay `failed` in `email_messages` and raise an in-app alert.
+- **New WhatsApp/e-mail events** (`payment_failed`, `return_rejected`, `refund_requested`, `refund_approved`, `refund_rejected`) are OFF until switched on per Agen. New default texts apply immediately to events that are already ON and still use the default template.
+- **Order links** use `APP_FRONTEND_URL` (falls back to `APP_URL`; production is single-domain, no change needed) and the numeric `/orders/{id}` route. Re-run `config:cache` after changing it.
+- **In-app centre:** `/dashboard/notifications` (Super Admin, Agen, Admin; own rows only). Retention: `php artisan primeclassy:admin-notifications-prune` (dry-run) / `--execute`; **not scheduled** — running it on production is an Owner-authorised step.

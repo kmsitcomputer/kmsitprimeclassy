@@ -70,6 +70,16 @@ class SmtpSettings
         return filter_var($this->get('smtp.enabled', '0'), FILTER_VALIDATE_BOOLEAN);
     }
 
+    /**
+     * Transactional order/payment/shipping/return/refund e-mail. Default OFF: needs the dashboard SMTP ON and complete AND
+     * this separate switch, so turning SMTP on for account mail never starts customer order mail by itself.
+     */
+    public function transactionalEnabled(): bool
+    {
+        return $this->enabled() && $this->isComplete()
+            && filter_var($this->get('smtp.transactional_enabled', '0'), FILTER_VALIDATE_BOOLEAN);
+    }
+
     public function password(): ?string
     {
         $cipher = $this->get('smtp.password');
@@ -103,6 +113,7 @@ class SmtpSettings
             'from_name' => $this->get('smtp.from_name'),
             'timeout' => (int) $this->get('smtp.timeout', '10'),
             'complete' => $this->isComplete(),
+            'transactional_enabled' => filter_var($this->get('smtp.transactional_enabled', '0'), FILTER_VALIDATE_BOOLEAN),
             // Which configuration the application is using right now.
             'active_source' => $this->enabled() && $this->isComplete() ? 'dashboard' : 'environment',
         ];
@@ -119,6 +130,9 @@ class SmtpSettings
 
         if (array_key_exists('enabled', $data)) {
             $writes['smtp.enabled'] = $data['enabled'] ? '1' : '0';
+        }
+        if (array_key_exists('transactional_enabled', $data)) {
+            $writes['smtp.transactional_enabled'] = $data['transactional_enabled'] ? '1' : '0';
         }
         foreach (['host' => 'smtp.host', 'username' => 'smtp.username', 'from_name' => 'smtp.from_name'] as $in => $key) {
             if (array_key_exists($in, $data)) {

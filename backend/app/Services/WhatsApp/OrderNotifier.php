@@ -3,12 +3,16 @@
 namespace App\Services\WhatsApp;
 
 use App\Models\AgentProfile;
+use App\Models\BankTransferVerification;
 use App\Models\Order;
+use App\Models\RefundObligation;
 use App\Models\RefundPayout;
 use App\Models\ReturnRequest;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Models\WhatsAppMessage;
+use App\Services\Notifications\AdminNotificationService;
+use App\Services\Notifications\TransactionalEmailNotifier;
 use App\Services\Payment\PaymentSummaryService;
 use App\Support\WhatsAppNumber;
 use Illuminate\Support\Facades\DB;
@@ -43,22 +47,78 @@ class OrderNotifier
 
     public function orderEvent(Order $order, string $event): void
     {
-        $this->defer($event, fn () => $this->send($event, 'order', $order->id, $order->id, fn () => []), $order->id);
+        $this->dispatch($event, 'order', $order->id, $order->id, fn () => []);
     }
 
     public function returnEvent(ReturnRequest $return, string $event): void
     {
-        $this->defer($event, fn () => $this->send($event, 'return', $return->id, $return->order_id, fn () => [
+        $this->dispatch($event, 'return', $return->id, $return->order_id, fn () => [
             'nomor_retur' => 'RTN-'.str_pad((string) $return->id, 6, '0', STR_PAD_LEFT),
-        ]));
+        ]);
     }
 
     public function refundEvent(RefundPayout $payout): void
     {
-        $this->defer(WhatsAppEvents::REFUND_COMPLETED, fn () => $this->send(
-            WhatsAppEvents::REFUND_COMPLETED, 'refund_payout', $payout->id, $payout->order_id,
-            fn () => ['jumlah_refund' => 'Rp '.number_format((float) $payout->amount, 0, ',', '.')],
-        ));
+        $this->dispatch(WhatsAppEvents::REFUND_COMPLETED, 'refund_payout', $payout->id, $payout->order_id, fn () => [
+            'jumlah_refund' => self::money($payout->amount),
+            'tanggal_refund' => $this->date($payout->paid_at),
+        ]);
+    }
+
+    public function obligationEvent(RefundObligation $obligation, string $event): void
+    {
+        $this->dispatch($event, 'refund_obligation', $obligation->id, $obligation->order_id, fn () => [
+            'nomor_refund' => $obligation->obligation_no,
+            'jumlah_refund' => self::money($obligation->amount),
+        ]);
+    }
+
+    public function paymentRejected(BankTransferVerification $verification, int $orderId): void
+    {
+        $this->dispatch(WhatsAppEvents::PAYMENT_FAILED, 'bank_transfer_verification', $verification->id, $orderId, fn () => [
+            'jumlah_diajukan' => $verification->submitted_amount !== null ? self::money($verification->submitted_amount) : null,
+            'alasan_penolakan' => $verification->rejection_reason,
+        ]);
+    }
+
+    /**
+     * One business fact, every channel. WhatsApp keeps its own gate (gateway ON + event switch); email and the in-app
+     * centre have theirs, so switching WhatsApp off never silences email (and vice versa). All deferred to after-commit.
+     */
+    private function dispatch(string $event, string $subjectType, int $subjectId, ?int $orderId, \Closure $extra): void
+    {
+        $this->defer($event, fn () => $this->send($event, $subjectType, $subjectId, $orderId, $extra), $orderId);
+        $this->deferChannels($event, $subjectType, $subjectId, $orderId, $extra);
+    }
+
+    private function deferChannels(string $event, string $subjectType, int $subjectId, ?int $orderId, \Closure $extra): void
+    {
+        if ($orderId === null) {
+            return;
+        }
+        DB::afterCommit(function () use ($event, $subjectType, $subjectId, $orderId, $extra) {
+            try {
+                $order = $this->loadOrder($orderId);
+                if (! $order) {
+                    return;
+                }
+                $vars = $this->data($order) + $extra();
+                app(TransactionalEmailNotifier::class)->dispatch($event, $order, $subjectType, $subjectId, $vars);
+                app(AdminNotificationService::class)->orderEvent($event, $order, $subjectType, $subjectId, $vars);
+            } catch (\Throwable $e) {
+                Log::warning('notify.channels.failed', ['event' => $event, 'order_id' => $orderId, 'error' => GatewayResult::sanitize($e->getMessage())]);
+            }
+        });
+    }
+
+    private function loadOrder(int $orderId): ?Order
+    {
+        return Order::withoutGlobalScopes()->with(['konsumen', 'sales', 'placedBy', 'shipments.courier', 'shipments.selfDeliveredBy', 'items', 'paymentTransactions.paymentMethod', 'paymentMethod'])->find($orderId);
+    }
+
+    private static function money(mixed $amount): string
+    {
+        return 'Rp '.number_format((float) $amount, 0, ',', '.');
     }
 
     /* ---------------------------------------------------------------- internals */
@@ -85,7 +145,7 @@ class OrderNotifier
     {
         $this->settings->reload();
         $key = "txn:{$event}:{$subjectType}:{$subjectId}";
-        $order = $orderId ? Order::withoutGlobalScopes()->with(['konsumen', 'sales', 'placedBy', 'shipments.courier', 'shipments.selfDeliveredBy', 'items', 'paymentTransactions.paymentMethod', 'paymentMethod'])->find($orderId) : null;
+        $order = $orderId ? $this->loadOrder($orderId) : null;
         if (! $order) {
             return;
         }
@@ -215,13 +275,20 @@ class OrderNotifier
             'jumlah_dibayarkan' => 'Rp '.number_format((float) $summary['total_paid'], 0, ',', '.'),
             'sisa_tagihan' => 'Rp '.number_format((float) $summary['remaining_balance'], 0, ',', '.'),
             'tanggal_pembayaran' => $this->date($latestVerified?->paid_at),
+            // D-10: the amount of THIS verified payment (latest verified transaction), distinct from the cumulative total.
+            'jumlah_pembayaran_ini' => $latestVerified ? 'Rp '.number_format((float) $latestVerified->amount, 0, ',', '.') : null,
+            'tanggal_pengiriman' => $this->date($shipments->pluck('shipped_at')->filter()->max()),
+            'tanggal_diterima' => $this->date($shipments->pluck('delivered_at')->filter()->max()),
+            'tanggal_pembatalan' => $this->date($order->cancelled_at),
             // AUD-06 shipping variables (Shipment truth only; courier phone is deliberately NEVER exposed).
             'nama_kurir' => $first?->courier?->name ?? $first?->selfDeliveredBy?->name,
             'layanan_pengiriman' => $first?->shipping_provider_code ?? $first?->courier?->type,
             'nomor_resi' => $first?->tracking_number,
             'nomor_telepon_kurir' => null, // HA-06: no courier-phone source exists; always dropped, never invented.
             'estimasi_tiba' => null, // No ETA source exists; always dropped, never invented.
-            'link_pesanan' => '/orders/'.$order->order_no,
+            // D-09: absolute URL of the SPA order-detail route, which takes the numeric id (`/orders/:id`, Number()).
+            // The old `/orders/{order_no}` was relative and resolved to NaN. No configured base => the line drops.
+            'link_pesanan' => self::orderUrl($order),
             // R-03: no verified tracking-URL source exists in the system (no config, no courier/provider URL template), so
             // the link is NEVER composed from a guessed domain. Null => the template line drops; `nomor_resi` still carries
             // the real tracking number.
@@ -239,4 +306,11 @@ class OrderNotifier
         return $c->day.' '.self::MONTHS[$c->month].' '.$c->year;
     }
 
+    /** Absolute SPA order-detail URL (`/orders/:id`), or null when no frontend base is configured. */
+    public static function orderUrl(Order $order): ?string
+    {
+        $base = rtrim((string) config('app.frontend_url'), '/');
+
+        return $base === '' ? null : $base.'/orders/'.$order->id;
+    }
 }

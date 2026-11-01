@@ -18,6 +18,7 @@ class UpdateSmtpSettingsRequest extends BaseFormRequest
     {
         return [
             'enabled' => ['sometimes', 'boolean'],
+            'transactional_enabled' => ['sometimes', 'boolean'],
             // A hostname or IP only: no scheme, path or credentials.
             'host' => ['sometimes', 'string', 'max:190', 'regex:/^[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?$/'],
             'port' => ['sometimes', 'integer', Rule::in([25, 465, 587, 2525, 1025, 2465])],

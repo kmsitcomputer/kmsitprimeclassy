@@ -162,15 +162,15 @@ Kanonis = nama yang dipakai source hari ini (`WhatsAppEvents::*_VARS` dan `sampl
 | `nama_pengguna` | `nama_pelanggan` | REQUIRES CONTEXT | Hanya untuk akun (NTF-001, NTF-002, NTF-003, NTF-005, NTF-006) |
 | `nama_penerima` | `nama_pelanggan` | REQUIRES CONTEXT | Untuk penerima checkout, nama dari `recipient_phone_snapshot`/nama penerima, bukan nama akun. Tidak sama |
 | `total_pesanan` | `total` | ALIAS | `total` di `ORDER_VARS` adalah total pesanan. Di `PAYMENT_VARS`, `total_tagihan` adalah nilai tagihan terbaru yang berbeda |
-| `jumlah_dibayar` | `jumlah_dibayarkan` | ALIAS | Keduanya jumlah yang dibayar pada transaksi/event ini |
+| `jumlah_dibayar` (per transaksi) | — | NOT IMPLEMENTED | KOREKSI audit §18 A7: `jumlah_dibayarkan` adalah total kumulatif `paid_amount`, bukan jumlah per transaksi. Tidak boleh dialias |
 | `sisa_pembayaran` | `sisa_tagihan` | ALIAS | Sisa tagihan dari `PaymentSummaryService` |
 | `ongkos_kirim` | `ongkir` | ALIAS | — |
-| `url_detail_pesanan` | `link_pesanan` | ALIAS | — |
+| `url_detail_pesanan` | `link_pesanan` | GAP | KOREKSI audit §18 A12: `link_pesanan` berupa path relatif `/orders/{order_no}`, sedangkan route frontend `/orders/:id` membaca id numerik. Tidak boleh dialias sebelum URL absolut dan parameter dibuktikan |
 | `tanggal_pesanan` | `tanggal` | REQUIRES CONTEXT | `tanggal` adalah tanggal event. Untuk event pembayaran, gunakan `tanggal_pembayaran` |
-| `kurir` | `nama_kurir` | ALIAS | Kedua nama sudah ada di source; default `order_shipped` memakai `{kurir}` |
+| `kurir` | `nama_kurir` | REQUIRES CONTEXT | KOREKSI audit §18 A6: `kurir` = gabungan semua kurir unik dari shipment non-batal; `nama_kurir` = kurir shipment pertama saja. Tidak setara |
 | `status_pesanan` | `status` | ALIAS | — |
-| `nomor_resi` | `resi` | ALIAS | — |
-| `total_dibayar` | — | REQUIRES CONTEXT | Akumulasi dibayar belum ada di `sample()`. Jangan disamakan dengan `jumlah_dibayarkan` |
+| `nomor_resi` | `resi` | REQUIRES CONTEXT | KOREKSI audit §18 A6: `resi` = gabungan semua tracking number unik; `nomor_resi` = tracking shipment pertama. Tidak setara |
+| `total_dibayar` | `jumlah_dibayarkan` | ALIAS | KOREKSI audit §18 A7: keduanya total kumulatif yang sudah dibayar (`PaymentSummaryService.total_paid`). Sumber ada. `sample()` belum memuat `jumlah_dibayarkan`, perlu dicek saat implementasi |
 | `nama_pembuat` | — | NOT IMPLEMENTED | Variabel peran `creator`, belum ada di kontrak |
 | `nama_agen` | — | NOT IMPLEMENTED | Perlu sumber nama Agen dari relasi order |
 | `alamat_pengiriman` | — | NOT IMPLEMENTED | Data sensitif. Hanya boleh untuk admin/creator terbukti (lihat D-01) |
@@ -339,7 +339,7 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
   - (a): G-03 tidak bisa dipenuhi. NTF-026 ditujukan ke pembuat/admin saja.
   - (b): perlu perubahan `RestrictedDeliveryPolicy` dan audit privasi baru. Tidak boleh dilakukan tanpa keputusan tertulis.
   - (c): bertentangan dengan kebijakan privasi yang ada, dan membuka kebocoran nilai transaksi ke nomor yang tidak terbukti.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ### D-02 — Verifikasi email dan pemulihan: OTP atau tautan
 
@@ -351,7 +351,7 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
 - **Konsekuensi:**
   - (a): template NTF-003 dan NTF-005 diubah agar memuat kode, bukan tautan. Tidak ada mekanisme token baru.
   - (b): butuh tabel token, masa berlaku, sekali pakai, dan audit keamanan ulang. Risiko phishing dan token bocor lewat log.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ### D-03 — Akun dibuat oleh admin
 
@@ -363,7 +363,7 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
 - **Konsekuensi:**
   - (a): tidak ada mekanisme baru. Risiko: kata sandi sementara bisa bocor di luar sistem.
   - (b): butuh token sekali pakai dan email transaksi (D-06). Kata sandi plaintext tidak pernah boleh masuk email.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ### D-04 — Notifikasi permintaan consent CRM
 
@@ -375,7 +375,7 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
 - **Konsekuensi:**
   - (a): NTF-028 tetap PARTIALLY_IMPLEMENTED. Tidak ada perubahan.
   - (b): notifikasi tanpa OTP bisa dipakai untuk phishing. Harus memakai kanal terverifikasi dan tidak boleh memuat tautan persetujuan langsung.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ### D-05 — Event baru dan pengingat
 
@@ -388,7 +388,7 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
   - Setiap event baru menambah entri `WhatsAppEvents`, template default, dan `RestrictedDeliveryPolicy` bila perlu.
   - Pengingat: volume pesan naik, risiko spam ke pelanggan. Belum boleh diaktifkan (§15 butir 5).
   - Event baru harus lewat tes idempotency dan audit sendiri.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ### D-06 — Email transaksi order, retur, refund
 
@@ -400,7 +400,7 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
 - **Konsekuensi:**
   - (a): butuh mailable baru, antrean `primeclassy-notify`, dan ledger kanal (migrasi additive, backup, dan izin per langkah). Peran dan jalur penerima harus sama dengan WA.
   - (b): kanal email untuk transaksi tetap kosong. NTF-009 sampai NTF-027 email tidak terpenuhi.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ### D-07 — In-App notification center
 
@@ -412,11 +412,11 @@ Setiap keputusan: opsi, rekomendasi, konsekuensi, dan status persetujuan. **Semu
 - **Konsekuensi:**
   - (a): tabel `notifications` baru, UI, dan retensi. Data sensitif tidak boleh tampil di luar peran.
   - (b): NTF-033 dan NTF-034 tetap NOT_IMPLEMENTED. Kegagalan pengiriman hanya terlihat di ledger `whatsapp_messages`.
-- **Status:** BELUM DISETUJUI.
+- **Status:** PROPOSED — AWAITING OWNER APPROVAL. Belum disetujui, bukan APPROVED.
 
 ---
 
-## 17. Audit source yang masih terbuka
+## 17. Audit source (daftar awal, sudah diselesaikan di §18)
 
 Status §3 dan §11 bergantung pada audit berikut. Sampai selesai, status tersebut provisional.
 
@@ -432,3 +432,335 @@ Status §3 dan §11 bergantung pada audit berikut. Sampai selesai, status terseb
 10. **Status `unknown` pada ledger:** belum diuji terhadap janji "jangan kirim ulang sebelum cek" di NTF-014.
 11. **Konfigurasi template di dashboard:** belum dibuka. Pastikan preview per event sama dengan default source.
 12. **Sumber `url_login`, `url_invoice`, `url_dashboard_order`, `url_persetujuan`:** belum ditentukan route kanoniknya.
+
+---
+
+## 18. Hasil audit source (12 audit §17)
+
+Setiap audit memuat: file/fungsi, perilaku aktual, perbandingan dengan Master Template, konflik, dampak variabel, rekomendasi, dan status. **`PASS` berarti audit selesai dengan bukti. Itu bukan berarti fitur sudah diimplementasikan.**
+
+| # | Audit | Status | Ringkasan |
+|---|---|---|---|
+| A1 | Teks template WA default (10 event) vs NTF-009–031 | GAP | Teks default jauh lebih pendek. Blok invoice, tanggal, dan link dalam spesifikasi belum ada di default |
+| A2 | Teks email `AccountRegisteredMail` vs NTF-001 | GAP | Hanya nama dan pemberitahuan. Email masked, tanggal, dan URL login tidak ada |
+| A3 | Teks WA registrasi vs NTF-001/G-05 | GAP | Teks tetap, tanpa baris "abaikan jika bukan Anda" |
+| A4 | Alur akun dibuat admin vs NTF-002 | PASS (audit) — NTF-002 tetap NOT_IMPLEMENTED | Admin mengisi password sendiri. Tidak ada tautan set-password |
+| A5 | Sumber `tanggal` per event | GAP | `tanggal` selalu `order.created_at`, termasuk event pembayaran dan pengiriman |
+| A6 | `kurir`/`nama_kurir`, `resi`/`nomor_resi` | GAP | Dua variabel per pasangan tidak setara (gabungan vs shipment pertama) |
+| A7 | `PaymentSummaryService` dan `sisa_tagihan` | PASS (audit) — dengan koreksi alias | `sisa_tagihan` = `max(total − paid, 0)`, 0 jika batal. `jumlah_dibayarkan` adalah kumulatif |
+| A8 | Allow-list nomor uji dan `sendTest` | GAP (minor) | Allow-list dicek di controller. Service `sendTest` tidak punya pemeriksaan sendiri |
+| A9 | Refund ke penerima dan `RefundRecipientService` | PASS (audit) | Penerima checkout tidak menerima event refund. Destinasi refund hanya terlihat peran terbatas |
+| A10 | Status `unknown` pada ledger | PASS (audit) | `unknown` tidak pernah di-retry otomatis. Retry operator wajib konfirmasi risiko duplikat |
+| A11 | Editor template di dashboard | GAP (minor) | Endpoint dan UI ada. Validasi variabel saat simpan belum dibaca penuh |
+| A12 | Target URL (`link_pesanan`, login, invoice, persetujuan) | GAP | `link_pesanan` relatif dan tidak cocok dengan route frontend. Tiga URL lain belum punya route |
+
+### A1. Teks template WA default
+
+- **File/fungsi:** `app/Services/WhatsApp/WhatsAppEvents.php::all()`, field `default`.
+- **Perilaku aktual:** 10 teks default, masing-masing 2–4 baris, menyebut `{nama_pelanggan}`, `{nomor_pesanan}`, `{total}`, `{status}`, `{nama_toko}`, dan untuk pembayaran `{jumlah_dibayarkan}` dan `{sisa_tagihan}`. Pengiriman menyebut `{kurir}` dan `{resi}`. Tidak ada daftar produk, diskon, ongkir, metode bayar, atau link.
+- **Perbandingan:** NTF-009 memuat ringkasan biaya lengkap, metode bayar, tujuan, dan link invoice. Default `order_created` hanya memuat total. NTF-011 menyebut "jumlah diterima". Default `payment_paid` hanya menyebut `{total}`, yaitu total pesanan, bukan jumlah yang diterima.
+- **Konflik:** tidak ada konflik keamanan. Ini gap konten.
+- **Dampak variabel:** `daftar_produk`, `subtotal`, `diskon`, `ongkir`, `metode_pembayaran`, `status_pembayaran`, dan `tanggal_pembayaran` sudah ada di `PAYMENT_VARS`, tetapi `ORDER_VARS` tidak memuatnya. Template yang ingin memakainya harus memakai event pembayaran.
+- **Rekomendasi:** tahap 1 roadmap. Perbarui teks default `order_created` dan `payment_paid` agar memakai variabel yang tersedia. Template Agen yang sudah diedit tidak ditimpa.
+- **Status:** GAP.
+
+### A2. Email `AccountRegisteredMail` vs NTF-001
+
+- **File/fungsi:** `app/Mail/AccountRegisteredMail.php::content()`, lang `messages.auth.registered_mail_subject` dan `registered_mail_body` (id, en, ar, zh).
+- **Perilaku aktual:** subjek id: "Selamat datang di PrimeClassy". Body: nama penerima, lalu "Akun PrimeClassy Anda telah dibuat. Email ini hanya pemberitahuan dan bukan verifikasi. ... Kami tidak pernah meminta kata sandi Anda lewat email." Mailable mengimplementasikan `ShouldQueue` dan dikirim lewat `primeclassy-notify`.
+- **Perbandingan:** subjek hampir sama. NTF-001 juga memuat `{email_masked}`, `{tanggal_pendaftaran}`, `{url_login}`, dan "jika Anda tidak merasa..." Source tidak memuatnya.
+- **Konflik:** tidak ada konflik keamanan. Body source konsisten dengan kebijakan "jangan minta password lewat email".
+- **Dampak variabel:** `email_masked`, `tanggal_pendaftaran`, dan `url_login` tidak ada di kontrak.
+- **Rekomendasi:** perbarui body menjadi versi spesifikasi bila D-06 disetujui. Sebelum itu, body source tetap dipakai.
+- **Status:** GAP.
+
+### A3. Teks WA registrasi vs NTF-001 dan G-05
+
+- **File/fungsi:** `app/Services/Auth/RegistrationNotifier.php::whatsapp()` dan `whatsappBody()`.
+- **Perilaku aktual:** teks tetap: "Selamat datang di PrimeClassy. Akun Anda telah dibuat. Untuk melihat informasi lebih lengkap ... verifikasi WhatsApp Anda melalui aplikasi resmi PrimeClassy." Dikirim lewat jalur `restricted`, peran `registrant`, event `account_registered`, dengan idempotency `txn:account_registered:user:{id}`.
+- **Perbandingan:** G-05 menyebut "jika bukan Anda, abaikan pesan ini". Teks source tidak memuatnya.
+- **Konflik:** tidak ada. Teks source tidak mengandung kode atau tautan.
+- **Dampak variabel:** tidak ada variabel. Teks ini tetap.
+- **Rekomendasi:** tambahkan baris "abaikan jika bukan Anda" bila G-05 dipilih. Ini perubahan teks tetap dan perlu persetujuan konten.
+- **Status:** GAP.
+
+### A4. Alur akun dibuat admin vs NTF-002
+
+- **File/fungsi:** `app/Http/Controllers/Api/V1/User/UserController.php::store()`, `app/Http/Requests/User/CreateUserRequest.php`, `app/Services/User/UserManagementService.php::create()`, `app/Models/User.php` (cast `password => hashed`).
+- **Perilaku aktual:** admin mengirim `password` (required, min 8, confirmed). Service menyimpannya lewat cast `hashed`. Setelah itu `RegistrationNotifier::notify()` dipanggil. Komentar R-02 menyebut "never the password". Tidak ada tautan set-password, token, atau email undangan.
+- **Perbandingan:** NTF-002 mengharapkan tautan pengaturan password dan instruksi aktivasi. Source tidak memuatnya.
+- **Konflik:** NTF-002 bertentangan dengan alur source. Ini keputusan D-03. Password plaintext tidak masuk email dan tidak masuk log (sesuai Ketentuan NTF-002).
+- **Dampak variabel:** `url_pengaturan_password` dan `nama_role` tidak ada di kontrak.
+- **Rekomendasi:** D-03. Sampai diputuskan, alur source dipertahankan.
+- **Status:** PASS (audit selesai). NTF-002 tetap NOT_IMPLEMENTED.
+
+### A5. Sumber `tanggal` per event
+
+- **File/fungsi:** `app/Services/WhatsApp/OrderNotifier.php::data()` baris `tanggal => $this->date($order->created_at)`, dan `tanggal_pembayaran => $this->date($latestVerified?->paid_at)`.
+- **Perilaku aktual:** `tanggal` selalu tanggal pembuatan order, untuk semua event. Tanggal pembayaran tersedia lewat `tanggal_pembayaran` dari transaksi terverifikasi terakhir. Tidak ada tanggal pengiriman, tanggal pembatalan, tanggal refund, atau tanggal retur.
+- **Perbandingan:** NTF-016 "Tanggal Pengiriman", NTF-026 "Tanggal Penyelesaian", NTF-018 "Tanggal Pembatalan" tidak bisa dipenuhi. Dalam event pengiriman, `{tanggal}` menunjukkan tanggal pesanan dibuat, yang menyesatkan.
+- **Konflik:** tidak ada konflik keamanan. Ini salah makna pada variabel yang ada.
+- **Dampak variabel:** `tanggal` harus diberi konteks per event, atau diganti per event. `tanggal_pesanan` tetap REQUIRES CONTEXT.
+- **Rekomendasi:** tahap 2 roadmap. Tambahkan variabel per event (tanggal pengiriman, pembatalan, refund) hanya jika ada sumber data. Jangan mengisi dengan tanggal lain.
+- **Status:** GAP.
+
+### A6. `kurir`/`nama_kurir` dan `resi`/`nomor_resi`
+
+- **File/fungsi:** `OrderNotifier::data()` baris 205–206 dan 219–221.
+- **Perilaku aktual:**
+  - `kurir` = gabungan nama kurir unik dari semua shipment non-batal, dipisah koma.
+  - `nama_kurir` = kurir shipment pertama (`first()`), atau nama `selfDeliveredBy` jika tidak ada kurir.
+  - `resi` = gabungan semua `tracking_number` unik.
+  - `nomor_resi` = `tracking_number` shipment pertama.
+  - `nomor_telepon_kurir` dan `estimasi_tiba` selalu null. Komentar HA-06 menyebut tidak ada sumber, sehingga baris dihilangkan.
+- **Perbandingan:** spesifikasi memakai satu kurir dan satu resi. Pesanan dengan banyak shipment menghasilkan daftar di `kurir`/`resi`, tetapi nilai tunggal di `nama_kurir`/`nomor_resi`.
+- **Konflik:** tidak ada konflik keamanan. Aturan "jangan buat resi palsu" terpenuhi karena nilai berasal dari data shipment, bukan dibuat.
+- **Dampak variabel:** alias `kurir`↔`nama_kurir` dan `resi`↔`nomor_resi` dikoreksi menjadi REQUIRES CONTEXT (lihat §7).
+- **Rekomendasi:** D-08 (baru, §19): aturan tampilan untuk pesanan multi-shipment.
+- **Status:** GAP.
+
+### A7. `PaymentSummaryService` dan `sisa_tagihan`
+
+- **File/fungsi:** `app/Services/Payment/PaymentSummaryService.php::summarize()` dan `app/Support/CollectibleReceivable.php::forOrder()`.
+- **Perilaku aktual:**
+  - `total_paid` = `order.paid_amount` (kumulatif, sumber kebenaran pembayaran).
+  - `grand_total` = `order.total_amount`.
+  - `remaining_balance` = `CollectibleReceivable::forOrder` = `max(total − paid, 0)`, dan 0 jika order batal.
+  - `overpaid_amount` = `max(paid − total, 0)`.
+  - `submitted_dp` berasal dari verifikasi pending dan tidak dihitung sebagai dibayar.
+- **Perbandingan:** `sisa_tagihan` = `sisa_pembayaran` sudah setara. `jumlah_dibayarkan` = total kumulatif, sehingga `total_dibayar` di spesifikasi setara dengan `jumlah_dibayarkan`.
+- **Konflik:** tidak ada. Ini sesuai HA-04/HA-06 (pembayaran terverifikasi saja).
+- **Dampak variabel:** koreksi alias: `jumlah_dibayar` per transaksi tidak punya sumber. `total_dibayar` ↔ `jumlah_dibayarkan` adalah ALIAS. `total_tagihan` = `total_amount`, bukan sisa.
+- **Rekomendasi:** tambahkan variabel `jumlah_pembayaran_ini` bila NTF-012 dan NTF-011 butuh nominal per transaksi (D-10, §19).
+- **Status:** PASS (audit selesai). Berlaku dengan koreksi §7.
+
+### A8. Allow-list nomor uji dan `sendTest`
+
+- **File/fungsi:** `app/Http/Controllers/Api/V1/Admin/WhatsAppGatewayController.php` (baris 52–60), `app/Http/Controllers/Api/V1/Agent/AgentWhatsAppController.php` (baris 189–190), `app/Services/WhatsApp/WhatsAppDelivery.php::sendTest()` dan `sendAgentTest()`.
+- **Perilaku aktual:** controller memeriksa `testNumbers()` atau `isAllowedTestNumber()` sebelum memanggil service. Service `sendTest` dan `sendAgentTest` tidak memeriksa allow-list sendiri. Keduanya membuat ledger `purpose = test` dan langsung mengirim.
+- **Perbandingan:** NTF-004 meminta kode OTP. Allow-list adalah mekanisme uji, bukan OTP. Keduanya berbeda.
+- **Konflik:** risiko pertahanan berlapis. Pemanggil service baru bisa mengirim ke nomor mana pun.
+- **Dampak variabel:** tidak ada.
+- **Rekomendasi:** pindahkan pemeriksaan allow-list ke service sebagai pertahanan kedua. Ini perubahan kode, bukan bagian audit ini.
+- **Status:** GAP (minor).
+
+### A9. Refund ke penerima dan `RefundRecipientService`
+
+- **File/fungsi:** `app/Services/WhatsApp/RestrictedDeliveryPolicy.php::eventEligible()` dan `check()`, `app/Services/Crm/RefundRecipientService.php`.
+- **Perilaku aktual:**
+  - `eventEligible` untuk peran `recipient` hanya `ORDER_EVENTS`. `refund_completed` dan `payment_*` tidak eligible.
+  - `check()` mengembalikan `restricted_not_allowed` untuk event itu.
+  - `RefundRecipientService` mencatat siapa penerima refund CRM (nama, metode, bukti). Bersifat append-only. Tidak membuat, menyetujui, atau membayar refund.
+  - `canSeeDestination` hanya untuk `super_admin` dan `keuangan`. Peran lain melihat ekor masking.
+- **Perbandingan:** NTF-026 ditujukan ke `{nama_penerima}`. Source hanya mengirim `refund_completed` ke pembuat dan admin. Ini tidak sama dengan spesifikasi.
+- **Konflik:** NTF-026 dan G-03 bertentangan dengan `RestrictedDeliveryPolicy`. Ini D-01.
+- **Catatan:** baris ledger untuk penerima dibuat dengan skip `restricted_not_allowed`. Ini dibuktikan dari `check()`. Alur enqueue penuh untuk penerima belum saya baca. Ledger tetap bersih dari pengiriman.
+- **Dampak variabel:** tidak ada tambahan.
+- **Rekomendasi:** D-01 (opsi a).
+- **Status:** PASS (audit selesai). Konflik spesifikasi tetap menunggu D-01.
+
+### A10. Status `unknown` pada ledger
+
+- **File/fungsi:** `app/Services/WhatsApp/WhatsAppDelivery.php` baris 20, 260–261, 298–318.
+- **Perilaku aktual:** hasil gateway `UNKNOWN` menjadi status `unknown`. Tidak di-retry otomatis. Retry manual untuk `unknown` mengembalikan 409 `duplicate_risk_confirmation_required` sampai operator menerima risiko duplikat. Batas volume menghitung `unknown` sebagai kemungkinan sudah terkirim.
+- **Perbandingan:** NTF-014 berisi "jangan melakukan pembayaran ulang sebelum memastikan status". Itu teks pembayaran ke pelanggan, bukan aturan ledger. Tidak ada padanan langsung.
+- **Konflik:** tidak ada.
+- **Dampak variabel:** tidak ada.
+- **Rekomendasi:** tidak ada perubahan. Dokumen operasi (`docs/OPERATIONS.md`) sudah mencatat aturan ini.
+- **Status:** PASS (audit selesai).
+
+### A11. Editor template di dashboard
+
+- **File/fungsi:** `app/Http/Controllers/Api/V1/Admin/WhatsAppGatewayController.php` (`previewTemplate`, `updateTemplate`, `resetTemplate`), `frontend/src/api/whatsapp.ts` (`previewWhatsAppTemplate`, `saveWhatsAppTemplate`, `resetWhatsAppTemplate`), `frontend/src/views/dashboard/WhatsAppGatewayView.vue`.
+- **Perilaku aktual:** endpoint preview memakai `WhatsAppEvents::sample()`. Simpan menulis `wa.template.{event}` dan mencatat audit. Reset mengembalikan default. UI memanggil ketiga fungsi.
+- **Perbandingan:** preview memakai nilai contoh di `sample()`. Nilai `sample()` belum memuat `jumlah_dibayarkan` dan beberapa variabel lain sesuai kontrak.
+- **Konflik:** tidak ada.
+- **Dampak variabel:** validasi variabel asing saat simpan belum dibaca penuh. Ini gap kecil.
+- **Rekomendasi:** baca `MessageTemplates::render` dan validasi simpan. Tambahkan tes bila perlu.
+- **Status:** GAP (minor).
+
+### A12. Target URL
+
+- **File/fungsi:** `OrderNotifier::data()` baris `link_pesanan => '/orders/'.$order->order_no`, `frontend/src/router` (`/orders/:id`, `props: Number(route.params.id)`, `requiresAuth: true`), `/login`, `/dashboard/invoice-config`, `frontend` route persetujuan CRM (belum ditemukan).
+- **Perilaku aktual:**
+  - `link_pesanan` adalah path relatif tanpa domain. Route frontend `/orders/:id` mengubah parameter dengan `Number()`. `order_no` seperti `PC-261028-000123` menjadi `NaN`. Tautan tidak berfungsi.
+  - `/orders/:id` memerlukan login. Penerima checkout yang belum punya akun tidak bisa membukanya.
+  - Tidak ada route untuk invoice pelanggan (`/dashboard/invoice-config` adalah pengaturan toko).
+  - Tidak ada route persetujuan konsumen.
+- **Perbandingan:** NTF-009, NTF-016, dan lainnya memakai `{url_detail_pesanan}`. Source memakai path relatif yang rusak.
+- **Konflik:** tautan ke pihak yang tidak berwenang (penerima tanpa akun) bertentangan dengan kebijakan restricted. Tautan hanya boleh untuk peran yang berwenang.
+- **Dampak variabel:** `url_detail_pesanan` GAP (lihat §7). `url_login`, `url_invoice`, `url_dashboard_order`, `url_persetujuan` belum punya sumber.
+- **Rekomendasi:** D-09 (baru, §19): basis URL absolut dari konfigurasi, parameter route yang benar, dan aturan siapa yang boleh menerima tautan.
+- **Status:** GAP.
+
+---
+
+## 19. Keputusan tambahan yang ditemukan audit
+
+Audit menemukan tiga keputusan yang belum ada di §16. Semuanya berstatus **PROPOSED — AWAITING OWNER APPROVAL**.
+
+- **D-08 — Tampilan multi-shipment.** Pesanan dengan lebih dari satu shipment. Opsi: (a) gabungkan semua kurir dan resi di `kurir`/`resi`, (b) tampilkan shipment pertama, (c) kirim satu pesan per shipment. Rekomendasi: (a) untuk kompatibilitas template, dengan `nama_kurir`/`nomor_resi` tetap berarti shipment pertama. Konsekuensi: (c) mengubah idempotency key dan jumlah pesan.
+- **D-09 — Basis URL dan akses tautan.** Opsi: (a) basis URL dari konfigurasi (`APP_URL` atau setting baru), dan tautan hanya untuk peran berwenang; (b) tanpa tautan dalam pesan restricted. Rekomendasi: (a) untuk pesan full, (b) untuk restricted. Konsekuensi: butuh route pelanggan yang benar.
+- **D-10 — Nominal per transaksi.** Apakah `jumlah_pembayaran_ini` (nominal transaksi ini) dibutuhkan? Opsi: (a) tambahkan dari `PaymentTransaction.amount` yang terverifikasi, (b) tidak. Rekomendasi: (a) untuk NTF-011 dan NTF-012.
+
+---
+
+## 20. Matriks event, kanal, dan penerima (terverifikasi)
+
+| Event | Admin | Pembuat | Penerima (restricted) | Registrant | Email | In-App |
+|---|---|---|---|---|---|---|
+| `order_created` | full | full | ya (status) | — | tidak | tidak |
+| `payment_paid` | full | full | tidak (kebijakan) | — | tidak | tidak |
+| `payment_partial` | full | full | tidak (kebijakan) | — | tidak | tidak |
+| `order_processed` | full | full | ya | — | tidak | tidak |
+| `order_shipped` | full | full | ya | — | tidak | tidak |
+| `order_delivered` | full | full | ya | — | tidak | tidak |
+| `order_cancelled` | full | full | ya | — | tidak | tidak |
+| `return_requested` | full | full | tidak | — | tidak | tidak |
+| `return_approved` | full | full | tidak | — | tidak | tidak |
+| `refund_completed` | full | full | tidak (kebijakan) | — | tidak | tidak |
+| `account_registered` | — | — | — | restricted | `AccountRegisteredMail` (queued) | tidak |
+| OTP WA / email / pemulihan | — | — | — | — | OTP sinkron | tidak |
+
+Keterangan: "full" memakai template Agen. "restricted" memakai teks tetap di server. Tidak ada kanal in-app dan tidak ada email transaksi order, retur, atau refund.
+
+---
+
+## 21. Kontrak variabel aktual (hasil audit)
+
+Sumber kebenaran: `OrderNotifier::data()`, `WhatsAppEvents::sample()`, dan konstanta `*_VARS`.
+
+| Variabel | Sumber | Event yang memakainya | Catatan |
+|---|---|---|---|
+| `nama_pelanggan` | `order.konsumen.name` | semua event order | — |
+| `nomor_pesanan` | `order.order_no` | semua | — |
+| `status` | `STATUS_LABEL[order.status]` | order, dibatalkan | label, bukan kode |
+| `total` | `order.total_amount` | order, pembayaran | total pesanan |
+| `tanggal` | `order.created_at` | semua | selalu tanggal pesanan (A5) |
+| `nama_toko` | `AgentProfile.store_name` atau "Prime Classy" | order | — |
+| `kurir` | gabungan kurir unik, shipment non-batal | pengiriman | multi (A6) |
+| `resi` | gabungan tracking unik | pengiriman | multi (A6) |
+| `daftar_produk` | item snapshot | pembayaran | — |
+| `subtotal`, `diskon`, `ongkir` | `order.*_amount` | pembayaran | — |
+| `total_tagihan` | `order.total_amount` | pembayaran | bukan sisa (A7) |
+| `metode_pembayaran` | `order.paymentMethod` atau transaksi terverifikasi | pembayaran | — |
+| `status_pembayaran` | `order.payment_status` | pembayaran | — |
+| `jumlah_dibayarkan` | `PaymentSummary.total_paid` | DP, pembayaran | kumulatif (A7) |
+| `sisa_tagihan` | `CollectibleReceivable.forOrder` | DP, pembayaran | — |
+| `tanggal_pembayaran` | `paid_at` transaksi terverifikasi terakhir | pembayaran | — |
+| `nama_kurir` | kurir shipment pertama | pengiriman | tunggal (A6) |
+| `layanan_pengiriman` | `shipping_provider_code` atau tipe kurir | pengiriman | — |
+| `nomor_resi` | `tracking_number` shipment pertama | pengiriman | tunggal (A6) |
+| `nomor_telepon_kurir`, `estimasi_tiba`, `link_pelacakan` | null | pengiriman | selalu dibuang, tidak pernah dikarang |
+| `link_pesanan` | `/orders/{order_no}` | semua | relatif, rusak (A12) |
+| `nomor_retur` | `RTN-{id:06}` | retur | — |
+| `jumlah_refund` | `RefundPayout.amount` | refund | — |
+
+Variabel dari spesifikasi yang **tidak ada sumbernya**: `email_masked`, `tanggal_pendaftaran`, `url_login`, `url_pengaturan_password`, `url_verifikasi_email`, `url_invoice`, `url_dashboard_order`, `url_persetujuan`, `waktu_kedaluwarsa`, `masa_berlaku_menit`, `kode_otp` (boleh di OTP channel, bukan di template), `instruksi_*`, `alasan_aman`, `referensi_aman`, `*_aman`, `alamat_pengiriman`, `nama_pembuat`, `nama_agen`, `tanggal_pengiriman`, `tanggal_pembatalan`, `tanggal_refund`, `jumlah_dibayar` (per transaksi), `device_id_masked`.
+
+---
+
+## 22. Konflik, keputusan, dan kebutuhan implementasi
+
+### 22.1 Konflik yang terselesaikan
+
+- **Kurir dan resi:** alias ALIAS dikoreksi menjadi REQUIRES CONTEXT (A6).
+- **Jumlah dibayar:** `jumlah_dibayarkan` adalah kumulatif. Alias per transaksi dihapus (A7).
+- **Total dibayar:** ALIAS ke `jumlah_dibayarkan` (A7).
+- **Link pesanan:** GAP, bukan ALIAS (A12).
+- **Penerima dan refund:** konsisten dengan `RestrictedDeliveryPolicy` (A9). Tetap menunggu D-01 untuk spesifikasi G-03.
+- **Status `unknown`:** konsisten dengan operasi (A10).
+
+### 22.2 Konflik yang masih terbuka
+
+- **NTF-002 dan D-03:** spesifikasi meminta tautan set-password, source memakai password dari admin (A4).
+- **NTF-003, NTF-005 dan D-02:** spesifikasi memakai tautan, source memakai OTP.
+- **G-03, NTF-026 dan D-01:** spesifikasi meminta informasi keuangan ke penerima checkout, kebijakan menutupnya.
+- **Tautan pesanan dan D-09:** tautan relatif dan rusak, dan tidak jelas siapa yang boleh menerimanya.
+- **Multi-shipment dan D-08:** tampilan `kurir`/`resi` belum disepakati.
+
+### 22.3 Daftar kebutuhan implementasi baru (belum dikerjakan, tidak masuk audit ini)
+
+1. Teks default `order_created` dan `payment_paid` yang memakai variabel tersedia (A1).
+2. Teks email `AccountRegisteredMail` dengan variabel tambahan, bila D-06 disetujui (A2).
+3. Baris "abaikan jika bukan Anda" di teks registrasi, bila G-05 disetujui (A3).
+4. Variabel `tanggal` per event (tanggal pengiriman, pembatalan, refund) dengan sumber nyata (A5).
+5. Aturan tampilan multi-shipment (D-08) (A6).
+6. Pemeriksaan allow-list di service `sendTest` dan `sendAgentTest` (A8).
+7. Validasi variabel saat simpan template (A11).
+8. Basis URL absolut dan route pelanggan (D-09) (A12).
+9. Variabel `jumlah_pembayaran_ini` (D-10) (A7).
+10. Email transaksi order, retur, refund (D-06).
+11. Pusat notifikasi in-app untuk admin (D-07).
+12. Event baru: pembayaran gagal, refund diajukan/disetujui/ditolak, retur ditolak, perubahan pesanan umum (D-05).
+13. Pengingat pembayaran, dengan job terjadwal dan persetujuan volume (D-05, ditunda).
+14. Notifikasi permintaan consent (D-04, bila disetujui).
+15. Alias layer di `MessageTemplates::render`, sesuai §7 yang sudah dikoreksi.
+
+### 22.4 Jawaban untuk pertanyaan Owner
+
+1. **Apakah 39 template sudah dipetakan dengan benar?** Sebagian. Pemetaan event ke template sudah benar. Gap konten (A1–A3) dan koreksi alias (A6, A7, A12) memperbaiki beberapa pemetaan. Klasifikasi §3 tetap berlaku dengan catatan di §18.
+2. **Apakah semua variabel punya sumber yang valid?** Tidak. Lebih dari 25 variabel dari spesifikasi tidak punya sumber (§21). Beberapa variabel yang ada punya makna berbeda (`tanggal`, `kurir`, `resi`, `jumlah_dibayarkan`).
+3. **Apakah tiga penerima sudah didukung secara aktual?** Ya di kode untuk event order: resolver memisahkan admin, pembuat, dan penerima, dengan dedup berdasarkan privilege (`OrderRecipientResolver`). Penerima hanya menerima event status, dan teksnya tetap di server, sehingga NTF-032 hanya PARTIAL. Belum diuji end-to-end di sesi ini, karena Full Test hanya milik Owner.
+4. **Apakah semua kebijakan verifikasi dan privasi konsisten?** Sebagian besar ya: OTP, restricted lane, penerima tanpa akun, destinasi refund, dan status `unknown` konsisten. Ada tiga ketidakkonsistenan: tautan pesanan rusak dan tidak dibatasi (A12), allow-list uji hanya di controller (A8), dan alur admin membuat password (A4) belum sesuai spesifikasi NTF-002.
+5. **Fitur mana yang benar-benar belum diimplementasikan?** Lihat §22.3 (15 item) dan NOT_IMPLEMENTED di §3. Termasuk email transaksi order/retur/refund, in-app, pembayaran gagal, refund diajukan/disetujui/ditolak, retur ditolak, pengingat, notifikasi consent, tautan absolut, dan alias layer.
+6. **Keputusan apa yang masih butuh persetujuan Owner?** D-01 sampai D-07 (status PROPOSED) dan D-08 sampai D-10 (§19).
+
+---
+
+## 23. Status dokumen
+
+- **Status:** DRAFT — keputusan D-01 sampai D-10 **dipakai sebagai baseline desain** atas instruksi Owner (2026-11-02, "Notification Fast-Track"). Belum ada persetujuan formal per keputusan; perubahan terhadap baseline tetap memerlukan keputusan Owner.
+- Status implementasi terbaru ada di §24. Status di §3 dan §11 adalah kondisi **sebelum** implementasi dan dipertahankan sebagai riwayat audit.
+
+---
+
+## 24. Status implementasi (branch `docs/notification-contract-v1`, 2026-11-02)
+
+"IMPLEMENTED" di bawah berarti kode, migrasi, dan scoped test ada di branch. **Belum berarti aktif di production.** Aktivasi production memerlukan migrasi dan saklar Owner.
+
+### 24.1 Koreksi hasil audit
+
+- **A11 → PASS.** `MessageTemplates::validate()` sudah menolak token di luar allow-list, kurung kurawal rusak, karakter kontrol, dan teks lebih dari 1000 karakter. Gap A11 di §18 tidak berlaku.
+- **`sample()` sudah memuat `jumlah_dibayarkan`.** Catatan di §7 dan §18 A11 yang menyebut sebaliknya keliru.
+- **NTF-009 dan invariant yang ada:** template status pesanan (`order_created` dan status lain) sengaja tidak boleh memakai variabel uang selain `{total}` (dikunci oleh `WhatsAppAgentScopeTest`). Rincian invoice NTF-009 tidak ditambahkan ke `order_created`; rincian itu tersedia di event pembayaran.
+
+### 24.2 Yang diimplementasikan
+
+**Paket 1 — WhatsApp Foundation**
+- `link_pesanan` menjadi URL absolut dengan id numerik: `{APP_FRONTEND_URL|APP_URL}/orders/{id}` (`OrderNotifier::orderUrl`). Baris dihilangkan jika basis URL kosong. Teks restricted tetap tanpa tautan (D-09).
+- Variabel baru bersumber nyata: `jumlah_pembayaran_ini` (D-10, transaksi terverifikasi terakhir), `tanggal_pengiriman`, `tanggal_diterima` (shipment), `tanggal_pembatalan` (order), `tanggal_refund` (payout). `{tanggal}` tetap tanggal pesanan.
+- Daftar variabel hanya ditambah (superset), sehingga template Agen yang tersimpan tetap valid dan tidak ditimpa. Teks default 10 event diperkaya sesuai Master Template, dengan footer WhatsApp standar.
+- Allow-list nomor uji dicek ulang di service (`sendTest`, `sendAgentTest`), bukan hanya di controller (A8).
+
+**Paket 2 — Email transaksi**
+- `TransactionalEmailNotifier` + `SendTransactionalEmailJob` (antrean `primeclassy-notify`, `$tries = 1`, klaim baris atomik `queued → sending`) + `TransactionalNotificationMail`.
+- Ledger `email_messages` (migrasi `2026_11_05_100000`, additive) dengan `idempotency_key` unik per event × subjek × akun penerima.
+- Penerima: admin cabang dan pembuat (buyer + submitter), **hanya email terverifikasi**. Penerima checkout tidak pernah menerima email. Order CRM-origin dilewati, sama seperti WhatsApp.
+- Saklar `smtp.transactional_enabled` (**default OFF**), terpisah dari saklar SMTP dan dari saklar WhatsApp. Saklar dibaca ulang saat kirim.
+
+**Paket 3 — In-App dan event tambahan**
+- Event baru (semua default OFF per Agen, seperti event lain): `payment_failed`, `return_rejected`, `refund_requested`, `refund_approved`, `refund_rejected`. Event non-status otomatis tertutup untuk penerima checkout (`RestrictedDeliveryPolicy` tidak berubah).
+- Pusat notifikasi operator: tabel `admin_notifications` (migrasi `2026_11_05_100100`, additive), satu baris per akun penerima, `dedupe_key` unik. API `GET/POST /api/v1/notifications/admin*` (peran `super_admin`, `agen`, `admin`) hanya membaca baris milik pemanggil. UI: lonceng di topbar dan halaman `/dashboard/notifications`.
+- Sumber notifikasi In-App: pesanan baru, pembayaran ditolak, retur baru, refund menunggu persetujuan (operator cabang); kegagalan pengiriman WA (`failed`/`unknown`) dan email (`failed`), serta perangkat WA terputus/terhubung kembali (operator cabang + Super Admin).
+- Retensi: `php artisan primeclassy:admin-notifications-prune` (dry-run default, `--execute`, hanya baris sudah dibaca, minimal 7 hari). **Tidak dijadwalkan.**
+- Pengingat pembayaran (NTF-020) **tidak** diimplementasikan, sesuai D-05.
+
+### 24.3 Klasifikasi 39 template setelah implementasi
+
+| Status | Jumlah | Template |
+|---|---|---|
+| IMPLEMENTED | 20 | NTF-004, 011, 012, 013, 014, 015, 016, 017, 018, 021, 022, 023, 024, 025, 026, 027, 030, 031, 033, 034 |
+| IMPLEMENTED_WITH_DIFFERENT_CONTENT | 2 | NTF-001 (tidak diubah), NTF-009 (tanpa rincian invoice, invariant §24.1) |
+| PARTIALLY_IMPLEMENTED | 7 | NTF-008, 028, 032; G-01, G-02, G-04, G-05 |
+| NOT_IMPLEMENTED | 7 | NTF-002, 006, 007, 010, 019, 020 (ditunda D-05), 029 |
+| REQUIRES_OWNER_DECISION | 3 | NTF-003, 005 (D-02); G-03 (D-01) |
+
+Catatan semantik: NTF-011 dan NTF-013 sama-sama `payment_paid`, karena event itu hanya untuk pelunasan penuh. NTF-023 berarti retur selesai dengan **semua** item ditolak. NTF-027 hanya bersumber dari penutupan obligation `needs_verification` oleh Owner (exit B), karena tidak ada status "refund ditolak" lain di source.
+
+### 24.4 Aktivasi production (belum dilakukan)
+
+1. Scoped test untuk semua area yang berubah lulus, frontend type-check/build lulus. Full Test bukan syarat rilis (keputusan Owner, 2026-11-02).
+2. Backup production, lalu migrasi `2026_11_05_100000` dan `2026_11_05_100100` (Pending → Ran).
+3. Opsional: `APP_FRONTEND_URL` bila SPA tidak satu domain dengan `APP_URL` (production satu domain, jadi tidak perlu).
+4. Owner menyalakan event baru per Agen dan saklar email transaksi bila diinginkan. Teks default baru langsung berlaku untuk event yang sudah aktif dan memakai template default.

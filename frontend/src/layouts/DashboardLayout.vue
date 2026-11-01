@@ -7,6 +7,7 @@ import { useSiteStore } from '@/stores/site'
 import { useI18n } from 'vue-i18n'
 import { buildNavStructure, groupHasVisibleItems, type NavGroup } from '@/dashboard/navConfig'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import NotificationBell from '@/components/dashboard/NotificationBell.vue'
 // PC-IMP-008 (DB-P01): dashboard-only Premium Maroon foundation. Every rule in
 // this stylesheet is scoped to `.pc-internal` / the `.pc-*` shell markers set
 // below — never to `html`/`body`/`:root` — so the public storefront is untouched.
@@ -302,6 +303,7 @@ async function logout() {
         >
           {{ userInitials }}
         </span>
+        <NotificationBell />
         <button
           type="button"
           class="grid h-9 w-9 shrink-0 place-items-center rounded-full text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"

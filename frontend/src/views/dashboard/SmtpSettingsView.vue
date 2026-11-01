@@ -18,12 +18,12 @@ const testing = ref<'' | 'connection' | 'email'>('')
 const notice = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
 const testResult = ref<{ ok: boolean; text: string } | null>(null)
 
-const form = ref({ enabled: false, host: '', port: 587, encryption: 'tls' as SmtpEncryption, username: '', password: '', from_address: '', from_name: '', timeout: 10 })
+const form = ref({ enabled: false, transactional_enabled: false, host: '', port: 587, encryption: 'tls' as SmtpEncryption, username: '', password: '', from_address: '', from_name: '', timeout: 10 })
 
 function hydrate(s: SmtpSettings) {
   settings.value = s
   form.value = {
-    enabled: s.enabled, host: s.host ?? '', port: s.port ?? 587, encryption: s.encryption, username: s.username ?? '',
+    enabled: s.enabled, transactional_enabled: s.transactional_enabled ?? false, host: s.host ?? '', port: s.port ?? 587, encryption: s.encryption, username: s.username ?? '',
     password: '', from_address: s.from_address ?? '', from_name: s.from_name ?? '', timeout: s.timeout,
   }
 }
@@ -50,7 +50,7 @@ async function save() {
     const f = form.value
     hydrate(
       await updateSmtpSettings({
-        enabled: f.enabled, host: f.host, port: Number(f.port), encryption: f.encryption, username: f.username || null,
+        enabled: f.enabled, transactional_enabled: f.transactional_enabled, host: f.host, port: Number(f.port), encryption: f.encryption, username: f.username || null,
         from_address: f.from_address, from_name: f.from_name || null, timeout: Number(f.timeout),
         ...(f.password ? { password: f.password } : {}),
       }),
@@ -117,6 +117,13 @@ const btnGhost =
 
       <label class="mb-4 flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
         <input v-model="form.enabled" type="checkbox" class="h-4 w-4 accent-brand-600" /> Gunakan pengaturan SMTP dari dashboard ini
+      </label>
+      <label class="mb-4 flex items-start gap-2 text-sm text-stone-700 dark:text-stone-200">
+        <input v-model="form.transactional_enabled" type="checkbox" class="mt-0.5 h-4 w-4 accent-brand-600" data-test="transactional-enabled" />
+        <span>
+          Kirim email transaksi (pesanan, pembayaran, pengiriman, retur, refund)
+          <span class="block text-xs text-stone-500">Hanya ke alamat email terverifikasi milik admin cabang dan pembuat pesanan. Nonaktif secara bawaan.</span>
+        </span>
       </label>
 
       <div class="grid gap-4 sm:grid-cols-2">

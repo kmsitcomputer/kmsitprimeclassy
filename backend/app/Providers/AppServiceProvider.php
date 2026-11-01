@@ -57,6 +57,12 @@ class AppServiceProvider extends ServiceProvider
         \App\Models\Order::observe(\App\Observers\WhatsAppLifecycleObserver::class);
         \App\Models\ReturnRequest::observe(\App\Observers\WhatsAppLifecycleObserver::class);
         \App\Models\RefundPayout::observe(\App\Observers\WhatsAppLifecycleObserver::class);
+        \App\Models\RefundObligation::observe(\App\Observers\WhatsAppLifecycleObserver::class);
+        \App\Models\BankTransferVerification::observe(\App\Observers\WhatsAppLifecycleObserver::class);
+
+        // Operator in-app centre (delivery failures, gateway connection changes): inert until its table exists.
+        \App\Models\WhatsAppMessage::observe(\App\Observers\AdminNotificationObserver::class);
+        \App\Models\AgentWhatsAppDevice::observe(\App\Observers\AdminNotificationObserver::class);
 
         /**
          * "SUPERADMIN: dapat mengubah konfigurasi website, payment gateway,

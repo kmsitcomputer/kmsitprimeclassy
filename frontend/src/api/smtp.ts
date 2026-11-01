@@ -16,12 +16,15 @@ export interface SmtpSettings {
   from_name: string | null
   timeout: number
   complete: boolean
+  /** Order / payment / shipping / return / refund e-mail (default OFF; needs SMTP ON + complete as well). */
+  transactional_enabled: boolean
   /** Which configuration the application is using right now. */
   active_source: 'dashboard' | 'environment'
 }
 
 export interface SmtpUpdatePayload {
   enabled?: boolean
+  transactional_enabled?: boolean
   host?: string
   port?: number
   encryption?: SmtpEncryption

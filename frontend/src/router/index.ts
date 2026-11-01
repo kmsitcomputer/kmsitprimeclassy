@@ -442,6 +442,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['super_admin'] },
     },
     {
+      path: '/dashboard/notifications',
+      name: 'admin-notifications',
+      component: () => import('@/views/dashboard/AdminNotificationsView.vue'),
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin'] },
+    },
+    {
       path: '/dashboard/settings/integrations/whatsapp',
       name: 'whatsapp-gateway',
       component: () => import('@/views/dashboard/WhatsAppGatewayView.vue'),

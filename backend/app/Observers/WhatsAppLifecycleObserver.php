@@ -2,7 +2,10 @@
 
 namespace App\Observers;
 
+use App\Models\BankTransferVerification;
 use App\Models\Order;
+use App\Models\PaymentTransaction;
+use App\Models\RefundObligation;
 use App\Models\RefundPayout;
 use App\Models\ReturnRequest;
 use App\Services\WhatsApp\OrderNotifier;
@@ -19,7 +22,12 @@ use Illuminate\Support\Facades\Log;
  *   Order.payment_status -> partially_paid -> payment_partial (HA-04: verified DP, never full settlement)
  *   Order.status -> diproses/dikirim/terkirim/dibatalkan -> order_processed/order_shipped/order_delivered/order_cancelled
  *   ReturnRequest created / -> approved -> return_requested / return_approved
+ *   ReturnRequest -> completed with EVERY item rejected -> return_rejected
  *   RefundPayout created (proven)      -> refund_completed
+ *   RefundObligation created pending / created approved -> refund_requested / refund_approved (root obligations only)
+ *   RefundObligation pending|needs_verification -> approved -> refund_approved
+ *   RefundObligation needs_verification -> cancelled (Owner exit B) -> refund_rejected
+ *   BankTransferVerification -> rejected -> payment_failed
  */
 class WhatsAppLifecycleObserver
 {
@@ -67,6 +75,56 @@ class WhatsAppLifecycleObserver
             if ($return->wasChanged('status') && $return->status === 'approved') {
                 $this->notifier()->returnEvent($return, WhatsAppEvents::RETURN_APPROVED);
             }
+            // Item decisions are written before the request completes (same transaction, visible to this read).
+            if ($return->wasChanged('status') && $return->status === 'completed'
+                && $return->items()->exists() && ! $return->items()->where('status', '!=', 'rejected')->exists()) {
+                $this->notifier()->returnEvent($return, WhatsAppEvents::RETURN_REJECTED);
+            }
+        });
+    }
+
+    public function obligationCreated(RefundObligation $obligation): void
+    {
+        $this->safely(function () use ($obligation) {
+            // Derived (deferred-materialization) children are bookkeeping of an already-notified root obligation.
+            if ($obligation->parent_obligation_id !== null) {
+                return;
+            }
+            match ($obligation->status) {
+                RefundObligation::STATUS_PENDING => $this->notifier()->obligationEvent($obligation, WhatsAppEvents::REFUND_REQUESTED),
+                RefundObligation::STATUS_APPROVED => $this->notifier()->obligationEvent($obligation, WhatsAppEvents::REFUND_APPROVED),
+                default => null,
+            };
+        });
+    }
+
+    public function obligationUpdated(RefundObligation $obligation): void
+    {
+        $this->safely(function () use ($obligation) {
+            if ($obligation->parent_obligation_id !== null || ! $obligation->wasChanged('status')) {
+                return;
+            }
+            $from = $obligation->getOriginal('status');
+            // partially_paid -> approved is a payment regression, not a new approval: never re-announced.
+            if ($obligation->status === RefundObligation::STATUS_APPROVED
+                && in_array($from, [RefundObligation::STATUS_PENDING, RefundObligation::STATUS_NEEDS_VERIFICATION], true)) {
+                $this->notifier()->obligationEvent($obligation, WhatsAppEvents::REFUND_APPROVED);
+            } elseif ($obligation->status === RefundObligation::STATUS_CANCELLED && $from === RefundObligation::STATUS_NEEDS_VERIFICATION) {
+                $this->notifier()->obligationEvent($obligation, WhatsAppEvents::REFUND_REJECTED);
+            }
+        });
+    }
+
+    public function verificationUpdated(BankTransferVerification $verification): void
+    {
+        $this->safely(function () use ($verification) {
+            if (! $verification->wasChanged('status') || $verification->status !== 'rejected') {
+                return;
+            }
+            $orderId = PaymentTransaction::query()->whereKey($verification->payment_transaction_id)->value('order_id');
+            if ($orderId !== null) {
+                $this->notifier()->paymentRejected($verification, (int) $orderId);
+            }
         });
     }
 
@@ -101,6 +159,7 @@ class WhatsAppLifecycleObserver
             $model instanceof Order => $this->orderCreated($model),
             $model instanceof ReturnRequest => $this->returnCreated($model),
             $model instanceof RefundPayout => $this->refundCreated($model),
+            $model instanceof RefundObligation => $this->obligationCreated($model),
             default => null,
         };
     }
@@ -110,6 +169,8 @@ class WhatsAppLifecycleObserver
         match (true) {
             $model instanceof Order => $this->orderUpdated($model),
             $model instanceof ReturnRequest => $this->returnUpdated($model),
+            $model instanceof RefundObligation => $this->obligationUpdated($model),
+            $model instanceof BankTransferVerification => $this->verificationUpdated($model),
             default => null,
         };
     }

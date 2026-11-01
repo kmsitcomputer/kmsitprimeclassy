@@ -54,6 +54,10 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // Public SPA origin used for links in notifications (WhatsApp/email). Production serves SPA and API on one
+    // domain, so it defaults to APP_URL; set APP_FRONTEND_URL when the SPA runs elsewhere (e.g. DEV Vite).
+    'frontend_url' => env('APP_FRONTEND_URL', env('APP_URL', 'http://localhost')),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

@@ -458,4 +458,72 @@ class WhatsAppNotificationTest extends TestCase
         $this->assertSame(['skipped', 'gateway_disabled'], [$m->status, $m->skip_reason]);
         Http::assertNothingSent();
     }
+
+    /* ----------------------------------------------------------------- notification contract (Paket 1) */
+
+    public function test_order_link_is_absolute_and_uses_the_numeric_spa_route_id(): void
+    {
+        Queue::fake();
+        config(['app.frontend_url' => 'https://shop.test/']);
+        $b = $this->branchWithPhone();
+        $this->enable([WhatsAppEvents::ORDER_CREATED]);
+
+        $order = $this->accountOrder($b);
+
+        $body = $this->messages()->firstWhere('event', 'order_created')->body;
+        $this->assertStringContainsString("Lihat pesanan: https://shop.test/orders/{$order->id}", $body);
+        $this->assertStringNotContainsString('/orders/'.$order->order_no, $body, 'the SPA route takes the numeric id, never order_no');
+    }
+
+    public function test_without_a_frontend_base_the_link_line_is_dropped_not_faked(): void
+    {
+        Queue::fake();
+        config(['app.frontend_url' => '']);
+        $b = $this->branchWithPhone();
+        $this->enable([WhatsAppEvents::ORDER_CREATED]);
+
+        $this->accountOrder($b);
+
+        $body = $this->messages()->firstWhere('event', 'order_created')->body;
+        $this->assertStringNotContainsString('Lihat pesanan', $body);
+        $this->assertStringNotContainsString('/orders/', $body);
+    }
+
+    public function test_refund_message_carries_the_payout_date_not_the_order_date(): void
+    {
+        Queue::fake();
+        $b = $this->branchWithPhone();
+        $this->enable([WhatsAppEvents::REFUND_COMPLETED]);
+        $order = $this->accountOrder($b);
+
+        $payout = (new RefundPayout(['order_id' => $order->id, 'amount' => '55000.00', 'verification_status' => 'proven']))
+            ->forceFill(['id' => 601, 'paid_at' => \Illuminate\Support\Carbon::parse('2026-11-02 03:00:00', 'UTC')]);
+        app(\App\Observers\WhatsAppLifecycleObserver::class)->created($payout);
+
+        $body = $this->messages()->firstWhere('idempotency_key', 'txn:refund_completed:refund_payout:601')->body;
+        $this->assertStringContainsString('Jumlah Refund: *Rp 55.000*', $body);
+        $this->assertStringContainsString('Tanggal Penyelesaian: 2 November 2026', $body);
+    }
+
+    public function test_test_lanes_refuse_a_number_outside_the_allow_list_at_the_service_layer(): void
+    {
+        $this->fake($this->ok());
+        $b = $this->branch();
+        $this->enable([], ['test_numbers' => ['081377700009']]);
+        $delivery = app(WhatsAppDelivery::class);
+
+        foreach ([
+            fn () => $delivery->sendTest(User::factory()->superAdmin()->create(), '6281300000000', 'x'),
+            fn () => $delivery->sendAgentTest($b['agen'], $b['agen']->id, '6281300000000', 'x'),
+        ] as $call) {
+            try {
+                $call();
+                $this->fail('a non-allow-listed number must be refused by the service itself');
+            } catch (\App\Exceptions\ApiException $e) {
+                $this->assertSame(422, $e->status());
+            }
+        }
+        $this->assertSame(0, WhatsAppMessage::query()->count(), 'a refused test send leaves no ledger row');
+        Http::assertNothingSent();
+    }
 }

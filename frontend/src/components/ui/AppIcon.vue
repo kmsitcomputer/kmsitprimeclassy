@@ -41,6 +41,7 @@ type IconName =
   | 'chart-bar'
   | 'shield'
   | 'chevron-up'
+  | 'bell'
 
 defineProps<{ name: IconName; size?: number }>()
 </script>
@@ -138,6 +139,10 @@ defineProps<{ name: IconName; size?: number }>()
     </template>
     <template v-else-if="name === 'grid'">
       <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />
+    </template>
+    <template v-else-if="name === 'bell'">
+      <path d="M6 9a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9Z" />
+      <path d="M10 19a2 2 0 0 0 4 0" />
     </template>
     <template v-else-if="name === 'clock'">
       <circle cx="12" cy="12" r="8.5" />

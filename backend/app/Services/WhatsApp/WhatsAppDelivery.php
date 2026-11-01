@@ -333,13 +333,18 @@ class WhatsAppDelivery
 
     /**
      * Agen-scoped real test message (WA-DEC-03): `agent_id` is set, so deliver() requires that Agen's own paired slot and skips with
-     * `agent_device_not_ready` otherwise — never the console default device, never another Agen's slot. Destination allow-listing
-     * and rate limiting are the caller's (AgentWhatsAppController) responsibility.
+     * `agent_device_not_ready` otherwise — never the console default device, never another Agen's slot. Rate limiting is the
+     * caller's (AgentWhatsAppController) responsibility; the destination allow-list is checked by the caller AND here.
      */
     public function sendAgentTest(User $actor, int $agentId, string $msisdn, string $text): WhatsAppMessage
     {
         if (! WhatsAppMessage::tableReady()) {
             throw new ApiException(__('messages.whatsapp.migration_pending'), 503);
+        }
+        // Defence in depth (A8): a future caller can never turn the test lane into a send-to-anyone path.
+        $agent = User::query()->find($agentId);
+        if (! $agent || ! app(AgentWhatsAppSettingsService::class)->isAllowedTestNumber($agent, $msisdn)) {
+            throw new ApiException(__('messages.whatsapp.number_not_allowed'), 422, ['number' => [__('messages.whatsapp.number_not_allowed')]]);
         }
 
         $message = $this->enqueue([
@@ -356,6 +361,10 @@ class WhatsAppDelivery
     {
         if (! WhatsAppMessage::tableReady()) {
             throw new ApiException(__('messages.whatsapp.migration_pending'), 503);
+        }
+        // Defence in depth (A8): Owner-authorised test numbers only, independent of the calling controller.
+        if (! in_array($msisdn, $this->settings->reload()->testNumbers(), true)) {
+            throw new ApiException(__('messages.whatsapp.number_not_allowed'), 422, ['number' => [__('messages.whatsapp.number_not_allowed')]]);
         }
 
         $message = $this->enqueue([
