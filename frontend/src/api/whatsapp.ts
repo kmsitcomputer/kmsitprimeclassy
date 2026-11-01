@@ -79,6 +79,12 @@ export interface WaMessage {
   purpose: 'transaction' | 'otp' | 'test'
   event: string | null
   status: WaMessageStatus
+  /** full | restricted (CL-05) — null on rows written before the ledger migration. */
+  template_class?: string | null
+  /** admin | creator | recipient | registrant */
+  recipient_role?: string | null
+  /** Sender device slot (Super Admin console only; shown truncated). */
+  sender_device_id?: string | null
   order_id: number | null
   /** Masked (62••••123). */
   recipient: string | null

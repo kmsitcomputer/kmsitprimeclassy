@@ -87,3 +87,45 @@ export function googleAuthUrl(mode: 'login' | 'register' | 'link', referralCode?
   if (mode === 'register' && referralCode) params.set('referral_code', referralCode.trim())
   return `${base}/api/v1/auth/google/redirect?${params.toString()}`
 }
+
+/* ---- Password recovery (unauthenticated; ALWAYS the same generic answer — never reveals whether the account exists) ---- */
+export type RecoveryChannel = 'email' | 'whatsapp'
+
+export async function forgotPassword(identifier: string, channel: RecoveryChannel) {
+  await ensureCsrfCookie()
+  await http.post('/auth/forgot-password', { identifier, channel })
+}
+
+export async function resetPassword(payload: { identifier: string; code: string; password: string; password_confirmation: string }) {
+  await ensureCsrfCookie()
+  await http.post('/auth/reset-password', payload)
+}
+
+/* ---- Email verification (signed-in holder, own address only) ---- */
+export interface EmailVerificationState {
+  email_masked: string | null
+  verified: boolean
+  pending: boolean
+}
+
+export interface EmailVerificationChallenge {
+  challenge_id: number
+  expires_at: string
+  max_attempts: number
+}
+
+export async function getEmailVerificationState() {
+  const { data } = await http.get<ApiEnvelope<EmailVerificationState>>('/profile/email/verification')
+  return data.data
+}
+
+/** Resolves a challenge, or the (already verified) state when nothing needed to be sent. */
+export async function requestEmailVerification() {
+  const { data } = await http.post<ApiEnvelope<EmailVerificationChallenge | EmailVerificationState>>('/profile/email/verification')
+  return data.data
+}
+
+export async function confirmEmailVerification(challengeId: number, code: string) {
+  const { data } = await http.post<ApiEnvelope<EmailVerificationState>>(`/profile/email/verification/${challengeId}/confirm`, { code })
+  return data.data
+}

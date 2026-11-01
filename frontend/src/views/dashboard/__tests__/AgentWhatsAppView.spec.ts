@@ -1,5 +1,5 @@
 /**
- * WhatsApp Saya (Agen). API mocked; the backend owns every rule. These tests pin what the page shows and sends: the QR comes from the server
+ * WhatsApp Cabang (Agen / Admin Agen). API mocked; the backend owns every rule. These tests pin what the page shows and sends: the QR comes from the server
  * as a data URI, pairing is polled, replacement needs an explicit confirmation, and no secret/slot id is ever rendered.
  */
 import { flushPromises, mount } from '@vue/test-utils'
@@ -18,6 +18,8 @@ const api = vi.hoisted(() => ({
   logoutAgentWhatsApp: vi.fn(),
   replaceAgentWhatsAppDevice: vi.fn(),
   listAgentWhatsAppMessages: vi.fn(),
+  getAgentWhatsAppScope: vi.fn(),
+  setAgentWhatsAppTarget: vi.fn(),
 }))
 vi.mock('@/api/agentWhatsapp', () => api)
 vi.mock('@/layouts/DashboardLayout.vue', () => ({ default: { template: '<div><slot /></div>' } }))
@@ -29,7 +31,7 @@ const status = (over: Partial<AgentWaStatus> = {}): AgentWaStatus => ({
 const btn = (w: ReturnType<typeof mount>, text: string | RegExp) => w.findAll('button').find((b) => (typeof text === 'string' ? b.text() === text : text.test(b.text())))!
 
 async function mountView() {
-  const w = mount(AgentWhatsAppView)
+  const w = mount(AgentWhatsAppView, { global: { stubs: { AgentWaEvents: true, AgentWaTesting: true } } })
   await flushPromises()
   return w
 }
@@ -38,10 +40,25 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   api.getAgentWhatsApp.mockResolvedValue(status())
   api.listAgentWhatsAppMessages.mockResolvedValue([])
+  api.getAgentWhatsAppScope.mockResolvedValue([{ id: 7, name: 'Agen Satu' }])
 })
 afterEach(() => vi.useRealTimers())
 
 describe('AgentWhatsAppView', () => {
+  it('shows the single authorised branch and sends it as the (server re-validated) target', async () => {
+    const w = await mountView()
+    expect(w.get('[data-test="wa-scope"]').text()).toContain('Agen Satu')
+    expect(api.setAgentWhatsAppTarget).toHaveBeenCalledWith(7)
+  })
+
+  it('lets an actor with several authorised Agen switch between them', async () => {
+    api.getAgentWhatsAppScope.mockResolvedValue([{ id: 7, name: 'Agen Satu' }, { id: 9, name: 'Agen Dua' }])
+    const w = await mountView()
+    await w.get('[data-test="wa-scope"] select').setValue(9)
+    await flushPromises()
+    expect(api.setAgentWhatsAppTarget).toHaveBeenLastCalledWith(9)
+  })
+
   it('offers to create the device when the Agent has none', async () => {
     api.getAgentWhatsApp.mockResolvedValue(status({ device: null }))
     api.createAgentWhatsAppDevice.mockResolvedValue(status())

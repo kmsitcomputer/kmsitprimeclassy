@@ -1,17 +1,21 @@
 <script setup lang="ts">
 /**
- * WhatsApp Saya (Agen). The Agent pairs and manages ITS OWN WhatsApp number here; order notifications and verification codes of this
+ * WhatsApp Saya (Agen) / WhatsApp Cabang (Admin Agen). The Agent — or the Admin of its branch — pairs and manages the branch WhatsApp number here; order notifications and verification codes of this
  * branch are sent from it. The Super Admin only has the global ON/OFF. Every rule (ownership, one device, isolation) is enforced by the
  * backend — this page only drives it. No GOWA secret, QR source URL or full number is ever in the browser.
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
+import AgentWaEvents from '@/components/whatsapp/AgentWaEvents.vue'
+import AgentWaTesting from '@/components/whatsapp/AgentWaTesting.vue'
 import { ApiError } from '@/api/client'
 import { formatApiError } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import {
   createAgentWhatsAppDevice,
   getAgentWhatsApp,
+  getAgentWhatsAppScope,
+  setAgentWhatsAppTarget,
   listAgentWhatsAppMessages,
   logoutAgentWhatsApp,
   reconnectAgentWhatsApp,
@@ -22,6 +26,8 @@ import {
   type AgentWaStatus,
 } from '@/api/agentWhatsapp'
 
+const scopes = ref<{ id: number; name: string }[]>([])
+const selectedAgent = ref<number | undefined>(undefined)
 const status = ref<AgentWaStatus | null>(null)
 const messages = ref<AgentWaMessage[]>([])
 const loading = ref(true)
@@ -65,6 +71,11 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
+    if (!scopes.value.length) {
+      scopes.value = await getAgentWhatsAppScope()
+      selectedAgent.value = scopes.value[0]?.id
+    }
+    setAgentWhatsAppTarget(selectedAgent.value)
     status.value = await getAgentWhatsApp()
     messages.value = status.value.table_ready ? await listAgentWhatsAppMessages().catch(() => []) : []
   } catch (e) {
@@ -74,6 +85,13 @@ async function load() {
   }
 }
 load()
+
+/** Switching the managed Agen reloads everything for that Agen; the backend rejects any Agen outside the actor's scope. */
+function changeAgent() {
+  stopTimers()
+  qrImage.value = pairCode.value = null
+  load()
+}
 
 async function refresh() {
   try {
@@ -174,8 +192,16 @@ const outcome = (m: AgentWaMessage) => (m.skip_reason ? SKIP[m.skip_reason] ?? m
 
 <template>
   <DashboardLayout>
-    <p class="text-xs text-stone-500 dark:text-stone-400">Pengaturan › WhatsApp Saya</p>
-    <h1 class="font-display text-2xl font-semibold text-stone-800 dark:text-stone-100">WhatsApp Saya</h1>
+    <p class="text-xs text-stone-500 dark:text-stone-400">Pengaturan › WhatsApp</p>
+    <h1 class="font-display text-2xl font-semibold text-stone-800 dark:text-stone-100">WhatsApp Cabang</h1>
+    <div v-if="scopes.length" class="mb-3 text-sm text-stone-600 dark:text-stone-300" data-test="wa-scope">
+      <label v-if="scopes.length > 1" class="flex items-center gap-2">Agen
+        <select v-model="selectedAgent" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-950" @change="changeAgent">
+          <option v-for="a in scopes" :key="a.id" :value="a.id">{{ a.name }}</option>
+        </select>
+      </label>
+      <span v-else>Cabang: <strong>{{ scopes[0]?.name }}</strong></span>
+    </div>
     <p class="mb-5 text-sm text-stone-500 dark:text-stone-400">
       Hubungkan nomor WhatsApp cabang Anda. Notifikasi pesanan dan kode verifikasi pelanggan cabang ini dikirim dari nomor ini, dan hanya dari nomor ini.
     </p>
@@ -282,6 +308,11 @@ const outcome = (m: AgentWaMessage) => (m.skip_reason ? SKIP[m.skip_reason] ?? m
           </table>
         </div>
       </section>
+
+      <div class="mt-5 space-y-5">
+        <AgentWaTesting :key="'t' + selectedAgent" :device-connected="state === 'connected'" :gateway-on="!unavailable && !globalOff" />
+        <AgentWaEvents :key="'e' + selectedAgent" />
+      </div>
     </template>
   </DashboardLayout>
 </template>

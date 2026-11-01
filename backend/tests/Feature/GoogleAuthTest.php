@@ -273,6 +273,33 @@ class GoogleAuthTest extends TestCase
         $this->assertDatabaseHas('activity_logs', ['event' => 'auth.google_registered', 'causer_id' => $user->id]);
     }
 
+    public function test_google_registration_sends_the_registration_email_but_no_whatsapp_without_a_phone(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        ['sales' => $sales] = $this->branch();
+
+        $this->runFlow('register', 'sa-t1')->assertRedirect('/?google=registered');
+
+        $user = User::query()->where('email', 'new.person@gmail.com')->firstOrFail();
+        $this->assertNotNull($user->email_verified_at, 'verified state still comes from the validated OAuth claim');
+        \Illuminate\Support\Facades\Mail::assertQueued(\App\Mail\AccountRegisteredMail::class, fn ($m) => $m->hasTo('new.person@gmail.com'));
+        $this->assertSame(0, \App\Models\WhatsAppMessage::query()->where('event', 'account_registered')->count());
+    }
+
+    public function test_repeat_google_login_sends_no_registration_email(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        ['agen' => $agen, 'korsal' => $korsal, 'sales' => $sales] = $this->branch();
+        $konsumen = User::factory()->konsumen()->create([
+            'email' => 'new.person@gmail.com', 'agent_id' => $agen->id, 'korsal_id' => $korsal->id, 'sales_id' => $sales->id, 'parent_id' => $sales->id,
+        ]);
+        UserSocialIdentity::create(['user_id' => $konsumen->id, 'provider' => 'google', 'provider_user_id' => 'g-sub-1']);
+
+        $this->runFlow('login', null)->assertRedirect('/?google=ok');
+
+        \Illuminate\Support\Facades\Mail::assertNothingQueued();
+    }
+
     public function test_login_mode_with_unknown_google_account_never_creates_a_konsumen(): void
     {
         $this->runFlow('login', null)->assertRedirect('/register?google_error=registration_required');

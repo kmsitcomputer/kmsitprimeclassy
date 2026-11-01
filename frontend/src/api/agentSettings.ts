@@ -42,6 +42,9 @@ export interface AgentShippingProviderRow {
   origin?: string | null
   couriers?: string[]
   profile?: string | null
+  /** KMSIT only: the Agen's own endpoint (no credentials can be embedded) and whether a token is stored; the token is never returned. */
+  base_url?: string | null
+  has_token?: boolean | null
   origin_coordinates?: { latitude: number; longitude: number } | null
   pricing?: { price_per_km: number; minimum_distance_km: number; minimum_charge: number } | null
 }
@@ -61,14 +64,23 @@ export interface AgentRajaOngkirConfigPayload {
 }
 export interface AgentOpenRouteConfigPayload {
   config: { api_key: string; profile: string }
-  price_per_km: number
-  minimum_distance_km: number
+  /** Tariff now lives in saveKurirTokoTariff; still accepted (together) for old callers, never needed for ORS. */
+  price_per_km?: number
+  minimum_distance_km?: number
   minimum_charge?: number
   free_shipping_enabled?: boolean
   free_shipping_min_amount?: number | null
 }
 
-export async function saveAgentShippingProviderConfig(id: number, payload: AgentRajaOngkirConfigPayload | AgentOpenRouteConfigPayload) {
+export interface AgentKmsitConfigPayload {
+  /** token is write-only: leave it out to keep the stored one. */
+  config: { base_url: string; profile: string; token?: string }
+  price_per_km?: number
+  minimum_distance_km?: number
+  minimum_charge?: number
+}
+
+export async function saveAgentShippingProviderConfig(id: number, payload: AgentRajaOngkirConfigPayload | AgentOpenRouteConfigPayload | AgentKmsitConfigPayload) {
   const { data } = await http.put<ApiEnvelope<AgentShippingProviderRow>>(`/agent/shipping-providers/${id}/config`, payload)
   return data.data
 }
@@ -106,4 +118,24 @@ export async function testOpenRouteConnection(id: number, destinationLatitude: n
     destination_longitude: destinationLongitude,
   })
   return data.data
+}
+
+/** The ONE per-Agen Kurir Toko tariff, independent of OpenRouteService and KMSIT (they only supply distance). */
+export interface KurirTokoTariff {
+  price_per_km: number
+  minimum_distance_km: number
+  minimum_charge: number
+  free_shipping_enabled: boolean
+  free_shipping_min_amount: number | null
+  is_active: boolean
+}
+
+export async function getKurirTokoTariff() {
+  const { data } = await http.get<ApiEnvelope<{ tariff: KurirTokoTariff | null }>>('/agent/shipping-tariff')
+  return data.data.tariff
+}
+
+export async function saveKurirTokoTariff(payload: { price_per_km: number; minimum_distance_km: number; minimum_charge: number }) {
+  const { data } = await http.put<ApiEnvelope<{ tariff: KurirTokoTariff }>>('/agent/shipping-tariff', payload)
+  return data.data.tariff
 }

@@ -27,6 +27,19 @@ class AppServiceProvider extends ServiceProvider
         \Illuminate\Support\Facades\RateLimiter::for('wa-number-request', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 6)->by('wa-number-request:'.($r->user()?->id ?? $r->ip())));
         \Illuminate\Support\Facades\RateLimiter::for('wa-number-confirm', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 12)->by('wa-number-confirm:'.($r->user()?->id ?? $r->ip())));
 
+        // Email verification (self-service): dedicated buckets so confirm calls never eat the request budget.
+        \Illuminate\Support\Facades\RateLimiter::for('email-verify-request', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 6)->by('email-verify-request:'.($r->user()?->id ?? $r->ip())));
+        \Illuminate\Support\Facades\RateLimiter::for('email-verify-confirm', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 12)->by('email-verify-confirm:'.($r->user()?->id ?? $r->ip())));
+
+        // Account recovery (unauthenticated, identifier-only): strict per-IP + per-identifier buckets (see service).
+        \Illuminate\Support\Facades\RateLimiter::for('recovery-request', fn (\Illuminate\Http\Request $r) => [
+            \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 6)->by('recovery-request:ip:'.$r->ip()),
+            // F-5: ALSO per normalised identifier, keyed by a hash (never the raw email/phone in the cache key or logs). Applies to
+            // every identifier identically, so the 429 says nothing about whether the account exists. Keys expire with the window.
+            \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 3)->by('recovery-request:id:'.hash('sha256', mb_strtolower(trim((string) $r->input('identifier'))))),
+        ]);
+        \Illuminate\Support\Facades\RateLimiter::for('recovery-confirm', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinutes(10, 12)->by('recovery-confirm:'.$r->ip()));
+
         \Illuminate\Support\Facades\RateLimiter::for('agent-wa-device', fn (\Illuminate\Http\Request $r) => \Illuminate\Cache\RateLimiting\Limit::perMinute(12)->by('agent-wa-device:'.($r->user()?->id ?? $r->ip())));
 
         // Owner 2026-10-29: only a number the account proved through a `whatsapp_number` challenge counts as verified.

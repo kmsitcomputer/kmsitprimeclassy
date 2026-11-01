@@ -42,6 +42,7 @@ class GoogleAuthService
     public function __construct(
         private readonly ReferralService $referralService,
         private readonly GoogleAuthConfigService $configService,
+        private readonly RegistrationNotifier $registrationNotifier,
     ) {}
 
     public function isConfigured(): bool
@@ -215,7 +216,12 @@ class GoogleAuthService
             }
 
             $identity->update(['provider_email' => $email, 'last_login_at' => now()]);
-            return $this->authenticated($user, false, 'auth.google_login', $flow);
+            // WS-04: the validated ID token proves control of the Google address. When it is the SAME address the
+            // local account currently holds (case-insensitive) and the local mark is still null (e.g. an older
+            // unverified row, or an address changed after linking), adopt the verified state. A differing address
+            // proves nothing about the local one and must never mark it — nor is the local email ever rewritten.
+            $this->syncVerifiedState($user, $email);
+            return $this->authenticated($user->fresh('role'), false, 'auth.google_login', $flow);
         }
 
         // Existing local account: only auto-link if the local email is already verified.
@@ -234,7 +240,11 @@ class GoogleAuthService
                 return $fail('conflict');
             }
 
-            return $this->authenticated($existing, false, 'auth.google_linked', $flow, ['method' => 'verified_email']);
+            // WS-04: matched by email and the gate above already required a verified local address — but if the mark
+            // was still pending for any reason, the validated token now proves it. Same-address only, never rewrite.
+            $this->syncVerifiedState($existing, $email);
+
+            return $this->authenticated($existing->fresh('role'), false, 'auth.google_linked', $flow, ['method' => 'verified_email']);
         }
 
         // Unknown accounts may only be created in register mode.
@@ -286,6 +296,13 @@ class GoogleAuthService
         } catch (UniqueConstraintViolationException) {
             return $fail('conflict');
         }
+
+        // WS-04: Google-only registration already required a validated `email_verified` claim — stamp it so the new
+        // account does not start unverified and immediately hit the auto-link gate on its next login.
+        $user->forceFill(['email_verified_at' => now()])->save();
+
+        // R-02: registration notice ONLY on first creation (this branch); an ordinary repeat Google login never reaches it.
+        $this->registrationNotifier->notify($user);
 
         return $this->authenticated($user->load('role'), true, 'auth.google_registered', $flow, [
             'referrer_id' => $chain['parent_id'],
@@ -385,6 +402,11 @@ class GoogleAuthService
             return $fail('identity_in_use');
         }
 
+        // WS-04: same-address sync — the session proves ownership of the local account and the validated token
+        // proves control of the Google address; only when they are the same address does the local mark flip
+        // (an explicit link with a DIFFERENT Google email leaves the local address unverified, by design).
+        $this->syncVerifiedState($current, $email);
+
         ActivityLogger::log($current->id, $current, 'auth.google_linked', null, [
             'actor_role' => 'konsumen',
             'method' => 'explicit',
@@ -403,6 +425,28 @@ class GoogleAuthService
             'provider_email' => $email,
             'last_login_at' => now(),
         ]);
+    }
+
+    /**
+     * WS-04 — adopt the validated Google `email_verified` claim onto the local mark, same-address ONLY.
+     * The claim is trustworthy (signature + aud + nonce checked in verifyIdToken, claim required true at the top of
+     * handleCallback), but it proves control of the GOOGLE address — so it may only flip `email_verified_at` when
+     * that address already equals the local one. Never rewrites the local email, never clears a mark, never
+     * backfills history: only null -> now on an exact match. No-op for differing addresses (explicit-link-with-
+     * different-email keeps its unverified local state until the holder verifies it via EmailVerificationService).
+     */
+    private function syncVerifiedState(User $user, string $googleEmail): void
+    {
+        if ($user->email === null || $user->email_verified_at !== null) {
+            return;
+        }
+
+        if (hash_equals(mb_strtolower($user->email), mb_strtolower($googleEmail))) {
+            $user->forceFill(['email_verified_at' => now()])->save();
+            ActivityLogger::log($user->id, $user, 'auth.email_verified', null, [
+                'method' => 'google',
+            ]);
+        }
     }
 
     private function isEligibleKonsumen(?User $user): bool

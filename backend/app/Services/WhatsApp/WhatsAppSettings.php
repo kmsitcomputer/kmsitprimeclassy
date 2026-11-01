@@ -26,6 +26,9 @@ class WhatsAppSettings
 
     public const PROVIDER = 'gowa';
 
+    /** HA-01 dedicated queue lane for all transactional WhatsApp jobs (see SendWhatsAppMessageJob::$queue). */
+    public const NOTIFY_QUEUE = 'primeclassy-notify';
+
     private const DEFAULT_OTP = [
         'enabled' => false, 'ttl_minutes' => 5, 'max_attempts' => 5, 'cooldown_seconds' => 60,
         'limit' => 3, 'limit_window_minutes' => 10,
@@ -160,6 +163,40 @@ class WhatsAppSettings
     {
         // Default OFF: nothing is sent to anyone until a Super Admin deliberately switches an event on.
         return WhatsAppEvents::exists($event) && $this->flag("wa.event.$event");
+    }
+
+    /**
+     * Effective switch for ONE Agen: its own row wins, otherwise the legacy global flag (so what Super Admin had enabled keeps
+     * working until the Agen decides otherwise). Unknown events are never enabled — OTP/identity/registration traffic is not an
+     * "event" here and cannot be switched off or on through this path.
+     */
+    public function eventEnabledFor(string $event, ?int $agentId): bool
+    {
+        if (! WhatsAppEvents::exists($event)) {
+            return false;
+        }
+        $row = $this->scopedRow($event, $agentId);
+        if ($row && $row->enabled !== null) {
+            return (bool) $row->enabled;
+        }
+
+        return $this->eventEnabled($event);
+    }
+
+    public function templateFor(string $event, ?int $agentId): string
+    {
+        $row = $this->scopedRow($event, $agentId);
+
+        return ($row && $row->template !== null && $row->template !== '') ? $row->template : $this->template($event);
+    }
+
+    private function scopedRow(string $event, ?int $agentId): ?\App\Models\AgentWhatsAppEventSetting
+    {
+        if (! $agentId || ! \App\Models\AgentWhatsAppEventSetting::tableReady()) {
+            return null;
+        }
+
+        return \App\Models\AgentWhatsAppEventSetting::query()->where('agent_id', $agentId)->where('event', $event)->first();
     }
 
     public function template(string $event): string

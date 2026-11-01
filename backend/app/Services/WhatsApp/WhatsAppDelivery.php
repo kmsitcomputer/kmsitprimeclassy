@@ -26,7 +26,28 @@ class WhatsAppDelivery
         private readonly WhatsAppSettings $settings,
         private readonly GowaClient $client,
         private readonly AgentDeviceService $devices,
+        private readonly RestrictedDeliveryPolicy $restricted = new RestrictedDeliveryPolicy,
     ) {}
+
+    /**
+     * Schema-not-yet-migrated compatibility. Before migration 2026_11_03_100000 the three ledger columns do not exist:
+     * a legacy row keeps working (the new keys are dropped), but a RESTRICTED row — whose authorization IS those columns —
+     * is refused (null) rather than written without its guard. Never a misleading "queued" for something that cannot be sent.
+     *
+     * @param  array<string,mixed>  $attrs
+     * @return array<string,mixed>|null
+     */
+    private function ledgerCompatible(array $attrs): ?array
+    {
+        if (WhatsAppMessage::ledgerReady()) {
+            return $attrs;
+        }
+        if (($attrs['template_class'] ?? null) === RestrictedDeliveryPolicy::CLASS_RESTRICTED) {
+            return null;
+        }
+
+        return array_diff_key($attrs, array_flip(WhatsAppMessage::LEDGER_COLUMNS));
+    }
 
     /**
      * Idempotently create a QUEUED message and dispatch its job. Returns the existing row for a duplicate key.
@@ -36,6 +57,18 @@ class WhatsAppDelivery
     public function enqueue(array $attrs, #[\SensitiveParameter] ?string $secretBody = null, bool $dispatch = true): ?WhatsAppMessage
     {
         if (! WhatsAppMessage::tableReady()) {
+            return null;
+        }
+
+        // Mass-assignment hardening (CL-13): only real ledger columns may be written — a stray key (e.g. an
+        // idempotency suffix helper) must fail loudly here, never silently become a column or a swallowed attr.
+        $message = new WhatsAppMessage;
+        $guarded = array_diff(array_keys($attrs), $message->getFillable());
+        if ($guarded !== []) {
+            throw new \InvalidArgumentException('WhatsAppDelivery::enqueue got unknown attributes: '.implode(', ', $guarded));
+        }
+
+        if (($attrs = $this->ledgerCompatible($attrs)) === null) {
             return null;
         }
 
@@ -71,7 +104,7 @@ class WhatsAppDelivery
     /** Record that a business event was deliberately NOT sent (and why). Idempotent. */
     public function skip(array $attrs, string $reason): ?WhatsAppMessage
     {
-        if (! WhatsAppMessage::tableReady()) {
+        if (! WhatsAppMessage::tableReady() || ($attrs = $this->ledgerCompatible($attrs)) === null) {
             return null;
         }
 
@@ -106,10 +139,19 @@ class WhatsAppDelivery
 
         // Proof is re-checked at SEND time, not only when the message was queued: a delayed job, a throttled retry or an operator's
         // manual retry hours later must never reach a number the account no longer holds a valid ownership proof for.
+        // Exactly two lanes (R-01): an account-bound row needs a valid number proof; a RESTRICTED row (CL-05) is judged by the closed
+        // RestrictedDeliveryPolicy instead. A row that is not restricted never gets the policy's leniency, and an accountless row that
+        // is not a valid restricted row fails the proof check (msisdnFor(null) === null) — there is no `if (!$recipient) allow`.
         if ($message->purpose === WhatsAppMessage::PURPOSE_TRANSACTION) {
-            $recipient = $message->recipient_user_id ? User::query()->find($message->recipient_user_id) : null;
-            if (WhatsAppNumberProof::msisdnFor($recipient) !== $message->recipient_phone) {
-                return $this->finish($message, WhatsAppMessage::SKIPPED, ['skip_reason' => 'number_not_verified']);
+            if (RestrictedDeliveryPolicy::isRestricted($message)) {
+                if ($reason = $this->restricted->check($message)) {
+                    return $this->finish($message, WhatsAppMessage::SKIPPED, ['skip_reason' => $reason]);
+                }
+            } else {
+                $recipient = $message->recipient_user_id ? User::query()->find($message->recipient_user_id) : null;
+                if (WhatsAppNumberProof::msisdnFor($recipient) !== $message->recipient_phone) {
+                    return $this->finish($message, WhatsAppMessage::SKIPPED, ['skip_reason' => 'number_not_verified']);
+                }
             }
         }
 
@@ -118,10 +160,15 @@ class WhatsAppDelivery
         // deliberately no fallback to the console's default device or to another Agent's slot. Dashboard test messages are the one
         // platform-level exception (Super Admin console, allow-listed numbers).
         $deviceId = null;
-        if ($message->purpose !== WhatsAppMessage::PURPOSE_TEST) {
+        // An Agen-scoped test message (agent_id set) is NOT the platform exception: it uses the Agen's explicit slot like any other.
+        if ($message->purpose !== WhatsAppMessage::PURPOSE_TEST || $message->agent_id !== null) {
             $deviceId = $this->devices->sendingDeviceId($message->agent_id);
             if ($deviceId === null) {
                 return $this->finish($message, WhatsAppMessage::SKIPPED, ['skip_reason' => 'agent_device_not_ready']);
+            }
+            // CL-01 / CL-13: record exactly which sender carried this message (never substituted, never borrowed).
+            if (WhatsAppMessage::ledgerReady()) {
+                $message->forceFill(['sender_device_id' => $deviceId])->save();
             }
         }
 
@@ -282,6 +329,26 @@ class WhatsAppDelivery
         SendWhatsAppMessageJob::dispatch($message->id);
 
         return $message->refresh();
+    }
+
+    /**
+     * Agen-scoped real test message (WA-DEC-03): `agent_id` is set, so deliver() requires that Agen's own paired slot and skips with
+     * `agent_device_not_ready` otherwise — never the console default device, never another Agen's slot. Destination allow-listing
+     * and rate limiting are the caller's (AgentWhatsAppController) responsibility.
+     */
+    public function sendAgentTest(User $actor, int $agentId, string $msisdn, string $text): WhatsAppMessage
+    {
+        if (! WhatsAppMessage::tableReady()) {
+            throw new ApiException(__('messages.whatsapp.migration_pending'), 503);
+        }
+
+        $message = $this->enqueue([
+            'idempotency_key' => 'test:'.bin2hex(random_bytes(10)),
+            'purpose' => WhatsAppMessage::PURPOSE_TEST, 'event' => 'test', 'agent_id' => $agentId,
+            'recipient_phone' => $msisdn, 'body' => $text, 'created_by' => $actor->id,
+        ], dispatch: false);
+
+        return $this->deliver($message->id) ?? $message->refresh();
     }
 
     /** Real test message to an allow-listed number, delivered synchronously so the dashboard shows the true outcome. */

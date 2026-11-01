@@ -59,6 +59,7 @@ function mountAs(u: AuthUser) {
         ShopLayout: { template: '<div><slot /></div>' },
         ImageUploader: true,
         WhatsAppNumberVerification: true,
+        EmailVerification: true,
       },
     },
   })

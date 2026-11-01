@@ -213,12 +213,12 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'agen'),
       },
       {
-        // The Agen's own WhatsApp device (QR / pairing code, reconnect, replace). Agen only; the Super Admin has just the global switch.
+        // The branch WhatsApp device, notification templates and test-send. Agen and its Admin Agen; the Super Admin has just the global switch.
         key: 'agent-whatsapp',
-        label: 'WhatsApp Saya',
+        label: 'WhatsApp Cabang',
         routeName: 'agent-whatsapp',
         icon: 'globe',
-        show: (auth) => isRole(auth, 'agen'),
+        show: (auth) => isRole(auth, 'agen') || isRole(auth, 'admin'),
       },
     ],
   },

@@ -20,6 +20,7 @@ class UserController extends Controller
     public function __construct(
         private readonly UserManagementService $userManagementService,
         private readonly ReferralReassignmentService $referralReassignment,
+        private readonly \App\Services\Auth\RegistrationNotifier $registrationNotifier,
     ) {}
 
     public function store(CreateUserRequest $request)
@@ -35,6 +36,9 @@ class UserController extends Controller
         ActivityLogger::log($request->user()->id, $user, 'user.created', null, [
             'actor_role' => $request->user()->role?->slug, 'target_role' => $request->targetRole(),
         ]);
+
+        // R-02: notify the NEW account's own contacts (never the creating Admin, never the password).
+        $this->registrationNotifier->notify($user);
 
         return $this->created(new UserResource($user), __('messages.user.created'));
     }

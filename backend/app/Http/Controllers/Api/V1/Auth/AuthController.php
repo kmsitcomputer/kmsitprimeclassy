@@ -9,6 +9,7 @@ use App\Http\Requests\Auth\RegisterKonsumenRequest;
 use App\Http\Resources\UserResource;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\Auth\RegistrationNotifier;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Referral\ReferralService;
 use App\Support\PermissionMap;
@@ -19,7 +20,10 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly ReferralService $referralService) {}
+    public function __construct(
+        private readonly ReferralService $referralService,
+        private readonly RegistrationNotifier $registrationNotifier,
+    ) {}
 
     /**
      * Bundles the user with its frontend permission hints (see PermissionMap)
@@ -104,6 +108,15 @@ class AuthController extends Controller
 
         Auth::login($user);
         $request->session()->regenerate();
+
+        // Manual email/password registration logs here; the Google path logs `auth.google_registered`. R-02 (HA-08/CL-05):
+        // an informational Email + restricted WhatsApp notice follow the commit (RegistrationNotifier; never fails the signup).
+        ActivityLogger::log($user->id, $user, 'auth.registered', null, [
+            'actor_role' => $user->role?->slug,
+            'agent_id' => $user->agent_id,
+            'referrer_id' => $chain['parent_id'],
+        ]);
+        $this->registrationNotifier->notify($user);
 
         return $this->created(
             $this->authPayload($user),

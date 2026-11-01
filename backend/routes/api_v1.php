@@ -14,6 +14,8 @@ use App\Http\Controllers\Api\V1\Agent\AgentPaymentMethodController;
 use App\Http\Controllers\Api\V1\Agent\AgentShippingProviderController;
 use App\Http\Controllers\Api\V1\Agent\AgentStoreProfileController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
+use App\Http\Controllers\Api\V1\Auth\AccountRecoveryController;
+use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\ProfileController;
 use App\Http\Controllers\Api\V1\Catalog\ProductCategoryController;
 use App\Http\Controllers\Api\V1\Catalog\ProductController;
@@ -100,6 +102,10 @@ Route::prefix('install')->middleware('throttle:20,1')->group(function () {
 // stuffing protection; kept generous enough not to lock out shared-IP users.
 Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+// Password recovery: enumeration-resistant (always the same generic answer); dedicated buckets so forgot/reset
+// never share a budget with login/register.
+Route::post('/auth/forgot-password', [AccountRecoveryController::class, 'forgot'])->middleware('throttle:recovery-request');
+Route::post('/auth/reset-password', [AccountRecoveryController::class, 'reset'])->middleware('throttle:recovery-confirm');
 
 Route::get('/categories', [ProductCategoryController::class, 'index']);
 Route::get('/products', [ProductController::class, 'index']);
@@ -149,10 +155,20 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::patch('/profile', [ProfileController::class, 'update']);
     // WhatsApp number proof (own number only; channel proof, never consent or CRM linking).
-    // WhatsApp device of the signed-in AGEN (Owner 2026-10-29: each Agent manages its own session; Super Admin only has the global ON/OFF).
-    Route::middleware('role:agen')->prefix('/agent/whatsapp')->group(function () {
+    // WhatsApp management for an AGEN's device/events/test numbers. Owner WA-DEC-01..04: the Agen manages its own; an Admin Agen manages
+    // its branch Agen; Super Admin only has the global ON/OFF. The target Agen is resolved server-side (WhatsAppScope), never trusted.
+    Route::middleware('role:agen,admin')->prefix('/agent/whatsapp')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'show']);
+        Route::get('/scope', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'scope']);
         Route::get('/messages', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'messages']);
+        Route::get('/events', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'events']);
+        Route::put('/events/{event}', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'updateEvent']);
+        Route::delete('/events/{event}/template', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'resetEventTemplate']);
+        Route::post('/events/{event}/preview', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'previewEvent']);
+        Route::get('/test-numbers', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'testNumbers']);
+        Route::post('/test-numbers', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'addTestNumber'])->middleware('throttle:10,1');
+        Route::delete('/test-numbers/{id}', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'removeTestNumber'])->whereNumber('id');
+        Route::post('/test-send', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'testSend'])->middleware('throttle:10,1');
         Route::middleware('throttle:agent-wa-device')->group(function () {
             Route::post('/device', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'createDevice']);
             Route::post('/pair/qr', [\App\Http\Controllers\Api\V1\Agent\AgentWhatsAppController::class, 'qr']);
@@ -166,6 +182,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     Route::get('/profile/whatsapp', [WhatsAppNumberController::class, 'show']);
     Route::post('/profile/whatsapp/verification', [WhatsAppNumberController::class, 'request'])->middleware('throttle:wa-number-request');
     Route::post('/profile/whatsapp/verification/{challenge}/confirm', [WhatsAppNumberController::class, 'confirm'])->middleware('throttle:wa-number-confirm');
+    // Email verification (own current address only; contact-change invalidation lives in ProfileController).
+    Route::get('/profile/email/verification', [EmailVerificationController::class, 'show']);
+    Route::post('/profile/email/verification', [EmailVerificationController::class, 'request'])->middleware('throttle:email-verify-request');
+    Route::post('/profile/email/verification/{challenge}/confirm', [EmailVerificationController::class, 'confirm'])->middleware('throttle:email-verify-confirm');
     Route::patch('/profile/password', [ProfileController::class, 'updatePassword']);
 
     // Self-service referral code — agen/korsal/sales only (konsumen/admin/kurir never carry one).
@@ -677,6 +697,9 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // Agen's own scoped shipping settings + store profile — on/off for the
     // agen's own branch only, plus the agen's own credentials/rate config.
     Route::middleware('role:agen')->group(function () {
+        // Kurir Toko tariff: one per-Agen record, independent of ORS/KMSIT (they only supply distance).
+        Route::get('/agent/shipping-tariff', [\App\Http\Controllers\Api\V1\Agent\AgentShippingTariffController::class, 'show']);
+        Route::put('/agent/shipping-tariff', [\App\Http\Controllers\Api\V1\Agent\AgentShippingTariffController::class, 'update']);
         Route::get('/agent/shipping-providers', [AgentShippingProviderController::class, 'index']);
         Route::patch('/agent/shipping-providers/{provider}/toggle', [AgentShippingProviderController::class, 'toggle']);
         Route::put('/agent/shipping-providers/{provider}/config', [AgentShippingProviderController::class, 'updateConfig']);

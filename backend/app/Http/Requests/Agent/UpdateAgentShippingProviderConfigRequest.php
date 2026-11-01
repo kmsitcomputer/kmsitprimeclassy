@@ -28,6 +28,11 @@ class UpdateAgentShippingProviderConfigRequest extends BaseFormRequest
             $this->merge(['config' => $config]);
         }
 
+        if (is_array($config) && $this->route('provider')?->code === 'kmsit' && empty($config['profile'])) {
+            $config['profile'] = 'car';
+            $this->merge(['config' => $config]);
+        }
+
         if (is_array($config) && $this->route('provider')?->code === 'openroute' && empty($config['profile'])) {
             $config['profile'] = config('services.openroute.profile');
             $this->merge(['config' => $config]);
@@ -45,8 +50,18 @@ class UpdateAgentShippingProviderConfigRequest extends BaseFormRequest
         ];
 
         if ($provider->code === 'openroute') {
-            $rules['price_per_km'] = ['required', 'numeric', 'min:0'];
-            $rules['minimum_distance_km'] = ['required', 'numeric', 'min:0'];
+            // Tariff moved to /agent/shipping-tariff; still accepted (both together) for older clients, never required for ORS.
+            $rules['price_per_km'] = ['nullable', 'numeric', 'min:0', 'required_with:minimum_distance_km'];
+            $rules['minimum_distance_km'] = ['nullable', 'numeric', 'min:0', 'required_with:price_per_km'];
+            $rules['minimum_charge'] = ['nullable', 'numeric', 'min:0'];
+            $rules['free_shipping_enabled'] = ['sometimes', 'boolean'];
+            $rules['free_shipping_min_amount'] = ['nullable', 'numeric', 'min:0'];
+        }
+
+        // KMSIT supplies distance only; the Kurir Toko tariff is the one shared per-Agen rate row (optional here).
+        if ($provider->code === 'kmsit') {
+            $rules['price_per_km'] = ['nullable', 'numeric', 'min:0', 'required_with:minimum_distance_km'];
+            $rules['minimum_distance_km'] = ['nullable', 'numeric', 'min:0', 'required_with:price_per_km'];
             $rules['minimum_charge'] = ['nullable', 'numeric', 'min:0'];
             $rules['free_shipping_enabled'] = ['sometimes', 'boolean'];
             $rules['free_shipping_min_amount'] = ['nullable', 'numeric', 'min:0'];

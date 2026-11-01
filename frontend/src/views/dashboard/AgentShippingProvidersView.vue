@@ -7,6 +7,8 @@ import {
   getAgentShippingProviders,
   toggleAgentShippingProvider,
   saveAgentShippingProviderConfig,
+  getKurirTokoTariff,
+  saveKurirTokoTariff,
   searchRajaOngkirDestinations,
   testRajaOngkirConnection,
   testOpenRouteConnection,
@@ -38,7 +40,32 @@ const rajaOngkirForm = reactive({ api_key: '', origin_destination_id: '', origin
 const destinationResults = ref<RajaOngkirDestination[]>([])
 const searchingDestination = ref(false)
 const connectionStatus = ref<'idle' | 'connected' | 'failed'>('idle')
-const openRouteForm = reactive({ api_key: '', profile: 'driving-car', price_per_km: '', minimum_distance_km: '', minimum_charge: '', test_latitude: '', test_longitude: '' })
+const openRouteForm = reactive({ api_key: '', profile: 'driving-car', test_latitude: '', test_longitude: '' })
+/** Kurir Toko tariff: its own record, independent of ORS/KMSIT status and credentials. */
+const tariffForm = reactive({ price_per_km: '', minimum_distance_km: '', minimum_charge: '' })
+const tariffSaving = ref(false)
+const tariffNotice = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
+const kmsitForm = reactive({ base_url: '', profile: 'car', token: '', test_latitude: '', test_longitude: '' })
+const kmsitConnection = ref<{ distance_km: number; duration_seconds: number } | null>(null)
+const kmsitStatus = ref<'idle' | 'connected' | 'failed'>('idle')
+const kmsitReason = ref('')
+
+/** Safe server-provided reason codes only (never a URL, token or response body). */
+const KMSIT_REASONS: Record<string, string> = {
+  not_found: 'server menjawab 404 — alamat/path gateway tidak ditemukan (alamat server harus berupa origin gateway)',
+  invalid_credential: 'API key ditolak server (401) — periksa API key',
+  forbidden: 'API key tidak memiliki izin routes:read (403)',
+  missing_credential: 'API key belum diisi',
+  invalid_profile: 'profil harus car atau motorcycle',
+  endpoint_blocked: 'alamat ditolak kebijakan keamanan (harus https dan publik)',
+  connection_error: 'server tidak dapat dihubungi',
+  route_not_found: 'server tidak menemukan rute / titik tidak dapat disnap ke jalan',
+  validation_error: 'titik tidak valid atau di luar cakupan layanan (Bandung Raya)',
+  rate_limited: 'kuota/batas permintaan server tercapai (429)',
+  upstream_unavailable: 'mesin routing server sedang tidak tersedia',
+  invalid_response: 'jawaban server bukan rute gateway yang valid',
+  provider_error: 'server menjawab dengan galat',
+}
 const openRouteConnection = ref<{ distance_km: number; duration_seconds: number } | null>(null)
 const openRouteConnectionStatus = ref<'idle' | 'connected' | 'failed'>('idle')
 
@@ -97,12 +124,21 @@ async function load() {
     if (savedRajaOngkir) {
       await loadCouriers(savedRajaOngkir.id)
     }
+    const savedKmsit = providers.value.find((provider) => provider.code === 'kmsit')
+    if (savedKmsit) {
+      kmsitForm.base_url = savedKmsit.base_url || ''
+      kmsitForm.profile = savedKmsit.profile === 'motorcycle' ? 'motorcycle' : 'car' // legacy 'driving' = car
+      kmsitForm.token = '' // never pre-filled: the stored token is not readable
+    }
     const savedOpenRoute = providers.value.find((provider) => provider.code === 'openroute')
     if (savedOpenRoute) {
       openRouteForm.profile = savedOpenRoute.profile || 'driving-car'
-      openRouteForm.price_per_km = savedOpenRoute.pricing?.price_per_km?.toString() || openRouteForm.price_per_km
-      openRouteForm.minimum_distance_km = savedOpenRoute.pricing?.minimum_distance_km?.toString() || openRouteForm.minimum_distance_km
-      openRouteForm.minimum_charge = savedOpenRoute.pricing?.minimum_charge?.toString() || openRouteForm.minimum_charge
+    }
+    const tariff = await getKurirTokoTariff().catch(() => null)
+    if (tariff) {
+      tariffForm.price_per_km = String(tariff.price_per_km)
+      tariffForm.minimum_distance_km = String(tariff.minimum_distance_km)
+      tariffForm.minimum_charge = String(tariff.minimum_charge)
     }
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.message : 'Gagal memuat penyedia ekspedisi.'
@@ -181,9 +217,6 @@ async function saveOpenRoute() {
   try {
     await saveAgentShippingProviderConfig(openRoute.id, {
       config: { api_key: openRouteForm.api_key, profile: openRouteForm.profile },
-      price_per_km: Number(openRouteForm.price_per_km),
-      minimum_distance_km: Number(openRouteForm.minimum_distance_km),
-      minimum_charge: openRouteForm.minimum_charge ? Number(openRouteForm.minimum_charge) : 0,
     })
     await load()
   } catch (e) {
@@ -209,6 +242,61 @@ async function testOpenRoute() {
   }
 }
 
+async function saveTariff() {
+  tariffSaving.value = true
+  tariffNotice.value = null
+  try {
+    await saveKurirTokoTariff({
+      price_per_km: Number(tariffForm.price_per_km),
+      minimum_distance_km: Number(tariffForm.minimum_distance_km),
+      minimum_charge: tariffForm.minimum_charge ? Number(tariffForm.minimum_charge) : 0,
+    })
+    tariffNotice.value = { kind: 'ok', text: 'Tarif Kurir Toko disimpan.' }
+  } catch (e) {
+    tariffNotice.value = { kind: 'err', text: e instanceof ApiError ? e.message : 'Tarif gagal disimpan.' }
+  } finally {
+    tariffSaving.value = false
+  }
+}
+
+async function saveKmsit() {
+  const provider = kmsit()
+  if (!provider) return
+  submitting.value = true
+  errors.value = {}
+  generalError.value = null
+  try {
+    await saveAgentShippingProviderConfig(provider.id, {
+      config: { base_url: kmsitForm.base_url.trim(), profile: kmsitForm.profile, ...(kmsitForm.token ? { token: kmsitForm.token } : {}) },
+    })
+    await load()
+  } catch (e) {
+    if (e instanceof ApiError) {
+      generalError.value = e.message
+      errors.value = e.errors ?? {}
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function testKmsit() {
+  const provider = kmsit()
+  if (!provider) return
+  kmsitStatus.value = 'idle'
+  kmsitReason.value = ''
+  kmsitConnection.value = null
+  try {
+    kmsitConnection.value = await testOpenRouteConnection(provider.id, Number(kmsitForm.test_latitude), Number(kmsitForm.test_longitude))
+    kmsitStatus.value = 'connected'
+  } catch (e) {
+    kmsitStatus.value = 'failed'
+    const code = e instanceof ApiError ? e.errors?.reason?.[0] : undefined
+    kmsitReason.value = code ? (KMSIT_REASONS[code] ?? '') : ''
+  }
+}
+
+const kmsit = () => providers.value.find((p) => p.code === 'kmsit')
 const rajaOngkir = () => providers.value.find((p) => p.code === 'rajaongkir')
 const openRoute = () => providers.value.find((p) => p.code === 'openroute')
 </script>
@@ -303,12 +391,37 @@ const openRoute = () => providers.value.find((p) => p.code === 'openroute')
         </div>
       </div>
 
+      <!-- Kurir Toko tariff: its own setting, independent of OpenRoute and KMSIT (they only supply the route distance) -->
+      <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900" data-test="tariff-card">
+        <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">Pengaturan Tarif Kurir Toko</h2>
+        <p class="text-xs text-stone-400">Berlaku untuk pengiriman Kurir Toko, siapa pun penyedia jaraknya (OpenRoute atau KMSIT), dan tetap dapat diubah walau penyedia dinonaktifkan.</p>
+        <form class="mt-3 space-y-2.5" @submit.prevent="saveTariff">
+          <div class="grid grid-cols-3 gap-2.5">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Tarif per KM setelah Jarak Minimum (Rp)</label>
+              <input v-model="tariffForm.price_per_km" data-test="tariff-price" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Jarak Minimum (KM)</label>
+              <input v-model="tariffForm.minimum_distance_km" data-test="tariff-min-distance" type="number" min="0" step="any" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+              <p class="mt-0.5 text-[11px] text-stone-400">Ongkir dihitung dari jarak tempuh setelah dikurangi Jarak Minimum: (Jarak Tempuh − Jarak Minimum) × Tarif per KM.</p>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Biaya Minimum (opsional)</label>
+              <input v-model="tariffForm.minimum_charge" data-test="tariff-min-charge" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+            </div>
+          </div>
+          <AppButton size="sm" type="submit" data-test="tariff-save" :disabled="tariffSaving || tariffForm.price_per_km === '' || tariffForm.minimum_distance_km === ''">{{ tariffSaving ? 'Menyimpan...' : 'Simpan Tarif' }}</AppButton>
+          <p v-if="tariffNotice" :role="tariffNotice.kind === 'err' ? 'alert' : 'status'" class="text-xs" :class="tariffNotice.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'" data-test="tariff-notice">{{ tariffNotice.text }}</p>
+        </form>
+      </div>
+
       <!-- OpenRoute -->
       <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <div class="flex items-center justify-between">
           <div>
             <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">OpenRoute</h2>
-            <p class="text-xs text-stone-400">Ongkir berdasarkan jarak tempuh (per km), plus picker peta di checkout.</p>
+            <p class="text-xs text-stone-400">Hanya menghitung jarak tempuh (dan picker peta di checkout). Tarif diatur di bagian Tarif Kurir Toko.</p>
             <p v-if="openRoute() && !openRoute()!.globally_active" class="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">
               Dinonaktifkan secara global oleh Super Admin — toggle di sini tidak akan mengaktifkannya.
             </p>
@@ -338,21 +451,6 @@ const openRoute = () => providers.value.find((p) => p.code === 'openroute')
           <p v-if="openRoute()?.origin_coordinates" class="text-xs text-stone-500">
             Origin Agent: {{ openRoute()!.origin_coordinates!.latitude }}, {{ openRoute()!.origin_coordinates!.longitude }}
           </p>
-          <div class="grid grid-cols-3 gap-2.5">
-            <div>
-              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Tarif per KM setelah Jarak Minimum (Rp)</label>
-              <input v-model="openRouteForm.price_per_km" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Jarak Minimum (KM)</label>
-              <input v-model="openRouteForm.minimum_distance_km" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
-              <p class="mt-0.5 text-[11px] text-stone-400">Ongkir dihitung dari jarak tempuh setelah dikurangi Jarak Minimum: (Jarak Tempuh − Jarak Minimum) × Tarif per KM.</p>
-            </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Biaya Minimum (opsional)</label>
-              <input v-model="openRouteForm.minimum_charge" type="number" min="0" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
-            </div>
-          </div>
           <div class="grid grid-cols-2 gap-2.5">
             <input v-model="openRouteForm.test_latitude" type="number" step="any" min="-90" max="90" placeholder="Latitude tujuan uji" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
             <input v-model="openRouteForm.test_longitude" type="number" step="any" min="-180" max="180" placeholder="Longitude tujuan uji" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
@@ -365,6 +463,56 @@ const openRoute = () => providers.value.find((p) => p.code === 'openroute')
           <p v-if="openRouteConnectionStatus === 'failed'" class="text-xs text-red-600">Failed — periksa API key, profile, dan koordinat tujuan.</p>
         </form>
         <p v-if="openRoute()?.configured" class="mt-2 text-xs text-emerald-600">Sudah dikonfigurasi ✓</p>
+      </div>
+      <!-- KMSIT Routing Server (OSRM): transparent fallback for Kurir Toko routing; not a separate checkout method -->
+      <div v-if="kmsit()" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900" data-test="kmsit-card">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-display text-base font-semibold text-stone-800 dark:text-stone-100">KMSIT Routing Server</h2>
+            <p class="text-xs text-stone-400">Cadangan perhitungan jarak untuk Kurir Toko bila OpenRoute nonaktif atau gagal. Tarif tetap memakai pengaturan Kurir Toko di atas.</p>
+            <p v-if="!kmsit()!.globally_active" class="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400" data-test="kmsit-global-off">
+              Dinonaktifkan secara global oleh Super Admin — toggle di sini tidak akan mengaktifkannya.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="kmsit()?.is_active ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : 'bg-stone-100 text-stone-500 dark:bg-stone-800'">
+              {{ kmsit()?.is_active ? 'Aktif' : 'Nonaktif' }}
+            </span>
+            <AppButton size="sm" variant="secondary" :disabled="togglingId === kmsit()?.id" @click="toggle(kmsit()!)">{{ kmsit()?.is_active ? 'Nonaktifkan' : 'Aktifkan' }}</AppButton>
+          </div>
+        </div>
+        <form class="mt-3 space-y-2.5" @submit.prevent="saveKmsit">
+          <div>
+            <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Alamat gateway (https://…, tanpa /api/v1)</label>
+            <input v-model="kmsitForm.base_url" data-test="kmsit-url" type="url" autocomplete="off" placeholder="https://routing.contoh.id" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+            <p v-if="errors['config.base_url']" class="mt-0.5 text-xs text-red-600">{{ errors['config.base_url'][0] }}</p>
+          </div>
+          <div class="grid grid-cols-2 gap-2.5">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">Profil rute</label>
+              <select v-model="kmsitForm.profile" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950">
+                <option value="car">Mobil (car)</option>
+                <option value="motorcycle">Motor (motorcycle)</option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">API key (X-API-Key)</label>
+              <PasswordInput v-model="kmsitForm.token" autocomplete="off" />
+              <p class="mt-0.5 text-[11px] text-stone-400" data-test="kmsit-token-hint">{{ kmsit()?.has_token ? 'API key tersimpan. Kosongkan untuk mempertahankan, isi untuk mengganti.' : 'Wajib diisi saat pertama kali menyimpan.' }}</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2.5">
+            <input v-model="kmsitForm.test_latitude" type="number" step="any" min="-90" max="90" placeholder="Latitude tujuan uji" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+            <input v-model="kmsitForm.test_longitude" type="number" step="any" min="-180" max="180" placeholder="Longitude tujuan uji" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
+          </div>
+          <div class="flex gap-2">
+            <AppButton size="sm" type="submit" :disabled="submitting || !kmsitForm.base_url">{{ submitting ? 'Menyimpan...' : 'Simpan' }}</AppButton>
+            <AppButton size="sm" variant="secondary" type="button" :disabled="!kmsit()?.configured || !kmsitForm.test_latitude || !kmsitForm.test_longitude" @click="testKmsit">Test Connection</AppButton>
+          </div>
+          <p v-if="kmsitStatus === 'connected' && kmsitConnection" class="text-xs text-emerald-600" data-test="kmsit-ok">Connected ✓ · {{ kmsitConnection.distance_km }} km · estimasi {{ Math.ceil(kmsitConnection.duration_seconds / 60) }} menit</p>
+          <p v-if="kmsitStatus === 'failed'" class="text-xs text-red-600" data-test="kmsit-fail">Gagal — {{ kmsitReason || 'periksa alamat server (harus https dan publik), profil, dan koordinat tujuan.' }}</p>
+        </form>
+        <p v-if="kmsit()?.configured" class="mt-2 text-xs text-emerald-600">Sudah dikonfigurasi ✓</p>
       </div>
       <p v-if="providers.length === 0" class="text-sm text-stone-400">Tidak ada penyedia ekspedisi yang tersedia.</p>
     </div>

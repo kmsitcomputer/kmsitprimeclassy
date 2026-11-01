@@ -7,7 +7,9 @@ use App\Models\Order;
 use App\Models\RefundPayout;
 use App\Models\ReturnRequest;
 use App\Models\Shipment;
+use App\Models\User;
 use App\Models\WhatsAppMessage;
+use App\Services\Payment\PaymentSummaryService;
 use App\Support\WhatsAppNumber;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -34,6 +36,7 @@ class OrderNotifier
     public function __construct(
         private readonly WhatsAppSettings $settings,
         private readonly WhatsAppDelivery $delivery,
+        private readonly OrderRecipientResolver $recipients,
     ) {}
 
     /* ---------------------------------------------------------------- entry points (from observers) */
@@ -63,7 +66,7 @@ class OrderNotifier
     private function defer(string $event, \Closure $work, ?int $orderId = null): void
     {
         // Cheap guards first: this runs on every order/return/refund write. reload(): never trust a stale cache here.
-        if (! WhatsAppMessage::tableReady() || ! $this->settings->reload()->enabled() || ! $this->settings->eventEnabled($event)) {
+        if (! WhatsAppMessage::tableReady() || ! $this->settings->reload()->enabled()) {
             return;
         }
 
@@ -82,8 +85,12 @@ class OrderNotifier
     {
         $this->settings->reload();
         $key = "txn:{$event}:{$subjectType}:{$subjectId}";
-        $order = $orderId ? Order::withoutGlobalScopes()->with(['konsumen', 'shipments.courier', 'shipments.selfDeliveredBy'])->find($orderId) : null;
+        $order = $orderId ? Order::withoutGlobalScopes()->with(['konsumen', 'sales', 'placedBy', 'shipments.courier', 'shipments.selfDeliveredBy', 'items', 'paymentTransactions.paymentMethod', 'paymentMethod'])->find($orderId) : null;
         if (! $order) {
+            return;
+        }
+        // Event switch is the ORDERING Agen's (scoped row, else the legacy global flag). Disabled = no ledger row at all, as before.
+        if (! $this->settings->eventEnabledFor($event, $order->agent_id)) {
             return;
         }
 
@@ -98,10 +105,11 @@ class OrderNotifier
             return;
         }
 
-        // Only a number whose ownership the account holder PROVED by OTP may receive order information. An unproven number
-        // (typo, someone else's) never gets a message; the event is recorded as skipped so the operator can see why.
-        $msisdn = WhatsAppNumberProof::msisdnFor($order->konsumen);
-        if ($msisdn === null) {
+        // HA-03/CL-05 routing: the order's own ACCOUNT buyer keeps its exact behaviour (full template, proven number
+        // or a visible skip). Admin + checkout-recipient reach uses the restricted template on the SAME event.
+        $targets = $this->recipients->resolve($order);
+        if ($targets === []) {
+            $msisdn = WhatsAppNumberProof::msisdnFor($order->konsumen);
             $this->delivery->skip(
                 $base + ['recipient_user_id' => $order->konsumen->id],
                 WhatsAppNumber::msisdn($order->konsumen->phone) === null ? 'no_phone' : 'number_not_verified',
@@ -110,14 +118,62 @@ class OrderNotifier
             return;
         }
 
-        $body = MessageTemplates::render($event, $this->settings->template($event), $this->data($order) + $extra());
+        foreach ($targets as $t) {
+            $this->sendTo($base, $order, $event, $t['role'], $t['msisdn'], $t['user'], $t['template_class'], $extra, (bool) ($t['primary'] ?? false));
+        }
+    }
+
+    /**
+     * One role-scoped row for one verified recipient. Idempotency: the PRIMARY buyer row keeps the legacy
+     * `txn:{event}:{subject}:{id}` key byte-for-byte, so replays of the pre-existing buyer-only path stay a single row;
+     * non-primary roles append `:{role}` and are independent rows. Deduplication already happened in the resolver
+     * (same number ⇒ highest privilege only).
+     *
+     * @param  \Closure():array<string,string|null>  $extra
+     */
+    private function sendTo(array $base, Order $order, string $event, string $role, string $msisdn, ?User $user, string $templateClass, \Closure $extra, bool $primary = false): void
+    {
+        // NOTE: `$base` already carries `idempotency_key`, so `$base + [...]` would keep the BASE key. Build the row
+        // explicitly instead: primary keeps the legacy key, every other role gets `:{role}` as its own ledger row.
+        $key = [
+            'idempotency_key' => $primary ? $base['idempotency_key'] : $base['idempotency_key'].':'.$role,
+            'purpose' => $base['purpose'], 'event' => $base['event'],
+            'agent_id' => $base['agent_id'], 'order_id' => $base['order_id'],
+            'subject_type' => $base['subject_type'], 'subject_id' => $base['subject_id'],
+            'recipient_role' => $role, 'template_class' => $templateClass,
+            'recipient_phone' => $msisdn,
+        ] + ($user ? ['recipient_user_id' => $user->id] : []);
+
+        if ($templateClass === RestrictedDeliveryPolicy::CLASS_RESTRICTED) {
+            // R-01 closed allow-list: a restricted (possibly unproven) number only ever hears about status changes — never
+            // payment/refund facts. The same policy re-validates at send time (WhatsAppDelivery::deliver).
+            if (! RestrictedDeliveryPolicy::eventEligible($role, $event)) {
+                $this->delivery->skip($key, 'restricted_event_not_allowed');
+
+                return;
+            }
+            $body = MessageTemplates::render($event, $this->restrictedTemplate($event, $order), ['nama_pelanggan' => $user?->name, 'nomor_pesanan' => $order->order_no]);
+        } else {
+            $body = MessageTemplates::render($event, $this->settings->templateFor($event, $order->agent_id), $this->data($order) + $extra());
+        }
         if ($body === null) {
-            $this->delivery->skip($base + ['recipient_user_id' => $order->konsumen->id, 'recipient_phone' => $msisdn], 'template_unrenderable');
+            $this->delivery->skip($key, 'template_unrenderable');
 
             return;
         }
 
-        $this->delivery->enqueue($base + ['recipient_user_id' => $order->konsumen->id, 'recipient_phone' => $msisdn, 'body' => $body]);
+        $this->delivery->enqueue($key + ['body' => $body]);
+    }
+
+    /**
+     * CL-05 restricted variant: limited, non-sensitive; names the event, names nothing financial, carries no OTP,
+     * token or link — and always says the same thing (no per-recipient disclosure through wording).
+     */
+    private function restrictedTemplate(string $event, Order $order): string
+    {
+        $label = WhatsAppEvents::all()[$event]['label'] ?? 'pesanan';
+
+        return "Halo Pelanggan,\n\nAda pembaruan {$label} untuk pesanan {$order->order_no}.\n\nVerifikasi nomor WhatsApp Anda di aplikasi PrimeClassy untuk melihat detail lengkap.";
     }
 
     /** @return array<string,string|null> every value is REAL data or null — never invented */
@@ -127,6 +183,17 @@ class OrderNotifier
         $couriers = $shipments->map(fn (Shipment $s) => $s->courier?->name ?? $s->selfDeliveredBy?->name)->filter()->unique()->values();
         $resi = $shipments->pluck('tracking_number')->filter()->unique()->values();
         $store = AgentProfile::query()->where('user_id', $order->agent_id)->value('store_name');
+        $first = $shipments->first();
+
+        // HA-04/HA-06 payment truth: verified summary only (PaymentSummaryService reads paid_amount backfilled by
+        // real money events); a submitted-but-unverified DP never appears as paid. Methods/dates come from the latest
+        // VERIFIED payment transaction, never from order status.
+        $summary = PaymentSummaryService::summarize($order);
+        $latestVerified = $order->paymentTransactions
+            ->filter(fn ($t) => $t->status === 'paid' && $t->paid_at !== null)
+            ->sortByDesc('id')->first() ?? $order->paymentTransactions->filter(fn ($t) => $t->status === 'paid')->sortByDesc('id')->first();
+
+        $items = $order->items->map(fn ($i) => trim(($i->product_name_snapshot ?? '').($i->variation_label_snapshot ? ' ('.$i->variation_label_snapshot.')' : '').' x'.($i->original_quantity ?? $i->quantity ?? 1)))->filter()->values();
 
         return [
             'nama_pelanggan' => $order->konsumen?->name,
@@ -137,6 +204,28 @@ class OrderNotifier
             'nama_toko' => $store ?: 'Prime Classy',
             'kurir' => $couriers->isNotEmpty() ? $couriers->implode(', ') : null,
             'resi' => $resi->isNotEmpty() ? $resi->implode(', ') : null,
+            // AUD-06 invoice variables (server-derived snapshots, never client input).
+            'daftar_produk' => $items->isNotEmpty() ? $items->implode(', ') : null,
+            'subtotal' => 'Rp '.number_format((float) $order->subtotal_amount, 0, ',', '.'),
+            'diskon' => 'Rp '.number_format((float) $order->discount_amount, 0, ',', '.'),
+            'ongkir' => 'Rp '.number_format((float) $order->shipping_fee_amount, 0, ',', '.'),
+            'total_tagihan' => 'Rp '.number_format((float) $order->total_amount, 0, ',', '.'),
+            'metode_pembayaran' => $order->paymentMethod?->name ?? $latestVerified?->paymentMethod?->name,
+            'status_pembayaran' => $order->payment_status,
+            'jumlah_dibayarkan' => 'Rp '.number_format((float) $summary['total_paid'], 0, ',', '.'),
+            'sisa_tagihan' => 'Rp '.number_format((float) $summary['remaining_balance'], 0, ',', '.'),
+            'tanggal_pembayaran' => $this->date($latestVerified?->paid_at),
+            // AUD-06 shipping variables (Shipment truth only; courier phone is deliberately NEVER exposed).
+            'nama_kurir' => $first?->courier?->name ?? $first?->selfDeliveredBy?->name,
+            'layanan_pengiriman' => $first?->shipping_provider_code ?? $first?->courier?->type,
+            'nomor_resi' => $first?->tracking_number,
+            'nomor_telepon_kurir' => null, // HA-06: no courier-phone source exists; always dropped, never invented.
+            'estimasi_tiba' => null, // No ETA source exists; always dropped, never invented.
+            'link_pesanan' => '/orders/'.$order->order_no,
+            // R-03: no verified tracking-URL source exists in the system (no config, no courier/provider URL template), so
+            // the link is NEVER composed from a guessed domain. Null => the template line drops; `nomor_resi` still carries
+            // the real tracking number.
+            'link_pelacakan' => null,
         ];
     }
 

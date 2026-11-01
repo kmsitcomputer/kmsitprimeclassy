@@ -12,8 +12,9 @@ use Illuminate\Database\QueryException;
 /**
  * WhatsApp device lifecycle PER AGENT on the one central GOWA server (Owner directive 2026-10-29).
  *
- *  - An Agent manages ONLY its own slot; the caller is always resolved to `agent_id` server-side, nothing the client sends selects a
- *    device or an Agent. Super Admin / Admin / other roles never reach these methods (route middleware `role:agen`).
+ *  - An Agent manages ONLY its own slot; the caller is always resolved to `agent_id` server-side (WhatsAppScope): an Agen acts on itself,
+ *    an Admin only on its branch Agen (audited with actor ≠ target), nothing the client sends selects an unauthorised device or Agent.
+ *    Super Admin / other roles never reach these methods.
  *  - Exactly one active slot per Agent (unique `agent_id`). Replacement is explicit and audited.
  *  - Sending uses the Agent's own slot only; there is NO fallback to another Agent's or the console's default device.
  *  - The GOWA credential, the QR source URL and the full WhatsApp number never reach the browser.
@@ -24,6 +25,24 @@ class AgentDeviceService
         private readonly GowaDeviceClient $gowa,
         private readonly WhatsAppSettings $settings,
     ) {}
+
+    /** The signed-in user performing the action when it differs from the owning Agen (an Admin acting for its branch Agen). */
+    private ?int $actorId = null;
+
+    /** Same service, but audit entries name `$actor` as the actor and the Agen as the target. Ownership semantics are unchanged. */
+    public function actingAs(User $actor): static
+    {
+        $clone = clone $this;
+        $clone->actorId = $actor->id;
+
+        return $clone;
+    }
+
+    /** @param array<string,mixed> $props */
+    private function audit(User $agent, AgentWhatsAppDevice $device, string $event, array $props = []): void
+    {
+        ActivityLogger::log($this->actorId ?? $agent->id, $device, $event, null, $props + ['target_agent_id' => $agent->id, 'actor_id' => $this->actorId ?? $agent->id]);
+    }
 
     /* ---------------------------------------------------------------- read side (also used by the sender) */
 
@@ -102,7 +121,7 @@ class AgentDeviceService
             $device = $this->forAgent($agent->id) ?? throw new ApiException(__('messages.whatsapp.device_gateway_error'), 502);
         }
 
-        ActivityLogger::log($agent->id, $device, 'whatsapp.device.created', null, ['agent_id' => $agent->id]);
+        $this->audit($agent, $device, 'whatsapp.device.created');
 
         return $device;
     }
@@ -119,7 +138,7 @@ class AgentDeviceService
         }
 
         $device->forceFill(['state' => AgentWhatsAppDevice::PAIRING])->save();
-        ActivityLogger::log($agent->id, $device, 'whatsapp.device.pairing_started', null, ['method' => 'qr']);
+        $this->audit($agent, $device, 'whatsapp.device.pairing_started', ['method' => 'qr']);
 
         return ['image' => $qr['image'], 'expires_in' => $qr['duration'], 'device' => $this->present($device)];
     }
@@ -142,7 +161,7 @@ class AgentDeviceService
 
         $device->forceFill(['state' => AgentWhatsAppDevice::PAIRING])->save();
         // The number being paired is NOT recorded in the audit trail in clear; only the method.
-        ActivityLogger::log($agent->id, $device, 'whatsapp.device.pairing_started', null, ['method' => 'code']);
+        $this->audit($agent, $device, 'whatsapp.device.pairing_started', ['method' => 'code']);
 
         return ['code' => $res['code'], 'device' => $this->present($device)];
     }
@@ -157,7 +176,7 @@ class AgentDeviceService
         if (! $res['ok']) {
             throw $this->gatewayError($res['error']);
         }
-        ActivityLogger::log($agent->id, $device, 'whatsapp.device.reconnect_requested');
+        $this->audit($agent, $device, 'whatsapp.device.reconnect_requested');
 
         return $this->present($this->refresh($device));
     }
@@ -173,7 +192,7 @@ class AgentDeviceService
             throw $this->gatewayError($res['error']);
         }
         $device->forceFill(['state' => AgentWhatsAppDevice::NOT_PAIRED, 'paired_at' => null, 'phone_masked' => null, 'last_checked_at' => now()])->save();
-        ActivityLogger::log($agent->id, $device, 'whatsapp.device.logged_out');
+        $this->audit($agent, $device, 'whatsapp.device.logged_out');
 
         return $this->present($device);
     }
@@ -203,7 +222,7 @@ class AgentDeviceService
             'device_id' => $new, 'state' => AgentWhatsAppDevice::NOT_PAIRED, 'phone_masked' => null, 'paired_at' => null,
             'last_checked_at' => now(), 'replaced_count' => $device->replaced_count + 1,
         ])->save();
-        ActivityLogger::log($agent->id, $device, 'whatsapp.device.replaced', null, ['replaced_count' => $device->replaced_count]);
+        $this->audit($agent, $device, 'whatsapp.device.replaced', ['replaced_count' => $device->replaced_count]);
 
         return $this->present($device);
     }

@@ -89,7 +89,8 @@ class AgentWhatsAppDeviceTest extends TestCase
         $this->configure();
         $this->gateway();
 
-        foreach (['superAdmin', 'admin', 'keuangan', 'korsal', 'sales', 'kurir', 'konsumen'] as $role) {
+        // 'admin' is deliberately absent: an Admin Agen WITH a branch may manage its branch Agen (WhatsAppAgentScopeTest); an unbranched one is refused there.
+        foreach (['superAdmin', 'keuangan', 'korsal', 'sales', 'kurir', 'konsumen'] as $role) {
             $u = User::factory()->$role()->create();
             foreach ([['getJson', '/api/v1/agent/whatsapp'], ['postJson', '/api/v1/agent/whatsapp/device'], ['postJson', '/api/v1/agent/whatsapp/pair/qr'],
                 ['postJson', '/api/v1/agent/whatsapp/replace'], ['getJson', '/api/v1/agent/whatsapp/messages']] as [$m, $url]) {

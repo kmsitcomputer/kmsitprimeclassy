@@ -1101,6 +1101,9 @@ async function refreshOrderStatus() {
               <div class="flex justify-between text-stone-600 dark:text-stone-300">
                 <dt>{{ t('checkout.review.shipping') }}</dt><dd>{{ quote.shipping_enabled ? formatRupiah(quote.shipping_fee_amount) : t('checkout.review.free') }}</dd>
               </div>
+              <div v-if="quote.shipping_enabled && quote.distance_km != null" class="flex justify-between text-xs text-stone-500 dark:text-stone-400" data-test="quote-distance">
+                <dt>{{ t('checkout.review.distance') }}</dt><dd>{{ Number(quote.distance_km).toLocaleString('id-ID', { maximumFractionDigits: 2 }) }} km</dd>
+              </div>
               <div class="flex justify-between text-stone-600 dark:text-stone-300"><dt>{{ t('checkout.review.adminFee') }}</dt><dd>{{ formatRupiah(quote.admin_fee_amount) }}</dd></div>
               <div class="flex justify-between border-t border-stone-100 pt-1.5 font-semibold text-stone-800 dark:border-stone-800 dark:text-stone-100">
                 <dt>{{ t('checkout.review.total') }}</dt><dd>{{ formatRupiah(quote.total_amount) }}</dd>

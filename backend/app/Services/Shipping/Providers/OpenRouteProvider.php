@@ -8,6 +8,7 @@ use App\DataTransferObjects\ShippingQuoteResult;
 use App\Exceptions\ShippingQuoteException;
 use App\Models\AgentProfile;
 use App\Models\AgentShippingProviderConfig;
+use App\Models\AgentShippingProviderSetting;
 use App\Models\ShippingConfiguration;
 use App\Models\ShippingProvider;
 use App\Services\Shipping\OpenRouteDistanceCalculator;
@@ -30,7 +31,27 @@ class OpenRouteProvider implements ShippingCostProviderInterface
 {
     private const DISTANCE_CACHE_TTL_SECONDS = 300;
 
-    public function __construct(private readonly OpenRouteDistanceCalculator $distanceCalculator) {}
+    public function __construct(
+        private readonly OpenRouteDistanceCalculator $distanceCalculator,
+        private readonly KmsitProvider $kmsit,
+    ) {}
+
+    /** ORS globally active and not switched off by this Agen (credentials are checked at quote time). */
+    public function isOrsEligible(?int $agentId, ShippingProvider $providerRow): bool
+    {
+        if (! $providerRow->is_active) {
+            return false;
+        }
+
+        return ! ($agentId && AgentShippingProviderSetting::query()
+            ->where('agent_id', $agentId)->where('shipping_provider_id', $providerRow->id)->where('is_active', false)->exists());
+    }
+
+    /** Kurir Toko is offerable when ORS is eligible OR the Agen's KMSIT fallback is. */
+    public function isAvailable(?int $agentId, ShippingProvider $providerRow): bool
+    {
+        return $this->isOrsEligible($agentId, $providerRow) || $this->kmsit->isEligible($agentId);
+    }
 
     public function quote(ShippingQuoteContext $context, ShippingProvider $providerRow): ShippingQuoteResult
     {
@@ -38,39 +59,21 @@ class OpenRouteProvider implements ShippingCostProviderInterface
             throw new ShippingQuoteException('OpenRoute requires an agen context to resolve credentials.');
         }
 
-        $config = $this->resolveConfig($context->agentId, $providerRow);
-
-        if (empty($config['api_key'])) {
-            throw new ShippingQuoteException('OpenRoute is not configured (api_key missing).');
-        }
-
-        $rateConfig = ShippingConfiguration::query()
-            ->where('shipping_provider_id', $providerRow->id)
-            ->where('agent_id', $context->agentId)
-            ->where('is_active', true)
-            ->first();
+        // Shared Kurir Toko tariff (independent of whether ORS or KMSIT supplies the distance, and of the ORS toggle).
+        $rateConfig = \App\Services\Shipping\KurirTokoTariff::activeFor($context->agentId);
 
         if (! $rateConfig) {
             throw new ShippingQuoteException('OpenRoute has no active rate configuration (price_per_km/minimum_distance_km).');
         }
 
-        // Distance between two fixed coordinates doesn't change — a short
-        // cache avoids paying for a fresh routing call on every quote/order
-        // for the same origin+destination pair, without staying stale long
-        // enough to matter (this is not live traffic-aware routing).
-        $profile = (string) ($config['profile'] ?? config('services.openroute.profile'));
-        $cacheKey = 'openroute:route:'.$profile.':'.round($context->originLat, 5).','.round($context->originLng, 5)
-            .'-'.round($context->destLat, 5).','.round($context->destLng, 5);
-
-        $route = Cache::remember($cacheKey, self::DISTANCE_CACHE_TTL_SECONDS, fn () => $this->distanceCalculator->route(
-            $context->originLat, $context->originLng, $context->destLat, $context->destLng, $config
-        ));
+        [$route, $source] = $this->resolveRoute($context, $providerRow);
 
         $distanceKm = $route->distanceKm;
         $ratePerKm = (float) $rateConfig->price_per_km;
         $minimumDistance = (float) $rateConfig->minimum_distance_km;
         $meta = [
-            'api_version' => 'v2',
+            'api_version' => $source === 'kmsit' ? 'osrm' : 'v2',
+            'routing_source' => $source,
             'distance_meters' => $route->distanceMeters,
             'duration_seconds' => $route->durationSeconds,
             'routing_profile' => $route->profile,
@@ -114,6 +117,40 @@ class OpenRouteProvider implements ShippingCostProviderInterface
             cost: $cost, distanceKm: $distanceKm, ratePerKm: $ratePerKm, providerCode: 'openroute',
             meta: [...$meta, 'rule' => 'distance_rate_applied'],
         );
+    }
+
+    /**
+     * ORS first (eligible + credentialed + healthy), else the Agen's KMSIT OSRM server, else fail closed.
+     * The tariff below is identical for both sources; the provider code stays 'openroute' (Kurir Toko).
+     *
+     * @return array{0: \App\DataTransferObjects\OpenRouteResult, 1: string}
+     */
+    private function resolveRoute(ShippingQuoteContext $context, ShippingProvider $providerRow): array
+    {
+        if ($this->isOrsEligible($context->agentId, $providerRow)) {
+            try {
+                $config = $this->resolveConfig($context->agentId, $providerRow);
+                if (! empty($config['api_key'])) {
+                    // Distance between two fixed coordinates doesn't change — a short cache avoids paying for a fresh routing
+                    // call on every quote for the same pair (not live traffic-aware routing).
+                    $profile = (string) ($config['profile'] ?? config('services.openroute.profile'));
+                    $cacheKey = 'openroute:route:'.$profile.':'.round($context->originLat, 5).','.round($context->originLng, 5)
+                        .'-'.round($context->destLat, 5).','.round($context->destLng, 5);
+
+                    return [Cache::remember($cacheKey, self::DISTANCE_CACHE_TTL_SECONDS, fn () => $this->distanceCalculator->route(
+                        $context->originLat, $context->originLng, $context->destLat, $context->destLng, $config
+                    )), 'openrouteservice'];
+                }
+            } catch (ShippingQuoteException $e) {
+                Log::warning('shipping.openroute_route_failed_trying_fallback', ['error' => $e->getMessage()]);
+            }
+        }
+
+        if ($this->kmsit->isEligible($context->agentId)) {
+            return [$this->kmsit->route($context), 'kmsit'];
+        }
+
+        throw new ShippingQuoteException('No routing source is available for Kurir Toko.');
     }
 
     public function testForAgent(int $agentId, ShippingProvider $providerRow, float $destLat, float $destLng): array

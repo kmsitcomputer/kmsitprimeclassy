@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Services\WhatsApp\WhatsAppDelivery;
+use App\Services\WhatsApp\WhatsAppSettings;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
@@ -19,7 +20,14 @@ class SendWhatsAppMessageJob implements ShouldQueue
 
     public int $timeout = 60;
 
-    public function __construct(public readonly int $messageId) {}
+    /**
+     * HA-01 dedicated PrimeClassy worker lane: transactional notifications are dequeued ONLY by a worker started
+     * with `--queue=primeclassy-notify,...`. A generic app worker that listens to other queues never picks these up.
+     */
+    public function __construct(public readonly int $messageId)
+    {
+        $this->onQueue(WhatsAppSettings::NOTIFY_QUEUE);
+    }
 
     public function handle(WhatsAppDelivery $delivery): void
     {

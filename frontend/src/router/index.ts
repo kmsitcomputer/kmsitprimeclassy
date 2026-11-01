@@ -97,6 +97,12 @@ const router = createRouter({
       meta: { guestOnly: true },
     },
     {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('@/views/auth/ForgotPasswordView.vue'),
+      meta: { guestOnly: true },
+    },
+    {
       path: '/register',
       name: 'register',
       component: () => import('@/views/auth/RegisterView.vue'),
@@ -427,7 +433,7 @@ const router = createRouter({
       path: '/dashboard/agent/whatsapp',
       name: 'agent-whatsapp',
       component: () => import('@/views/dashboard/AgentWhatsAppView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['agen'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['agen', 'admin'] },
     },
     {
       path: '/dashboard/settings/integrations/smtp',

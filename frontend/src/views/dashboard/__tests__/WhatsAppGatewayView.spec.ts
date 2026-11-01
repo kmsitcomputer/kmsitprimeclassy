@@ -14,9 +14,6 @@ const api = vi.hoisted(() => ({
   updateWhatsAppSettings: vi.fn(),
   testWhatsAppConnection: vi.fn(),
   sendWhatsAppTestMessage: vi.fn(),
-  previewWhatsAppTemplate: vi.fn(),
-  saveWhatsAppTemplate: vi.fn(),
-  resetWhatsAppTemplate: vi.fn(),
   listWhatsAppMessages: vi.fn(),
   retryWhatsAppMessage: vi.fn(),
 }))
@@ -163,35 +160,14 @@ describe('WhatsAppGatewayView', () => {
     expect(api.updateWhatsAppSettings.mock.calls[0][0].otp).toMatchObject({ ttl_minutes: 7, max_attempts: 5, enabled: false })
   })
 
-  it('toggles an event, previews and saves a template, inserts variables, and shows template errors', async () => {
+  it('no longer offers per-Agen templates, event switches or a Notifikasi tab (delegated to Agen / Admin Agen)', async () => {
     const w = await mountView()
-    await tab(w, 'Notifikasi').trigger('click')
-
-    await w.find('input[aria-label="Aktifkan Pesanan dikirim"]').setValue(true)
-    await flushPromises()
-    expect(api.updateWhatsAppSettings).toHaveBeenCalledWith({ events: { order_shipped: true } })
-
-    const shipped = w.findAll('article')[0]
-    await shipped.findAll('button').find((b) => b.text() === '{resi}')!.trigger('click')
-    expect((shipped.find('textarea').element as HTMLTextAreaElement).value).toBe('Halo {nama_pelanggan} {nomor_pesanan}{resi}')
-
-    api.previewWhatsAppTemplate.mockResolvedValue('Halo Budi Santoso PC-1')
-    await shipped.findAll('button').find((b) => b.text() === 'Preview')!.trigger('click')
-    await flushPromises()
-    expect(shipped.find('[aria-label="Pratinjau"]').text()).toBe('Halo Budi Santoso PC-1')
-
-    api.saveWhatsAppTemplate.mockRejectedValue(new ApiError('Validasi gagal', 422, { template: ['Template memakai variabel yang tidak diizinkan: {sandi}'] }))
-    await shipped.findAll('button').find((b) => b.text() === 'Simpan Template')!.trigger('click')
-    await flushPromises()
-    expect(shipped.find('[role="alert"]').text()).toContain('{sandi}')
-
-    // Default templates cannot be "reset"; a customised one can.
-    expect(shipped.findAll('button').find((b) => b.text() === 'Kembalikan Bawaan')!.attributes('disabled')).toBeDefined()
-    const created = w.findAll('article')[1]
-    api.resetWhatsAppTemplate.mockResolvedValue(settings())
-    await created.findAll('button').find((b) => b.text() === 'Kembalikan Bawaan')!.trigger('click')
-    await flushPromises()
-    expect(api.resetWhatsAppTemplate).toHaveBeenCalledWith('order_created')
+    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(['Koneksi', 'OTP', 'Riwayat'])
+    expect(w.find('textarea[aria-label^="Template"]').exists()).toBe(false)
+    expect(w.find('input[aria-label^="Aktifkan Pesanan"]').exists()).toBe(false)
+    expect(w.find('[data-test="wa-delegated-note"]').exists()).toBe(true)
+    // The global ON/OFF and central connection stay with the Super Admin.
+    expect(w.find('[aria-label="Koneksi"] input[type="checkbox"]').exists()).toBe(true)
   })
 
   it('loads the history lazily, filters it, and retries a definite failure without any risk prompt', async () => {

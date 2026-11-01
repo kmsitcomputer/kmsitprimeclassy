@@ -16,7 +16,7 @@ class ShippingProviderController extends Controller
 {
     public function index()
     {
-        $providers = ShippingProvider::query()->whereIn('code', ['rajaongkir', 'openroute'])->orderBy('id')->get();
+        $providers = ShippingProvider::query()->whereIn('code', ['rajaongkir', 'openroute', 'kmsit'])->orderBy('id')->get();
 
         return $this->ok($providers->map(fn (ShippingProvider $provider) => $this->present($provider))->values());
     }

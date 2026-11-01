@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
  * Mapped facts (all pre-existing):
  *   Order created                      -> order_created
  *   Order.payment_status -> paid       -> payment_paid
+ *   Order.payment_status -> partially_paid -> payment_partial (HA-04: verified DP, never full settlement)
  *   Order.status -> diproses/dikirim/terkirim/dibatalkan -> order_processed/order_shipped/order_delivered/order_cancelled
  *   ReturnRequest created / -> approved -> return_requested / return_approved
  *   RefundPayout created (proven)      -> refund_completed
@@ -44,8 +45,13 @@ class WhatsAppLifecycleObserver
             if ($order->wasChanged('status') && isset(self::ORDER_STATUS_EVENT[$order->status])) {
                 $this->notifier()->orderEvent($order, self::ORDER_STATUS_EVENT[$order->status]);
             }
+            // HA-04: full settlement notifies `payment_paid`; a verified PARTIAL (DP) notifies `payment_partial`.
+            // One transition ⇒ exactly one of them (the `wasChanged` guard means a partial→paid path emits once per
+            // transition, never both for the same write). Order status is never consulted for payment truth.
             if ($order->wasChanged('payment_status') && $order->payment_status === 'paid') {
                 $this->notifier()->orderEvent($order, WhatsAppEvents::PAYMENT_PAID);
+            } elseif ($order->wasChanged('payment_status') && $order->payment_status === 'partially_paid') {
+                $this->notifier()->orderEvent($order, WhatsAppEvents::PAYMENT_PARTIAL);
             }
         });
     }

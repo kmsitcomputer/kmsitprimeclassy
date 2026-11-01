@@ -18,18 +18,18 @@ class ShippingProviderSeeder extends Seeder
         $providers = [
             ['code' => 'rajaongkir', 'name' => 'RajaOngkir'],
             ['code' => 'openroute', 'name' => 'OpenRouteService'],
+            ['code' => 'kmsit', 'name' => 'KMSIT Routing Server'],
         ];
 
         foreach ($providers as $provider) {
-            DB::table('shipping_providers')->updateOrInsert(
-                ['code' => $provider['code']],
-                [
-                    'name' => $provider['name'],
-                    'is_active' => false,
-                    'updated_at' => now(),
-                    'created_at' => now(),
-                ]
-            );
+            // Missing rows start inactive; an existing row's activation state is never overwritten.
+            if (DB::table('shipping_providers')->where('code', $provider['code'])->exists()) {
+                continue;
+            }
+            DB::table('shipping_providers')->insert([
+                'code' => $provider['code'], 'name' => $provider['name'], 'is_active' => false,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
         }
     }
 }

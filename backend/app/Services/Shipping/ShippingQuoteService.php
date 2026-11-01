@@ -74,7 +74,7 @@ class ShippingQuoteService
 
         $openRouteRow = ShippingProvider::query()->where('code', 'openroute')->first();
 
-        if ($openRouteRow?->is_active && ! $this->agentDisabled($openRouteRow->id, $context->agentId)) {
+        if ($openRouteRow && $this->openRoute->isAvailable($context->agentId, $openRouteRow)) {
             $attemptedProvider = true;
             try {
                 return $this->openRoute->quote($context, $openRouteRow);
@@ -133,7 +133,12 @@ class ShippingQuoteService
     {
         $providerRow = ShippingProvider::query()->where('code', $context->preferredProvider)->first();
 
-        if (! $providerRow?->is_active || $this->agentDisabled($providerRow->id, $context->agentId)) {
+        // Kurir Toko stays offerable through the Agen's KMSIT fallback even when ORS itself is off/unconfigured.
+        $available = $providerRow && ($context->preferredProvider === 'openroute'
+            ? $this->openRoute->isAvailable($context->agentId, $providerRow)
+            : $providerRow->is_active && ! $this->agentDisabled($providerRow->id, $context->agentId));
+
+        if (! $available) {
             throw new ApiException(__('messages.shipping.method_not_available'), 422, [
                 'shipping_method' => __('messages.system.field_invalid'),
             ]);
@@ -174,18 +179,22 @@ class ShippingQuoteService
             return collect();
         }
 
-        $providers = ShippingProvider::query()->whereIn('code', ['rajaongkir', 'openroute'])->where('is_active', true)->get();
+        $rows = ShippingProvider::query()->whereIn('code', ['rajaongkir', 'openroute'])->get()->keyBy('code');
+        $disabledIds = $agentId
+            ? AgentShippingProviderSetting::query()->where('agent_id', $agentId)->where('is_active', false)
+                ->whereIn('shipping_provider_id', $rows->pluck('id'))->pluck('shipping_provider_id')
+            : collect();
 
-        if (! $agentId) {
-            return $providers;
+        $providers = collect();
+        if (($ro = $rows->get('rajaongkir')) && $ro->is_active && ! $disabledIds->contains($ro->id)) {
+            $providers->push($ro);
+        }
+        // Kurir Toko = ORS (active, not agent-disabled) OR the Agen's KMSIT fallback; KMSIT itself is never listed.
+        if (($or = $rows->get('openroute')) && $this->openRoute->isAvailable($agentId, $or)) {
+            $providers->push($or);
         }
 
-        $disabledIds = AgentShippingProviderSetting::query()
-            ->where('agent_id', $agentId)->where('is_active', false)
-            ->whereIn('shipping_provider_id', $providers->pluck('id'))
-            ->pluck('shipping_provider_id');
-
-        return $providers->reject(fn (ShippingProvider $p) => $disabledIds->contains($p->id))->values();
+        return $providers->values();
     }
 
     public function isAnyProviderEnabled(?int $agentId = null): bool

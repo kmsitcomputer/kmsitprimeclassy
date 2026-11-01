@@ -7,6 +7,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import ImageUploader from '@/components/ui/ImageUploader.vue'
 import WhatsAppNumberVerification from '@/components/WhatsAppNumberVerification.vue'
+import EmailVerification from '@/components/EmailVerification.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { googleAuthUrl, updateProfile, updatePassword, updateReferralCode, regenerateReferralCode, deleteReferralCode } from '@/api/auth'
@@ -338,6 +339,8 @@ async function handleLogout() {
         </div>
       </form>
     </div>
+
+    <EmailVerification />
 
     <WhatsAppNumberVerification />
 

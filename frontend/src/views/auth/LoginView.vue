@@ -69,6 +69,7 @@ async function submit() {
       <div>
         <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">{{ t('auth.login.password') }}</label>
         <PasswordInput v-model="password" required autocomplete="current-password" />
+        <RouterLink :to="{ name: 'forgot-password' }" class="mt-1 inline-block text-xs font-medium text-brand-600 dark:text-brand-400" data-test="forgot-link">{{ t('auth.recovery.link') }}</RouterLink>
       </div>
 
       <AppButton type="submit" size="lg" block :disabled="submitting">{{ submitting ? t('auth.login.submitting') : t('auth.login.submit') }}</AppButton>

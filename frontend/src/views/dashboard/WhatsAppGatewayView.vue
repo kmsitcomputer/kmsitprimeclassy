@@ -14,9 +14,6 @@ import {
   updateWhatsAppSettings,
   testWhatsAppConnection,
   sendWhatsAppTestMessage,
-  previewWhatsAppTemplate,
-  saveWhatsAppTemplate,
-  resetWhatsAppTemplate,
   listWhatsAppMessages,
   retryWhatsAppMessage,
   type WaSettings,
@@ -27,11 +24,10 @@ import {
   type WaOtp,
 } from '@/api/whatsapp'
 
-type Tab = 'koneksi' | 'otp' | 'notifikasi' | 'riwayat'
+type Tab = 'koneksi' | 'otp' | 'riwayat'
 const tabs: { key: Tab; label: string }[] = [
   { key: 'koneksi', label: 'Koneksi' },
   { key: 'otp', label: 'OTP' },
-  { key: 'notifikasi', label: 'Notifikasi' },
   { key: 'riwayat', label: 'Riwayat' },
 ]
 const tab = ref<Tab>('koneksi')
@@ -43,7 +39,6 @@ const loadError = ref('')
 /* ---------------------------------------------------------------- load */
 const conn = ref({ enabled: false, base_url: '', username: '', password: '', device_id: '', timeout: 10, perRecipient: 6, perMinute: 20, testNumbersText: '', clearTests: false })
 const otp = ref<WaOtp>({ enabled: false, ttl_minutes: 5, max_attempts: 5, cooldown_seconds: 60, limit: 3, limit_window_minutes: 10 })
-const templates = ref<Record<string, string>>({})
 
 function hydrate(s: WaSettings) {
   settings.value = s
@@ -53,7 +48,6 @@ function hydrate(s: WaSettings) {
     testNumbersText: '', clearTests: false,
   }
   otp.value = { ...s.otp }
-  templates.value = Object.fromEntries(s.events.map((e) => [e.key, e.template]))
 }
 
 async function load() {
@@ -169,63 +163,6 @@ async function saveOtp() {
   }
 }
 
-/* ---------------------------------------------------------------- Notifikasi */
-const previews = ref<Record<string, string>>({})
-const eventErrors = ref<Record<string, string>>({})
-const busyEvent = ref<string | null>(null)
-
-async function toggleEvent(key: string, enabled: boolean) {
-  busyEvent.value = key
-  try {
-    hydrate(await updateWhatsAppSettings({ events: { [key]: enabled } }))
-  } catch (e) {
-    fail(e, 'Gagal mengubah event.')
-    await load()
-  } finally {
-    busyEvent.value = null
-  }
-}
-
-async function preview(key: string) {
-  eventErrors.value[key] = ''
-  try {
-    previews.value[key] = await previewWhatsAppTemplate(key, templates.value[key] ?? '')
-  } catch (e) {
-    previews.value[key] = ''
-    eventErrors.value[key] = e instanceof ApiError ? formatApiError(e) : 'Pratinjau gagal.'
-  }
-}
-
-async function saveTemplate(key: string) {
-  busyEvent.value = key
-  eventErrors.value[key] = ''
-  try {
-    hydrate(await saveWhatsAppTemplate(key, templates.value[key] ?? ''))
-    say('ok', 'Template disimpan.')
-  } catch (e) {
-    eventErrors.value[key] = e instanceof ApiError ? formatApiError(e) : 'Gagal menyimpan template.'
-  } finally {
-    busyEvent.value = null
-  }
-}
-
-async function resetTemplate(key: string) {
-  busyEvent.value = key
-  try {
-    hydrate(await resetWhatsAppTemplate(key))
-    previews.value[key] = ''
-    say('ok', 'Template dikembalikan ke bawaan.')
-  } catch (e) {
-    fail(e, 'Gagal mengembalikan template.')
-  } finally {
-    busyEvent.value = null
-  }
-}
-
-function insertVariable(key: string, variable: string) {
-  templates.value[key] = (templates.value[key] ?? '') + `{${variable}}`
-}
-
 /* ---------------------------------------------------------------- Riwayat */
 const history = ref<WaMessagePage | null>(null)
 const historyLoading = ref(false)
@@ -321,7 +258,7 @@ async function confirmRetry() {
 
     <template v-else-if="settings">
       <p v-if="!tableReady" role="alert" class="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-        Tabel log pengiriman belum ada di database ini (migrasi menunggu persetujuan Owner). Konfigurasi, tes koneksi, dan template sudah dapat dipakai;
+        Tabel log pengiriman belum ada di database ini (migrasi menunggu persetujuan Owner). Konfigurasi dan tes koneksi sudah dapat dipakai;
         notifikasi otomatis, pesan uji, dan riwayat baru aktif setelah migrasi dijalankan.
       </p>
 
@@ -342,6 +279,11 @@ async function confirmRetry() {
 
       <!-- ============================== KONEKSI ============================== -->
       <section v-show="tab === 'koneksi'" role="tabpanel" aria-label="Koneksi" class="space-y-5">
+        <p class="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300" data-test="wa-delegated-note">
+          Di sini Super Admin hanya mengatur sakelar global ON/OFF, koneksi pusat GOWA, kebijakan OTP, dan batas volume. Perangkat WhatsApp, template pesan,
+          pengaturan event, dan nomor uji dikelola oleh <strong>Agen</strong> dan <strong>Admin Agen</strong> masing-masing cabang
+          (Pengaturan › WhatsApp Saya).
+        </p>
         <form :class="cardClass" @submit.prevent="saveConnection">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-sm font-semibold text-stone-800 dark:text-stone-100">Koneksi GOWA</h2>
@@ -473,51 +415,6 @@ async function confirmRetry() {
         </form>
       </section>
 
-      <!-- ============================== NOTIFIKASI ============================== -->
-      <section v-show="tab === 'notifikasi'" role="tabpanel" aria-label="Notifikasi" class="space-y-4">
-        <p class="text-xs text-stone-500 dark:text-stone-400">
-          Notifikasi transaksi dikirim setelah perubahan tersimpan, ke pembeli ber-akun pada nomor di akunnya. Pesanan dari pelanggan CRM tidak dikirimi
-          karena nomornya belum terverifikasi. Semua event bawaan <strong>mati</strong> sampai Anda mengaktifkannya. Tidak ada pesan promosi di sini.
-        </p>
-        <article v-for="e in settings.events" :key="e.key" :class="cardClass">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <h3 class="text-sm font-semibold text-stone-800 dark:text-stone-100">{{ e.label }}</h3>
-            <label class="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
-              <input
-                type="checkbox"
-                class="h-4 w-4 accent-brand-600"
-                :checked="e.enabled"
-                :disabled="busyEvent === e.key"
-                :aria-label="'Aktifkan ' + e.label"
-                @change="toggleEvent(e.key, ($event.target as HTMLInputElement).checked)"
-              />
-              Aktif
-            </label>
-          </div>
-          <label class="mt-3 block text-sm text-stone-600 dark:text-stone-300">Template
-            <textarea v-model="templates[e.key]" rows="8" maxlength="1000" :class="inputClass" :aria-label="'Template ' + e.label" />
-          </label>
-          <p class="mt-2 text-xs text-stone-500">
-            Variabel (klik untuk menyisipkan):
-            <button
-              v-for="v in e.variables"
-              :key="v"
-              type="button"
-              class="ml-1 rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200"
-              @click="insertVariable(e.key, v)"
-            >{{ '{' + v + '}' }}</button>
-          </p>
-          <p class="mt-1 text-[11px] text-stone-400">Baris yang berisi variabel opsional kosong (misalnya resi) dihapus otomatis; data tidak pernah dikarang.</p>
-          <p v-if="eventErrors[e.key]" role="alert" class="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">{{ eventErrors[e.key] }}</p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button type="button" :class="btnGhost" @click="preview(e.key)">Preview</button>
-            <button type="button" :disabled="busyEvent === e.key" :class="btnPrimary" @click="saveTemplate(e.key)">Simpan Template</button>
-            <button type="button" :disabled="busyEvent === e.key || e.is_default_template" :class="btnGhost" @click="resetTemplate(e.key)">Kembalikan Bawaan</button>
-          </div>
-          <pre v-if="previews[e.key]" class="mt-3 whitespace-pre-wrap rounded-xl bg-stone-50 p-3 font-sans text-sm text-stone-700 dark:bg-stone-950 dark:text-stone-200" aria-label="Pratinjau">{{ previews[e.key] }}</pre>
-        </article>
-      </section>
-
       <!-- ============================== RIWAYAT ============================== -->
       <section v-show="tab === 'riwayat'" role="tabpanel" aria-label="Riwayat" class="space-y-4">
         <div :class="[cardClass, 'flex flex-wrap items-end gap-3']">
@@ -557,7 +454,12 @@ async function confirmRetry() {
               <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
                 <tr v-for="m in history.data" :key="m.id">
                   <td class="px-3 py-2 whitespace-nowrap">{{ formatDateTime(m.created_at) }}</td>
-                  <td class="px-3 py-2">{{ m.event ?? '-' }}<span class="ml-1 text-xs text-stone-400">{{ m.purpose }}</span></td>
+                  <td class="px-3 py-2">
+                    {{ m.event ?? '-' }}<span class="ml-1 text-xs text-stone-400">{{ m.purpose }}</span>
+                    <div v-if="m.recipient_role || m.template_class || m.sender_device_id" class="text-xs text-stone-400" data-test="wa-ledger-meta">
+                      <span v-if="m.recipient_role">{{ m.recipient_role }}</span><span v-if="m.template_class"> · {{ m.template_class }}</span><span v-if="m.sender_device_id"> · …{{ m.sender_device_id.slice(-6) }}</span>
+                    </div>
+                  </td>
                   <td class="px-3 py-2 font-mono text-xs">{{ m.recipient ?? '-' }}</td>
                   <td class="px-3 py-2"><span class="rounded-full px-2 py-0.5 text-xs font-semibold" :class="STATUS_CLASS[m.status]">{{ statusText(m.status) }}</span></td>
                   <td class="px-3 py-2">{{ m.attempts }}/{{ m.max_attempts }}</td>

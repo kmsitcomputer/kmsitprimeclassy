@@ -88,6 +88,28 @@ php artisan test
 php artisan queue:work --stop-when-empty
 ```
 
+### 3.3 PrimeClassy WhatsApp worker lane (HA-01, DEV configuration reference)
+
+Transactional WhatsApp rows are dispatched on the dedicated `primeclassy-notify` queue
+(`App\Jobs\SendWhatsAppMessageJob::$queue`; canonical name `App\Services\WhatsApp\WhatsAppSettings::NOTIFY_QUEUE`).
+The production supervisor configuration MUST reserve at least one worker for this lane so a backlog on other
+queues can never starve notifications, and MUST point failed jobs at the existing `failed_jobs` table for
+visibility. DEV reference commands (reference only — never run against production):
+
+```powershell
+# DEV: drain only the notification lane
+php artisan queue:work --queue=primeclassy-notify,default --stop-when-empty
+# DEV: list failed notification jobs
+php artisan queue:failed
+# DEV: retry one failed job after reading the duplicate-risk note in the diagnostics entry
+php artisan queue:retry <id>
+```
+
+Rules: retries stay bounded inside `WhatsAppDelivery` (`max_attempts`, backoff, RETRY/FAILED/UNKNOWN
+classification); Laravel's own retry is off (`$tries = 1`) so a worker crash is a re-claim, never a duplicate send.
+OTP rows are never retried (a fresh challenge must be issued). No worker configuration is started or changed by
+implementation runs — this section documents the target state for Owner provisioning.
+
 Port-conflict check — always identify the listener before terminating anything:
 
 ```powershell
@@ -445,3 +467,13 @@ Automated tests fake HTTP and use isolated cache; no live provider is called. Ne
 - **Migration:** `2026_10_31_100000_create_whatsapp_messages_table` (one new table, additive). Until it is approved and applied the notifier is inert and the console shows "migration pending". Before applying: backup, `migrate --pretend`, apply that single file, verify.
 - **Reading the log:** `queued` waiting/retrying · `sent` provider acknowledged · `failed` definite failure · `unknown` may or may not have been delivered (check the phone BEFORE retrying) · `skipped` deliberately not sent (reason shown).
 - **Real messages in DEV** go only to Owner-authorised numbers (console → "Nomor uji yang diizinkan"). Never point DEV at production customers.
+
+### KMSIT Routing Server — Kurir Toko routing fallback (2026-11-04, DEV implemented; live gateway verified)
+- **What it is.** A transparent distance fallback for the existing *Kurir Toko* quote, not a checkout method and not RajaOngkir. Order: ORS (enabled, credentialed, healthy) → the Agen's own KMSIT endpoint → fail closed (422, no fabricated distance or price). The tariff (minimum distance, per-km, minimum charge, free-shipping override, server requote) is unchanged and shared (`KurirTokoTariff`); the quote still reports provider `openroute` with `meta.routing_source` = `openrouteservice` | `kmsit`.
+- **Contract (LOCKED baseline `openapi.yaml` 1.1.0; `App\Services\Shipping\KmsitDistanceCalculator`).** `GET {base}/api/v1/routes?profile=car|motorcycle&coordinates=lon,lat;lon,lat` with header `X-API-Key` (write-only per-Agen key, encrypted at rest). 200 `{request_id, profile, distance_m, duration_s, …}`; the error envelope maps to safe machine reasons. Native OSRM paths/Bearer auth are NOT spoken; a legacy saved profile `driving` maps to `car`. LIVE verified 2026-11-04: HTTP 200, 12,216.3 m / 659.4 s against `routing.kmsitcomputer.com` through the stored DEV config (Agen 11). Gateway coverage is Bandung Raya (contract bbox) — outside it the gateway answers VALIDATION_ERROR and PrimeClassy fails closed.
+- **Config.** Each Agen saves its own `base_url` (gateway origin; a trailing `/api/v1` is tolerated, never doubled), profile and the write-only key at *Penyedia Pengiriman*; the tariff is edited on the separate *Pengaturan Tarif Kurir Toko* card/endpoint, independent of ORS/KMSIT state. Super Admin sees only the global ON/OFF row (`kmsit`, **inactive by default**). Migration `2026_11_04_100000_register_kmsit_shipping_provider` (additive, inserts the inactive row only) is applied to DEV (batch 42) and **pending on production** — apply it with this release. The seeder never overwrites an existing row's activation state.
+- **SSRF policy** (`App\Support\EndpointGuard`, enforced on save, test and every use): http(s) only, no userinfo/query, no localhost/loopback/link-local/metadata/private ranges (every resolved address checked), vetted IP pinned for the request, ambient proxies disabled, redirects off. A private or plain-http server is allowed only if its exact host is in `KMSIT_TRUSTED_HOSTS` (operator env; metadata/link-local stay blocked even then).
+
+### WhatsApp management by Agen / Admin Agen (2026-11-04, DEV implemented)
+- Routes `/agent/whatsapp/*` now allow `agen` and `admin` (scope resolved server-side, see BUSINESS-RULES §28); new: `scope`, `events`, `test-numbers`, `test-send` (registered-number allow-list, the target Agen's own paired slot only, 3/min & 20/day, ≤5 numbers). Migration `2026_11_04_100100_create_agent_whatsapp_scoped_settings` (two additive tables) is applied to DEV (batch 42) and **pending on production** — apply it with this release; until then scoped settings fail closed (503) and the legacy global behaviour continues unchanged.
+- The Super Admin console no longer has the Notifikasi (templates/events) tab; its backend endpoints remain only as the platform-default fallback.

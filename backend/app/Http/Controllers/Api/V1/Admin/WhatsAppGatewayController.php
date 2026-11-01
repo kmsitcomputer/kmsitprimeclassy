@@ -134,6 +134,8 @@ class WhatsAppGatewayController extends Controller
     {
         return [
             'id' => $m->id, 'purpose' => $m->purpose, 'event' => $m->event, 'status' => $m->status,
+            'template_class' => $m->template_class, 'recipient_role' => $m->recipient_role,
+            'sender_device_id' => $m->sender_device_id,
             'order_id' => $m->order_id, 'recipient' => $m->maskedPhone(),
             // OTP bodies are stored redacted; the encrypted original is never serialised (model $hidden).
             'body' => $m->body, 'attempts' => $m->attempts, 'max_attempts' => $m->max_attempts,

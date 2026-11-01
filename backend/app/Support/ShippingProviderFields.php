@@ -29,6 +29,14 @@ class ShippingProviderFields
                 // full-config form can't bypass that check.
                 'couriers.*' => ['string', 'max:30', 'regex:/^[a-z0-9_-]+$/', Rule::in(self::supportedCourierCodes())],
             ],
+            // KMSIT Routing GATEWAY (OpenAPI v1: GET /api/v1/routes, X-API-Key, profiles car|motorcycle). The URL is additionally vetted by
+            // EndpointGuard (SSRF) on save/test/use. token = the service API key: write-only, blank on update keeps the stored one
+            // (the controller requires one to exist).
+            'kmsit' => [
+                'base_url' => ['required', 'string', 'max:255', 'url:http,https'],
+                'profile' => ['required', 'in:car,motorcycle'],
+                'token' => ['nullable', 'string', 'max:255'],
+            ],
             'openroute' => [
                 'api_key' => ['required', 'string', 'max:255'],
                 'profile' => ['required', 'in:driving-car,driving-hgv,cycling-regular,cycling-road,cycling-mountain,cycling-electric,foot-walking,foot-hiking,wheelchair'],

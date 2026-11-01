@@ -68,7 +68,7 @@ async function runImport() {
   <DashboardLayout>
     <h1 class="mb-1 font-display text-xl font-semibold text-stone-800 dark:text-stone-100">Pengaturan Pengiriman</h1>
     <p class="mb-1 text-sm text-stone-500 dark:text-stone-400">
-      Aktifkan/nonaktifkan RajaOngkir dan OpenRoute secara global. Jika keduanya nonaktif, semua order gratis ongkir.
+      Aktifkan/nonaktifkan RajaOngkir dan OpenRoute secara global. KMSIT Routing Server adalah cadangan rute untuk Kurir Toko (bukan metode tersendiri); endpoint diatur oleh masing-masing Agen. Jika semua nonaktif, semua order gratis ongkir.
     </p>
     <p class="mb-4 text-xs font-medium text-amber-600 dark:text-amber-400">
       Kredensial dan tarif per-km kini diatur oleh masing-masing agen di dashboard mereka sendiri — bukan di sini.

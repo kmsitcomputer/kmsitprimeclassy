@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Agent;
 
+use App\Exceptions\KmsitRouteException;
 use App\Exceptions\ShippingQuoteException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Agent\UpdateAgentShippingProviderConfigRequest;
@@ -12,7 +13,10 @@ use App\Models\ShippingConfiguration;
 use App\Models\ShippingCourier;
 use App\Models\ShippingProvider;
 use App\Services\Logging\ActivityLogger;
+use App\Services\Shipping\KurirTokoTariff;
+use App\Services\Shipping\Providers\KmsitProvider;
 use App\Services\Shipping\Providers\OpenRouteProvider;
+use App\Support\EndpointGuard;
 use App\Services\Shipping\Providers\RajaOngkirProvider;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
@@ -32,13 +36,13 @@ class AgentShippingProviderController extends Controller
     {
         $agentId = $request->user()->id;
 
-        $providers = ShippingProvider::query()->whereIn('code', ['rajaongkir', 'openroute'])->orderBy('id')->get();
+        $providers = ShippingProvider::query()->whereIn('code', ['rajaongkir', 'openroute', 'kmsit'])->orderBy('id')->get();
         $overrides = AgentShippingProviderSetting::query()->where('agent_id', $agentId)->get()->keyBy('shipping_provider_id');
         $configs = AgentShippingProviderConfig::query()->where('agent_id', $agentId)->get()->keyBy('shipping_provider_id');
-        $rates = ShippingConfiguration::query()->where('agent_id', $agentId)->get()->keyBy('shipping_provider_id');
+        $tariff = KurirTokoTariff::present(KurirTokoTariff::for($agentId));
         $agentProfile = AgentProfile::query()->where('user_id', $agentId)->first();
 
-        return $this->ok($providers->map(function (ShippingProvider $provider) use ($overrides, $configs, $rates, $agentProfile) {
+                return $this->ok($providers->map(function (ShippingProvider $provider) use ($overrides, $configs, $tariff, $agentProfile) {
             $configRow = $configs->get($provider->id);
             try {
                 $config = $configRow?->config ?? [];
@@ -56,15 +60,17 @@ class AgentShippingProviderController extends Controller
                 'api_version' => $provider->code === 'rajaongkir' ? ($config['api_version'] ?? 'legacy') : null,
                 'origin' => $provider->code === 'rajaongkir' ? ($config['origin_label'] ?? null) : null,
                 'couriers' => $provider->code === 'rajaongkir' ? ($config['couriers'] ?? []) : [],
-                'profile' => $provider->code === 'openroute' ? ($config['profile'] ?? config('services.openroute.profile')) : null,
+                'profile' => $provider->code === 'openroute' ? ($config['profile'] ?? config('services.openroute.profile')) : ($provider->code === 'kmsit' ? \App\Services\Shipping\KmsitDistanceCalculator::normalizeProfile($config['profile'] ?? null) : null),
+                // KMSIT: the endpoint is shown (no credentials can be embedded in it); the token is never echoed, only whether one is set.
+                'base_url' => $provider->code === 'kmsit' ? ($config['base_url'] ?? null) : null,
+                'has_token' => $provider->code === 'kmsit' ? ! empty($config['token']) : null,
                 'origin_coordinates' => $provider->code === 'openroute' && $agentProfile ? [
                     'latitude' => (float) $agentProfile->latitude,
                     'longitude' => (float) $agentProfile->longitude,
                 ] : null,
-                'pricing' => $provider->code === 'openroute' && $rates->get($provider->id) ? [
-                    'price_per_km' => (float) $rates->get($provider->id)->price_per_km,
-                    'minimum_distance_km' => (float) $rates->get($provider->id)->minimum_distance_km,
-                    'minimum_charge' => (float) $rates->get($provider->id)->minimum_charge,
+                // The shared Kurir Toko tariff (same for ORS and KMSIT; also served by GET /agent/shipping-tariff).
+                'pricing' => in_array($provider->code, ['openroute', 'kmsit'], true) && $tariff ? [
+                    'price_per_km' => $tariff['price_per_km'], 'minimum_distance_km' => $tariff['minimum_distance_km'], 'minimum_charge' => $tariff['minimum_charge'],
                 ] : null,
             ];
         })->values());
@@ -115,21 +121,36 @@ class AgentShippingProviderController extends Controller
             $config['origin_label'] = $origin['label'];
         }
 
+        if ($provider->code === 'kmsit') {
+            try {
+                EndpointGuard::vet((string) $config['base_url']);
+            } catch (ShippingQuoteException) {
+                return $this->fail('Endpoint KMSIT tidak diizinkan atau tidak dapat dijangkau.', ['config.base_url' => ['Endpoint ditolak oleh kebijakan keamanan.']], 422);
+            }
+            $config['base_url'] = rtrim((string) $config['base_url'], '/');
+            // Write-only secret: a blank token on update keeps the stored one; a non-blank one replaces it.
+            if (empty($config['token'])) {
+                unset($config['token']);
+                if ($kept = $this->currentConfig($agentId, $provider)['token'] ?? null) {
+                    $config['token'] = $kept;
+                }
+            }
+            // The Gateway requires X-API-Key on /api/v1/routes: a config without one can never work, so refuse it here.
+            if (empty($config['token'])) {
+                return $this->fail('API key KMSIT wajib diisi.', ['config.token' => ['API key KMSIT wajib diisi.']], 422);
+            }
+        }
+
         AgentShippingProviderConfig::replaceConfig($agentId, $provider->id, $config);
 
-        if ($provider->code === 'openroute') {
-            ShippingConfiguration::query()->updateOrCreate(
-                ['agent_id' => $agentId],
-                [
-                    'shipping_provider_id' => $provider->id,
-                    'price_per_km' => $request->input('price_per_km'),
-                    'minimum_distance_km' => $request->input('minimum_distance_km'),
-                    'minimum_charge' => $request->input('minimum_charge', 0),
-                    'free_shipping_enabled' => $request->boolean('free_shipping_enabled'),
-                    'free_shipping_min_amount' => $request->input('free_shipping_min_amount'),
-                    'is_active' => true,
-                ]
-            );
+        if ($provider->code === 'kmsit' && $request->filled('price_per_km') && $request->filled('minimum_distance_km')) {
+            KurirTokoTariff::save($agentId, $request->only(['price_per_km', 'minimum_distance_km', 'minimum_charge', 'free_shipping_enabled', 'free_shipping_min_amount']));
+        }
+
+        // Back-compat only: an older client may still send the tariff with the ORS form. The ORS form never needs it and, when it is
+        // absent, the stored tariff is left exactly as it is.
+        if ($provider->code === 'openroute' && $request->filled('price_per_km') && $request->filled('minimum_distance_km')) {
+            KurirTokoTariff::save($agentId, $request->only(['price_per_km', 'minimum_distance_km', 'minimum_charge', 'free_shipping_enabled', 'free_shipping_min_amount']));
         }
 
         ActivityLogger::log($agentId, $provider, 'agent_shipping_provider.config_updated', null, [
@@ -255,17 +276,21 @@ class AgentShippingProviderController extends Controller
         }
     }
 
-    public function testConnection(Request $request, ShippingProvider $provider, RajaOngkirProvider $rajaOngkir, OpenRouteProvider $openRoute)
+    public function testConnection(Request $request, ShippingProvider $provider, RajaOngkirProvider $rajaOngkir, OpenRouteProvider $openRoute, KmsitProvider $kmsit)
     {
         try {
             if ($provider->code === 'rajaongkir') {
                 return $this->ok($rajaOngkir->testForAgent($request->user()->id, $provider));
             }
-            abort_unless($provider->code === 'openroute', 404);
+            abort_unless(in_array($provider->code, ['openroute', 'kmsit'], true), 404);
             $validated = $request->validate([
                 'destination_latitude' => ['required', 'numeric', 'between:-90,90'],
                 'destination_longitude' => ['required', 'numeric', 'between:-180,180'],
             ]);
+
+            if ($provider->code === 'kmsit') {
+                return $this->ok($kmsit->testForAgent($request->user()->id, (float) $validated['destination_latitude'], (float) $validated['destination_longitude']));
+            }
 
             return $this->ok($openRoute->testForAgent(
                 $request->user()->id,
@@ -274,7 +299,11 @@ class AgentShippingProviderController extends Controller
                 (float) $validated['destination_longitude'],
             ));
         } catch (ShippingQuoteException $e) {
-            return $this->fail('Koneksi provider pengiriman gagal. Periksa API key, profile, dan koordinat.', null, 422);
+            // KMSIT only: a safe reason code (no URL/token/body) so the Agen can tell a wrong path (404), a rejected credential
+            // (401/403), a blocked endpoint or "no route" apart. Everything else keeps the generic message.
+            $diag = $e instanceof KmsitRouteException ? ['reason' => [$e->reason], 'http_status' => [(string) ($e->httpStatus ?? '')]] : null;
+
+            return $this->fail('Koneksi provider pengiriman gagal. Periksa API key, profile, dan koordinat.', $diag, 422);
         }
     }
 }

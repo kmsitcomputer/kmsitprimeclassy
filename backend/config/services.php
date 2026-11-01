@@ -52,6 +52,11 @@ return [
         'profile' => env('OPENROUTE_PROFILE', 'driving-car'),
     ],
 
+    // KMSIT Routing Server (OSRM) — per-Agen endpoints; only hosts listed here may be private/plain-http (operator allow-list).
+    'kmsit' => [
+        'trusted_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('KMSIT_TRUSTED_HOSTS', ''))))),
+    ],
+
     // IMP-001: Google sign-in (consumers only). Endpoints are config so tests can fake them;
     // the secret is read from the environment only and never logged or persisted.
     'google' => [
