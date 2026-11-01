@@ -758,9 +758,11 @@ Variabel dari spesifikasi yang **tidak ada sumbernya**: `email_masked`, `tanggal
 
 Catatan semantik: NTF-011 dan NTF-013 sama-sama `payment_paid`, karena event itu hanya untuk pelunasan penuh. NTF-023 berarti retur selesai dengan **semua** item ditolak. NTF-027 hanya bersumber dari penutupan obligation `needs_verification` oleh Owner (exit B), karena tidak ada status "refund ditolak" lain di source.
 
-### 24.4 Aktivasi production (belum dilakukan)
+### 24.4 Aktivasi production
 
-1. Scoped test untuk semua area yang berubah lulus, frontend type-check/build lulus. Full Test bukan syarat rilis (keputusan Owner, 2026-11-02).
-2. Backup production, lalu migrasi `2026_11_05_100000` dan `2026_11_05_100100` (Pending → Ran).
+Kode dan migrasi sudah di-deploy ke production pada REL005 (SHA `87ef993`, 2026-11-01 18:28 UTC; catatan lengkap di `docs/OPERATIONS.md`). Yang masih menjadi keputusan Owner adalah langkah 4 di bawah.
+
+1. Scoped test untuk semua area yang berubah lulus, frontend type-check/build lulus. Full Test bukan syarat rilis (keputusan Owner, 2026-11-02). — **selesai**
+2. Backup production, lalu migrasi `2026_11_05_100000` dan `2026_11_05_100100` (Pending → Ran). — **selesai** (160 → 162 Ran)
 3. Opsional: `APP_FRONTEND_URL` bila SPA tidak satu domain dengan `APP_URL` (production satu domain, jadi tidak perlu).
 4. Owner menyalakan event baru per Agen dan saklar email transaksi bila diinginkan. Teks default baru langsung berlaku untuk event yang sudah aktif dan memakai template default.
