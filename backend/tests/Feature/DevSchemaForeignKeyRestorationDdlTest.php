@@ -39,6 +39,9 @@ class DevSchemaForeignKeyRestorationDdlTest extends TestCase
 {
     use RestoresIsolatedTestDatabase;
 
+    /** Explicit DDL contract test: always start from, and leave behind, a freshly migrated schema. */
+    protected bool $isolatedSchemaAlwaysRebuild = true;
+
     private const PHASE_A = '2026_10_08_110000_restore_pre_reset_foreign_keys';
 
     private const PHASE_C = '2026_10_08_112000_restore_post_cleanup_foreign_keys';

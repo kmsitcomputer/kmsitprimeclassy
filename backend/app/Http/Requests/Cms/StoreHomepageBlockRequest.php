@@ -12,6 +12,16 @@ class StoreHomepageBlockRequest extends BaseFormRequest
         return true; // Gate::allows('manage-system-config') checked explicitly in the controller.
     }
 
+    protected function prepareForValidation(): void
+    {
+        $type = $this->input('type');
+        if (! $this->has('content')) {
+            return;
+        }
+
+        $this->merge(['content' => HomepageBlockTypes::normalizeContent(is_string($type) ? $type : null, $this->input('content'))]);
+    }
+
     public function rules(): array
     {
         $type = $this->input('type');
@@ -25,7 +35,7 @@ class StoreHomepageBlockRequest extends BaseFormRequest
             'is_active' => ['sometimes', 'boolean'],
             'starts_at' => ['nullable', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
-        ], is_string($type) ? HomepageBlockTypes::contentRules($type) : []);
+        ], is_string($type) ? HomepageBlockTypes::contentRules($type) : [], HomepageBlockTypes::fileRules(is_string($type) ? $type : null));
     }
 
     public function metaData(): array

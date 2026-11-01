@@ -14,8 +14,13 @@ import CustomBlock from './blocks/CustomBlock.vue'
 import SocialMediaBlock from './blocks/SocialMediaBlock.vue'
 import WhatsappChatBlock from './blocks/WhatsappChatBlock.vue'
 import MarketplaceLinksBlock from './blocks/MarketplaceLinksBlock.vue'
+import BannerSliderBlock from './blocks/BannerSliderBlock.vue'
 
-const props = defineProps<{ block: HomepageBlock }>()
+const props = defineProps<{
+  block: HomepageBlock
+  /** CMS preview only: which device's images the preview should use (layout follows the preview frame's width). */
+  previewDevice?: 'mobile' | 'desktop'
+}>()
 
 /**
  * One entry per type registered in the backend's App\Support\HomepageBlockTypes.
@@ -36,11 +41,17 @@ const COMPONENTS: Record<string, unknown> = {
   social_media: SocialMediaBlock,
   whatsapp_chat: WhatsappChatBlock,
   marketplace_links: MarketplaceLinksBlock,
+  banner_slider: BannerSliderBlock,
 }
 
 const component = computed(() => COMPONENTS[props.block.type] ?? null)
 </script>
 
 <template>
-  <component :is="component" v-if="component" :content="block.content" />
+  <component
+    :is="component"
+    v-if="component"
+    :content="block.content"
+    v-bind="block.type === 'banner_slider' && previewDevice ? { previewDevice } : {}"
+  />
 </template>

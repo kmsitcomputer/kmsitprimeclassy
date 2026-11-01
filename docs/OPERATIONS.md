@@ -104,7 +104,7 @@ or ask the Owner. Never kill another project's server automatically.
 ## 4. TEST
 
 - Database `primeclassy_testing` only. `phpunit.xml` forces `APP_ENV=testing` and the DB name; `Tests\TestCase` requires exactly `APP_ENV=testing`, MySQL/MariaDB and database `primeclassy_testing`, protecting DEV and production data.
-- Commands: `php artisan test`, `php artisan test --filter=Name`, and the serialized runner `php scripts/run-tests-serialized.php tests/Feature/Name.php` (lock-protected; refuses non-testing databases) for destructive refresh/migration suites.
+- Commands: `php artisan test`, `php artisan test --filter=Name`, and the serialized runner `php scripts/run-tests-serialized.php tests/Feature/Name.php` (lock-protected; refuses non-testing databases) for destructive refresh/migration suites. One runner per test database is enforced by a MySQL lock; full procedure in [TESTING.md](TESTING.md).
 - Race suites spawn real second PHP processes (`.phpunit-concurrency-actor.php`); they need the same isolated DB and take ~10–20 s each. A full run takes roughly 12–15 minutes.
 - Last recorded full run: 855 passed / 6075 assertions / 0 failures (includes the 4 DEV reset-command tests; frontend type-check and build also pass). Always re-run for current numbers.
 - Frontend: `npm run type-check` and `npm run build-only`; there is no frontend test runner.

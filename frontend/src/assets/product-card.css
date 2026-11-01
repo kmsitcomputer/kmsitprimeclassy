@@ -1,0 +1,118 @@
+/*
+ * Product card: Owner design lock "Two-Tone Luxury + Footer Divider".
+ *
+ * ONE definition for every product card (catalog, wishlist, related products, homepage product block).
+ * Light and dark share the same anatomy; only the tokens change. Anatomy:
+ *
+ *   .pc-card
+ *     .pc-card__image    1:1 surface (the product photo, or the placeholder)
+ *     .pc-card__footer   second surface
+ *       .pc-card__name     max two lines, fixed two-line slot so the rest never shifts
+ *       .pc-card__divider  1px rule between name and price
+ *       .pc-card__price
+ *
+ * The page background is NOT touched here; the card carries its own surfaces so it stays distinct from it.
+ */
+.pc-card {
+  /* Light: warm luxury (champagne border, cream footer, burgundy price) */
+  --pc-card: #fffcf8;
+  --pc-image: #eadbcb;
+  --pc-footer: #f2e5d7;
+  --pc-border: #c5a48b;
+  --pc-divider: #d9c4b1;
+  --pc-name: #392729;
+  --pc-price: #8e354d;
+  --pc-placeholder: #b79b86;
+  --pc-shadow: 0 1px 2px rgb(92 61 46 / 0.1), 0 6px 16px -8px rgb(92 61 46 / 0.3);
+  --pc-shadow-hover: 0 2px 4px rgb(92 61 46 / 0.12), 0 14px 26px -10px rgb(92 61 46 / 0.38);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* clips the image and both surfaces to the rounded corners */
+  border: 1px solid var(--pc-border);
+  border-radius: 16px;
+  background: var(--pc-card);
+  box-shadow: var(--pc-shadow);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* Dark: charcoal / plum / soft rose. Same structure, only tokens differ. */
+.dark .pc-card {
+  --pc-card: #241d20;
+  --pc-image: #34292d;
+  --pc-footer: #2d2327;
+  --pc-border: #5c424b;
+  --pc-divider: #5c424b;
+  --pc-name: #ffffff;
+  --pc-price: #f49ab2;
+  --pc-placeholder: #6d5860;
+  --pc-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 20px -10px rgb(0 0 0 / 0.7);
+  --pc-shadow-hover: 0 2px 4px rgb(0 0 0 / 0.55), 0 14px 26px -10px rgb(0 0 0 / 0.8);
+}
+
+.pc-card__image {
+  overflow: hidden;
+  background: var(--pc-image);
+  /* the two surfaces meet on a visible line, not just a colour change */
+  border-bottom: 1px solid var(--pc-divider);
+}
+
+.pc-card__placeholder {
+  color: var(--pc-placeholder);
+}
+
+.pc-card__footer {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  background: var(--pc-footer);
+}
+
+.pc-card__name {
+  color: var(--pc-name);
+}
+
+.pc-card__divider {
+  height: 1px;
+  flex: none;
+  background: var(--pc-divider);
+}
+
+.pc-card__price {
+  color: var(--pc-price);
+}
+
+/*
+ * The neutral "log in to see stock" pill (StockBadge's only stone-coloured state) takes the footer's palette so it does
+ * not read as a cool grey blob on the warm footer, or vanish on the dark one. The real stock states (low / in / out)
+ * keep their own semantic colours.
+ */
+.pc-card__stock.bg-stone-100 {
+  background: var(--pc-image);
+  color: color-mix(in srgb, var(--pc-name) 72%, var(--pc-footer));
+}
+
+/* Hover: a small lift, only on devices that really hover; nothing essential depends on it. */
+@media (hover: hover) and (pointer: fine) {
+  .pc-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--pc-shadow-hover);
+  }
+}
+
+.pc-card:focus-visible {
+  outline: 2px solid var(--pc-price);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-card {
+    transition: none;
+  }
+  .pc-card:hover {
+    transform: none;
+  }
+}

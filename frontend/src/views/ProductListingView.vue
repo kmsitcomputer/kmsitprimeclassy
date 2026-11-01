@@ -178,14 +178,14 @@ onMounted(async () => {
       </aside>
 
       <div>
-        <div v-if="loading" class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div v-if="loading" class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3.5 xl:grid-cols-4 xl:gap-4">
           <div v-for="i in 9" :key="i" class="aspect-[3/4.2] animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
         </div>
         <p v-else-if="!products.length" class="rounded-xl bg-stone-100 p-8 text-center text-sm text-stone-500 dark:bg-stone-900">
           {{ t('productList.noResults') }}
         </p>
         <template v-else>
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3.5 xl:grid-cols-4 xl:gap-4">
             <ProductCard v-for="product in products" :key="product.id" :product="product" />
           </div>
 

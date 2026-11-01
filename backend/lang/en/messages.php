@@ -98,6 +98,7 @@ return [
         'reorder_saved' => 'Block order saved successfully.',
         'unknown_type' => 'Unknown block type ":type".',
         'type_rejects_image' => 'Block type ":type" does not accept an image.',
+        'slide_image_required' => 'Every slide needs a desktop image.',
         'article_deleted' => 'Article deleted successfully.',
         'page_deleted' => 'Page deleted successfully.',
     ],

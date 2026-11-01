@@ -77,7 +77,7 @@ class TransferOwnershipAssignmentConcurrencyTest extends TestCase
             }
             // Assignment itself always succeeds — it never depends on transfer state.
             $this->assertSame($sub->id, $ownerId);
-            fwrite(STDOUT, 'TRANSFER_OWNERSHIP_RACE '.json_encode(['iteration' => $iteration, 'a' => $report['a']['outcome'], 'b' => $report['b']['outcome'], 'transfer_status' => $transferStatus]).PHP_EOL);
+            fwrite(STDOUT, 'TRANSFER_OWNERSHIP_RACE '.json_encode(['startup' => $report['startup'], 'iteration' => $iteration, 'a' => $report['a']['outcome'], 'b' => $report['b']['outcome'], 'transfer_status' => $transferStatus]).PHP_EOL);
         }
     }
 }

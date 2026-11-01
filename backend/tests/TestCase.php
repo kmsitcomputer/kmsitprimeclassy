@@ -4,19 +4,27 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Tests\Support\TestDatabaseGuard;
+use Tests\Support\TestRunLock;
+use Tests\Support\TestRunReport;
 
 abstract class TestCase extends BaseTestCase
 {
+    private float $reportStartedAt = 0.0;
+
     public function createApplication()
     {
         $app = parent::createApplication();
         TestDatabaseGuard::assertApplicationSafe($app);
+
+        // One runner per test database: refuse (fail-fast) before any schema work if another owns it.
+        TestRunLock::acquireForApplication($app);
 
         return $app;
     }
 
     protected function setUp(): void
     {
+        $this->reportStartedAt = microtime(true);
         parent::setUp();
 
         // The API uses Sanctum's SPA cookie-session mode (see bootstrap/app.php),
@@ -28,6 +36,12 @@ abstract class TestCase extends BaseTestCase
 
         // New payment proofs are stored on the PRIVATE ('local') disk; never write test uploads into the real storage.
         \Illuminate\Support\Facades\Storage::fake('local');
+    }
+
+    protected function tearDown(): void
+    {
+        parent::tearDown();
+        TestRunReport::testFinished(static::class, microtime(true) - $this->reportStartedAt);
     }
 
     /**

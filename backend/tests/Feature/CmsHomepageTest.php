@@ -171,6 +171,119 @@ class CmsHomepageTest extends TestCase
         ])->assertStatus(422)->assertJsonValidationErrors('content.platforms.tokopedia.url');
     }
 
+    public function test_platform_flags_sent_as_form_strings_are_accepted_on_create_update_and_reload(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        // Multipart FormData serialises booleans as the strings "true"/"false".
+        $id = $this->actingAs($superAdmin)->post('/api/v1/cms/homepage-blocks', [
+            'type' => 'social_media',
+            'content' => ['layout' => 'cards', 'platforms' => [
+                'instagram' => ['enabled' => 'true', 'url' => 'https://www.instagram.com/primeclassy'],
+                'tiktok' => ['enabled' => 'false', 'url' => 'https://vt.tiktok.com/abc'],
+                'facebook' => ['enabled' => '1', 'url' => 'https://facebook.com'],
+            ]],
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data.id');
+
+        $platforms = CmsHomepageBlock::findOrFail($id)->content['platforms'];
+        $this->assertTrue($platforms['instagram']['enabled']);
+        $this->assertFalse($platforms['tiktok']['enabled']);
+        $this->assertTrue($platforms['facebook']['enabled']);
+        $this->assertSame('https://facebook.com', $platforms['facebook']['url']);
+
+        $this->actingAs($superAdmin)->post("/api/v1/cms/homepage-blocks/{$id}", [
+            '_method' => 'PATCH',
+            'content' => ['platforms' => [
+                'instagram' => ['enabled' => 'false', 'url' => 'https://www.instagram.com/primeclassy'],
+                'tiktok' => ['enabled' => 'true', 'url' => 'https://www.tiktok.com/@primeclassy'],
+                'facebook' => ['enabled' => '0', 'url' => 'https://m.facebook.com/primeclassy'],
+            ]],
+        ], ['Accept' => 'application/json'])->assertOk();
+
+        $platforms = CmsHomepageBlock::findOrFail($id)->content['platforms'];
+        $this->assertFalse($platforms['instagram']['enabled']);
+        $this->assertTrue($platforms['tiktok']['enabled']);
+        $public = $this->getJson('/api/v1/homepage')->json('data.0.content.platforms');
+        $this->assertTrue($public['tiktok']['enabled']);
+        $this->assertFalse($public['instagram']['enabled']);
+
+        $mp = $this->actingAs($superAdmin)->post('/api/v1/cms/homepage-blocks', [
+            'type' => 'marketplace_links',
+            'content' => ['layout' => 'cards', 'platforms' => [
+                'tokopedia' => ['enabled' => 'true', 'url' => 'https://www.tokopedia.com/primeclassy?source=a&x=1'],
+                'shopee' => ['enabled' => 'false', 'url' => 'https://shopee.co.id/primeclassy'],
+            ]],
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data.id');
+        $this->assertSame(
+            'https://www.tokopedia.com/primeclassy?source=a&x=1',
+            CmsHomepageBlock::findOrFail($mp)->content['platforms']['tokopedia']['url'],
+        );
+    }
+
+    public function test_platform_validation_still_rejects_bad_flags_and_unsafe_urls(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $post = fn (array $platforms) => $this->actingAs($superAdmin)->postJson('/api/v1/cms/homepage-blocks', [
+            'type' => 'social_media', 'content' => ['layout' => 'cards', 'platforms' => $platforms],
+        ]);
+        $ok = ['enabled' => false, 'url' => null];
+
+        $post(['instagram' => ['enabled' => 'maybe', 'url' => null], 'tiktok' => $ok, 'facebook' => $ok])
+            ->assertStatus(422)->assertJsonValidationErrors('content.platforms.instagram.enabled');
+        foreach (['javascript:alert(1)', 'data:text/html,x', 'http://instagram.com/x', 'https://instagram.com.evil.test/x', 'https://evilinstagram.com/x'] as $bad) {
+            $post(['instagram' => ['enabled' => true, 'url' => $bad], 'tiktok' => $ok, 'facebook' => $ok])
+                ->assertStatus(422)->assertJsonValidationErrors('content.platforms.instagram.url');
+        }
+    }
+
+    public function test_public_category_block_follows_cms_id_order_and_skips_inactive_or_missing(): void
+    {
+        $ids = [];
+        foreach (['Cookies', 'Cake', 'Hampers', 'Lainnya', 'Choco'] as $name) {
+            $ids[] = ProductCategory::create(['name' => $name, 'slug' => strtolower($name).'-'.uniqid(), 'is_active' => true])->id;
+        }
+        [$cookies, $cake, $hampers, $lainnya, $choco] = $ids;
+        $block = CmsHomepageBlock::create(['type' => 'category', 'content' => ['category_ids' => [$cookies, $choco, $cake, $lainnya, $hampers]], 'sort_order' => 0, 'is_active' => true]);
+        $names = fn () => collect($this->getJson('/api/v1/homepage')->json('data.0.content.categories'))->pluck('name')->all();
+
+        $this->assertSame(['Cookies', 'Choco', 'Cake', 'Lainnya', 'Hampers'], $names());
+
+        $block->update(['content' => ['category_ids' => [$hampers, $cookies, $choco, $cake, $lainnya]]]);
+        $this->assertSame(['Hampers', 'Cookies', 'Choco', 'Cake', 'Lainnya'], $names());
+
+        ProductCategory::whereKey($choco)->update(['is_active' => false]);
+        $block->update(['content' => ['category_ids' => [$cookies, $choco, $cake, 99999, $cake, $hampers]]]);
+        $this->assertSame(['Cookies', 'Cake', 'Hampers'], $names());
+    }
+
+    public function test_admin_category_order_round_trips_through_save_reload_and_public_homepage(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $ids = [];
+        foreach (['Cookies', 'Cake', 'Hampers', 'Lainnya', 'Choco'] as $name) {
+            $ids[$name] = ProductCategory::create(['name' => $name, 'slug' => strtolower($name).'-'.uniqid(), 'is_active' => true])->id;
+        }
+        $order = [$ids['Cookies'], $ids['Choco'], $ids['Cake'], $ids['Lainnya'], $ids['Hampers']];
+
+        // Multipart form fields, as the admin form submits them.
+        $blockId = $this->actingAs($superAdmin)->post('/api/v1/cms/homepage-blocks', [
+            'type' => 'category', 'content' => ['category_ids' => array_map('strval', $order)],
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data.id');
+
+        $this->assertSame($order, $this->getJson("/api/v1/cms/homepage-blocks")->json('data.0.content.category_ids'));
+        $public = fn () => collect($this->getJson('/api/v1/homepage')->json('data.0.content.categories'))->pluck('id')->all();
+        $this->assertSame($order, $public());
+        $this->assertSame($order, $public()); // refresh
+
+        $alt = [$ids['Hampers'], $ids['Cookies'], $ids['Choco'], $ids['Cake'], $ids['Lainnya']];
+        $this->actingAs($superAdmin)->post("/api/v1/cms/homepage-blocks/{$blockId}", [
+            '_method' => 'PATCH', 'content' => ['category_ids' => array_map('strval', $alt)],
+        ], ['Accept' => 'application/json'])->assertOk();
+
+        $this->assertSame($alt, $this->getJson('/api/v1/cms/homepage-blocks')->json('data.0.content.category_ids'));
+        $this->assertSame($alt, $public());
+    }
+
     public function test_custom_block_html_is_sanitized_before_storage(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

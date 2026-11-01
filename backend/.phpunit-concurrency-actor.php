@@ -132,6 +132,21 @@ function actorSignalReady(string $path, string $contents): void
     fwrite(STDERR, sprintf("READINESS WRITE FAILED: %s (path=%s)\n", substr($lastError, 0, 300), $path));
     exit(4);
 }
+
+/**
+ * Boot breadcrumb on STDERR. If the parent times out waiting for readiness, its diagnostics include this
+ * stream, so a stalled actor shows how far it got (nothing at all = the PHP process never ran the script;
+ * the last phase = where it stalled). Cheap, no business effect.
+ */
+function actorBreadcrumb(string $phase): void
+{
+    static $bootStart = null;
+    $bootStart ??= (float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true));
+    @fwrite(STDERR, sprintf("[actor-boot] pid=%d phase=%s since_process_start=%.3fs
+", getmypid(), $phase, microtime(true) - $bootStart));
+}
+
+actorBreadcrumb('script-entered');
 $options = getopt('', $longOptions);
 
 if (! isset($options['role'], $options['runtime-dir'])) {
@@ -158,9 +173,11 @@ if (! file_exists($autoload)) {
 }
 
 require $autoload;
+actorBreadcrumb('autoload-done');
 
 $app = require __DIR__.'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
+actorBreadcrumb('kernel-bootstrapped');
 
 // Independent fail-closed guard (does not rely on ConcurrencyHarness): runs
 // before the first query or model/service call. Exact equality only.
@@ -174,6 +191,7 @@ if (app()->environment() !== 'testing'
 }
 
 $connectionId = DB::selectOne('SELECT CONNECTION_ID() AS connection_id')->connection_id;
+actorBreadcrumb('db-connected');
 
 if (str_starts_with($role, 'order-race-')) {
     $locked = (string) $options['order-race-locked'];

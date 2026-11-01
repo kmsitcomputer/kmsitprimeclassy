@@ -253,10 +253,10 @@ function goToLoginToBuy() {
         <h2 class="mb-3 font-display text-lg font-semibold text-stone-800 dark:text-stone-100">
           {{ t('product.relatedProducts') }}
         </h2>
-        <div v-if="relatedLoading" class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        <div v-if="relatedLoading" class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3.5 lg:grid-cols-4 lg:gap-4">
           <div v-for="i in 4" :key="i" class="aspect-[3/4.2] animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
         </div>
-        <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        <div v-else class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3.5 lg:grid-cols-4 lg:gap-4">
           <ProductCard v-for="related in relatedProducts" :key="related.id" :product="related" />
         </div>
       </div>

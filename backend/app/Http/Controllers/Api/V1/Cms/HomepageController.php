@@ -59,6 +59,10 @@ class HomepageController extends Controller
         }
 
         return match ($block->type) {
+            HomepageBlockTypes::BANNER_SLIDER => [
+                ...$content,
+                'slides' => HomepageBlockTypes::resolveSlides($content['slides'] ?? [], false),
+            ],
             HomepageBlockTypes::CATEGORY => [
                 ...$content,
                 'categories' => ProductCategory::query()
@@ -97,7 +101,11 @@ class HomepageController extends Controller
 
     private function resolveProducts(array $content): Collection
     {
-        $query = Product::query()->where('status', 'active')->with(['images' => fn ($q) => $q->where('is_primary', true)]);
+        $query = Product::query()->where('status', 'active')->with([
+            'images' => fn ($q) => $q->where('is_primary', true),
+            // Same eligibility as the public catalog's starting price (ProductController): active variations only.
+            'variations' => fn ($q) => $q->where('is_active', true),
+        ]);
 
         if (! empty($content['product_ids'])) {
             $query->whereIn('id', $content['product_ids']);
@@ -111,6 +119,9 @@ class HomepageController extends Controller
             'slug' => $product->slug,
             'has_variations' => $product->has_variations,
             'base_price' => $product->base_price,
+            // "mulai Rp…": a variation product has no base_price, its price is the cheapest ACTIVE variation
+            // (null when it has none, so the card shows no amount instead of a made-up one).
+            'starting_price' => $product->has_variations ? $product->variations->min('price') : $product->base_price,
             'image_url' => $product->images->first()
                 ? Storage::disk('public')->url($product->images->first()->path)
                 : null,

@@ -39,7 +39,8 @@ onMounted(async () => {
       </RouterLink>
     </div>
 
-    <div v-else class="space-y-8">
+    <!-- One source of block spacing (blocks add no outer margin/padding): 20 / 28 / 36 px. Flex gap, not space-y, so a fixed (floating) block never adds a gap. The extra mobile bottom padding keeps the last block clear of the floating WhatsApp button. -->
+    <div v-else class="flex flex-col gap-5 pb-16 sm:gap-7 sm:pb-0 lg:gap-9">
       <HomepageBlockRenderer v-for="block in blocks" :key="block.id" :block="block" />
     </div>
   </ShopLayout>

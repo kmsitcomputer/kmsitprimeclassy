@@ -29,6 +29,9 @@ class MigrationVerificationTest extends TestCase
 {
     use RestoresIsolatedTestDatabase;
 
+    /** Explicit DDL contract test: always start from, and leave behind, a freshly migrated schema. */
+    protected bool $isolatedSchemaAlwaysRebuild = true;
+
     /** Earliest Package B migration; everything at or after it is in the rollback span. */
     private const FIRST_ROLLBACK_BOUNDARY = '2026_10_01_100000_add_self_delivery_to_shipments_table';
 

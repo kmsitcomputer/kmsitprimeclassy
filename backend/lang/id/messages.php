@@ -109,6 +109,7 @@ return [
         'reorder_saved' => 'Urutan block berhasil disimpan.',
         'unknown_type' => 'Tipe block ":type" tidak dikenal.',
         'type_rejects_image' => 'Tipe block ":type" tidak menerima gambar.',
+        'slide_image_required' => 'Setiap slide wajib memiliki gambar desktop.',
         'article_deleted' => 'Artikel berhasil dihapus.',
         'page_deleted' => 'Halaman berhasil dihapus.',
     ],

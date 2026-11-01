@@ -23,6 +23,21 @@ export interface HomepageContentProduct {
   image_url?: string
   has_variations?: boolean
   base_price?: number
+  /** "mulai Rp…": base price of a simple product, cheapest ACTIVE variation otherwise; null = no valid price. */
+  starting_price?: string | number | null
+}
+
+export interface HomepageSlide {
+  key: string
+  image_url?: string | null
+  mobile_image_url?: string | null
+  alt?: string | null
+  title?: string | null
+  description?: string | null
+  button_label?: string | null
+  button_url?: string | null
+  overlay?: 'none' | 'light' | 'dark' | null
+  content_position?: 'left' | 'center' | 'right' | null
 }
 
 export interface HomepageBlockContent {
@@ -47,8 +62,22 @@ export interface HomepageBlockContent {
   categories?: HomepageContentCategory[]
   products?: HomepageContentProduct[]
 
+  // Hero / CTA presentation options (all optional; older blocks lack them)
+  image_fit?: 'cover' | 'contain'
+  image_position?: 'center' | 'top' | 'bottom' | 'left' | 'right'
+  overlay?: 'none' | 'light' | 'dark'
+  align?: 'left' | 'center'
+  theme?: 'brand' | 'dark' | 'light' | 'sand'
+
+  // Banner slider (`banner_slider`). Flags may arrive as 1/0/"1"/"0" or booleans.
+  autoplay?: boolean | number | string
+  interval_seconds?: number | string
+  show_arrows?: boolean | number | string
+  show_dots?: boolean | number | string
+  slides?: HomepageSlide[]
+
   // Native CMS blocks: social media, WhatsApp, marketplace
-  layout?: 'cards' | 'compact'
+  layout?: 'cards' | 'compact' | 'contained' | 'wide'
   mode?: 'card' | 'floating'
   phone?: string
   message?: string

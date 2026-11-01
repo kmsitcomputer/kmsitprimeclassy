@@ -57,6 +57,7 @@ Review the diff against the stated baseline, not just the last commit. At least 
 - Every behaviour change gets the smallest meaningful regression test. Use real-database tests for persistence, locking, policy, migration and concurrency behaviour — do not replace a DB/lock defect with mocks.
 - Run focused tests while iterating, then the **full backend suite** (`cd backend && php artisan test`, 0 failures) before review. Frontend changes: `npm run type-check` and `npm run build-only`. Then `git diff --check`.
 - Distinguish pre-existing noise (e.g. the CLI "OPcache already loaded" / `mbstring` warnings) from new failures. Record exact commands and results in the checkpoint.
+- Test harness, lock, Owner Full-Test procedure and the agent testing policy (scoped tests only; Full Test is Owner-exclusive; never two runners on one database) are in [docs/TESTING.md](docs/TESTING.md).
 - Tests run only against a database whose name contains `_test`/`_testing` (`primeclassy_testing`); the bootstrap refuses anything else. Never point tests at DEV or production data.
 
 ## 8. Context compaction / checkpoint protocol

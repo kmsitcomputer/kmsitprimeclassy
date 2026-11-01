@@ -22,6 +22,16 @@ class ConcurrencyHarness
 
     protected string $actorBResult;
 
+    /**
+     * Per-actor startup evidence for runServiceRace: spawn->ready seconds and how many launches it took.
+     *
+     * @var array<string, array{ready_seconds: float, attempts: int, first_attempt_stall: ?string}>
+     */
+    protected array $actorStartup = [];
+
+    /** Readiness budget per launch for service-race actors (seconds); only the harness self-test shortens it. */
+    protected int $readyTimeoutSeconds = 15;
+
     public function __construct()
     {
         $this->root = dirname(__DIR__, 2);
@@ -333,12 +343,12 @@ class ConcurrencyHarness
         $paths = [$readyA, $readyB, $release, $resultA, $resultB];
         $this->cleanupFiles($paths);
 
-        $aProcess = $this->spawnServiceRaceActor('a', $sideA, $readyA, $readyB, $release, $resultA, $resultB);
+        $this->actorStartup = [];
+        $aProcess = null;
 
         try {
-            $this->waitForActorSignal($readyA, 15, $aProcess, 'sr-a');
-            $bProcess = $this->spawnServiceRaceActor('b', $sideB, $readyA, $readyB, $release, $resultA, $resultB);
-            $this->waitForActorSignal($readyB, 15, $bProcess, 'sr-b');
+            $aProcess = $this->startServiceRaceActorUntilReady('a', $sideA, $readyA, $readyB, $release, $resultA, $resultB, $readyA);
+            $bProcess = $this->startServiceRaceActorUntilReady('b', $sideB, $readyA, $readyB, $release, $resultA, $resultB, $readyB);
             $this->writeFile($release, 'go');
 
             $aProcess->wait();
@@ -360,15 +370,100 @@ class ConcurrencyHarness
                 'b' => $bResult,
                 'different_connections' => true,
                 'true_overlap' => true,
+                'startup' => $this->actorStartup,
             ];
         } finally {
             if (isset($bProcess)) {
                 $this->cleanupProcess($bProcess);
             }
-            $this->cleanupProcess($aProcess);
+            if ($aProcess !== null) {
+                $this->cleanupProcess($aProcess);
+            }
             $this->cleanupFiles($paths);
             $this->cleanupBarrierDir();
         }
+    }
+
+    /**
+     * Launch one service-race actor and wait for its readiness signal, with a single bounded respawn.
+     *
+     * The ready file is written BEFORE the actor touches any business state or opens a transaction, so an
+     * actor that is still alive but has not signalled has done nothing that matters: it is stopped and
+     * launched once more, and the first attempt's diagnostics (including the [actor-boot] breadcrumbs) are
+     * kept. A crashed actor (process exited) is never retried, and a second stall fails the test with both
+     * diagnostics. The race itself is unchanged: the release barrier is only written after BOTH actors are
+     * ready, so the operations still start together on separate connections.
+     */
+    /** Seam over Symfony's stop(): one place to stop an actor (overridden only by the harness self-test). */
+    protected function stopActorProcess(Process $process): void
+    {
+        $this->cleanupProcess($process);
+    }
+
+    /**
+     * Stop an actor and PROVE it is gone. Symfony's stop() swallows kill failures, so the state is re-read
+     * for up to 5s; a process that is still running afterwards aborts the run instead of being replaced.
+     */
+    protected function terminateActorVerified(Process $process, string $label): void
+    {
+        $this->stopActorProcess($process);
+
+        $deadline = microtime(true) + 5;
+        while ($process->isRunning() && microtime(true) < $deadline) {
+            usleep(50000);
+        }
+
+        if ($process->isRunning()) {
+            throw new \RuntimeException(sprintf('ACTOR TERMINATION NOT VERIFIED: %s (pid %s) is still running; refusing to launch a replacement.', $label, var_export($process->getPid(), true)));
+        }
+    }
+
+    protected function startServiceRaceActorUntilReady(string $side, array $config, string $readyA, string $readyB, string $release, string $resultA, string $resultB, string $readyPath): Process
+    {
+        $label = 'sr-'.$side;
+        $firstStall = null;
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $spawnedAt = microtime(true);
+            $process = $this->spawnServiceRaceActor($side, $config, $readyA, $readyB, $release, $resultA, $resultB);
+
+            try {
+                $this->waitForActorSignal($readyPath, $this->readyTimeoutSeconds, $process, $label);
+                $this->actorStartup[$label] = [
+                    'ready_seconds' => round(microtime(true) - $spawnedAt, 3),
+                    'attempts' => $attempt,
+                    'first_attempt_stall' => $firstStall,
+                ];
+
+                return $process;
+            } catch (\RuntimeException $stall) {
+                if ($process->isRunning() && file_exists($readyPath)) {
+                    // Signalled in the instant after the deadline: it is ready, do not fail or replace it.
+                    $this->actorStartup[$label] = [
+                        'ready_seconds' => round(microtime(true) - $spawnedAt, 3),
+                        'attempts' => $attempt,
+                        'first_attempt_stall' => $firstStall,
+                    ];
+
+                    return $process;
+                }
+                $stalledAlive = $process->isRunning();
+                if ($attempt === 2 || ! $stalledAlive) {
+                    $this->stopActorProcess($process);
+                    throw new \RuntimeException($firstStall === null
+                        ? $stall->getMessage()
+                        : $stall->getMessage()."\n  FIRST ATTEMPT ALSO STALLED:\n  ".$firstStall);
+                }
+                $firstStall = $stall->getMessage();
+                // Fail closed: the replacement may only start once the old actor is PROVEN dead, so two actors
+                // of one role can never overlap and a late write from the old one cannot hit the new attempt.
+                $this->terminateActorVerified($process, $label);
+                // Only now (nothing can write any more) scrub this side's signals so attempt 2 starts clean.
+                $this->cleanupFiles([$readyPath, $side === 'a' ? $resultA : $resultB]);
+            }
+        }
+
+        throw new \LogicException('unreachable');
     }
 
     public function runDispatchRace(array $sideA, array $sideB): array
@@ -533,6 +628,8 @@ class ConcurrencyHarness
 
     protected function ensureRuntimeDir(): void
     {
+        // THR-04: every actor batch starts here — refuse it unless this runner still owns the test database.
+        TestRunLock::assertCurrentOwned('start a concurrency actor batch');
         $dir = $this->root.'/storage/framework/testing/concurrency';
         if (! is_dir($dir) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
             throw new \RuntimeException('Unable to create concurrency runtime directory.');
@@ -544,6 +641,7 @@ class ConcurrencyHarness
 
     protected function spawnActor(string $name): Process
     {
+        TestRunLock::assertCurrentOwned('launch concurrency actor '.$name);
         $script = $this->root.'/.phpunit-concurrency-actor.php';
         $process = new Process([
             PHP_BINARY,
@@ -662,6 +760,7 @@ class ConcurrencyHarness
 
     protected function startProcess(array $arguments): Process
     {
+        TestRunLock::assertCurrentOwned('launch a concurrency actor');
         $process = new Process(array_merge([PHP_BINARY, $this->root.'/.phpunit-concurrency-actor.php'], $arguments), $this->root, $this->actorEnvironment(), null, 30);
         $process->start();
 
@@ -776,6 +875,8 @@ class ConcurrencyHarness
 
     protected function readJson(string $path): array
     {
+        // Actors have finished (or failed); prove ownership before their results drive further work.
+        TestRunLock::assertCurrentOwned('use concurrency actor results');
         if (! file_exists($path)) {
             return [];
         }

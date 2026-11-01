@@ -14,6 +14,17 @@ class UpdateHomepageBlockRequest extends BaseFormRequest
         return true; // Gate::allows('manage-system-config') checked explicitly in the controller.
     }
 
+    protected function prepareForValidation(): void
+    {
+        /** @var CmsHomepageBlock $block */
+        $block = $this->route('block');
+        if (! $this->has('content')) {
+            return;
+        }
+
+        $this->merge(['content' => HomepageBlockTypes::normalizeContent($block->type, $this->input('content'))]);
+    }
+
     public function rules(): array
     {
         /** @var CmsHomepageBlock $block */
@@ -34,7 +45,7 @@ class UpdateHomepageBlockRequest extends BaseFormRequest
             'is_active' => ['sometimes', 'boolean'],
             'starts_at' => ['nullable', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
-        ], $contentRules);
+        ], $contentRules, HomepageBlockTypes::fileRules($block->type));
     }
 
     public function metaData(): array

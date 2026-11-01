@@ -98,6 +98,7 @@ return [
         'reorder_saved' => 'تم حفظ ترتيب الكتل بنجاح.',
         'unknown_type' => 'نوع الكتلة ":type" غير معروف.',
         'type_rejects_image' => 'نوع الكتلة ":type" لا يقبل صورة.',
+        'slide_image_required' => 'يجب أن تحتوي كل شريحة على صورة لسطح المكتب.',
         'article_deleted' => 'تم حذف المقال بنجاح.',
         'page_deleted' => 'تم حذف الصفحة بنجاح.',
     ],

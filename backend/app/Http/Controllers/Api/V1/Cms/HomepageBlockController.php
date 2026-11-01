@@ -40,6 +40,7 @@ class HomepageBlockController extends Controller
             $request->input('content', []),
             $request->metaData(),
             $request->file('image'),
+            slideImages: (array) $request->file('slide_images', []),
         );
 
         Log::info('cms.homepage_block.created', ['block_id' => $block->id, 'type' => $block->type, 'by' => $request->user()->id]);
@@ -57,6 +58,7 @@ class HomepageBlockController extends Controller
             $request->metaData(),
             $request->file('image'),
             $request->boolean('remove_image'),
+            slideImages: (array) $request->file('slide_images', []),
         );
 
         Log::info('cms.homepage_block.updated', ['block_id' => $block->id, 'by' => $request->user()->id]);

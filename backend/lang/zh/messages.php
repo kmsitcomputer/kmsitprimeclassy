@@ -98,6 +98,7 @@ return [
         'reorder_saved' => '区块顺序保存成功。',
         'unknown_type' => '未知的区块类型":type"。',
         'type_rejects_image' => '区块类型":type"不支持图片。',
+        'slide_image_required' => '每张幻灯片都必须有桌面图片。',
         'article_deleted' => '文章删除成功。',
         'page_deleted' => '页面删除成功。',
     ],
