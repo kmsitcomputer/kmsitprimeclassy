@@ -94,6 +94,7 @@ Harness self-tests: `tests/Unit/TestRunLockTest.php` (lock, loss, boundaries), `
 
 * Agents run **scoped tests only** (a class or `--filter`); never the full suite, never under another name (full regression, comprehensive, exhaustive, all tests).
 * The Owner is the only party that runs Full Test.
+* Full Test is **not** a review or release gate (Owner decision, 2026-11-02). The required evidence for review and release is the scoped tests covering every changed area (plus frontend type-check/build); the Owner may run Full Test at their discretion.
 * No concurrent runner on the same database. Before any test: check no runner is active (preflight command above); never stop processes that are not your own.
 * Never reset/migrate/wipe `primeclassy_dev` or production; destructive schema operations happen only on `primeclassy_testing`, by the harness.
 * Every PASS claim carries evidence: command, counts, duration, database.

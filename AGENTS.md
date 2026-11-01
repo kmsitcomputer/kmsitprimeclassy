@@ -55,7 +55,8 @@ Review the diff against the stated baseline, not just the last commit. At least 
 ## 7. Testing requirements
 
 - Every behaviour change gets the smallest meaningful regression test. Use real-database tests for persistence, locking, policy, migration and concurrency behaviour — do not replace a DB/lock defect with mocks.
-- Run focused tests while iterating, then the **full backend suite** (`cd backend && php artisan test`, 0 failures) before review. Frontend changes: `npm run type-check` and `npm run build-only`. Then `git diff --check`.
+- Run focused tests while iterating, then the **scoped backend tests for every changed area** (test classes / `--filter`, 0 failures) before review. Frontend changes: `npm run type-check` and `npm run build-only`. Then `git diff --check`.
+- **The full backend suite (Full Test) is not a review or release requirement** (Owner decision, 2026-11-02). The Owner may run it at their discretion; scoped tests covering every changed area are the required evidence.
 - Distinguish pre-existing noise (e.g. the CLI "OPcache already loaded" / `mbstring` warnings) from new failures. Record exact commands and results in the checkpoint.
 - Test harness, lock, Owner Full-Test procedure and the agent testing policy (scoped tests only; Full Test is Owner-exclusive; never two runners on one database) are in [docs/TESTING.md](docs/TESTING.md).
 - Tests run only against a database whose name contains `_test`/`_testing` (`primeclassy_testing`); the bootstrap refuses anything else. Never point tests at DEV or production data.
@@ -99,9 +100,9 @@ Packages A, B and C are implemented; A and B are closed in production. Their inv
 
 ## 13. Independent review and remediation workflow
 
-1. The implementer finishes the package, runs the full validation and records the baseline and HEAD.
+1. The implementer finishes the package, runs the scoped validation (focused tests for every changed area, frontend type-check/build) and records the baseline and HEAD.
 2. An independent reviewer reviews diff-first and reports evidence-backed findings (BLOCKER / MAJOR / MINOR).
-3. The Human assigns findings for one coordinated remediation pass; the remediation agent fixes only those findings, adds regressions, re-runs focused then full suites, commits, and stops.
+3. The Human assigns findings for one coordinated remediation pass; the remediation agent fixes only those findings, adds regressions, re-runs the focused and scoped suites, commits, and stops.
 4. A specialist verifier may re-check the remediation. The reviewer does not review its own remediation.
 5. Manual DEV UAT → Human Stage Gate → only then production preflight, backup, deployment, migration, reconciliation, smoke test.
 
