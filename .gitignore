@@ -35,3 +35,27 @@ deploy/output/
 
 # Local point-in-time recovery material; may contain production database data.
 /recovery/*.sql
+
+# Local design reference (mockdesign spec, tokens, logo reference) — kept on
+# disk as a visual reference only, never app source. See docs/18 §D.
+/design/
+
+# Local scratch artifacts (visual-QA screenshots, one-time deploy bundles and
+# helper scripts, dev logs). Regenerable or one-shot evidence of closed
+# releases; never part of the build. See docs/18 §E.
+/artifacts/
+
+# Local full-test / remediation log copies (Tee-Object output of the Owner's
+# runs). The machine-readable evidence (summary/junit/stats) lives in
+# backend/storage/framework/testing/runs/, ignored by backend/.gitignore.
+/full-test-*.log
+/*-fulltest-*.log
+
+# Local smoketest outputs (e.g. kmsit-routing-smoketest.local.txt).
+/*.local.txt
+
+# Legacy stray lockfile from pnpm experiments — npm is the repository standard
+# (Owner decision G-14, 2026-10-30): the tracked, authoritative lockfile is
+# frontend/package-lock.json. This older untracked file is deliberately kept
+# on disk and never used, tracked or deleted. See docs/18 §D.
+/frontend/pnpm-lock.yaml

@@ -71,5 +71,5 @@ Keterbatasan, gap, dan item yang disetujui-desain-tapi-belum-diimplementasikan, 
 
 - Frontend tidak punya test runner sebagai gerbang; verifikasi = type-check + build + browser manual.
 - Full suite angka terakhir 855/6075/0 — selalu jalankan ulang untuk angka terkini.
-- Repo lokal memuat folder untracked di luar Git (`design/`, `artifacts/`, log Full Test, `pnpm-lock.yaml`, berkas `.bak`, `backend/2048])!`, `backend/holder)`) — bukan bagian dokumentasi kanonis; tidak dihapus/di-stage tanpa instruksi Owner.
-- `docs/PRIMECLASSY-WA-MGMT-KMSIT-OSRM-CHECKPOINT.md` berisi modifikasi Owner belum di-commit — sengaja tidak disentuh reset ini.
+- Artefak lokal telah dibersihkan (2026-11-02); yang tersisa di-disk dan di-ignore: `design/` (referensi lokal), `artifacts/backend-dev*.log` (log server dev aktif), `frontend/pnpm-lock.yaml` (stray G-14), `kmsit-routing-smoketest.local.txt`. Manifest: [18-LOCAL-REPOSITORY-CLEANUP](18-LOCAL-REPOSITORY-CLEANUP.md).
+- `docs/PRIMECLASSY-WA-MGMT-KMSIT-OSRM-CHECKPOINT.md` berisi modifikasi Owner belum di-commit — sengaja tidak disentuh.

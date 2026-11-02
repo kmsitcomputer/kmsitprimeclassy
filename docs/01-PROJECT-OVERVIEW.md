@@ -53,7 +53,7 @@ primeclassy/
                                     # systemd queue worker, template public_html
 ```
 
-Folder lokal lain (untracked, bukan bagian repository Git): `design/` (referensi mockdesign lokal), `artifacts/`, berkas log Full Test. Jangan di-stage dan jangan dihapus tanpa instruksi Owner.
+Folder lokal lain (di-ignore `.gitignore`, bukan bagian repository Git): `design/` (referensi mockdesign lokal), `artifacts/` (log dev aktif), `frontend/pnpm-lock.yaml` (stray legacy G-14), `*.local.txt` (smoketest lokal). Klasifikasi lengkap: [18-LOCAL-REPOSITORY-CLEANUP](18-LOCAL-REPOSITORY-CLEANUP.md).
 
 ## 4. Status implementasi saat ini
 
