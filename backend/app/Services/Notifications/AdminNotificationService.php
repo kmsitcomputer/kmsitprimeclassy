@@ -45,6 +45,32 @@ final class AdminNotificationService
         $this->record($type, $severity, $title, implode(' · ', $parts), $order->agent_id, $order->id, $subjectType, $subjectId, includeSuperAdmins: false);
     }
 
+    /**
+     * Payment proof uploaded: ONLY the given Keuangan accounts (FinanceRecipientResolver). No operator fan-out, so no other
+     * role — Super Admin, Admin, Agen — is ever added. Dedupe per proof file, verification and recipient.
+     *
+     * @param  Collection<int, User>  $users
+     */
+    public function paymentProofUploaded(Order $order, \App\Models\BankTransferVerification $verification, string $proofHash, Collection $users): void
+    {
+        if (! AdminNotification::tableReady()) {
+            return;
+        }
+        $title = 'Bukti Pembayaran Baru';
+        $body = sprintf('Konsumen %s mengunggah bukti pembayaran untuk pesanan %s. Menunggu verifikasi Keuangan.', $order->konsumen?->name ?? 'pelanggan', $order->order_no);
+
+        foreach ($users as $user) {
+            AdminNotification::query()->createOrFirst(
+                ['dedupe_key' => mb_substr("payment.proof:{$verification->id}:{$proofHash}:{$user->id}", 0, 191)],
+                [
+                    'recipient_user_id' => $user->id, 'agent_id' => $order->agent_id, 'type' => 'payment.proof_uploaded',
+                    'severity' => AdminNotification::WARNING, 'title' => $title, 'body' => mb_substr($body, 0, 500),
+                    'order_id' => $order->id, 'subject_type' => 'bank_transfer_verification', 'subject_id' => $verification->id,
+                ],
+            );
+        }
+    }
+
     /** NTF-033: a transactional message could not be delivered (WhatsApp failed/unknown, e-mail failed). */
     public function deliveryFailed(string $channel, string $event, ?int $agentId, ?int $orderId, string $subjectType, int $subjectId, string $status): void
     {

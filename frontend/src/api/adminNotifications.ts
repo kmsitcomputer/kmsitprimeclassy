@@ -24,7 +24,7 @@ export interface AdminNotificationMeta {
   migration_pending?: boolean
 }
 
-export const ADMIN_NOTIFICATION_ROLES = ['super_admin', 'agen', 'admin'] as const
+export const ADMIN_NOTIFICATION_ROLES = ['super_admin', 'agen', 'admin', 'keuangan'] as const
 
 const base = '/notifications/admin'
 

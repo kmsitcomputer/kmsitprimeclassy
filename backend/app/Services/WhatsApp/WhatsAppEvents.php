@@ -43,6 +43,12 @@ final class WhatsAppEvents
     /** A return request finished with EVERY item rejected (ReturnRequest.status -> completed, no approved item). */
     public const RETURN_REJECTED = 'return_rejected';
 
+    /**
+     * A consumer uploaded a payment proof (BankTransferVerification saved and committed). The recipients are the
+     * branch's Keuangan staff ONLY (FinanceRecipientResolver). The upload is not money: the order stays unpaid until verified.
+     */
+    public const PAYMENT_PROOF_UPLOADED = 'payment_proof_uploaded';
+
     /** A refund obligation awaiting manual approval was recorded (RefundObligation created as `pending`). */
     public const REFUND_REQUESTED = 'refund_requested';
 
@@ -172,6 +178,15 @@ final class WhatsAppEvents
                     ."Nomor Pesanan: {nomor_pesanan}\nJumlah Refund: *{jumlah_refund}*\nTanggal Penyelesaian: {tanggal_refund}\nStatus: *SELESAI*\n\n"
                     ."Terima kasih atas kesabaran Anda.".self::FOOTER,
             ],
+            self::PAYMENT_PROOF_UPLOADED => [
+                'label' => 'Bukti pembayaran baru (perlu verifikasi)',
+                'variables' => [...self::ORDER_VARS, 'nama_keuangan', 'nama_pelanggan', 'nominal_klaim', 'waktu_upload', 'link_verifikasi_pembayaran'],
+                'required' => ['nomor_pesanan'],
+                'default' => "*PRIMECLASSY — BUKTI PEMBAYARAN BARU*\n\nHalo {nama_keuangan},\n\nKonsumen telah mengunggah bukti pembayaran baru yang memerlukan pemeriksaan Tim Keuangan.\n\n"
+                    ."Nomor Pesanan: {nomor_pesanan}\nNama Konsumen: {nama_pelanggan}\nTotal Tagihan: {total}\nNominal yang Diklaim: {nominal_klaim}\n"
+                    ."Waktu Upload: {waktu_upload}\nStatus: Menunggu Verifikasi Keuangan\n\nPeriksa bukti pembayaran: {link_verifikasi_pembayaran}\n\n"
+                    ."Unggahan bukti pembayaran bukan konfirmasi bahwa dana telah diterima.\n\n_Pesan otomatis PrimeClassy. Khusus petugas Keuangan yang berwenang._",
+            ],
             self::PAYMENT_FAILED => [
                 'label' => 'Pembayaran belum berhasil',
                 'variables' => [...self::ORDER_VARS, 'jumlah_diajukan', 'alasan_penolakan'],
@@ -246,6 +261,8 @@ final class WhatsAppEvents
             'jumlah_pembayaran_ini' => 'Rp 110.000', 'tanggal_pengiriman' => '30 Oktober 2026', 'tanggal_diterima' => '31 Oktober 2026',
             'tanggal_pembatalan' => '29 Oktober 2026', 'tanggal_refund' => '2 November 2026',
             'nomor_refund' => 'RO-CONTOH-0001', 'jumlah_diajukan' => 'Rp 110.000', 'alasan_penolakan' => 'Nominal transfer tidak sesuai',
+            'nama_keuangan' => 'Petugas Keuangan', 'nominal_klaim' => 'Rp 110.000', 'waktu_upload' => '29 Oktober 2026, 14.30 WIB',
+            'link_verifikasi_pembayaran' => 'https://contoh.primeclassy.test/orders/123',
         ];
     }
 }

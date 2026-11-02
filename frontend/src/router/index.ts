@@ -445,7 +445,7 @@ const router = createRouter({
       path: '/dashboard/notifications',
       name: 'admin-notifications',
       component: () => import('@/views/dashboard/AdminNotificationsView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin'] },
+      meta: { requiresAuth: true, requiresAnyRole: ['super_admin', 'agen', 'admin', 'keuangan'] },
     },
     {
       path: '/dashboard/settings/integrations/whatsapp',

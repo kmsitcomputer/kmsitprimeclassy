@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\Invoice\InvoiceIssuanceService;
 use App\Services\Logging\ActivityLogger;
 use App\Services\Media\MediaService;
+use App\Services\WhatsApp\OrderNotifier;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -216,6 +217,8 @@ class PaymentService
             }
 
             $onBehalf = $submittedBy !== null && $submittedBy->id !== $order->konsumen_id;
+            // Upload identity for notification idempotency: the same bytes re-sent never notify twice.
+            $proofHash = hash_file('sha256', $proof->getRealPath());
             $path = $proof->store(self::PROOF_DIRECTORY, self::PRIVATE_DISK);
             $payload = $current->raw_payload ?? [];
 
@@ -240,6 +243,10 @@ class PaymentService
             );
 
             $order->update(['payment_status' => 'pending_verification']);
+
+            // Notification is deferred to after-commit inside the notifier: a rollback of this transaction notifies nobody.
+            // The payment status above is NOT changed to paid by the upload; only the verification flow does that.
+            app(OrderNotifier::class)->paymentProofUploaded($verification, $order->id, $proofHash);
 
             if ($submittedBy !== null) {
                 ActivityLogger::log($submittedBy->id, $order, 'payment.proof_submitted', null, [

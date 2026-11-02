@@ -12,6 +12,7 @@ use App\Models\Shipment;
 use App\Models\User;
 use App\Models\WhatsAppMessage;
 use App\Services\Notifications\AdminNotificationService;
+use App\Services\Notifications\FinanceRecipientResolver;
 use App\Services\Notifications\TransactionalEmailNotifier;
 use App\Services\Payment\PaymentSummaryService;
 use App\Support\WhatsAppNumber;
@@ -82,6 +83,68 @@ class OrderNotifier
     }
 
     /**
+     * A consumer uploaded a payment proof. Called from PaymentService INSIDE the upload transaction; everything below is
+     * deferred to after-commit, so a rolled-back upload notifies nobody. Recipients: Keuangan of the order's branch only.
+     * The upload never changes the payment status. `$proofHash` (sha256 of the file) is the upload identity: an identical
+     * re-upload of the same file yields the same keys and therefore no duplicate.
+     */
+    public function paymentProofUploaded(BankTransferVerification $verification, int $orderId, string $proofHash): void
+    {
+        $event = WhatsAppEvents::PAYMENT_PROOF_UPLOADED;
+        $vars = fn (Order $order, User $user) => [
+            'nama_keuangan' => $user->name,
+            'nominal_klaim' => self::money($verification->submitted_amount),
+            'waktu_upload' => $verification->submitted_at ? self::dateTime($verification->submitted_at) : null,
+            'link_verifikasi_pembayaran' => self::orderUrl($order),
+        ];
+
+        $this->defer($event, function () use ($event, $verification, $orderId, $proofHash, $vars) {
+            $order = $this->loadOrder($orderId);
+            if (! $order || ! $this->settings->eventEnabledFor($event, $order->agent_id)) {
+                return;
+            }
+            $users = app(FinanceRecipientResolver::class)->for($order);
+            if ($users->isEmpty()) {
+                Log::warning('payment_proof.no_authorized_finance_recipient', ['order_id' => $orderId]);
+
+                return;
+            }
+            foreach ($users as $user) {
+                $base = [
+                    'idempotency_key' => "txn:{$event}:bank_transfer_verification:{$verification->id}:{$proofHash}:u{$user->id}",
+                    'purpose' => WhatsAppMessage::PURPOSE_TRANSACTION, 'event' => $event,
+                    'agent_id' => $order->agent_id, 'order_id' => $order->id,
+                    'subject_type' => 'bank_transfer_verification', 'subject_id' => $verification->id,
+                    'recipient_role' => 'finance', 'recipient_user_id' => $user->id, 'template_class' => 'full',
+                ];
+                $msisdn = WhatsAppNumberProof::msisdnFor($user);
+                if ($msisdn === null) {
+                    $this->delivery->skip($base, 'number_not_verified');
+
+                    continue;
+                }
+                $this->sendTo($base, $order, $event, 'finance', $msisdn, $user, 'full',
+                    fn () => $vars($order, $user), primary: true);
+            }
+        }, $orderId);
+
+        DB::afterCommit(function () use ($verification, $orderId, $proofHash, $vars) {
+            try {
+                $order = $this->loadOrder($orderId);
+                if (! $order) {
+                    return;
+                }
+                $users = app(FinanceRecipientResolver::class)->for($order);
+                app(TransactionalEmailNotifier::class)->dispatchFinance(WhatsAppEvents::PAYMENT_PROOF_UPLOADED, $order, $verification, $proofHash,
+                    $this->data($order), $users, fn (User $u) => $vars($order, $u));
+                app(AdminNotificationService::class)->paymentProofUploaded($order, $verification, $proofHash, $users);
+            } catch (\Throwable $e) {
+                Log::warning('notify.payment_proof.channels_failed', ['order_id' => $orderId, 'error' => GatewayResult::sanitize($e->getMessage())]);
+            }
+        });
+    }
+
+    /**
      * One business fact, every channel. WhatsApp keeps its own gate (gateway ON + event switch); email and the in-app
      * centre have theirs, so switching WhatsApp off never silences email (and vice versa). All deferred to after-commit.
      */
@@ -119,6 +182,14 @@ class OrderNotifier
     private static function money(mixed $amount): string
     {
         return 'Rp '.number_format((float) $amount, 0, ',', '.');
+    }
+
+    /** Local date + time in the application zone (Asia/Jakarta), for upload timestamps. */
+    private static function dateTime(\DateTimeInterface $at): string
+    {
+        $c = \Illuminate\Support\Carbon::instance($at)->setTimezone('Asia/Jakarta');
+
+        return $c->day.' '.self::MONTHS[$c->month].' '.$c->year.', '.$c->format('H:i').' WIB';
     }
 
     /* ---------------------------------------------------------------- internals */

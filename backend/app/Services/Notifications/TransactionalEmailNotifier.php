@@ -3,9 +3,11 @@
 namespace App\Services\Notifications;
 
 use App\Jobs\SendTransactionalEmailJob;
+use App\Models\BankTransferVerification;
 use App\Models\EmailMessage;
 use App\Models\Order;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use App\Services\Mail\SmtpSettings;
 use App\Services\WhatsApp\MessageTemplates;
 use App\Services\WhatsApp\WhatsAppEvents;
@@ -26,6 +28,7 @@ final class TransactionalEmailNotifier
 {
     /** Subject per event (Master Template "Judul Email"). */
     public const SUBJECTS = [
+        WhatsAppEvents::PAYMENT_PROOF_UPLOADED => self::PROOF_SUBJECT,
         WhatsAppEvents::ORDER_CREATED => 'Pesanan {nomor_pesanan} Berhasil Dibuat',
         WhatsAppEvents::PAYMENT_PAID => 'Pesanan {nomor_pesanan} Telah Lunas',
         WhatsAppEvents::PAYMENT_PARTIAL => 'Pembayaran Sebagian Pesanan {nomor_pesanan} Diterima',
@@ -42,6 +45,20 @@ final class TransactionalEmailNotifier
         WhatsAppEvents::REFUND_REJECTED => 'Hasil Peninjauan Refund {nomor_refund}',
         WhatsAppEvents::REFUND_COMPLETED => 'Pengembalian Dana Pesanan {nomor_pesanan} Selesai',
     ];
+
+    /** Payment-proof subject (Master Template §5). */
+    public const PROOF_SUBJECT = '[PrimeClassy] Bukti Pembayaran Baru — Pesanan {nomor_pesanan}';
+
+    /** Payment-proof body (Master Template §5). Plain text; the mailable adds the shared transactional footer. */
+    public const PROOF_BODY = "Halo {nama_keuangan},\n\n"
+        ."Sistem PrimeClassy menerima unggahan bukti pembayaran dari konsumen yang memerlukan pemeriksaan dan verifikasi oleh Tim Keuangan.\n\n"
+        ."Informasi Pesanan\n- Nomor Pesanan: {nomor_pesanan}\n- Nama Konsumen: {nama_pelanggan}\n- Total Tagihan: {total}\n"
+        ."- Nominal yang Diklaim: {nominal_klaim}\n- Waktu Unggah: {waktu_upload}\n- Status: Menunggu Verifikasi Keuangan\n\n"
+        ."Tindakan yang Diperlukan\nSilakan masuk ke dashboard PrimeClassy untuk melihat bukti pembayaran, memeriksa nominal dan identitas transaksi, "
+        ."lalu menyetujui atau menolak melalui fitur verifikasi.\n\n"
+        ."Buka Halaman Verifikasi: {link_verifikasi_pembayaran}\n\n"
+        ."Catatan keamanan: bukti pembayaran yang diunggah belum membuktikan dana sudah diterima. Jangan menyetujui pembayaran sebelum pemeriksaan selesai.\n\n"
+        ."Email otomatis khusus petugas Keuangan. Mohon tidak membalas email ini.";
 
     private const PRECEDENCE = ['admin' => 2, 'creator' => 1];
 
@@ -75,6 +92,45 @@ final class TransactionalEmailNotifier
                 ],
             );
             if ($row->wasRecentlyCreated) {
+                SendTransactionalEmailJob::dispatch($row->id);
+            }
+        }
+    }
+
+    /**
+     * Payment proof uploaded: Keuangan of the order's branch only (the caller passes the resolved list). A Keuangan account
+     * without a verified e-mail gets a ledger row with status `skipped` (`email_not_verified`) and no send.
+     *
+     * @param  array<string, string|null>  $baseVars  order data
+     * @param  Collection<int, User>  $users
+     * @param  \Closure(User): array<string, string|null>  $varsFor  per-recipient variables
+     */
+    public function dispatchFinance(string $event, Order $order, BankTransferVerification $verification, string $proofHash, array $baseVars, Collection $users, \Closure $varsFor): void
+    {
+        if (! EmailMessage::tableReady() || ! isset(self::SUBJECTS[$event]) || ! $this->smtp->reload()->transactionalEnabled()) {
+            return;
+        }
+
+        foreach ($users as $user) {
+            $vars = $baseVars + $varsFor($user);
+            $body = MessageTemplates::render($event, self::PROOF_BODY, $vars);
+            if ($body === null) {
+                continue;
+            }
+            $email = self::verifiedEmail($user);
+            $row = EmailMessage::query()->createOrFirst(
+                ['idempotency_key' => "mail:{$event}:bank_transfer_verification:{$verification->id}:{$proofHash}:{$user->id}"],
+                [
+                    'event' => $event, 'agent_id' => $order->agent_id, 'order_id' => $order->id,
+                    'subject_type' => 'bank_transfer_verification', 'subject_id' => $verification->id,
+                    'recipient_role' => 'finance', 'recipient_user_id' => $user->id,
+                    'recipient_email' => $email ?? '', 'subject' => mb_substr(self::subject($event, $vars), 0, 190),
+                    'body' => $body,
+                    'status' => $email === null ? EmailMessage::SKIPPED : EmailMessage::QUEUED,
+                    'skip_reason' => $email === null ? 'email_not_verified' : null,
+                ],
+            );
+            if ($row->wasRecentlyCreated && $email !== null) {
                 SendTransactionalEmailJob::dispatch($row->id);
             }
         }

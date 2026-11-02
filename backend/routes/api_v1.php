@@ -158,7 +158,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // WhatsApp management for an AGEN's device/events/test numbers. Owner WA-DEC-01..04: the Agen manages its own; an Admin Agen manages
     // its branch Agen; Super Admin only has the global ON/OFF. The target Agen is resolved server-side (WhatsAppScope), never trusted.
     // Operator in-app notification centre (NTF-030/033/034). Rows are per recipient: the controller only reads the caller's own.
-    Route::middleware('role:super_admin,agen,admin')->prefix('/notifications/admin')->group(function () {
+    Route::middleware('role:super_admin,agen,admin,keuangan')->prefix('/notifications/admin')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\V1\AdminNotificationController::class, 'index']);
         Route::get('/unread-count', [\App\Http\Controllers\Api\V1\AdminNotificationController::class, 'unreadCount']);
         Route::post('/read-all', [\App\Http\Controllers\Api\V1\AdminNotificationController::class, 'markAllRead']);
