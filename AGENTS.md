@@ -6,11 +6,12 @@ Operating contract for every AI coding/review agent and every human developer wo
 
 | Doc | Purpose |
 |---|---|
-| [README.md](README.md) | Entry point: stack, layout, setup, commands |
-| [docs/MASTER-SYSTEM.md](docs/MASTER-SYSTEM.md) | Canonical description of the whole system as it exists |
-| [docs/BUSINESS-RULES.md](docs/BUSINESS-RULES.md) | Locked business invariants and the authority matrix |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture, services, locking, idempotency |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | DEV / TEST / PRODUCTION runbook |
+| [README.md](README.md) | Entry point: stack, layout, setup, commands, indeks dokumen kanonis |
+| [docs/01-PROJECT-OVERVIEW.md](docs/01-PROJECT-OVERVIEW.md) | Identitas sistem, stack, struktur repo, status implementasi |
+| [docs/05-BUSINESS-RULES.md](docs/05-BUSINESS-RULES.md) | Locked business invariants and the authority matrix |
+| [docs/02-SYSTEM-ARCHITECTURE.md](docs/02-SYSTEM-ARCHITECTURE.md) | Technical architecture, services, locking, idempotency |
+| [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) | DEV / TEST / PRODUCTION runbook |
+| [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md) | Test harness, lock, agent testing policy |
 
 Historical specs, checkpoints, audits and reports were removed from the working tree on purpose. **Git history is the archive** (`git log -- docs/`). Do not resurrect a historical decision just because an old file said so.
 
@@ -23,7 +24,7 @@ When sources disagree, use this order:
 3. Current source code, migrations, tests and runtime evidence.
 4. Anything in Git history.
 
-**Source reality wins over stale documentation.** If you find the docs wrong, fix the docs in the same change (or flag it) — never "fix" source to match an outdated sentence. If you find source that contradicts a locked business rule in `docs/BUSINESS-RULES.md`, stop and report it instead of silently choosing.
+**Source reality wins over stale documentation.** If you find the docs wrong, fix the docs in the same change (or flag it) — never "fix" source to match an outdated sentence. If you find source that contradicts a locked business rule in `docs/05-BUSINESS-RULES.md`, stop and report it instead of silently choosing.
 
 ## 3. Roles in the workflow
 
@@ -58,7 +59,7 @@ Review the diff against the stated baseline, not just the last commit. At least 
 - Run focused tests while iterating, then the **scoped backend tests for every changed area** (test classes / `--filter`, 0 failures) before review. Frontend changes: `npm run type-check` and `npm run build-only`. Then `git diff --check`.
 - **The full backend suite (Full Test) is not a review or release requirement** (Owner decision, 2026-11-02). The Owner may run it at their discretion; scoped tests covering every changed area are the required evidence.
 - Distinguish pre-existing noise (e.g. the CLI "OPcache already loaded" / `mbstring` warnings) from new failures. Record exact commands and results in the checkpoint.
-- Test harness, lock, Owner Full-Test procedure and the agent testing policy (scoped tests only; Full Test is Owner-exclusive; never two runners on one database) are in [docs/TESTING.md](docs/TESTING.md).
+- Test harness, lock, Owner Full-Test procedure and the agent testing policy (scoped tests only; Full Test is Owner-exclusive; never two runners on one database) are in [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md).
 - Tests run only against a database whose name contains `_test`/`_testing` (`primeclassy_testing`); the bootstrap refuses anything else. Never point tests at DEV or production data.
 
 ## 8. Context compaction / checkpoint protocol
@@ -82,11 +83,11 @@ Production data is authoritative.
 - **Never copy the DEV `.env`, DEV credentials or DEV uploads to production.** Preserve production `.env`, uploads, private credentials, sessions, logs, runtime caches and installed-lock state.
 - **No production mutation (deploy, migrate, cache, data) without explicit Human authorization for that step.** Approval for one step does not carry over to the next.
 - Use dry-runs / whitelists when production holds local/runtime differences. Keep maintenance mode on during incompatible code/schema transition windows. Verify migrations Pending before and Ran after. Reconcile data before bringing the app fully live.
-- **Frontend production invariant — never delete `public_html/laravel.php`.** The single-domain layout routes `/api`, `/sanctum` and `/up` to Laravel through that bridge; a destructive sync silently removes it and the API returns 404 while the frontend still loads (a real production incident). Never run `rsync --delete` against the document root without `--exclude='laravel.php'`. The canonical command is in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+- **Frontend production invariant — never delete `public_html/laravel.php`.** The single-domain layout routes `/api`, `/sanctum` and `/up` to Laravel through that bridge; a destructive sync silently removes it and the API returns 404 while the frontend still loads (a real production incident). Never run `rsync --delete` against the document root without `--exclude='laravel.php'`. The canonical command is in [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md).
 
 ## 11. Concurrency and inventory invariants
 
-Any path touching Agent or Sub inventory must preserve the established lock and source invariants (details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
+Any path touching Agent or Sub inventory must preserve the established lock and source invariants (details in [docs/02-SYSTEM-ARCHITECTURE.md](docs/02-SYSTEM-ARCHITECTURE.md)):
 
 - Sub domain order: `WarehouseSubLocation` parent → Sub `WarehouseStock` targets → Sub reservation rows.
 - Multi-target Agent capacity uses the shared canonical target ordering (`StockService::canonicalReservationTargets`). Do not introduce a second ordering vocabulary.
@@ -96,7 +97,7 @@ Any path touching Agent or Sub inventory must preserve the established lock and 
 
 ## 12. Preserved package invariants
 
-Packages A, B and C are implemented; A and B are closed in production. Their invariants in [docs/BUSINESS-RULES.md](docs/BUSINESS-RULES.md) (10 roles, Sub ownership and stock source, reservation lifecycle, self-delivery, delivery verification, Order-level payment truth, operational vs financial projections, SC-03 Admin-only add-line) must not change without Human business approval.
+Packages A, B and C are implemented; A and B are closed in production. Their invariants in [docs/05-BUSINESS-RULES.md](docs/05-BUSINESS-RULES.md) (11 roles, Sub ownership and stock source, reservation lifecycle, self-delivery, delivery verification, Order-level payment truth, operational vs financial projections, SC-03 Admin-only add-line) must not change without Human business approval.
 
 ## 13. Independent review and remediation workflow
 

@@ -1,86 +1,74 @@
 # Prime Classy Cake & Cookies
 
-Multi-branch (multi-Agent) cake & cookies ordering platform: a **Laravel 11** JSON API plus a separate **Vue 3 / Vite** single-page app. Each Agent (branch) runs its own storefront presence, staff hierarchy, stock, warehouse and delivery operation; one Super Admin oversees the platform; consumers buy from a shared catalog and are attributed to a branch through a referral chain.
+Platform pemesanan kue & cookies **multi-cabang (multi-Agent)**: Laravel 11 JSON API + SPA Vue 3/Vite terpisah. Setiap Agen (cabang) menjalankan storefront, hierarki staf, stok, gudang, dan pengiriman sendiri; satu Super Admin mengawasi platform; konsumen membeli dari katalog bersama dan teratribusi ke cabang melalui rantai referral.
 
-This README is the entry point only. The system is specified in:
+README ini hanya pintu masuk. Sistem dijelaskan dalam **dokumentasi kanonis**:
 
-| Doc | What it holds |
+| Dokumen | Isi |
 |---|---|
-| [docs/MASTER-SYSTEM.md](docs/MASTER-SYSTEM.md) | Canonical description of the whole website (what exists today) |
-| [docs/BUSINESS-RULES.md](docs/BUSINESS-RULES.md) | Locked business invariants, roles and authority matrix |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Services, locking, idempotency, API/frontend structure |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | DEV / TEST / PRODUCTION runbook, deployment and backup |
-| [AGENTS.md](AGENTS.md) | AI / developer governance |
+| [docs/01-PROJECT-OVERVIEW.md](docs/01-PROJECT-OVERVIEW.md) | Identitas, stack, struktur repo, status implementasi |
+| [docs/02-SYSTEM-ARCHITECTURE.md](docs/02-SYSTEM-ARCHITECTURE.md) | Topologi, layanan, locking, idempotency |
+| [docs/03-FEATURE-CATALOG.md](docs/03-FEATURE-CATALOG.md) | Katalog fitur + status (IMPLEMENTED/PARTIAL/…) |
+| [docs/04-ROLES-PERMISSIONS.md](docs/04-ROLES-PERMISSIONS.md) | 11 role, matriks otorisasi, isolasi data Agen |
+| [docs/05-BUSINESS-RULES.md](docs/05-BUSINESS-RULES.md) | Aturan bisnis **terkunci (LOCKED)** — jangan diubah tanpa persetujuan Owner |
+| [docs/06-BUSINESS-WORKFLOWS.md](docs/06-BUSINESS-WORKFLOWS.md) | 20 alur bisnis end-to-end |
+| [docs/07-FRONTEND-GUIDE.md](docs/07-FRONTEND-GUIDE.md) | SPA Vue: routing, halaman, navigasi per role |
+| [docs/08-BACKEND-API.md](docs/08-BACKEND-API.md) | Referensi endpoint `/api/v1` + command + jobs |
+| [docs/09-DATABASE-MODEL.md](docs/09-DATABASE-MODEL.md) | Tabel, kolom kunci, relasi (±100 tabel) |
+| [docs/10-NOTIFICATIONS.md](docs/10-NOTIFICATIONS.md) | Sistem notifikasi WA/Email/In-App (REL005 & REL006) |
+| [docs/11-INTEGRATIONS.md](docs/11-INTEGRATIONS.md) | GOWA, SMTP, ORS/KMSIT, RajaOngkir, Sheets, Google |
+| [docs/12-SECURITY.md](docs/12-SECURITY.md) | Autentikasi, otorisasi, proteksi data, audit |
+| [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) | Runbook DEV/TEST/PRODUCTION + invarian `laravel.php` |
+| [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md) | Harness uji + kebijakan (Full Test = Owner) |
+| [docs/15-KNOWN-LIMITATIONS.md](docs/15-KNOWN-LIMITATIONS.md) | Gap ledger + keterbatasan |
+| [docs/16-TRACEABILITY.md](docs/16-TRACEABILITY.md) | Register keputusan Owner |
+| [AGENTS.md](AGENTS.md) | Kontrak tata kelola AI/developer |
 
-Historical specs, audits and checkpoints live in Git history only.
+Spesifikasi, audit, checkpoint dan laporan historis hanya ada di **Git history** (`git log -- docs/`); laporan reset dokumentasi ini: [docs/17-DOCUMENTATION-RESET-REPORT.md](docs/17-DOCUMENTATION-RESET-REPORT.md).
 
 ## Stack
 
-- **Backend:** PHP 8.2+ (DEV runs 8.3), Laravel 11.56, Laravel Sanctum (SPA cookie sessions), MariaDB 10.11 (DEV and production; MySQL-compatible), HTMLPurifier, PhpSpreadsheet, Google API auth (Sheets export).
-- **Frontend:** Vue 3 (Composition API), Vite 8, TypeScript, Pinia, Vue Router, vue-i18n (id / en / ar / zh), Tailwind CSS 4, CKEditor 5, Axios. Node ^22.18 or ≥24.12.
-- **External services:** OpenRouteService (road-route pricing), RajaOngkir / Komerce V2 (expedition rates), Google Sheets (one-way report export), optional Google Maps (frontend picker).
+- **Backend:** PHP 8.2+ (DEV 8.3), Laravel 11.56, Sanctum (SPA cookie session), MariaDB 10.11, HTMLPurifier, PhpSpreadsheet, Google API (Sheets export).
+- **Frontend:** Vue 3 (Composition API), Vite 8, TypeScript, Pinia, Vue Router, vue-i18n (id/en/ar/zh), Tailwind CSS 4, CKEditor 5, Axios. Node ^22.18 / ≥24.12; package manager **npm**.
+- **Layanan eksternal:** GOWA (WhatsApp), OpenRouteService, KMSIT Routing Server, RajaOngkir/Komerce, Google Sheets, Google OAuth, Nominatim.
 
-## Major modules
-
-Catalog & SKU registry · Referral hierarchy (11 roles) · Checkout & orders · Payment (COD, DP, manual transfer) · Fulfilment & shipments · Delivery proof, self-delivery and Admin delivery verification · Returns & refunds · Commissions · Warehouse (Transit / Factory Plan / Shipping / Sub stock, transfers, handovers, opname, stock requests) · Sales-Kurir-Sub & Sub Locations · Existing-order line addition (SC-03) · Reports & XLSX export · Google Sheets sync · CMS · Installer wizard · Audit log.
-
-## Repository layout
-
-```
-primeclassy/
-├── README.md  AGENTS.md  docs/        # the authoritative documentation set
-├── backend/                           # Laravel 11 API
-│   ├── app/{Http,Models,Policies,Services,Support,Console}
-│   ├── routes/api_v1.php              # entire API surface
-│   ├── database/{migrations,seeders,factories,data/regions}
-│   ├── lang/{id,en,ar,zh}             # backend message catalogs
-│   ├── tests/{Feature,Unit,Support}   # PHPUnit; real-DB + concurrency harness
-│   └── scripts/run-tests-serialized.php
-├── frontend/                          # Vue 3 SPA
-│   └── src/{api,views,components,layouts,stores,router,dashboard,i18n,utils}
-└── deploy/                            # build.sh, DEV nginx/php-fpm helpers, single-domain public_html files
-```
-
-## Local setup
+## Setup lokal
 
 ```bash
 # backend
 cd backend
 composer install
 cp .env.example .env && php artisan key:generate
-# create an empty database + user, set DB_* in .env, then:
-php artisan migrate --seed          # roles, languages, settings, payment methods, shipping providers (no demo users)
-php artisan serve                   # http://localhost:8000
+# buat database kosong + user, set DB_* di .env, lalu:
+php artisan migrate --seed   # roles (11), languages, settings, payment methods, shipping providers — tanpa user demo
+php artisan serve            # http://localhost:8000
 
 # frontend
 cd frontend
 npm install
-cp .env.example .env                # VITE_API_URL (empty = same origin)
-npm run dev                         # http://localhost:5173
+cp .env.example .env         # VITE_API_URL (kosong = same origin)
+npm run dev                  # http://localhost:5173
 ```
 
-Frontend package manager is **npm** (G-14, verified 2026-10-30): `frontend/package.json` has no `packageManager` field, the tracked/authoritative lockfile is `frontend/package-lock.json`, and every documented command runs through npm scripts. The untracked, older `frontend/pnpm-lock.yaml` is a legacy local stray — do not install or upgrade with pnpm, and do not delete the file without an Owner instruction.
+Sanctum butuh `FRONTEND_URLS` (dengan scheme) **dan** `SANCTUM_STATEFUL_DOMAINS` (host:port, tanpa scheme) di `backend/.env`. Super Admin pertama dibuat lewat installer browser (`/setup`; `/install` = landing PWA publik) atau `php artisan tinker` — lihat [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) §5.
 
-A first Super Admin is created by the browser installer (`/setup`) on a fresh install, or via `php artisan tinker` — see [docs/OPERATIONS.md](docs/OPERATIONS.md). (`/install` is the public PWA installation landing page.) Sanctum needs both `FRONTEND_URLS` (with scheme) and `SANCTUM_STATEFUL_DOMAINS` (host:port, no scheme) in `backend/.env`.
-
-## DEV / test commands
+## Perintah utama
 
 ```bash
 cd backend
-php artisan test                                  # full suite (isolated DB primeclassy_testing)
-php artisan test --filter=SomeTest                # focused
-php scripts/run-tests-serialized.php tests/Feature/PermissionMapTest.php   # serialized, lock-protected runner
+php artisan test --filter=NamaTest      # scoped (database primeclassy_testing)
+php scripts/run-tests-serialized.php tests/Feature/NamaTest.php
 cd ../frontend
-npm run type-check                                # vue-tsc
-npm run build-only                                # vite build (npm run build = type-check + build)
+npm run type-check                      # vue-tsc
+npm run build-only                      # vite build
 ```
 
-No automated frontend test suite exists; frontend verification is type-check, build and manual browser checks. Tests require exactly `APP_ENV=testing`, MySQL/MariaDB and database `primeclassy_testing`; all other databases are refused.
+Kebijakan pengujian (scoped test untuk agen; Full Test eksklusif Owner; satu runner per database): [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md).
 
-## Build
+## Build & deployment
 
-`npm run build-only` outputs `frontend/dist/`. `deploy/build.sh` assembles the single-domain production package (SPA + `laravel.php` bridge + `.htaccess` + `config.js` + backend). Production deployment rules, including the `laravel.php` invariant, are in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+`npm run build-only` → `frontend/dist/`; `deploy/build.sh` merakit paket produksi single-domain (SPA + `laravel.php` + `.htaccess` + `config.js` + backend). Aturan deployment produksi (termasuk invarian **`public_html/laravel.php` tidak boleh dihapus**): [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) §7.
 
 ## Status
 
-Package A (Sales-Kurir-Sub + Sub stock) and Package B (fulfilment/delivery lifecycle + authority/reporting) are **production closed**. Package C (SC-03, Admin-only add-line to an existing order) is implemented, independently reviewed, remediated and finally audited on branch `feat/package-c-sc03`; DEV UAT is a Human PASS and the DEV Stage Gate is CLOSED/APPROVED. **Production deployment and production migrations are PENDING.** See [docs/MASTER-SYSTEM.md §41](docs/MASTER-SYSTEM.md#41-current-roadmap-state).
+Baseline produksi/main: REL006 (`f8445e1`). Package A & B tutup di produksi; Package C diimplementasi (DEV stage gate CLOSED, deployment produksi tertunda). Rincian status per fitur: [docs/03-FEATURE-CATALOG.md](docs/03-FEATURE-CATALOG.md).
