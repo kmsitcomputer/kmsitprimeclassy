@@ -221,6 +221,26 @@ Before warehouse/order writes resume: put the site in maintenance, restore the v
 
 Never copy DEV `.env`/credentials to production · preserve production `.env`, uploads, private credentials, sessions, logs and installed lock · never run `migrate:fresh`/destructive reset · back up before migrating · keep maintenance mode on during incompatible windows · reconcile before going live · keep production changes whitelisted and dry-run-checked.
 
+### 7.7 Production queue worker & scheduler (ACTIVE since 2026-11-02)
+
+Production host `kmsit` (SSH alias), Docker container `primeccookies_php` (compose project `primeccookies` at `/opt/primeccookies`, backend at `/var/www/backend`). Laravel 11.56.1, `QUEUE_CONNECTION=database`.
+
+**Worker.** Systemd unit `primeclassy-queue.service` (template: [deploy/production/primeclassy-queue.service](../deploy/production/primeclassy-queue.service)) runs one `queue:work database --queue=primeclassy-notify,default` inside the container as `www-data`. It runs under `flock -n /tmp/primeclassy-queue.lock`, so a second instance cannot run concurrently. `Restart=always` restarts it after failure and reboot (`enabled`). `ExecStop` calls `queue:restart` for a graceful stop. `$tries = 1`, so a restart never causes a Laravel retry.
+- Lane: notifications (`primeclassy-notify`) are listed first, so a backlog on `default` cannot delay them. The single worker is deliberate, because the queue is small and one worker avoids unplanned concurrency.
+- Covers WhatsApp notifications and the queued account-registered email (`AccountRegisteredMail`). OTP messages (WhatsApp and email) remain synchronous and fail closed by design.
+
+**Scheduler.** `/etc/cron.d/primeccookies-scheduler` already runs `schedule:run` every minute through `flock` (it was in place before this change). `php artisan schedule:list` reports no scheduled tasks, so it is a no-op. The repository adds no scheduler artifact, to avoid a duplicate.
+
+**Activation record (2026-11-02, Owner-authorised).**
+- Preflight: `jobs` 0, `failed_jobs` 0, `whatsapp_messages` 0 rows (no backlog, so no stale message could be sent). No `queue:work` running in the container beforehand. `settings` holds SMTP (`smtp.enabled=1`, host `mail.kmsitcomputer.com`) and WhatsApp (`wa.enabled=1`, gateway `wagateway.kmsitcomputer.com`). Real notifications go out once something is queued; that is the purpose of the worker.
+- Backup before change: `/root/primeclassy-backup-queue-20261102/` (copy of `/etc/cron.d/primeccookies-scheduler` and root crontab).
+- After start: one worker process (PID 856 at activation); `/up` 200; `/api/v1/categories`, `/api/v1/products`, `/api/v1/install/status` 200; `cepatjual-queue.service`, `kmsit-bff.service`, `kmsit-wagateway-whatsapp_go-1`, `sapakita-staging-api-1` and `-worker-1`, and `cepatjual_php` untouched.
+- Not performed: no end-to-end test message. The test-number allow-list (`wa.test_numbers` = one number) was not used, and no real delivery test was run.
+
+**Rollback.** `systemctl disable --now primeclassy-queue.service` and remove `/etc/systemd/system/primeclassy-queue.service`, then `systemctl daemon-reload`. No code, data or schema change is involved. Any queued notification stays in `jobs` until a worker runs again.
+
+**Rules.** Never run the DEV `queue:work` reference commands (§3.3) against production. Never add the retention commands (§8) to the scheduler. Do not change the WhatsApp gateway configuration here (separate remediation).
+
 ## 8. Maintenance and data commands
 
 | Command | Purpose / caution |

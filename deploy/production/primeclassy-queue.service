@@ -1,0 +1,23 @@
+# systemd unit for the PrimeClassy Laravel queue worker (PRODUCTION, host kmsit, container primeccookies_php).
+# Installed as /etc/systemd/system/primeclassy-queue.service on 2026-11-02 (docs/OPERATIONS.md §7.7).
+# Same host pattern as cepatjual-queue.service.
+
+[Unit]
+Description=PrimeClassy Laravel Queue Worker (primeclassy-notify, default; database queue)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+# One worker only: flock -n makes a second instance exit instead of running concurrently
+# (docker exec does not reliably forward SIGTERM, so an old in-container worker may outlive a unit restart).
+# Notify lane first, default second: a backlog on default cannot delay notifications.
+ExecStart=/usr/bin/docker exec -u www-data -w /var/www/backend primeccookies_php flock -n /tmp/primeclassy-queue.lock php artisan queue:work database --queue=primeclassy-notify,default --sleep=3 --tries=1 --timeout=60 --memory=256 --max-time=3600 --no-interaction
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+# Graceful: workers finish the current job and exit (same pattern as cepatjual-queue.service).
+ExecStop=/usr/bin/docker exec -u www-data -w /var/www/backend primeccookies_php php artisan queue:restart
+
+[Install]
+WantedBy=multi-user.target
