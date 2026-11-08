@@ -93,8 +93,9 @@ Status legenda: **IMPLEMENTED** (terverifikasi dari kode+tes), **NOT VERIFIED** 
 ## 13. Pengiriman & multi-shipment — IMPLEMENTED
 
 - **Aktor:** dispatcher (`koordinator-kurir`/`agen`/`admin`/`super_admin`) assign kurir; executor (`kurir`/SKS-self/executor-SKS/KK-self) memprogres.
-- **Langkah:** assignment `PATCH /shipments/{shipment}/courier` (eligibilitas SKS CR-001 dicek server-side di bawah lock) → kurir claim/progress per item `PATCH /shipments/{shipment}/items/{item}/status` → `dikirim` (pickup; courier lain kehilangan akses) → `terkirim` per item **wajib bukti foto** (`proof_media_id`) → shipment `delivered` saat SEMUA item tiba (agregat) → komisi courier difinalisasi per item (`CommissionFinalizer`).
-- **Self-delivery:** item Sub → `self_sub` shipment milik SKS, tanpa kurir; progres oleh SKS.
+- **Langkah:** assignment `PATCH /shipments/{shipment}/courier` (eligibilitas SKS CR-001 dicek server-side di bawah lock) → kurir yang di-assign memprogres per item `PATCH /shipments/{shipment}/items/{item}/status` (tanpa self-claim; non-assignee 403) → `dikirim` (pickup) → `terkirim` per item **wajib bukti foto** (`proof_media_id`) → shipment `delivered` saat SEMUA item tiba (agregat) → komisi courier difinalisasi per item (`CommissionFinalizer`).
+- **Self-delivery:** item Sub → `self_sub` shipment milik SKS, tanpa kurir; progres hanya oleh SKS yang juga **pembuat order** (`placed_by_user_id`).
+- **Riwayat terkirim (koordinator):** Dispatch → tab *Riwayat Terkirim* (`GET /dispatch/history`): shipment `delivered` cabang, executor (kurir / SKS / tidak tersedia), waktu selesai, bukti kirim, tautan *Buka Order*; filter tanggal/kurir/wilayah/no. order; paginasi server-side.
 - **Resi:** `GET /shipments/{shipment}/receipt` (per shipment; cetak `/print/shipments/:id`).
 - **Notifikasi:** `order_shipped`, `order_delivered`.
 
@@ -112,7 +113,7 @@ Status legenda: **IMPLEMENTED** (terverifikasi dari kode+tes), **NOT VERIFIED** 
 ## 16. Retur & refund — IMPLEMENTED
 
 - **Pengajuan:** konsumen (`POST /orders/{order}/returns`, item `terkirim`, kapasitas = `fulfilled − returned`) atau assisted (`/orders/{order}/assisted-returns` dengan consent OTP CRM).
-- **Alur:** review (`review` — approve/reject; jadwal `pickup-schedule`) → kurir `pickup`/`confirm` (claim-on-first-action) → inspeksi Gudang (`inspect`: good/damaged/mixed) → finalisasi Admin (`finalize`: restock good → Transit/Sub asal; damaged tidak sellable) → refund.
+- **Alur:** review (`review` — approve/reject; jadwal `pickup-schedule`) → office/dispatch meng-assign kurir (`PATCH /return-items/{item}/courier`) → kurir yang di-assign `pickup`/`confirm` → inspeksi Gudang (`inspect`: good/damaged/mixed) → finalisasi Admin (`finalize`: restock good → Transit/Sub asal; damaged tidak sellable) → refund.
 - **Refund ledger (§26):** obligation (pending → approved) → attempt (initiate → complete/fail/unknown/reconcile) → payout (membalik `paid_amount` via `PaymentService`) → `refund_ledger_events` append-only. Bukti penerima (`refund-recipient` evidence). Approval: `super_admin`/`agen`/`keuangan` (per matriks §3 [04-ROLES-PERMISSIONS](04-ROLES-PERMISSIONS.md)).
 - **Notifikasi:** `return_requested/approved/rejected`, `refund_requested/approved/rejected/completed`.
 - **Pengecualian:** komisi TIDAK disesuaikan otomatis (OD-05 pending); order status `pengembalian→kembali` untuk retur penuh.

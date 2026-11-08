@@ -22,9 +22,9 @@ class CourierOrderResource extends JsonResource
         $viewerCourierId = $actor?->courierProfile?->id;
         $viewerUserId = $actor?->id;
 
-        // R-04 / §C: a normal Kurir's queue may show work they have not claimed yet. Minimize the
-        // pre-claim projection (no recipient contact / street address / coordinates) and expose the
-        // full operational detail only once the shipment is assigned to THEM. A Sales-Kurir-Sub's
+        // R-04 / §C: operational detail is exposed only for work assigned to THEM (the queue
+        // itself is assignment-only since 2026-11-08; the minimal projection stays as defence in
+        // depth). A Sales-Kurir-Sub's
         // own self_sub shipments are already theirs, so they always get full detail.
         // A1-01: a Koordinator-Kurir self-executor behaves exactly like a normal Kurir; the same
         // minimal-until-assigned projection applies, driven by their own Courier profile.
@@ -98,7 +98,8 @@ class CourierOrderResource extends JsonResource
         // courier's, never another Sales-Kurir-Sub's self_sub.
         if ($viewerIsSubActor) {
             if ($item->shipment?->self_delivered_by_user_id !== null
-                && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId) {
+                && (int) $item->shipment->self_delivered_by_user_id === (int) $viewerUserId
+                && $item->shipment->isSelfPickupAuthorizedFor(request()->user())) {
                 return true;
             }
 
@@ -113,24 +114,14 @@ class CourierOrderResource extends JsonResource
                 && $item->shipment?->courier_id === $viewerCourierId;
         }
 
-        // A1-01: a koordinator-kurir self-executor is treated exactly like a normal kurir with a
-        // Courier profile — items on their own assigned shipment, and 'diproses' items (their
-        // dispatch queue remains visible pre-claim like any kurir's).
         if (! $viewerIsKurir) {
             return true;
         }
 
-        // A self_sub item belongs to its owning Sales-Kurir-Sub, never a normal Kurir's queue.
-        if ($item->shipment?->delivery_mode === 'self_sub') {
-            return false;
-        }
-
-        if (in_array($item->status, ['diterima', 'diproses'], true)) {
-            return true;
-        }
-
-        $shipmentCourierId = $item->shipment?->courier_id;
-
-        return $shipmentCourierId === null || $shipmentCourierId === $viewerCourierId;
+        // Assignment-only (Owner decision 2026-11-08): a kurir sees only items on a standard
+        // shipment recorded to their own Courier profile.
+        return $item->shipment?->delivery_mode === 'standard'
+            && $viewerCourierId !== null
+            && $item->shipment?->courier_id === $viewerCourierId;
     }
 }

@@ -87,6 +87,31 @@ class DispatchAssignmentConcurrencyTest extends TestCase
         return compact('agen', 'gudang', 'admin', 'konsumen', 'koordinator', 'kurirA', 'kurirB', 'order', 'request', 'requestItem');
     }
 
+    public function test_concurrent_return_assignments_have_one_winner_and_one_conflict(): void
+    {
+        $f = $this->fixture();
+        $item = $f['order']->items()->firstOrFail();
+        $item->update(['status' => 'pengembalian']);
+        $return = \App\Models\ReturnRequest::create([
+            'order_id' => $f['order']->id, 'requested_by' => $f['konsumen']->id,
+            'reason' => 'Race fixture', 'status' => 'requested', 'total_refund_amount' => 0,
+        ]);
+        $line = \App\Models\ReturnItem::create([
+            'return_id' => $return->id, 'order_item_id' => $item->id,
+            'quantity_returned' => 1, 'refund_amount' => 0, 'status' => 'pending',
+        ]);
+        $base = ['op' => 'return-assign', 'actor_id' => $f['koordinator']->id, 'item_id' => $line->id];
+        $report = (new \Tests\Support\ConcurrencyHarness)->runDispatchRace(
+            $base + ['courier_id' => $f['kurirA']->id], $base + ['courier_id' => $f['kurirB']->id],
+        );
+        $this->assertTrue($report['different_connections']);
+        $this->assertTrue($report['true_overlap']);
+        $this->assertSame('success', $report['a']['outcome'], json_encode($report));
+        $this->assertSame(409, $report['b']['business_status'], json_encode($report));
+        $this->assertSame($f['kurirA']->id, $line->fresh()->courier_id);
+        $this->assertSame(1, \Illuminate\Support\Facades\DB::table('activity_logs')->where('event', 'return_item.courier_assigned')->count());
+    }
+
     public function test_concurrent_same_shipment_assignments_have_exactly_one_winner(): void
     {
         $f = $this->fixture();
@@ -167,38 +192,102 @@ class DispatchAssignmentConcurrencyTest extends TestCase
         $assigned = Shipment::withoutGlobalScopes()->where('order_id', $f['order']->id)->value('courier_id');
         $this->assertGreaterThanOrEqual(1, $proposals + ($assigned ? 1 : 0), 'either the proposal or the assignment must have completed cleanly');
     }
+    /**
+     * Owner decision (2026-11-08): a kurir is assignment-only — pickup never claims. The race between an
+     * authorized dispatch assignment and a pickup attempt is therefore exercised in BOTH orders for:
+     *  - the courier being assigned (pickup succeeds only AFTER the assignment commits; a pickup that
+     *    wins the Order lock first is refused 403 and rolls back, then the assignment lands), and
+     *  - a courier who is NOT the assignee (pickup is refused 403 in both orders and can never
+     *    overwrite or take over the executor).
+     */
     public function test_assignment_and_pickup_serialize_in_both_orders_without_executor_overwrite(): void
     {
         foreach ([true, false] as $assignmentFirst) {
-            $f = $this->fixture();
-            $assign = ['op' => 'assign', 'actor_id' => $f['koordinator']->id, 'order_id' => $f['order']->id, 'courier_id' => $f['kurirB']->id];
-            $pickup = ['op' => 'pickup', 'actor_id' => $f['kurirA']->user_id, 'order_id' => $f['order']->id];
-            $report = (new \Tests\Support\ConcurrencyHarness)->runDispatchRace($assignmentFirst ? $assign : $pickup, $assignmentFirst ? $pickup : $assign);
-            $this->assertSame('success', $report['a']['outcome'], json_encode($report));
-            $this->assertSame('failed', $report['b']['outcome'], json_encode($report));
-            foreach (['a', 'b'] as $side) {
-                $this->assertNotContains((int) ($report[$side]['error_code'] ?? 0), [1213, 1205], json_encode($report));
+            foreach ([true, false] as $pickerIsAssignee) {
+                $f = $this->fixture();
+                // Assignee is kurirB; the picker is kurirB (authorized) or kurirA (never assigned).
+                $assign = ['op' => 'assign', 'actor_id' => $f['koordinator']->id, 'order_id' => $f['order']->id, 'courier_id' => $f['kurirB']->id];
+                $picker = $pickerIsAssignee ? $f['kurirB'] : $f['kurirA'];
+                $pickup = ['op' => 'pickup', 'actor_id' => $picker->user_id, 'order_id' => $f['order']->id];
+                $ctx = json_encode(['assignmentFirst' => $assignmentFirst, 'pickerIsAssignee' => $pickerIsAssignee]);
+
+                $report = (new \Tests\Support\ConcurrencyHarness)->runDispatchRace($assignmentFirst ? $assign : $pickup, $assignmentFirst ? $pickup : $assign);
+                $this->assertTrue($report['different_connections'], $ctx);
+                $this->assertTrue($report['true_overlap'], $ctx.json_encode($report));
+                foreach (['a', 'b'] as $side) {
+                    $this->assertNotContains((int) ($report[$side]['error_code'] ?? 0), [1213, 1205], $ctx.json_encode($report));
+                }
+
+                $assignSide = $assignmentFirst ? 'a' : 'b';
+                $pickupSide = $assignmentFirst ? 'b' : 'a';
+                $shipment = Shipment::withoutGlobalScopes()->where('order_id', $f['order']->id)->firstOrFail();
+                $item = OrderItem::where('order_id', $f['order']->id)->firstOrFail();
+
+                // The dispatch assignment always wins and the executor is always kurirB — never overwritten.
+                $this->assertSame('success', $report[$assignSide]['outcome'], $ctx.json_encode($report));
+                $this->assertSame($f['kurirB']->id, $shipment->courier_id, $ctx);
+
+                if ($pickerIsAssignee && $assignmentFirst) {
+                    // Assignment committed first → the now-authorized executor's pickup succeeds.
+                    $this->assertSame('success', $report[$pickupSide]['outcome'], $ctx.json_encode($report));
+                    $this->assertSame('dikirim', $item->status, $ctx);
+                    $this->assertSame('in_transit', $shipment->status, $ctx);
+                } else {
+                    // Pickup won the Order lock before any assignment (or the picker is not the assignee):
+                    // refused 403, rolled back, nothing moved.
+                    $this->assertSame('failed', $report[$pickupSide]['outcome'], $ctx.json_encode($report));
+                    $this->assertSame(403, $report[$pickupSide]['business_status'], $ctx.json_encode($report));
+                    $this->assertNotSame('dikirim', $item->status, $ctx);
+                    $this->assertSame('pending', $shipment->status, $ctx);
+                }
             }
-            $shipment = Shipment::withoutGlobalScopes()->where('order_id', $f['order']->id)->firstOrFail();
-            $this->assertSame($assignmentFirst ? $f['kurirB']->id : $f['kurirA']->id, $shipment->courier_id);
         }
     }
 
+    /**
+     * Delivery pickup (by the ASSIGNED courier) and an admin quantity adjustment serialize on the Order boundary
+     * in both orders. Negative: a courier who is not the assignee can never pick up in either order, and the
+     * adjustment still lands cleanly.
+     */
     public function test_delivery_and_quantity_adjustment_share_order_boundary_in_both_orders(): void
     {
         foreach ([true, false] as $pickupFirst) {
-            $f = $this->fixture();
-            $pickup = ['op' => 'pickup', 'actor_id' => $f['kurirA']->user_id, 'order_id' => $f['order']->id];
-            $adjust = ['op' => 'adjust', 'actor_id' => $f['admin']->id, 'order_id' => $f['order']->id, 'quantity' => 1];
-            $report = (new \Tests\Support\ConcurrencyHarness)->runDispatchRace($pickupFirst ? $pickup : $adjust, $pickupFirst ? $adjust : $pickup);
-            $this->assertSame('success', $report['a']['outcome'], json_encode($report));
-            $this->assertSame($pickupFirst ? 'failed' : 'success', $report['b']['outcome'], json_encode($report));
-            foreach (['a', 'b'] as $side) {
-                $this->assertNotContains((int) ($report[$side]['error_code'] ?? 0), [1213, 1205], json_encode($report));
+            foreach ([true, false] as $pickerIsAssignee) {
+                $f = $this->fixture();
+                // Pre-recorded authorized assignment (kurirA) — the only way a kurir may pick up.
+                Shipment::withoutGlobalScopes()->where('order_id', $f['order']->id)->update(['courier_id' => $f['kurirA']->id]);
+                $picker = $pickerIsAssignee ? $f['kurirA'] : $f['kurirB'];
+                $pickup = ['op' => 'pickup', 'actor_id' => $picker->user_id, 'order_id' => $f['order']->id];
+                $adjust = ['op' => 'adjust', 'actor_id' => $f['admin']->id, 'order_id' => $f['order']->id, 'quantity' => 1];
+                $ctx = json_encode(['pickupFirst' => $pickupFirst, 'pickerIsAssignee' => $pickerIsAssignee]);
+
+                $report = (new \Tests\Support\ConcurrencyHarness)->runDispatchRace($pickupFirst ? $pickup : $adjust, $pickupFirst ? $adjust : $pickup);
+                $this->assertTrue($report['true_overlap'], $ctx.json_encode($report));
+                foreach (['a', 'b'] as $side) {
+                    $this->assertNotContains((int) ($report[$side]['error_code'] ?? 0), [1213, 1205], $ctx.json_encode($report));
+                }
+                $pickupSide = $pickupFirst ? 'a' : 'b';
+                $adjustSide = $pickupFirst ? 'b' : 'a';
+                $item = OrderItem::where('order_id', $f['order']->id)->firstOrFail();
+                $shipment = Shipment::withoutGlobalScopes()->where('order_id', $f['order']->id)->firstOrFail();
+                $this->assertSame($f['kurirA']->id, $shipment->courier_id, $ctx.' executor must not change');
+
+                if ($pickerIsAssignee) {
+                    $this->assertSame('success', $report[$pickupSide]['outcome'], $ctx.json_encode($report));
+                    // Pickup first → the adjustment is then refused (already shipped) and quantity stays 2;
+                    // adjustment first → both succeed and the shipped quantity is 1.
+                    $this->assertSame($pickupFirst ? 'failed' : 'success', $report[$adjustSide]['outcome'], $ctx.json_encode($report));
+                    $this->assertSame($pickupFirst ? 2 : 1, $item->fulfilled_quantity, $ctx);
+                    $this->assertSame('dikirim', $item->status, $ctx);
+                } else {
+                    // Not the assignee: pickup refused 403 in both orders; the adjustment always succeeds.
+                    $this->assertSame('failed', $report[$pickupSide]['outcome'], $ctx.json_encode($report));
+                    $this->assertSame(403, $report[$pickupSide]['business_status'], $ctx.json_encode($report));
+                    $this->assertSame('success', $report[$adjustSide]['outcome'], $ctx.json_encode($report));
+                    $this->assertSame(1, $item->fulfilled_quantity, $ctx);
+                    $this->assertNotSame('dikirim', $item->status, $ctx);
+                }
             }
-            $item = OrderItem::where('order_id', $f['order']->id)->firstOrFail();
-            $this->assertSame($pickupFirst ? 2 : 1, $item->fulfilled_quantity);
-            $this->assertSame('dikirim', $item->status);
         }
     }
 
@@ -329,10 +418,10 @@ class DispatchAssignmentConcurrencyTest extends TestCase
         $this->assertSame(2, Shipment::where('order_id', $f['order']->id)->count());
         $this->assertSame(2, $f['request']->items()->count());
         $this->assertSame(0, Shipment::where('order_id', $f['order']->id)->whereNotNull('courier_id')->count());
-        // Automatic pickup assignment must respect the same pending-demand guard.
+        // Ordinary couriers cannot claim unassigned work, even with pending demand.
         $shipment = Shipment::where('order_id', $f['order']->id)->firstOrFail();
         $this->actingAs(User::findOrFail($f['kurirA']->user_id))->patchJson('/api/v1/shipments/'.$shipment->id.'/status', ['status' => 'dikirim'])
-            ->assertUnprocessable()->assertJsonPath('message', __('messages.courier.sc03_fulfillment_pending'));
+            ->assertForbidden();
         // UAT-006: the Koordinator's "Ambil Pengiriman" (courier_id: 0 self-executor
         // sentinel) must obey the SAME gate — an explicit self-take may never be a
         // way around the fulfilment-before-dispatch sequence, and must leave no

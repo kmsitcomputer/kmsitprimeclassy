@@ -252,8 +252,8 @@ class DashboardKpiService
     /**
      * Delivery tasks: assigned standard shipments with an item due today (WIB), distinct shipments.
      * Return pickups (GAP-A, Owner-approved): return items scheduled for TODAY (WIB) that this kurir
-     * still has to act on — shared ReturnService::scheduledPickupsToday derivation (own claim or
-     * unclaimed in the same branch), item grain (each item is its own pickup claim).
+     * still has to act on — shared ReturnService::scheduledPickupsToday derivation,
+     * explicitly assigned to this courier, at return-item grain.
      *
      * @return array{date: string, deliveries: int, return_pickups: int}
      */

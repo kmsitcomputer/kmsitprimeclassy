@@ -26,19 +26,15 @@ class CourierDashboardController extends Controller
     /**
      * The delivery queue.
      *
-     * Normal Kurir: every 'diproses' item in their branch is visible to every kurir
-     * ("semua order diproses bisa dilihat semua kurir"); once picked up ('dikirim') an item is
-     * exclusive to the kurir holding that shipment.
-     *
-     * A1-01: a Koordinator-Kurir that self-assigned a delivery becomes the actual executor with
-     * THEIR OWN Courier profile. They see exactly the same queue shape as a normal Kurir (their
-     * own assigned 'dikirim'/'terkirim' — never another courier's), and they can never see a
-     * self_sub shipment (that belongs to the owning Sales-Kurir-Sub).
+     * Owner decision (2026-11-08): Kurir and Koordinator-Kurir executors are ASSIGNMENT-ONLY — the
+     * queue is filtered server-side to standard shipments recorded to the actor's own Courier
+     * profile. Unassigned work and other couriers' work never appear (no pre-claim queue).
+     * They never see a self_sub shipment.
      *
      * R-03: a Sales-Kurir-Sub is NOT a normal Kurir — they may only ever see orders containing
-     * their OWN self_sub shipment (delivery_mode = self_sub AND self_delivered_by_user_id = self),
-     * for both 'diproses' and 'dikirim'. They must never see Agent-sourced standard shipments or
-     * another Sales-Kurir-Sub's self_sub shipment.
+     * their OWN self_sub shipment on an order THEY placed (creator-only self-pickup:
+     * Shipment::scopeSelfPickupOwnedBy). They must never see Agent-sourced unassigned standard
+     * shipments or another Sales-Kurir-Sub's self_sub shipment.
      *
      * CR-SALES-KURIR-SUB-DELIVERY-001: plus the standard shipments explicitly assigned to their
      * own Courier profile by an office dispatcher (courier_id = own profile) — unassigned or
@@ -67,10 +63,8 @@ class CourierDashboardController extends Controller
                         $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
                         $sq->whereIn('status', $statuses)
                             ->where(function ($wq) use ($actor, $courierId) {
-                                $wq->whereHas('shipment', function ($ssq) use ($actor) {
-                                    $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB)
-                                        ->where('self_delivered_by_user_id', $actor->id);
-                                });
+                                // Creator-only SKS self-pickup (Owner decision 2026-11-08).
+                                $wq->whereHas('shipment', fn ($ssq) => $ssq->selfPickupOwnedBy($actor));
                                 if ($courierId) {
                                     $wq->orWhereHas('shipment', function ($ssq) use ($courierId) {
                                         $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_STANDARD)
@@ -82,38 +76,14 @@ class CourierDashboardController extends Controller
                         return;
                     }
 
-                    if ($isKoordinator) {
-                        $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
-                        $sq->whereIn('status', $statuses)->whereHas('shipment', fn ($ssq) => $ssq
-                            ->where('delivery_mode', Shipment::DELIVERY_MODE_STANDARD)
-                            ->where('courier_id', $courierId ?? 0));
-
-                        return;
-                    }
-
-                    // A1-01: a koordinator-kurir executor behaves like a normal kurir for its own
-                    // profile — standard shipments only, 'diproses' queue visible, 'dikirim'/
-                    // 'terkirim' exclusive to their own Courier profile. Never a self_sub shipment.
-                    $sq->whereDoesntHave('shipment', fn ($ssq) => $ssq->where('delivery_mode', Shipment::DELIVERY_MODE_SELF_SUB));
-
-                    // Normal Kurir — a requested status narrows the queue; ownership stays the same.
-                    if (in_array($status, $validStatuses, true)) {
-                        $sq->where('status', $status);
-                        if ($status !== 'diproses') {
-                            $sq->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
-                        }
-
-                        return;
-                    }
-
-                    // Nested so the self_sub exclusion above stays AND-ed with both alternatives.
-                    $sq->where(function ($qq) use ($courierId) {
-                        $qq->where('status', 'diproses')
-                            ->orWhere(function ($dq) use ($courierId) {
-                                $dq->where('status', 'dikirim')
-                                    ->whereHas('shipment', fn ($ssq) => $ssq->where('courier_id', $courierId));
-                            });
-                    });
+                    // Owner decision (2026-11-08): kurir and koordinator-kurir executors are
+                    // assignment-only — they see exactly the standard shipments recorded to their
+                    // OWN Courier profile (pending/diproses, dikirim and terkirim alike). Unassigned
+                    // and other couriers' shipments never appear; no courier profile = empty queue.
+                    $statuses = in_array($status, $validStatuses, true) ? [$status] : ['diproses', 'dikirim'];
+                    $sq->whereIn('status', $statuses)->whereHas('shipment', fn ($ssq) => $ssq
+                        ->where('delivery_mode', Shipment::DELIVERY_MODE_STANDARD)
+                        ->where('courier_id', $courierId ?? 0));
                 });
             })
             ->with('items.shipment.courier')
@@ -127,10 +97,9 @@ class CourierDashboardController extends Controller
     }
 
     /**
-     * Return requests in this kurir's branch — unclaimed ones ("pengembalian"
-     * with no courier_id yet) are visible to every kurir; once one of them
-     * picks it up (pickupReturn(), or courierConfirmReturn() claiming it as a
-     * fallback), it disappears from every other kurir's queue.
+     * Owner decision (2026-11-08): return pickups are assignment-only. Only return items an
+     * authorized office/dispatch actor explicitly assigned to THIS kurir's Courier profile
+     * (return_items.courier_id) are listed; unclaimed returns are invisible to every kurir.
      */
     public function returns(Request $request)
     {
@@ -140,20 +109,16 @@ class CourierDashboardController extends Controller
         $returns = ReturnRequest::query()
             ->whereHas('order', fn ($q) => $q->where('agent_id', $actor->agent_id))
             ->whereHas('items', function ($q) use ($courierId) {
-                // GAP-A: pickup scheduling normally happens after review approval,
-                // so an item still waiting to be PHYSICALLY collected is kurir work
-                // in both review states (pending = not yet reviewed, approved =
-                // review passed). orderItem.status 'pengembalian' still marks the
-                // not-yet-collected item — once collected it leaves every queue.
-                // The courier claim rules are untouched (unclaimed = everyone in
-                // the branch; claimed = only the claimer).
+                // GAP-A: an item still waiting to be PHYSICALLY collected is kurir work in both
+                // review states (pending/approved); orderItem.status 'pengembalian' marks it.
                 $q->whereIn('status', ['pending', 'approved'])
                     ->whereHas('orderItem', fn ($oq) => $oq->where('status', 'pengembalian'))
-                    ->where(function ($cq) use ($courierId) {
-                        $cq->whereNull('courier_id')->orWhere('courier_id', $courierId);
-                    });
+                    ->where('courier_id', $courierId ?? 0);
             })
-            ->with(['order', 'items.orderItem'])
+            ->with(['order', 'items' => fn ($q) => $q->where('courier_id', $courierId ?? 0)
+                ->whereIn('status', ['pending', 'approved'])
+                ->whereHas('orderItem', fn ($oq) => $oq->where('status', 'pengembalian'))
+                ->with('orderItem')])
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -170,7 +135,7 @@ class CourierDashboardController extends Controller
 
         $item = $this->returnService->pickupReturn($item, $request->user(), $validated['note'] ?? null);
 
-        return $this->ok($item, __('messages.courier.assigned'));
+        return $this->ok($item->only(['id', 'courier_id', 'condition_note', 'pickup_scheduled_for']), __('messages.courier.assigned'));
     }
 
     /** pengembalian -> terkirim (not actually collected) or pengembalian -> kembali (collected) — never touches refund_status/money. */
@@ -181,7 +146,7 @@ class CourierDashboardController extends Controller
 
         $item = $this->returnService->courierConfirmReturn($item, $request->user(), $validated['received']);
 
-        return $this->ok($item, __('messages.courier.return_confirmed'));
+        return $this->ok($item->only(['id', 'courier_id', 'status', 'condition_note']), __('messages.courier.return_confirmed'));
     }
 
     private function assertSameBranch(Request $request, ReturnItem $item): void

@@ -152,7 +152,7 @@ class ReturnPickupScheduleTest extends TestCase
         $this->assertNull($item->pickup_scheduled_for);
     }
 
-    public function test_kurir_kpi_counts_unclaimed_and_own_scheduled_pickups_for_today_only(): void
+    public function test_kurir_kpi_counts_only_assigned_scheduled_pickups_for_today(): void
     {
         $b = $this->makeBranch();
         $ret = $this->approvedReturn($b);
@@ -165,10 +165,10 @@ class ReturnPickupScheduleTest extends TestCase
         $returnItem->update(['pickup_scheduled_for' => $tomorrow]);
         $this->assertSame(0, $this->actingAs($b['kurir'])->getJson('/api/v1/kurir/returns/pickup-today')->json('data.count'));
 
-        // 2. Scheduled today + unclaimed → every branch kurir's task.
+        // 2. Scheduled today but unassigned: invisible to every courier.
         $returnItem->update(['pickup_scheduled_for' => $today]);
-        $this->assertSame(1, $this->actingAs($b['kurir'])->getJson('/api/v1/kurir/returns/pickup-today')->json('data.count'));
-        $this->assertSame(1, $this->kpisReturnPickups($b['otherKurir']));
+        $this->assertSame(0, $this->actingAs($b['kurir'])->getJson('/api/v1/kurir/returns/pickup-today')->json('data.count'));
+        $this->assertSame(0, $this->kpisReturnPickups($b['otherKurir']));
 
         // 3. Claimed by another courier → only that courier's task.
         $returnItem->update(['courier_id' => $b['otherCourier']->id]);
@@ -194,7 +194,7 @@ class ReturnPickupScheduleTest extends TestCase
         $b = $this->makeBranch();
         $ret = $this->approvedReturn($b);
         $today = now('Asia/Jakarta')->toDateString();
-        ReturnItem::where('return_id', $ret['returnId'])->update(['pickup_scheduled_for' => $today]);
+        ReturnItem::where('return_id', $ret['returnId'])->update(['pickup_scheduled_for' => $today, 'courier_id' => Courier::where('user_id', $b['kurir']->id)->value('id')]);
 
         $payload = $this->actingAs($b['kurir'])->getJson('/api/v1/kurir/returns')->json('data');
         $firstReturn = collect($payload)->firstWhere('id', $ret['returnId']);

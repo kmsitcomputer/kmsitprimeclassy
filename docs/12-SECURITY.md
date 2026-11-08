@@ -29,7 +29,8 @@ Model keamanan berdasarkan source code. Prinsip dasar: **backend adalah satu-sat
 
 ## 4. Proteksi data
 
-- **Bukti pembayaran** disimpan disk privat (`proof_disk=local`), disajikan hanya via `GET /payment-proofs/{id}` dengan cek otorisasi (owner/finance/office cabang/in-scope sales/super_admin). Legacy public tetap URL lama.
+- **Bukti pembayaran** disimpan disk privat (`proof_disk=local`), disajikan hanya via `GET /payment-proofs/{id}` dengan cek otorisasi (owner/finance/office cabang/in-scope sales/super_admin). Legacy public tetap URL lama. Frontend membuka bukti privat lewat `ProtectedFileViewer` (fetch ber-sesi `http` ke path relatif same-origin; pratinjau in-page + tombol Unduh yang dipicu user — tanpa `window.open` async; objectURL di-revoke; error 401/403/404/jaringan ditampilkan). Hanya melihat bukti tidak mengubah status pembayaran.
+- **Kurir assignment-only (2026-11-08):** server-side di `CourierService` (`assertAssignedToActor`, `Shipment::isSelfPickupAuthorizedFor`), `ShipmentPolicy`, `CourierDashboardController`, `CourierOrderResource`, `ReturnService` — bukan hanya filter frontend. Pengecualian SKS = pembuat order (`placed_by_user_id`), fail closed bila kosong.
 - **Media** — policy per collection (avatar semua role; collection lain super_admin/agen); batas ukuran & tipe MIME ketat (JPEG/PNG/WebP).
 - **Kredensial integrasi** terenkripsi at rest, write-only, tidak pernah di-echo (`agent_payment_gateway_configs`, `agent_shipping_provider_configs`, `google_auth_settings`).
 - **Secret body OTP** (`whatsapp_messages.secret_body`) terenkripsi; kode tidak pernah di-log/di-audit.

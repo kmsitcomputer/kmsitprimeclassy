@@ -325,6 +325,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::get('/dispatch', [DispatchController::class, 'index']);
         Route::get('/dispatch/couriers', [DispatchController::class, 'couriers']);
         Route::get('/dispatch/regions', [DispatchController::class, 'regions']);
+        Route::get('/dispatch/returns', [DispatchController::class, 'returns']);
+        Route::get('/dispatch/history', [DispatchController::class, 'history']);
+        // Owner decision (2026-11-08): return pickups are assigned, never self-claimed by a kurir.
+        Route::patch('/return-items/{item}/courier', [ReturnController::class, 'assignPickupCourier']);
     });
 
     // R-03: Admin final delivery verification — append-only operational outcome (received /

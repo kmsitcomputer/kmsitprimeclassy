@@ -26,7 +26,7 @@ class CourierReturnResource extends JsonResource
                 'condition_note' => $item->condition_note,
                 // GAP-A: WIB business date this item's pickup was scheduled for (null = belum dijadwalkan).
                 'pickup_scheduled_for' => $item->pickup_scheduled_for?->format('Y-m-d'),
-                // Whether THIS kurir already claimed the pickup — null means still open to anyone.
+                // Whether THIS kurir is the explicitly assigned pickup executor.
                 'picked_up_by_me' => $item->courier_id !== null && $item->courier_id === $request->user()?->courierProfile?->id,
             ])),
             'created_at' => $this->created_at,

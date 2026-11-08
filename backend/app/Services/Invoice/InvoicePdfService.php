@@ -47,8 +47,10 @@ class InvoicePdfService
             // consumer learning someone else's identity — this toggle only
             // ever HIDES content, which is always privacy-safe).
             'showRecipient' => (bool) ($config['show_konsumen'] ?? true),
-            // A1-22: resolved logo URL — null when missing/foreign/disabled.
-            'logo_url' => $this->resolveLogoUrl($config, (int) $order->agent_id),
+            // A1-22 + INVOICE-001: branch-configured logo when valid and authorized, otherwise the
+            // official Prime logo; null only when neither can be loaded (the template then shows the
+            // company-name text header).
+            'logo_url' => $this->resolveLogoUrl($config, (int) $order->agent_id) ?? $this->defaultLogoDataUri(),
             'summary' => $summary,
             'items' => $order->items()->with('shipment')->get(),
             'now' => now(),
@@ -104,5 +106,25 @@ class InvoicePdfService
 
         // Embed validated image bytes: DomPDF remote loading remains disabled.
         return 'data:'.$image['mime'].';base64,'.base64_encode($bytes);
+    }
+
+    /**
+     * INVOICE-001: the official Prime logo bundled with the backend (resources/branding), embedded as
+     * a validated data URI so DomPDF never needs remote loading. Null when the asset is missing or
+     * not a valid image — the invoice then falls back to the readable company-name header.
+     */
+    private function defaultLogoDataUri(): ?string
+    {
+        $path = resource_path('branding/prime-logo.png');
+        if (! is_file($path)) {
+            return null;
+        }
+        $bytes = @file_get_contents($path);
+        $image = $bytes === false ? false : @getimagesizefromstring($bytes);
+        if (! $image || ($image['mime'] ?? null) !== 'image/png') {
+            return null;
+        }
+
+        return 'data:image/png;base64,'.base64_encode($bytes);
     }
 }

@@ -55,6 +55,38 @@ class Shipment extends Model
         return $this->delivery_mode === self::DELIVERY_MODE_SELF_SUB;
     }
 
+    /**
+     * Owner decision (2026-11-08): the ONLY self-pickup exception to the assignment-only courier
+     * rule. The actor must be the SKS (sales-kurir-sub) recorded as the self-delivery owner AND the
+     * very account that placed the order (`orders.placed_by_user_id`, write-once, set from the
+     * authenticated actor in OrderService) AND in the same Agen branch. A NULL/legacy
+     * `placed_by_user_id` fails closed — ownership is never inferred from branch or stock location.
+     */
+    public function isSelfPickupAuthorizedFor(User $actor): bool
+    {
+        if (! $this->isSelfDelivery() || ! $actor->isRole('sales-kurir-sub')) {
+            return false;
+        }
+
+        $order = $this->order;
+
+        return $this->self_delivered_by_user_id !== null
+            && (int) $this->self_delivered_by_user_id === (int) $actor->id
+            && $order !== null
+            && $order->placed_by_user_id !== null
+            && (int) $order->placed_by_user_id === (int) $actor->id
+            && (int) $order->agent_id === (int) $actor->agent_id;
+    }
+
+    /** Query form of {@see isSelfPickupAuthorizedFor} for list/discovery endpoints. */
+    public function scopeSelfPickupOwnedBy($query, User $actor)
+    {
+        return $query->where('delivery_mode', self::DELIVERY_MODE_SELF_SUB)
+            ->where('self_delivered_by_user_id', $actor->id)
+            ->whereHas('order', fn ($oq) => $oq->where('placed_by_user_id', $actor->id)
+                ->where('agent_id', $actor->agent_id));
+    }
+
     /** KURIR ONLINE (OpenRoute) — canonical `shipping_provider_code`. */
     public const PROVIDER_COURIER_ONLINE = 'openroute';
 

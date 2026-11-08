@@ -33,7 +33,7 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | PATCH/POST/DELETE | `/profile/referral-code(…)` | agen, korsal, sales, SKS | kode referral sendiri |
 | POST/DELETE | `/media`, `/media/{media}` | semua (Policy per collection) | avatar semua role; collection lain super_admin/agen |
 | POST | `/users` | super_admin, agen, korsal, koordinator-kurir | pembuatan sesuai HierarchyRules |
-| GET/PATCH/DELETE | `/users(…)` | 9 role (scope policy) | + `reassign-referral`, `convert-to-sales-kurir-sub` (agen; alias legacy `convert-to-sales-kurir`) |
+| GET/PATCH/DELETE | `/users(…)` | 9 role (scope policy); `GET /users`: `page`, `per_page` (1–100, default 15), `search` (nama/email/telepon), `role`, `status` (`active\|inactive\|suspended`), urut `id` stabil; meta memuat `per_page` | + `reassign-referral`, `convert-to-sales-kurir-sub` (agen; alias legacy `convert-to-sales-kurir`) |
 | GET | `/notifications/admin`, `/unread-count`, POST `/read-all`, `/{id}/read` | super_admin, agen, admin, keuangan | Notification Center (per-penerima) |
 
 ## 3. Checkout & order
@@ -46,7 +46,7 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | GET | `/orders`, `/orders/regions`, `/orders/{order}` | semua ter-autentikasi (scope role) | filter: status, payment_status, search, delivery_date, wilayah, paid |
 | POST | `/orders/{order}/cancel` | scope matriks | jendela §14 |
 | PATCH | `/orders/{order}/status` | super_admin, agen, admin | bulk office |
-| GET | `/orders/{order}/invoice` | owner / role finansial cabang | PDF dinamis (409 bila belum layak terbit) |
+| GET | `/orders/{order}/invoice` | owner / role finansial cabang | PDF dinamis (409 bila belum layak terbit); logo: konfigurasi cabang valid → logo Prime resmi bawaan → teks nama perusahaan |
 | PATCH | `/orders/{order}/items/{item}/fulfillment` / `reschedule` | super_admin, agen, admin | jendela fulfilment §21 |
 | POST | `/orders/{order}/items` | **admin** | SC-03 add-line (`Idempotency-Key`) |
 | POST | `/crm/customers/{customer}/orders` | agen, korsal, sales, SKS | assisted order CRM (D3) |
@@ -58,7 +58,7 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | POST | `/orders/{order}/payment/proof` | konsumen (own), super_admin/agen/admin/keuangan (cabang), korsal/sales/SKS (payOnBehalf) | bukti transfer; disk privat |
 | POST | `/orders/{order}/payment/cod-proof` | idem | bukti COD |
 | POST | `/orders/{order}/payment/installment` | idem + konsumen own | cicilan/pelunasan/kas (§29) |
-| GET | `/payment-proofs/{verification}` | owner, finance/office cabang, in-scope sales, super_admin | file bukti (otorisasi dicek) |
+| GET | `/payment-proofs/{verification}` | owner, finance/office cabang, in-scope sales, super_admin | file bukti privat (otorisasi dicek; 403/404; `proof_url` kini path relatif `/api/v1/payment-proofs/{id}`) |
 | PUT | `/orders/{order}/due-date` | super_admin, admin, keuangan | alasan wajib, audit |
 | PATCH | `/orders/{order}/payment/cod` | super_admin, keuangan | toggle COD |
 | POST | `/orders/{order}/payment/verify` | super_admin, keuangan | approve/reject bukti |
@@ -76,6 +76,9 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | PATCH | `/shipments/{shipment}/courier` | super_admin, agen, admin, koordinator-kurir | assignment (eligibilitas SKS CR-001) |
 | GET | `/shipments/{shipment}/eligible-couriers` | idem | daftar kurir + SKS eligible |
 | GET | `/dispatch(/couriers)(/regions)` | idem | workspace dispatch (KK scope cabang; SA `?agent_id=`) |
+| GET | `/dispatch/returns` | super_admin, agen, admin, koordinator-kurir | daftar item retur menunggu pickup, operasional saja, scope cabang + pagination |
+| GET | `/dispatch/history` | idem | riwayat shipment terkirim cabang (read-only, tanpa data uang); filter `delivered_from/to`, `courier_id`, region, `search`; `per_page` ≤ 50; SA wajib `agent_id` |
+| PATCH | `/return-items/{item}/courier` | super_admin, agen, admin, koordinator-kurir | assign kurir pickup retur; `expected_courier_id` = assignment pada tampilan (null saat belum ditugaskan); stale replacement → 409; hanya executor role kurir aktif Agen sama |
 | GET/POST | `/shipments/{shipment}/delivery-verifications` | super_admin, admin | verifikasi delivery append-only |
 | GET | `/kurir/orders` | kurir, SKS, koordinator-kurir | dashboard kurir (scope self) |
 | GET/PATCH | `/kurir/returns(/pickup-today)…` | kurir | pickup/konfirmasi retur + laporan delivered |

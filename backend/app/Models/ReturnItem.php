@@ -17,7 +17,7 @@ class ReturnItem extends Model
     {
         // See User::casts() — courier_id is compared with strict ===/!== against
         // already-int ids (CourierReturnResource::picked_up_by_me,
-        // ReturnService::claimReturnPickup). Uncast it returns as a string on
+        // ReturnService::assertReturnAssignedToActor). Uncast it returns as a string on
         // some PDO/MySQL driver builds, so picked_up_by_me stays false and the
         // "Refund"/"Terkirim" return buttons never render for the kurir.
         return [
@@ -42,7 +42,7 @@ class ReturnItem extends Model
         return $this->belongsTo(OrderItem::class);
     }
 
-    /** Which kurir picked this specific return up — null until claimed (Blueprint: "setelah ada kurir yang pickup... tidak boleh tampil di kurir lain"). */
+    /** Explicitly assigned pickup executor; null means no courier may process this return. */
     public function courier(): BelongsTo
     {
         return $this->belongsTo(Courier::class);

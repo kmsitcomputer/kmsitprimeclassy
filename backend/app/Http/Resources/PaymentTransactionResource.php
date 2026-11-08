@@ -30,7 +30,7 @@ class PaymentTransactionResource extends JsonResource
                     // authorization-checked endpoint (never a public storage URL).
                     'proof_url' => $this->bankTransferVerification->proof_image_path
                         ? ($this->bankTransferVerification->proof_disk === 'local'
-                            ? url('/api/v1/payment-proofs/'.$this->bankTransferVerification->id)
+                            ? '/api/v1/payment-proofs/'.$this->bankTransferVerification->id
                             : Storage::disk('public')->url($this->bankTransferVerification->proof_image_path))
                         : null,
                     'proof_private' => $this->bankTransferVerification->proof_disk === 'local',

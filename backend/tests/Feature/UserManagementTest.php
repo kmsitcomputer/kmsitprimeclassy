@@ -446,4 +446,62 @@ class UserManagementTest extends TestCase
         $this->assertSame('081234567890', $target->fresh()->phone);
         $this->assertSame('089876543210', $other->fresh()->phone);
     }
+
+    /* UI-USER-001: server-side pagination, search, status filter, stable order, page-size clamp. */
+
+    private function branchWithKonsumen(int $count): array
+    {
+        $agen = User::factory()->agen()->create();
+        $agen->update(['agent_id' => $agen->id]);
+        $rows = [];
+        for ($i = 1; $i <= $count; $i++) {
+            $rows[] = User::factory()->konsumen()->create([
+                'agent_id' => $agen->id, 'name' => sprintf('Konsumen %02d', $i),
+                'status' => $i % 5 === 0 ? 'suspended' : 'active',
+            ]);
+        }
+
+        return [$agen, $rows];
+    }
+
+    public function test_user_list_paginates_beyond_the_first_page_without_gaps_or_duplicates(): void
+    {
+        [$agen] = $this->branchWithKonsumen(23);
+
+        $seen = [];
+        foreach ([1, 2, 3] as $page) {
+            $res = $this->actingAs($agen)->getJson("/api/v1/users?role=konsumen&per_page=10&page={$page}")->assertOk();
+            $this->assertSame(23, $res->json('meta.total'));
+            $this->assertSame(3, $res->json('meta.last_page'));
+            $this->assertSame(10, $res->json('meta.per_page'));
+            array_push($seen, ...collect($res->json('data'))->pluck('id')->all());
+        }
+        $this->assertCount(23, $seen);
+        $this->assertCount(23, array_unique($seen));
+    }
+
+    public function test_user_list_filters_by_search_and_status_before_paginating_and_clamps_per_page(): void
+    {
+        [$agen] = $this->branchWithKonsumen(23);
+
+        $this->assertSame(1, $this->actingAs($agen)->getJson('/api/v1/users?role=konsumen&search=Konsumen 17')->json('meta.total'));
+        // 4 of 23 are suspended (every 5th): filter applies across pages.
+        $this->assertSame(4, $this->actingAs($agen)->getJson('/api/v1/users?role=konsumen&status=suspended&per_page=2')->json('meta.total'));
+        $this->actingAs($agen)->getJson('/api/v1/users?status=bogus')->assertStatus(422);
+
+        $big = $this->actingAs($agen)->getJson('/api/v1/users?role=konsumen&per_page=100000')->assertOk();
+        $this->assertSame(100, $big->json('meta.per_page'));
+        $small = $this->actingAs($agen)->getJson('/api/v1/users?role=konsumen&per_page=0')->assertOk();
+        $this->assertSame(1, $small->json('meta.per_page'));
+    }
+
+    public function test_user_list_stays_confined_to_the_actors_branch(): void
+    {
+        [$agen] = $this->branchWithKonsumen(3);
+        [, $foreign] = $this->branchWithKonsumen(2);
+
+        $ids = collect($this->actingAs($agen)->getJson('/api/v1/users?role=konsumen&per_page=100')->json('data'))->pluck('id');
+        $this->assertCount(3, $ids);
+        $this->assertFalse($ids->contains($foreign[0]->id));
+    }
 }

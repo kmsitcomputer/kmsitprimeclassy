@@ -6,7 +6,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AgentPicker from '@/components/ui/AgentPicker.vue'
-import { listDispatchQueue, listDispatchCouriers, listDispatchRegionOptions, type DispatchCourier, type DispatchRow } from '@/api/dispatch'
+import { listDispatchQueue, listDispatchCouriers, listDispatchRegionOptions, listDispatchHistory, listDispatchReturns, assignReturnCourier, type DispatchReturnRow, type DispatchCourier, type DispatchRow, type DispatchHistoryRow } from '@/api/dispatch'
 import { assignCourier } from '@/api/shipments'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/client'
@@ -115,6 +115,108 @@ function onDistrictChange() {
 }
 
 const couriers = ref<DispatchCourier[]>([])
+
+// COURIER-002 — "Riwayat Terkirim": branch-wide, read-only delivered-shipment history. Operational
+// data only; the server scopes the branch and attributes the real executor.
+const tab = ref<'queue' | 'history' | 'returns'>('queue')
+const history = ref<DispatchHistoryRow[]>([])
+const historyMeta = ref({ current_page: 1, last_page: 1, total: 0 })
+const historyLoading = ref(false)
+const historyError = ref('')
+const historyFilters = ref({ delivered_from: '', delivered_to: '', courier_id: '' as number | '', search: '' })
+let historyRequestSeq = 0
+
+async function loadHistory(page = 1) {
+  const seq = ++historyRequestSeq
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    const { rows: r, meta: m } = await listDispatchHistory(page, {
+      delivered_from: historyFilters.value.delivered_from || undefined,
+      delivered_to: historyFilters.value.delivered_to || undefined,
+      courier_id: historyFilters.value.courier_id || undefined,
+      search: historyFilters.value.search || undefined,
+      agent_id: agentId.value ?? undefined,
+    })
+    if (seq !== historyRequestSeq) return // a newer request superseded this one
+    history.value = r
+    historyMeta.value = m
+  } catch (e) {
+    if (seq !== historyRequestSeq) return
+    historyError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat riwayat terkirim.'
+  } finally {
+    if (seq === historyRequestSeq) historyLoading.value = false
+  }
+}
+
+const returnCouriers = ref<DispatchCourier[]>([])
+const returns = ref<DispatchReturnRow[]>([])
+const returnsMeta = ref({ current_page: 1, last_page: 1, total: 0 })
+const returnsLoading = ref(false)
+const returnsError = ref('')
+const returnsSuccess = ref('')
+const selectedReturnCourier = ref<Record<number, number | ''>>({})
+const assigningReturnId = ref<number | null>(null)
+let returnsSeq = 0
+
+async function loadReturns(page = 1) {
+  const seq = ++returnsSeq
+  returnsLoading.value = true
+  returnsError.value = ''
+  try {
+    const [result, candidates] = await Promise.all([
+      listDispatchReturns(page, agentId.value ?? undefined),
+      listDispatchCouriers(agentId.value ?? undefined, true),
+    ])
+    if (seq !== returnsSeq) return
+    returnCouriers.value = candidates
+    returns.value = result.rows
+    returnsMeta.value = result.meta
+  } catch (e) {
+    if (seq !== returnsSeq) return
+    returns.value = []
+    returnsError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat retur.'
+  } finally {
+    if (seq === returnsSeq) returnsLoading.value = false
+  }
+}
+
+async function assignReturn(row: DispatchReturnRow) {
+  const courierId = selectedReturnCourier.value[row.id]
+  if (!courierId || assigningReturnId.value !== null) return
+  assigningReturnId.value = row.id
+  returnsError.value = ''
+  returnsSuccess.value = ''
+  try {
+    await assignReturnCourier(row, Number(courierId))
+    returnsSuccess.value = 'Kurir retur berhasil ditugaskan.'
+    delete selectedReturnCourier.value[row.id]
+    await loadReturns(returnsMeta.value.current_page)
+  } catch (e) {
+    returnsError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menugaskan kurir retur.'
+  } finally {
+    assigningReturnId.value = null
+  }
+}
+
+function switchTab(next: 'queue' | 'history' | 'returns') {
+  tab.value = next
+  if (next === 'history') void loadHistory(1)
+  if (next === 'returns') void loadReturns(1)
+}
+
+function onHistoryPage(d: number) {
+  void loadHistory(Math.max(1, Math.min(historyMeta.value.last_page, historyMeta.value.current_page + d)))
+}
+
+function formatDateTime(value: string | null) {
+  return value ? new Date(value).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' }) : '—'
+}
+
+function executorLabel(row: DispatchHistoryRow) {
+  if (row.executor.type === 'unavailable' || !row.executor.name) return 'Tidak tersedia'
+  return row.executor.type === 'sks' ? `${row.executor.name} (SKS — antar sendiri)` : row.executor.name
+}
 const selectedCourier = ref<Record<number, number | ''>>({})
 const assigningShipmentId = ref<number | null>(null)
 
@@ -157,7 +259,15 @@ function applyFilters() {
 // A1-18: branch change reloads the queue, the courier list and the region options.
 async function onAgentChange() {
   successMessage.value = ''
+  returns.value = []
+  history.value = []
+  returnCouriers.value = []
+  returnsSeq++
+  historyRequestSeq++
   await Promise.all([load(1), loadCouriers(), loadRegions()])
+  selectedReturnCourier.value = {}
+  if (tab.value === 'history') await loadHistory(1)
+  if (tab.value === 'returns') await loadReturns(1)
 }
 
 async function assign(row: DispatchRow) {
@@ -217,6 +327,114 @@ onMounted(() => {
       Antrean pengiriman cabang — order diproses yang belum punya kurir. Tugaskan kurir untuk mulai mengantar.
     </p>
 
+    <div class="mb-4 flex gap-2 border-b border-stone-200 dark:border-stone-800" role="tablist">
+      <button type="button" role="tab" :aria-selected="tab === 'queue'"
+        class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"
+        :class="tab === 'queue' ? 'border-brand-600 text-brand-700 dark:text-brand-300' : 'border-transparent text-stone-500'"
+        @click="switchTab('queue')">Antrean Dispatch</button>
+      <button type="button" role="tab" :aria-selected="tab === 'history'"
+        class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"
+        :class="tab === 'history' ? 'border-brand-600 text-brand-700 dark:text-brand-300' : 'border-transparent text-stone-500'"
+        @click="switchTab('history')">Riwayat Terkirim</button>
+      <button type="button" role="tab" :aria-selected="tab === 'returns'"
+        class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"
+        :class="tab === 'returns' ? 'border-brand-600 text-brand-700' : 'border-transparent text-stone-500'"
+        @click="switchTab('returns')">Penugasan Retur</button>
+    </div>
+
+    <section v-if="tab === 'returns'" aria-label="Penugasan Retur" class="space-y-3">
+      <AgentPicker v-if="isSuperAdmin" v-model="agentId" :allow-all="false" label="Agen" @update:model-value="onAgentChange" />
+      <p v-if="returnsError" role="alert" class="text-sm text-red-600">{{ returnsError }}</p>
+      <p v-if="returnsSuccess" role="status" class="text-sm text-emerald-600">{{ returnsSuccess }}</p>
+      <AppButton size="sm" variant="secondary" @click="loadReturns(returnsMeta.current_page)">Muat ulang</AppButton>
+      <p v-if="returnsLoading" role="status">Memuat retur…</p>
+      <template v-else>
+        <p v-if="!returns.length" class="text-sm text-stone-500">Tidak ada retur menunggu pickup.</p>
+        <article v-for="row in returns" :key="row.id" class="rounded-2xl border border-stone-200 p-4 dark:border-stone-800">
+          <button type="button" class="font-semibold text-brand-700 hover:underline" @click="openOrder(row.order_id)">{{ row.order_no }}</button>
+          <p class="text-sm">{{ row.product_name }} × {{ row.quantity }}</p>
+          <p class="text-sm">Pickup: {{ row.pickup_scheduled_for ? formatDate(row.pickup_scheduled_for) : 'Belum dijadwalkan' }}</p>
+          <p class="my-2 text-sm">{{ row.assignment_status === 'assigned' ? 'Ditugaskan' : 'Belum ditugaskan' }} · {{ row.courier_name ?? '—' }}</p>
+          <div class="flex flex-wrap gap-2">
+            <select v-model="selectedReturnCourier[row.id]" aria-label="Kurir retur" class="rounded-lg border bg-white px-2 py-1.5 text-sm dark:bg-stone-950">
+              <option value="">Pilih kurir</option>
+              <option v-for="c in returnCouriers" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <AppButton size="sm" :disabled="!selectedReturnCourier[row.id] || assigningReturnId !== null" @click="assignReturn(row)">
+              {{ assigningReturnId === row.id ? 'Menugaskan…' : 'Tugaskan Kurir' }}
+            </AppButton>
+          </div>
+        </article>
+        <div class="flex items-center justify-between text-sm">
+          <AppButton size="sm" variant="secondary" :disabled="returnsMeta.current_page <= 1" @click="loadReturns(returnsMeta.current_page - 1)">Sebelumnya</AppButton>
+          <span>{{ returnsMeta.current_page }} / {{ returnsMeta.last_page }} · {{ returnsMeta.total }} retur</span>
+          <AppButton size="sm" variant="secondary" :disabled="returnsMeta.current_page >= returnsMeta.last_page" @click="loadReturns(returnsMeta.current_page + 1)">Berikutnya</AppButton>
+        </div>
+      </template>
+    </section>
+
+    <section v-if="tab === 'history'" aria-label="Riwayat Terkirim">
+      <div class="mb-4 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
+        <AgentPicker v-if="isSuperAdmin" v-model="agentId" :allow-all="false" label="Agen" @update:model-value="onAgentChange" />
+        <label class="flex flex-col gap-1 text-xs text-stone-500">Dari tanggal
+          <input v-model="historyFilters.delivered_from" type="date" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" />
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-stone-500">Sampai tanggal
+          <input v-model="historyFilters.delivered_to" type="date" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" />
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-stone-500">Kurir
+          <select v-model="historyFilters.courier_id" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950">
+            <option value="">Semua kurir</option>
+            <option v-for="c in couriers" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-stone-500">No. order
+          <input v-model="historyFilters.search" type="search" maxlength="60" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" @keyup.enter="loadHistory(1)" />
+        </label>
+        <AppButton size="sm" variant="secondary" @click="loadHistory(1)">Terapkan</AppButton>
+      </div>
+
+      <p v-if="historyError" class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300" role="alert">
+        {{ historyError }}
+        <button type="button" class="ml-2 underline" @click="loadHistory(historyMeta.current_page)">Coba lagi</button>
+      </p>
+
+      <div v-if="historyLoading" class="space-y-3">
+        <div v-for="i in 3" :key="i" class="h-20 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
+      </div>
+      <div v-else-if="!history.length && !historyError" class="rounded-2xl bg-stone-100 py-14 text-center text-sm text-stone-500 dark:bg-stone-900 dark:text-stone-400">
+        Belum ada pengiriman terkirim untuk filter ini.
+      </div>
+      <div v-else class="space-y-3">
+        <div v-for="h in history" :key="h.shipment_id" class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="text-sm font-semibold text-stone-800 dark:text-stone-100">{{ h.order_no ?? '—' }}
+                <span class="ml-2 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">Terkirim</span>
+                <span class="ml-1 rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-400">Pengiriman #{{ h.shipment_id }}</span>
+              </p>
+              <p class="text-xs text-stone-500">Selesai: {{ formatDateTime(h.delivered_at) }}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <a v-if="h.proof_available && h.proof_url" :href="h.proof_url" target="_blank" rel="noopener" class="text-sm text-brand-700 underline">Bukti pengiriman</a>
+              <AppButton size="sm" variant="secondary" @click="openOrder(h.order_id)">Buka Order</AppButton>
+            </div>
+          </div>
+          <div class="mt-2 grid gap-1 text-xs text-stone-600 dark:text-stone-400 sm:grid-cols-2">
+            <p>Pengantar: <strong>{{ executorLabel(h) }}</strong></p>
+            <p>Penerima: {{ h.recipient_name ?? '—' }}</p>
+            <p class="sm:col-span-2">{{ [h.village_name, h.district_name, h.regency_name, h.province_name].filter(Boolean).join(', ') || '—' }}</p>
+          </div>
+        </div>
+        <div v-if="historyMeta.last_page > 1" class="flex items-center justify-between gap-2 text-sm">
+          <AppButton size="sm" variant="secondary" :disabled="historyMeta.current_page <= 1" @click="onHistoryPage(-1)">Prev</AppButton>
+          <span class="text-stone-500">Halaman {{ historyMeta.current_page }} / {{ historyMeta.last_page }} ({{ historyMeta.total }})</span>
+          <AppButton size="sm" variant="secondary" :disabled="historyMeta.current_page >= historyMeta.last_page" @click="onHistoryPage(1)">Next</AppButton>
+        </div>
+      </div>
+    </section>
+
+    <template v-if="tab === 'queue'">
     <p v-if="errorMessage" class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
       {{ errorMessage }}
     </p>
@@ -382,5 +600,6 @@ onMounted(() => {
         <AppButton size="sm" variant="secondary" :disabled="meta.current_page >= meta.last_page" @click="onPage(1)">Next</AppButton>
       </div>
     </div>
+    </template>
   </DashboardLayout>
 </template>

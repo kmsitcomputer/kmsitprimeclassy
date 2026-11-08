@@ -464,11 +464,9 @@ class ReturnService
     }
 
     /**
-     * "Kurir harus melakukan pickup" — a distinct claim on the physical
-     * pickup itself, separate from (and normally happening well before) the
-     * eventual courierConfirmReturn(). Once claimed, the item drops out of
-     * every OTHER kurir's return queue (CourierDashboardController::returns)
-     * even though it's still sitting in 'pengembalian' awaiting resolution.
+     * "Kurir harus melakukan pickup" — the physical pickup acknowledgement by the ASSIGNED kurir
+     * (never a claim: assertReturnAssignedToActor refuses unassigned/other-courier items),
+     * separate from the eventual courierConfirmReturn().
      */
     public function pickupReturn(ReturnItem $returnItem, User $actor, ?string $note = null): ReturnItem
     {
@@ -480,7 +478,7 @@ class ReturnService
                 throw new ApiException(__('messages.return.already_reviewed'), 422);
             }
 
-            $this->claimReturnPickup($returnItem, $actor);
+            $this->assertReturnAssignedToActor($returnItem, $actor);
 
             if ($note !== null) {
                 $returnItem->update(['condition_note' => $note]);
@@ -513,7 +511,7 @@ class ReturnService
                 throw new ApiException(__('messages.return.already_reviewed'), 422);
             }
 
-            $this->claimReturnPickup($returnItem, $actor);
+            $this->assertReturnAssignedToActor($returnItem, $actor);
 
             if ($received) {
                 $orderItem->update(['status' => 'kembali']);
@@ -538,10 +536,9 @@ class ReturnService
      * One derivation, shared by CourierDashboardController::pickupToday and
      * DashboardKpiService (kurir `return_pickups`): the item is scheduled for
      * TODAY (WIB business date), has NOT been physically collected yet (order
-     * item still 'pengembalian'), and is either still unclaimed in the kurir's
-     * own branch (claim-on-first-action — the same visibility as the return
-     * queue, so it is every branch kurir's task until one of them claims it)
-     * or already claimed by this kurir.
+     * item still 'pengembalian'), and is in the kurir's own branch AND explicitly
+     * assigned to this kurir's Courier profile
+     * (same visibility as the return queue — no unclaimed return is any kurir's task).
      */
     public function scheduledPickupsQuery(User $actor)
     {
@@ -554,12 +551,8 @@ class ReturnService
                 $oiq->where('order_items.status', 'pengembalian')
                     ->whereHas('order', fn ($oq) => $oq->where('agent_id', $actor->agent_id));
             })
-            ->where(function ($q) use ($courierId) {
-                $q->whereNull('courier_id');
-                if ($courierId !== null) {
-                    $q->orWhere('courier_id', $courierId);
-                }
-            });
+            // Assignment-only (Owner decision 2026-11-08): only returns assigned to this kurir.
+            ->where('courier_id', $courierId ?? 0);
     }
 
     public function scheduledPickupsToday(User $actor): int
@@ -568,23 +561,72 @@ class ReturnService
     }
 
     /**
-     * The same claim-on-first-action pattern as CourierService::selfAssignIfUnassigned,
-     * scoped per return item — "status order request pengembalian bisa
-     * dilihat oleh semua kurir, setelah ada kurir yang pickup... tidak boleh
-     * tampil di kurir lain."
+     * Owner decision (2026-11-08): no kurir self-claim on returns. The pickup executor is recorded
+     * ONLY by an authorized office/dispatch actor via {@see assignPickupCourier}; the kurir's own
+     * pickup/confirm actions require that recorded assignment to be THEIR Courier profile.
      */
-    private function claimReturnPickup(ReturnItem $returnItem, User $actor): void
+    private function assertReturnAssignedToActor(ReturnItem $returnItem, User $actor): void
     {
         $courier = $actor->courierProfile;
+        $agentId = $returnItem->orderItem->order?->agent_id;
+        if ($actor->status !== 'active' || ! $actor->isRole('kurir')
+            || ! $courier?->is_active || (int) $courier->agent_id !== (int) $agentId
+            || (int) $actor->agent_id !== (int) $agentId) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
 
         if (! $courier) {
             throw new ApiException(__('messages.courier.no_profile'), 422);
         }
 
-        if ($returnItem->courier_id === null) {
-            $returnItem->update(['courier_id' => $courier->id]);
-        } elseif ($returnItem->courier_id !== $courier->id) {
+        if ($returnItem->courier_id === null || (int) $returnItem->courier_id !== (int) $courier->id) {
             throw new ApiException(__('messages.courier.not_your_delivery'), 403);
         }
+    }
+
+    /**
+     * Dispatch/office assignment of a return pickup to an eligible courier of the SAME Agen branch.
+     * Locks the return item + order item; refuses items no longer awaiting pickup. Re-assigning the
+     * same courier is an idempotent replay; switching to a different courier requires the expected previous assignment
+     * and is audited (previous_courier_id). Stale competing writes fail with 409. Revocation = assigning another courier.
+     */
+    public function assignPickupCourier(ReturnItem $returnItem, \App\Models\Courier $courier, User $actor, ?int $expectedCourierId = null): ReturnItem
+    {
+        return DB::transaction(function () use ($returnItem, $courier, $actor, $expectedCourierId) {
+            $returnItem = ReturnItem::query()->whereKey($returnItem->id)->lockForUpdate()->firstOrFail();
+            $orderItem = OrderItem::query()->whereKey($returnItem->order_item_id)->lockForUpdate()->firstOrFail();
+            $order = Order::withoutGlobalScopes()->whereKey($orderItem->order_id)->firstOrFail();
+
+            if (! $actor->isRole('super_admin', 'agen', 'admin', 'koordinator-kurir')
+                || (! $actor->isRole('super_admin') && (int) $order->agent_id !== (int) $actor->agent_id)) {
+                throw new ApiException(__('messages.system.unauthorized_action'), 403);
+            }
+            if ($orderItem->status !== 'pengembalian' || ! in_array($returnItem->status, ['pending', 'approved'], true)) {
+                throw new ApiException(__('messages.return.already_reviewed'), 422);
+            }
+
+            $courier = \App\Models\Courier::query()->whereKey($courier->id)->lockForUpdate()->firstOrFail();
+            $executor = $courier->user_id !== null ? User::query()->whereKey($courier->user_id)->lockForUpdate()->first() : null;
+            if ((int) $courier->agent_id !== (int) $order->agent_id || ! $courier->is_active
+                || ! $executor || $executor->status !== 'active' || (int) $executor->agent_id !== (int) $order->agent_id
+                || ! $executor->isRole('kurir')) {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+
+            $previous = $returnItem->courier_id;
+            if ($previous !== null && (int) $previous === (int) $courier->id) {
+                return $returnItem;
+            }
+            if ($previous !== $expectedCourierId) {
+                throw new ApiException('Penugasan retur telah berubah. Muat ulang sebelum menugaskan.', 409);
+            }
+            $returnItem->update(['courier_id' => $courier->id]);
+
+            ActivityLogger::log($actor->id, $returnItem, 'return_item.courier_assigned', null, [
+                'courier_id' => $courier->id, 'previous_courier_id' => $previous, 'actor_role' => $actor->role?->slug,
+            ]);
+
+            return $returnItem->fresh();
+        });
     }
 }

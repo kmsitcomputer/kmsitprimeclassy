@@ -108,9 +108,9 @@ export async function listDispatchQueue(page = 1, filters: DispatchFilters = {})
   return { rows: data.data, meta: data.meta as unknown as PaginationMeta }
 }
 
-export async function listDispatchCouriers(agentId?: number) {
+export async function listDispatchCouriers(agentId?: number, forReturns = false) {
   const { data } = await http.get<ApiEnvelope<DispatchCourier[]>>('/dispatch/couriers', {
-    params: agentId ? { agent_id: agentId } : {},
+    params: { agent_id: agentId, for_returns: forReturns ? 1 : undefined },
   })
   return data.data
 }
@@ -140,8 +140,68 @@ export async function listDispatchRegionOptions(filters: RegionOptionFilters = {
   return data.data
 }
 
-function clean(filters: DispatchFilters | RegionOptionFilters): Record<string, string | number> {
+function clean(filters: DispatchFilters | RegionOptionFilters | DispatchHistoryFilters): Record<string, string | number> {
   return Object.fromEntries(
     Object.entries(filters).filter(([, v]) => v !== undefined && v !== null && v !== ''),
   ) as Record<string, string | number>
+}
+
+/** COURIER-002 — one delivered shipment in the branch-wide history (operational data only, no money fields). */
+export interface DispatchHistoryRow {
+  id: number
+  shipment_id: number
+  order_id: number
+  order_no: string | null
+  status: string
+  delivery_mode: string
+  executor: { type: 'courier' | 'sks' | 'unavailable'; name: string | null; courier_id?: number }
+  delivered_at: string | null
+  recipient_name: string | null
+  village_name: string | null
+  district_name: string | null
+  regency_name: string | null
+  province_name: string | null
+  proof_available: boolean
+  proof_url: string | null
+}
+
+export interface DispatchHistoryFilters {
+  delivered_from?: string
+  delivered_to?: string
+  courier_id?: number | ''
+  search?: string
+  per_page?: number
+  agent_id?: number
+}
+
+export async function listDispatchHistory(page = 1, filters: DispatchHistoryFilters = {}) {
+  const { data } = await http.get<ApiEnvelope<DispatchHistoryRow[]>>('/dispatch/history', {
+    params: { page, ...clean(filters) },
+  })
+  return { rows: data.data, meta: data.meta as unknown as PaginationMeta }
+}
+
+export interface DispatchReturnRow {
+  id: number
+  order_id: number
+  order_no: string
+  product_name: string
+  quantity: number
+  pickup_scheduled_for: string | null
+  courier_id: number | null
+  courier_name: string | null
+  assignment_status: 'unassigned' | 'assigned'
+}
+
+export async function listDispatchReturns(page = 1, agentId?: number) {
+  const { data } = await http.get<ApiEnvelope<DispatchReturnRow[]>>('/dispatch/returns', {
+    params: { page, agent_id: agentId },
+  })
+  return { rows: data.data, meta: data.meta as unknown as PaginationMeta }
+}
+
+export async function assignReturnCourier(row: DispatchReturnRow, courierId: number) {
+  await http.patch(`/return-items/${row.id}/courier`, {
+    courier_id: courierId, expected_courier_id: row.courier_id,
+  })
 }

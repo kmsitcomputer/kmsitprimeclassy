@@ -345,9 +345,16 @@ class MasterV2PaymentCoreTest extends TestCase
         $otherBranch->update(['agent_id' => $otherBranch->id]);
         $this->actingAs($otherBranch)->get($url)->assertStatus(403)->assertStatus(403);
 
+        foreach (['kurir', 'gudang', 'koordinatorKurir'] as $role) {
+            $actor = User::factory()->{$role}()->create(['agent_id' => $this->b['agen']->id]);
+            $this->actingAs($actor)->get($url)->assertForbidden();
+        }
+
         // The exposed URL is the API route, never a public storage URL.
         $json = $this->actingAs($this->b['konsumen'])->getJson("/api/v1/orders/{$order->id}")->json();
         $this->assertStringContainsString("/api/v1/payment-proofs/{$v->id}", json_encode($json, JSON_UNESCAPED_SLASHES));
+        Storage::disk('local')->delete($v->proof_image_path);
+        $this->actingAs($this->b['konsumen'])->get($url)->assertNotFound();
     }
 
     public function test_legacy_public_proofs_stay_readable(): void

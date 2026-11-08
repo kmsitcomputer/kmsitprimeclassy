@@ -128,16 +128,31 @@ class UserController extends Controller
             $query->whereHas('role', fn ($q) => $q->whereIn('slug', Role::slugsFor(Role::canonicalSlug($request->string('role')->toString()))));
         }
         if ($request->filled('search')) {
-            $search = $request->string('search')->toString();
-            $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('phone', 'like', "%{$search}%"));
+            // Escape LIKE wildcards so a literal % or _ is searched as text, not as a pattern.
+            $search = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $request->string('search')->toString());
+            $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")
+                ->orWhere('phone', 'like', "%{$search}%")
+                ->orWhere('email', 'like', "%{$search}%"));
+        }
+        // UI-USER-001: validated status filter (users.status: active | inactive | suspended).
+        if ($request->filled('status')) {
+            $status = $request->string('status')->toString();
+            if (! in_array($status, ['active', 'inactive', 'suspended'], true)) {
+                throw new \App\Exceptions\ApiException('Status tidak valid.', 422, ['status' => 'Status tidak valid.']);
+            }
+            $query->where('status', $status);
         }
 
-        $users = $query->paginate($request->integer('per_page', 15));
+        // Filtering happens above, BEFORE pagination. Deterministic order with a unique tie-breaker
+        // (id) so pages never skip or repeat rows; per_page is normalized to 1..100 (default 15).
+        $perPage = min(max($request->integer('per_page', 15), 1), 100);
+        $users = $query->orderBy('id')->paginate($perPage);
 
         return $this->ok(UserResource::collection($users)->resolve(), meta: [
             'current_page' => $users->currentPage(),
             'last_page' => $users->lastPage(),
             'total' => $users->total(),
+            'per_page' => $users->perPage(),
         ]);
     }
 

@@ -87,6 +87,96 @@ class DispatchController extends Controller
         );
     }
 
+    /** Return pickup assignments: operational projection, one row per awaiting item. */
+    public function returns(Request $request)
+    {
+        $actor = $request->user();
+        $agentId = $actor->isRole('super_admin')
+            ? $this->resolveSuperAdminAgentId($request) : (int) $actor->agent_id;
+        $items = \App\Models\ReturnItem::query()
+            ->whereIn('status', ['pending', 'approved'])
+            ->whereHas('orderItem', fn ($q) => $q->where('status', 'pengembalian')
+                ->whereHas('order', fn ($oq) => $oq->where('agent_id', $agentId)))
+            ->with(['orderItem.order', 'courier'])
+            ->orderBy('id')
+            ->paginate(min(max($request->integer('per_page', 15), 1), 100));
+
+        return $this->ok($items->getCollection()->map(fn ($item) => [
+            'id' => $item->id,
+            'order_id' => $item->orderItem->order_id,
+            'order_no' => $item->orderItem->order->order_no,
+            'product_name' => $item->orderItem->product_name_snapshot,
+            'quantity' => $item->quantity_returned,
+            'pickup_scheduled_for' => $item->pickup_scheduled_for?->format('Y-m-d'),
+            'courier_id' => $item->courier_id,
+            'courier_name' => $item->courier?->name,
+            'assignment_status' => $item->courier_id === null ? 'unassigned' : 'assigned',
+        ])->all(), meta: [
+            'current_page' => $items->currentPage(), 'last_page' => $items->lastPage(), 'total' => $items->total(),
+        ]);
+    }
+
+    /**
+     * COURIER-002 (Owner 2026-11-08): read-only, branch-wide history of DELIVERED shipments for the
+     * Koordinator-Kurir (and office). Shipment-level, operational data only — no payment, DP,
+     * outstanding, refund or commission figures. Executor attribution comes from the recorded
+     * executor: Shipment.courier (standard) or Shipment.selfDeliveredBy (valid SKS self-delivery);
+     * when neither is provable the executor is reported as unavailable, never invented.
+     * Filters: delivered_from / delivered_to (WIB dates on delivered_at), courier_id, region ids,
+     * search (order no). Stable order: delivered_at DESC, id DESC. super_admin must pass a valid agent_id.
+     */
+    public function history(Request $request)
+    {
+        $user = $request->user();
+        $agentId = $user->isRole('super_admin')
+            ? $this->resolveSuperAdminAgentId($request)
+            : (int) $user->agent_id;
+
+        $filters = $request->validate([
+            'delivered_from' => ['nullable', 'date_format:Y-m-d'],
+            'delivered_to' => ['nullable', 'date_format:Y-m-d'],
+            'courier_id' => ['nullable', 'integer', 'min:1'],
+            'search' => ['nullable', 'string', 'max:60'],
+            'per_page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $shipments = Shipment::query()
+            ->where('status', 'delivered')
+            ->whereNotNull('delivered_at')
+            ->whereHas('order', function ($oq) use ($agentId, $request, $filters) {
+                $oq->where('agent_id', $agentId);
+                foreach (['province_id', 'regency_id', 'district_id', 'village_id'] as $column) {
+                    if ($request->filled($column)) {
+                        $oq->where($column, $request->string($column)->toString());
+                    }
+                }
+                if (! empty($filters['search'])) {
+                    $oq->where('order_no', 'like', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $filters['search']).'%');
+                }
+            });
+
+        if (! empty($filters['delivered_from'])) {
+            $shipments->where('delivered_at', '>=', \Carbon\Carbon::parse($filters['delivered_from'], 'Asia/Jakarta')->startOfDay()->utc());
+        }
+        if (! empty($filters['delivered_to'])) {
+            $shipments->where('delivered_at', '<=', \Carbon\Carbon::parse($filters['delivered_to'], 'Asia/Jakarta')->endOfDay()->utc());
+        }
+        if (! empty($filters['courier_id'])) {
+            $shipments->where('courier_id', $filters['courier_id']);
+        }
+
+        $shipments = $shipments
+            ->with(['order', 'courier.user', 'selfDeliveredBy', 'proof'])
+            ->orderByDesc('delivered_at')
+            ->orderByDesc('id')
+            ->paginate(min(max($request->integer('per_page', 15), 1), 50));
+
+        return $this->ok(
+            \App\Http\Resources\DispatchHistoryResource::collection($shipments)->resolve(),
+            meta: ['current_page' => $shipments->currentPage(), 'last_page' => $shipments->lastPage(), 'total' => $shipments->total(), 'per_page' => $shipments->perPage()],
+        );
+    }
+
     /**
      * The dispatchable-order scope shared by the queue and the region options: 'diproses'
      * orders of the branch, composable with the same delivery-date, paid and region filters.
@@ -182,6 +272,9 @@ class DispatchController extends Controller
                 ->where(fn ($q) => $q->whereNull('user_id')->orWhereHas('user', fn ($user) => $user
                     ->where('agent_id', $agentId)->where('status', 'active')
                     ->whereHas('role', fn ($role) => $role->whereIn('slug', ['kurir', 'koordinator-kurir']))))
+                ->when($request->boolean('for_returns'), fn ($q) => $q->whereHas('user', fn ($uq) => $uq
+                    ->where('status', 'active')->where('agent_id', $agentId)
+                    ->whereHas('role', fn ($rq) => $rq->where('slug', 'kurir'))))
                 ->orderBy('name')
                 ->get(['id', 'name'])
         );

@@ -15,8 +15,8 @@ Evidence: `RoleSeeder.php`; migrasi `2026_09_22_090000` (keuangan), `2026_09_29_
 | `admin` | Staf kantor cabang | `agen` | — | Cabang sendiri |
 | `keuangan` | Keuangan cabang | `agen` | — | Cabang sendiri (permukaan finansial saja) |
 | `gudang` | Gudang cabang | `agen` | — | Cabang sendiri (proyeksi operasional, tanpa uang) |
-| `kurir` | Kurir cabang | `agen` / `koordinator-kurir` | — | Shipment yang ditugaskan |
-| `koordinator-kurir` | Dispatcher pengiriman cabang | `agen` | — | Cabang sendiri (dispatch + assignment kurir; tanpa uang, tanpa fulfilment) |
+| `kurir` | Kurir cabang | `agen` / `koordinator-kurir` | — | Hanya shipment/retur yang di-assign kepadanya (assignment-only, tanpa self-claim) |
+| `koordinator-kurir` | Dispatcher pengiriman cabang | `agen` | — | Cabang sendiri (dispatch + assignment kurir/retur + riwayat terkirim read-only; tanpa uang, tanpa fulfilment) |
 | `korsal` | Koordinator sales | `agen` | `KO-` | Downline sendiri |
 | `sales` | Penjual | `agen` (wajib Korsal) / `korsal` | `SA-` | Konsumen yang direferensikan |
 | `sales-kurir-sub` | Penjual + pengantar mandiri | `agen` / `korsal`; konversi Sales oleh `agen` | `SS-` (baru; `SA-`/`SK-` historis tetap sah) | Scope referral + Sub Location sendiri |
@@ -48,7 +48,7 @@ Format: aksi → role yang diizinkan route+policy (evidence route di `api_v1.php
 | Tambah baris produk ke order (SC-03) | **`admin` saja** (terkunci) | `role:admin` + `OrderPolicy::addLine` |
 | Sesuaikan kuantitas terpenuhi / reschedule / split | `super_admin`, `agen`, `admin` | jendela fulfilment §21 |
 | Assign kurir ke shipment | `super_admin`, `agen`, `admin`, `koordinator-kurir` | `ShipmentPolicy` + eligibility SKS CR-001 |
-| Progres status shipment / per-item | `super_admin`, `agen`, `admin`, `kurir`, `sales-kurir-sub`, `koordinator-kurir` (hanya sebagai executor tercatat) | `ShipmentPolicy::updateStatus` |
+| Progres status shipment / per-item | `super_admin`, `agen`, `admin`, `kurir`, `koordinator-kurir` (hanya sebagai executor tercatat), `sales-kurir-sub` (executor tercatat, atau self_sub **hanya untuk order yang ia buat**) | `ShipmentPolicy::updateStatus` |
 | Cetak resi | `super_admin`, `agen`, `admin`, `kurir`, `sales-kurir-sub`, `koordinator-kurir` | `ShipmentPolicy::printReceipt` (keuangan/korsal/sales/konsumen sengaja dikecualikan) |
 | Verifikasi pengiriman (delivery verification) | `super_admin`, `admin` (cabang sama) | `DeliveryVerificationPolicy` |
 | Upload bukti pembayaran (transfer/COD/DP/cicilan) | `konsumen` (milik sendiri); `super_admin`, `agen`, `admin`, `keuangan` (cabang); `korsal`/`sales`/`sales-kurir-sub` dalam scope `payOnBehalf` | upload saja, tidak memverifikasi |

@@ -281,9 +281,61 @@ class InvoiceTest extends TestCase
         ]);
         $pdfForeign = $pdfService->render($order, [...$base['config'], 'logo_media_id' => $foreign->id], viewerIsOwner: false);
         $this->assertStringNotContainsString('logos/foreign.png', $pdfForeign->getDom()->saveHTML(), 'cross-agent media must never be embedded');
+        // INVOICE-001: the unauthorized custom logo falls back to the OFFICIAL default, never a blank header.
+        $this->assertStringContainsString($this->defaultLogoDataUri(), $pdfForeign->getDom()->saveHTML());
+        $this->assertStringNotContainsString(base64_encode(file_get_contents($logo->getRealPath())), $pdfForeign->getDom()->saveHTML());
+    }
 
-        // No logo configured → no <img> at all.
-        $pdfNone = $pdfService->render($order, $base['config'], viewerIsOwner: false);
-        $this->assertStringNotContainsString('<img', $pdfNone->getDom()->saveHTML());
+    private function defaultLogoDataUri(): string
+    {
+        return 'data:image/png;base64,'.base64_encode(file_get_contents(resource_path('branding/prime-logo.png')));
+    }
+
+    public function test_official_prime_logo_is_the_default_when_no_logo_is_configured(): void
+    {
+        $order = $this->placeOrder();
+        $config = InvoiceConfigService::resolved((int) $order->agent_id);
+        $this->assertEmpty($config['logo_media_id'] ?? null);
+
+        $pdf = \App::make(\App\Services\Invoice\InvoicePdfService::class)->render($order, $config, viewerIsOwner: false);
+
+        $this->assertStringContainsString($this->defaultLogoDataUri(), $pdf->getDom()->saveHTML());
+        $this->assertStringContainsString('/Subtype /Image', $pdf->output(), 'the default logo must be embedded in the actual PDF');
+        $this->assertStringContainsString($order->order_no, $pdf->getDom()->saveHTML(), 'invoice number/content unchanged');
+    }
+
+    public function test_invalid_custom_logo_media_falls_back_to_the_default_logo(): void
+    {
+        $order = $this->placeOrder();
+        $config = [...InvoiceConfigService::resolved((int) $order->agent_id), 'logo_media_id' => 99999999];
+
+        $pdf = \App::make(\App\Services\Invoice\InvoicePdfService::class)->render($order, $config, viewerIsOwner: false);
+
+        $this->assertStringContainsString($this->defaultLogoDataUri(), $pdf->getDom()->saveHTML());
+    }
+
+    public function test_missing_default_asset_keeps_company_text_and_pdf_rendering(): void
+    {
+        $order = $this->placeOrder();
+        $config = InvoiceConfigService::resolved((int) $order->agent_id);
+        $original = base_path();
+        try {
+            config('view.paths'); // Preserve actual template/public paths while simulating absent branding.
+            config(['dompdf.public_path' => public_path()]);
+            app()->setBasePath(storage_path('framework/testing/missing-branding'));
+            $pdf = app(\App\Services\Invoice\InvoicePdfService::class)->render($order, $config);
+            $this->assertStringContainsString(e($config['company_name']), $pdf->getDom()->saveHTML());
+            $this->assertStringStartsWith('%PDF-', $pdf->output());
+        } finally {
+            app()->setBasePath($original);
+        }
+    }
+
+    public function test_bundled_default_logo_is_the_official_reference_asset(): void
+    {
+        $this->assertSame(
+            hash_file('sha256', base_path('../design/assets/prime-logo-reference.png')),
+            hash_file('sha256', resource_path('branding/prime-logo.png')),
+        );
     }
 }

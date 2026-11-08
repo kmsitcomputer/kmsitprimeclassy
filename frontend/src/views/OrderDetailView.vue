@@ -10,7 +10,7 @@ import RefundRecipientPanel from '@/components/dashboard/RefundRecipientPanel.vu
 import OrderPaymentTools from '@/components/orders/OrderPaymentTools.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
-import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement, openPaymentProof } from '@/api/payments'
+import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { listEligibleCouriers, type EligibleCourier } from '@/api/dispatch'
 import { recordDeliveryVerification } from '@/api/deliveries'
@@ -33,6 +33,7 @@ import type { DeliveryVerificationOutcome, Order, OrderItem, Product } from '@/a
 import { formatRupiah, formatDate, orderStatusLabel, paymentStatusLabel } from '@/utils/format'
 import { secureUuid } from '@/utils/uuid'
 import { ApiError } from '@/api/client'
+import ProtectedFileViewer from '@/components/ui/ProtectedFileViewer.vue'
 import { isGoogleMapsConfigured } from '@/utils/googleMaps'
 import GoogleMapView from '@/components/maps/GoogleMapView.vue'
 
@@ -1493,14 +1494,12 @@ async function submitReturn(item: OrderItem) {
               <div v-if="order.payment_transaction.bank_transfer_verification.submitted_by">Bukti di-upload oleh: <strong>{{ roleLabel(order.payment_transaction.bank_transfer_verification.submitted_by.role) }} — {{ order.payment_transaction.bank_transfer_verification.submitted_by.name }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.submitted_at"> ({{ formatDate(order.payment_transaction.bank_transfer_verification.submitted_at) }})</span></div>
               <div v-if="order.payment_transaction.bank_transfer_verification.verified_by">Diverifikasi oleh: <strong>{{ roleLabel(order.payment_transaction.bank_transfer_verification.verified_by.role) }} — {{ order.payment_transaction.bank_transfer_verification.verified_by.name }}</strong><span v-if="order.payment_transaction.bank_transfer_verification.verified_at"> ({{ formatDate(order.payment_transaction.bank_transfer_verification.verified_at) }})</span></div>
             </dl>
-            <button
+            <ProtectedFileViewer
               v-if="order.payment_transaction.bank_transfer_verification.proof_url && order.payment_transaction.bank_transfer_verification.proof_private"
-              type="button"
-              class="text-xs font-medium text-brand-600 dark:text-brand-400"
-              @click="openPaymentProof(order.payment_transaction.bank_transfer_verification.proof_url!)"
-            >
-              {{ t('orders.viewTransferProof') }}
-            </button>
+              :url="order.payment_transaction.bank_transfer_verification.proof_url!"
+              :label="t('orders.viewTransferProof')"
+              :filename-base="`bukti-transfer-${order.order_no}`"
+            />
             <a
               v-else-if="order.payment_transaction.bank_transfer_verification.proof_url"
               :href="order.payment_transaction.bank_transfer_verification.proof_url"

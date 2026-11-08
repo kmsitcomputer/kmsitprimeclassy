@@ -13,8 +13,17 @@ export interface CreateUserPayload {
   korsal_id?: number
 }
 
-export async function listUsers(page = 1, filters: { role?: string; search?: string; agent_id?: number } = {}) {
-  const { data } = await http.get<ApiEnvelope<AuthUser[]>>('/users', { params: { page, ...filters } })
+export interface ListUsersFilters {
+  role?: string
+  search?: string
+  status?: string
+  agent_id?: number
+  per_page?: number
+}
+
+export async function listUsers(page = 1, filters: ListUsersFilters = {}, signal?: AbortSignal) {
+  const params = Object.fromEntries(Object.entries({ page, ...filters }).filter(([, v]) => v !== undefined && v !== ''))
+  const { data } = await http.get<ApiEnvelope<AuthUser[]>>('/users', { params, signal })
   return { users: data.data, meta: data.meta as unknown as PaginationMeta }
 }
 

@@ -119,6 +119,29 @@ class CourierSystemTest extends TestCase
         Shipment::query()->where('order_id', $orderId)->update(['shipping_provider_code' => 'openroute']);
     }
 
+    /**
+     * Owner decision (2026-11-08): couriers are assignment-only, so every fixture that has a kurir
+     * progress a delivery first records that assignment through the authorized dispatch route
+     * (office admin). Idempotent: skips when the shipment already has an executor.
+     */
+    private function assignKurir(array $branch, int $shipmentId, ?User $kurir = null): void
+    {
+        if (Shipment::query()->whereKey($shipmentId)->value('courier_id') !== null) {
+            return;
+        }
+        $kurir ??= $branch['kurir'];
+        $courierId = Courier::where('user_id', $kurir->id)->value('id');
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])->assertOk();
+    }
+
+    /** Authorized assignment of a return pickup to a kurir (the only way a kurir gets a return). */
+    private function assignReturn(array $branch, int $returnItemId, ?User $kurir = null): void
+    {
+        $kurir ??= $branch['kurir'];
+        $courierId = Courier::where('user_id', $kurir->id)->value('id');
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/return-items/{$returnItemId}/courier", ['courier_id' => $courierId])->assertOk();
+    }
+
     /** Every order starts with exactly one shipment shared by all its items — see the OrderService::createOrder wiring. */
     private function shipmentIdFor(Order $order): int
     {
@@ -224,6 +247,8 @@ class CourierSystemTest extends TestCase
         $this->assertDatabaseHas('commissions', ['order_id' => $order->id, 'beneficiary_role' => 'agent']);
         $this->assertDatabaseMissing('commissions', ['order_id' => $order->id, 'beneficiary_role' => 'courier']);
 
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
+
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
         $this->assertDatabaseMissing('commissions', ['order_id' => $order->id, 'beneficiary_role' => 'courier']);
 
@@ -244,6 +269,7 @@ class CourierSystemTest extends TestCase
         ])->assertOk();
 
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('proof.jpg')])->assertOk();
 
@@ -406,6 +432,11 @@ class CourierSystemTest extends TestCase
         $product = $this->makeProduct($branch['agen'], 'Kue Branch', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
 
+        // Assignment-only: unassigned work is invisible even to the kurir of the same branch...
+        $this->assertFalse(collect($this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->contains('id', $order->id));
+
+        // ...and appears once an authorized actor assigns it to them.
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
         $ownList = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders');
         $ownList->assertOk();
         $this->assertTrue(collect($ownList->json('data'))->contains('id', $order->id));
@@ -428,13 +459,15 @@ class CourierSystemTest extends TestCase
         // Kurir may never push an order INTO diproses — that's still an office decision.
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertStatus(403);
 
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
+
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('proof.jpg')])->assertOk();
 
         $this->assertSame('terkirim', $order->fresh()->status);
     }
 
-    public function test_kurir_self_assigns_on_dikirim_and_a_second_kurir_cannot_take_over(): void
+    public function test_kurir_cannot_claim_an_unassigned_shipment_and_a_second_kurir_cannot_take_over_an_assigned_one(): void
     {
         $branch = $this->makeAgentBranch();
         $secondKurir = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id]);
@@ -442,14 +475,19 @@ class CourierSystemTest extends TestCase
 
         $product = $this->makeProduct($branch['agen'], 'Kue Assign', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $shipmentId = $this->shipmentIdFor($order);
 
-        $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
+        // SEC-COURIER-001: no self-claim on pickup — an unassigned shipment is refused and untouched.
+        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertStatus(403);
+        $this->assertDatabaseHas('shipments', ['id' => $shipmentId, 'courier_id' => null, 'status' => 'pending']);
 
+        $this->assignKurir($branch, $shipmentId);
         $courierId = Courier::where('user_id', $branch['kurir']->id)->value('id');
+        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
         $this->assertDatabaseHas('shipments', ['order_id' => $order->id, 'courier_id' => $courierId]);
 
-        // A different kurir in the same branch cannot barge in on an already-claimed delivery.
-        $this->actingAs($secondKurir)->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'terkirim'])->assertStatus(403);
+        // A different kurir in the same branch cannot barge in on another kurir's assigned delivery.
+        $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'terkirim'])->assertStatus(403);
     }
 
     public function test_admin_can_proactively_assign_a_courier_and_kurir_cannot(): void
@@ -494,6 +532,7 @@ class CourierSystemTest extends TestCase
         $product = $this->makeProduct($branch['agen'], 'Kue Uang', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
 
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
         $list = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders');
         $list->assertOk();
         $row = collect($list->json('data'))->firstWhere('id', $order->id);
@@ -515,10 +554,12 @@ class CourierSystemTest extends TestCase
      * Kurir + returns (pengembalian)
      * ------------------------------------------------------------- */
 
-    private function makeDeliveredAndReturnedItem(array $branch, Product $product): array
+    private function makeDeliveredAndReturnedItem(array $branch, Product $product, bool $assignToKurir = true): array
     {
         $order = $this->placeOrder($branch['konsumen'], $product, 2);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
+
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
 
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('proof.jpg')])->assertOk();
@@ -531,7 +572,56 @@ class CourierSystemTest extends TestCase
 
         $returnItemId = ReturnItem::where('order_item_id', $item->id)->value('id');
 
+        if ($assignToKurir) {
+            $this->assignReturn($branch, $returnItemId);
+        }
+
         return compact('order', 'item', 'returnItemId');
+    }
+
+    public function test_return_dispatch_queue_and_assignment_conflicts_preserve_branch_and_executor(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Return regression', 50000, 20);
+        ['returnItemId' => $id] = $this->makeDeliveredAndReturnedItem($branch, $product, false);
+        $courier = Courier::where('user_id', $branch['kurir']->id)->firstOrFail();
+        $other = $this->makeAgentBranch();
+        $otherCourier = Courier::where('user_id', $other['kurir']->id)->firstOrFail();
+        $this->actingAs($branch['kurir'])->getJson('/api/v1/dispatch/returns')->assertForbidden();
+        $this->actingAs($other['admin'])->getJson('/api/v1/dispatch/returns')->assertOk()->assertJsonCount(0, 'data');
+        $queue = $this->actingAs($branch['admin'])->getJson('/api/v1/dispatch/returns')->assertOk();
+        $queue->assertJsonPath('data.0.id', $id)->assertJsonPath('data.0.assignment_status', 'unassigned');
+        $this->assertArrayNotHasKey('refund_amount', $queue->json('data.0'));
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/return-items/{$id}/courier", ['courier_id' => $otherCourier->id])->assertStatus(422);
+        $this->actingAs($other['admin'])->patchJson("/api/v1/return-items/{$id}/courier", ['courier_id' => $otherCourier->id])->assertForbidden();
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/return-items/{$id}/courier", ['courier_id' => $courier->id])->assertOk();
+        $replacement = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id]);
+        $replacementCourier = Courier::create(['type' => 'internal', 'user_id' => $replacement->id, 'agent_id' => $branch['agen']->id, 'name' => 'Replacement', 'is_active' => true]);
+        // A second dispatcher with a stale unassigned snapshot must never overwrite the winner.
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/return-items/{$id}/courier", ['courier_id' => $replacementCourier->id])->assertStatus(409);
+        $this->assertSame($courier->id, ReturnItem::findOrFail($id)->courier_id);
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/return-items/{$id}/courier", ['courier_id' => $replacementCourier->id, 'expected_courier_id' => $courier->id])->assertOk();
+        $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/returns')->assertOk()->assertJsonCount(0, 'data');
+        $this->actingAs($replacement)->getJson('/api/v1/kurir/returns')->assertOk()->assertJsonPath('data.0.items.0.id', $id);
+        $this->actingAs($replacement)->patchJson("/api/v1/kurir/returns/{$id}/confirm", ['received' => true])->assertOk();
+        $this->actingAs($branch['admin'])->patchJson("/api/v1/return-items/{$id}/courier", ['courier_id' => $courier->id, 'expected_courier_id' => $replacementCourier->id])->assertStatus(422);
+        $this->assertDatabaseHas('activity_logs', ['event' => 'return_item.courier_assigned']);
+    }
+
+    public function test_courier_return_queue_never_exposes_sibling_items_assigned_elsewhere(): void
+    {
+        $branch = $this->makeAgentBranch();
+        $product = $this->makeProduct($branch['agen'], 'Return regression', 50000, 20);
+        ['item' => $item, 'returnItemId' => $id] = $this->makeDeliveredAndReturnedItem($branch, $product);
+        $own = ReturnItem::findOrFail($id);
+        $siblingOrderItem = $item->replicate();
+        $siblingOrderItem->save();
+        $sibling = $own->replicate();
+        $sibling->order_item_id = $siblingOrderItem->id;
+        $sibling->courier_id = null;
+        $sibling->save();
+        $response = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/returns')->assertOk();
+        $response->assertJsonCount(1, 'data.0.items')->assertJsonPath('data.0.items.0.id', $id);
     }
 
     public function test_kurir_sees_pengembalian_queue_and_can_confirm_kembali(): void
@@ -574,35 +664,30 @@ class CourierSystemTest extends TestCase
         $queue->assertOk()->assertJsonPath('data.0.items.0.condition_note', 'Kemasan penyok saat diambil');
     }
 
-    public function test_an_unclaimed_return_is_visible_to_every_kurir_but_disappears_once_one_of_them_picks_it_up(): void
+    public function test_an_unassigned_return_is_invisible_and_unclaimable_by_every_kurir_until_authorized_assignment(): void
     {
         $branch = $this->makeAgentBranch();
         $secondKurir = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id]);
         Courier::create(['type' => 'internal', 'user_id' => $secondKurir->id, 'agent_id' => $branch['agen']->id, 'name' => $secondKurir->name, 'is_active' => true]);
 
         $product = $this->makeProduct($branch['agen'], 'Kue Retur Rebutan', 40000, 10);
-        ['returnItemId' => $returnItemId] = $this->makeDeliveredAndReturnedItem($branch, $product);
+        ['returnItemId' => $returnItemId] = $this->makeDeliveredAndReturnedItem($branch, $product, assignToKurir: false);
 
-        // Both couriers see the unclaimed return.
+        // SEC-COURIER-001: nobody sees an unassigned return, and nobody can claim it.
         foreach ([$branch['kurir'], $secondKurir] as $actor) {
-            $list = $this->actingAs($actor)->getJson('/api/v1/kurir/returns');
-            $list->assertOk();
-            $this->assertCount(1, $list->json('data'));
+            $this->assertCount(0, $this->actingAs($actor)->getJson('/api/v1/kurir/returns')->assertOk()->json('data'));
+            $this->actingAs($actor)->patchJson("/api/v1/kurir/returns/{$returnItemId}/pickup", [])->assertStatus(403);
+            $this->actingAs($actor)->patchJson("/api/v1/kurir/returns/{$returnItemId}/confirm", ['received' => true])->assertStatus(403);
         }
+        $this->assertDatabaseHas('return_items', ['id' => $returnItemId, 'courier_id' => null]);
 
-        $this->actingAs($secondKurir)->patchJson("/api/v1/kurir/returns/{$returnItemId}/pickup", [])->assertOk();
-
-        // Now claimed by secondKurir — the original kurir no longer sees it in their queue...
-        $afterList = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/returns');
-        $afterList->assertOk();
-        $this->assertCount(0, $afterList->json('data'));
-
-        // ...and cannot pick it up or confirm it either, even though it's still 'pengembalian'.
+        // Authorized assignment to secondKurir: only they see/process it.
+        $this->assignReturn($branch, $returnItemId, $secondKurir);
+        $this->assertCount(0, $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/returns')->assertOk()->json('data'));
+        $this->assertCount(1, $this->actingAs($secondKurir)->getJson('/api/v1/kurir/returns')->assertOk()->json('data'));
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/kurir/returns/{$returnItemId}/pickup", [])->assertStatus(403);
-        $this->actingAs($branch['kurir'])->patchJson("/api/v1/kurir/returns/{$returnItemId}/confirm", ['received' => true])
-            ->assertStatus(403);
+        $this->actingAs($branch['kurir'])->patchJson("/api/v1/kurir/returns/{$returnItemId}/confirm", ['received' => true])->assertStatus(403);
 
-        // secondKurir, who actually holds it, can still confirm it normally.
         $this->actingAs($secondKurir)->patchJson("/api/v1/kurir/returns/{$returnItemId}/confirm", ['received' => true])->assertOk();
     }
 
@@ -637,6 +722,7 @@ class CourierSystemTest extends TestCase
         $branch = $this->makeAgentBranch();
         $product = $this->makeProduct($branch['agen'], 'Kue Laporan', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('proof.jpg')])->assertOk();
 
@@ -670,6 +756,8 @@ class CourierSystemTest extends TestCase
             $view->assertOk();
             $this->assertSame([], $view->json('data.couriers'));
         }
+
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
 
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
 
@@ -736,6 +824,9 @@ class CourierSystemTest extends TestCase
         $secondKurir = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id]);
         Courier::create(['type' => 'internal', 'user_id' => $secondKurir->id, 'agent_id' => $branch['agen']->id, 'name' => 'Second Kurir', 'is_active' => true]);
 
+        $this->assignKurir($branch, $itemA->shipment_id, $secondKurir);
+        $this->assignKurir($branch, $itemB->shipment_id);
+
         $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemB->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
 
@@ -795,6 +886,7 @@ class CourierSystemTest extends TestCase
         Courier::create(['type' => 'internal', 'user_id' => $secondKurir->id, 'agent_id' => $branch['agen']->id, 'name' => 'Second Kurir', 'is_active' => true]);
 
         // The original kurir self-assigns the SPLIT shipment (A's, now theirs)...
+        $this->assignKurir($branch, $splitShipmentId);
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$splitShipmentId}/status", ['status' => 'dikirim'])->assertOk();
 
         // ...so a second kurir, even from the same branch, cannot finish delivering it.
@@ -805,7 +897,7 @@ class CourierSystemTest extends TestCase
      * Delivery visibility: diproses is universal, dikirim/terkirim are exclusive
      * ------------------------------------------------------------- */
 
-    public function test_a_diproses_order_stays_visible_to_every_kurir_even_after_a_proactive_admin_assignment(): void
+    public function test_a_diproses_order_is_visible_only_to_the_kurir_it_is_assigned_to(): void
     {
         $branch = $this->makeAgentBranch();
         $secondKurir = User::factory()->kurir()->create(['agent_id' => $branch['agen']->id]);
@@ -813,29 +905,22 @@ class CourierSystemTest extends TestCase
 
         $product = $this->makeProduct($branch['agen'], 'Kue Universal', 40000, 10);
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
-
-        // Admin proactively pre-assigns a courier to the shipment — the item is still 'diproses', not yet picked up.
-        $courierId = Courier::where('user_id', $branch['kurir']->id)->value('id');
         $shipmentId = $this->shipmentIdFor($order);
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])->assertOk();
 
-        // "Semua order diproses bisa dilihat semua kurir" — the pre-assignment never hides it from anyone.
+        // Owner decision (2026-11-08): unassigned work is invisible to every kurir.
         foreach ([$branch['kurir'], $secondKurir] as $actor) {
-            $list = $this->actingAs($actor)->getJson('/api/v1/kurir/orders');
-            $list->assertOk();
-            $this->assertTrue(collect($list->json('data'))->contains('id', $order->id));
+            $this->assertFalse(collect($this->actingAs($actor)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->contains('id', $order->id));
         }
 
-        // Once actually picked up (marked 'dikirim'), it becomes exclusive to whoever holds it.
+        // Authorized assignment (still 'diproses', pending pickup) makes it visible to the assignee ONLY.
+        $this->assignKurir($branch, $shipmentId);
+        $this->assertTrue(collect($this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->contains('id', $order->id));
+        $this->assertFalse(collect($this->actingAs($secondKurir)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->contains('id', $order->id));
+
+        // Still exclusive after pickup.
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
-
-        $ownerList = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders');
-        $ownerList->assertOk();
-        $this->assertTrue(collect($ownerList->json('data'))->contains('id', $order->id));
-
-        $otherList = $this->actingAs($secondKurir)->getJson('/api/v1/kurir/orders');
-        $otherList->assertOk();
-        $this->assertFalse(collect($otherList->json('data'))->contains('id', $order->id));
+        $this->assertTrue(collect($this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->contains('id', $order->id));
+        $this->assertFalse(collect($this->actingAs($secondKurir)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->contains('id', $order->id));
     }
 
     /**
@@ -882,26 +967,28 @@ class CourierSystemTest extends TestCase
         $itemB = $itemB->fresh();
         $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
 
-        // First kurir picks up product A only — product B stays 'diproses', untouched.
-        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+        // First kurir is assigned + picks up product A only — product B stays unassigned.
+        $this->assignKurir($branch, $itemA->shipment_id);
 
-        // Second kurir's queue: the order still appears (product B is still up for grabs),
-        // but product A — already claimed by the first kurir — must not be in its items.
+        // Second kurir holds nothing: the order does not appear at all (no leak of A, and B is not a claimable queue item).
         $list = $this->actingAs($secondKurir)->getJson('/api/v1/kurir/orders');
         $list->assertOk();
-        $seenOrder = collect($list->json('data'))->firstWhere('id', $order->id);
-        $this->assertNotNull($seenOrder);
+        $this->assertNull(collect($list->json('data'))->firstWhere('id', $order->id));
 
-        $seenProductIds = collect($seenOrder['items'])->pluck('id');
-        $this->assertTrue($seenProductIds->contains($itemB->id));
-        $this->assertFalse($seenProductIds->contains($itemA->id));
-
-        // The first kurir's own queue still shows both — their own claimed item, and the still-open one.
+        // The first kurir sees ONLY their own item A — never the unassigned item B.
         $ownList = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders');
-        $ownSeenOrder = collect($ownList->json('data'))->firstWhere('id', $order->id);
-        $ownSeenProductIds = collect($ownSeenOrder['items'])->pluck('id');
+        $ownSeenProductIds = collect(collect($ownList->json('data'))->firstWhere('id', $order->id)['items'])->pluck('id');
         $this->assertTrue($ownSeenProductIds->contains($itemA->id));
-        $this->assertTrue($ownSeenProductIds->contains($itemB->id));
+        $this->assertFalse($ownSeenProductIds->contains($itemB->id));
+
+        // Assign B to the second kurir: they now see B only, never A.
+        $this->assignKurir($branch, $itemB->shipment_id, $secondKurir);
+        $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
+
+        $secondSeen = collect($this->actingAs($secondKurir)->getJson('/api/v1/kurir/orders')->json('data'))->firstWhere('id', $order->id);
+        $secondIds = collect($secondSeen['items'])->pluck('id');
+        $this->assertTrue($secondIds->contains($itemB->id));
+        $this->assertFalse($secondIds->contains($itemA->id));
     }
 
     /* ---------------------------------------------------------------
@@ -955,6 +1042,7 @@ class CourierSystemTest extends TestCase
         ])->assertOk();
 
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
+        $this->assignKurir($branch, $this->shipmentIdFor($order));
         $this->actingAs($branch['kurir'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch('/api/v1/shipments/'.$this->shipmentIdFor($order).'/status', ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('proof.jpg')])->assertOk();
 

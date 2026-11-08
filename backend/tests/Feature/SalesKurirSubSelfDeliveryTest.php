@@ -267,7 +267,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
 
         foreach (['/api/v1/kurir/orders', '/api/v1/kurir/orders?status=diproses'] as $url) {
             $ids = collect($this->actingAs($this->b['kurir'])->getJson($url)->assertOk()->json('data'))->pluck('id');
-            $this->assertTrue($ids->contains($agentOrderId), 'the standard Agent-sourced order stays claimable');
+            $this->assertFalse($ids->contains($agentOrderId), 'unassigned standard work is invisible to ordinary couriers');
             $this->assertFalse($ids->contains($subOrder->id), 'a self_sub order is never in a normal Kurir queue');
         }
     }

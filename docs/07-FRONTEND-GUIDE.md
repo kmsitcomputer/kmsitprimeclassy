@@ -96,7 +96,8 @@ Urutan `router.beforeEach`:
 - **keuangan**: finance, piutang, verifikasi pembayaran, laporan finansial, network summary, komisi (slice), notification center, refund ledger.
 - **gudang**: antrian order diproses, warehouse stock/transfers/opnames/returns, sub-stock execution, proposal fulfilment, stok read, KPI gudang.
 - **kurir**: `/dashboard/kurir` (antrian delivery, retur pickup), komisi own, KPI kurir.
-- **koordinator-kurir**: dispatch workspace, assignment kurir, (executor self via profil kurir), komisi.
+- **koordinator-kurir**: dispatch workspace (tab *Antrean Dispatch* + *Riwayat Terkirim* — riwayat shipment terkirim cabang, filter tanggal/kurir/no. order, paginasi, bukti kirim via `ProtectedFileViewer`, *Buka Order*), assignment kurir, (executor self via profil kurir), komisi.
+- **Manajemen pengguna** (`UserManagementView`): paginasi + pencarian + filter peran/status server-side (page size 10/25/50/100, reset ke halaman 1 saat filter berubah, respons usang dibuang); selector kandidat pindah referral = pencarian server-side terbatas (20/role), bukan halaman-1 saja.
 - **korsal**: laporan transaksi/sales/network, CRM downline read, my-customers, komisi tim, KPI.
 - **sales / sales-kurir-sub**: CRM miliknya (customers/visits/follow-ups/assisted order), my-customers, komisi, KPI; SKS + `/dashboard/sub-stock` (stok sendiri) + `/dashboard/kurir`.
 - **konsumen**: storefront + `/orders`, `/profile`, `/account/addresses`.
@@ -153,3 +154,5 @@ npm run build        # type-check + build
 ```
 
 Tidak ada test runner frontend otomatis; verifikasi = type-check + build + pemeriksaan browser manual.
+
+Penugasan retur tersedia di tab **Penugasan Retur** pada Dispatch: daftar pickup tertunda, kurir eligible, assignment saat ini, pagination, serta feedback sukses/error. Jika assignment berubah sejak daftar dimuat (409), muat ulang sebelum mencoba lagi.

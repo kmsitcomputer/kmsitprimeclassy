@@ -26,7 +26,7 @@
     <div class="header">
         <span class="company">{{ $config['company_name'] }}</span>
         <span class="title">{{ $config['title'] }}</span>
-        @if(!empty($logo_url)) <img src="{{ $logo_url }}" alt="logo" style="max-height:28px; float:right; margin-left:8px;"> @endif
+        @if(!empty($logo_url)) <img src="{{ $logo_url }}" alt="logo" style="max-height:48px; max-width:140px; width:auto; height:auto; float:right; margin-left:8px;"> @endif
         <div class="clear"></div>
     </div>
 

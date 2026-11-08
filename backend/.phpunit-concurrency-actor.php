@@ -1070,7 +1070,11 @@ if (str_starts_with($role, 'dispatch-race-')) {
     $isFirst = $role === 'dispatch-race-dr-a';
     if ($isFirst) {
         DB::beginTransaction();
-        Order::withoutGlobalScopes()->whereKey($orderId)->lockForUpdate()->firstOrFail();
+        if ($operation === 'return-assign') {
+            \App\Models\ReturnItem::whereKey($itemId)->lockForUpdate()->firstOrFail();
+        } else {
+            Order::withoutGlobalScopes()->whereKey($orderId)->lockForUpdate()->firstOrFail();
+        }
         actorSignalReady($ready, 'order-locked');
         $deadline = microtime(true) + 25;
         while (microtime(true) < $deadline && ! file_exists($release)) {
@@ -1078,8 +1082,9 @@ if (str_starts_with($role, 'dispatch-race-')) {
         }
     } else {
         // Signal at the real competing lock attempt, while A still owns Order.
-        DB::connection()->beforeExecuting(function ($query) use ($ready) {
-            if (str_contains(strtolower($query), '`orders`') && str_contains(strtolower($query), 'for update')) {
+        DB::connection()->beforeExecuting(function ($query) use ($ready, $operation) {
+            $table = $operation === 'return-assign' ? '`return_items`' : '`orders`';
+            if (str_contains(strtolower($query), $table) && str_contains(strtolower($query), 'for update')) {
                 actorSignalReady($ready, 'order-lock-attempt');
             }
         });
@@ -1095,7 +1100,13 @@ if (str_starts_with($role, 'dispatch-race-')) {
 
     try {
         $actor = User::withoutGlobalScopes()->findOrFail($actorId);
-        if ($operation === 'propose') {
+        if ($operation === 'return-assign') {
+            $result = app(\App\Services\Order\ReturnService::class)->assignPickupCourier(
+                \App\Models\ReturnItem::findOrFail($itemId),
+                \App\Models\Courier::findOrFail($courierId), $actor,
+            );
+            $payload['return_courier_id'] = $result->courier_id;
+        } elseif ($operation === 'propose') {
             $request = StockRequest::withoutGlobalScopes()->findOrFail($requestId);
             $proposal = app(StockRequestProposalService::class)->propose(
                 $actor,

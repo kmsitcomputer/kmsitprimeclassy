@@ -98,6 +98,9 @@ class CourierFeeSplitTest extends TestCase
     private function deliver(OrderItem $item, User $actor): void
     {
         $shipment = $item->shipment()->first();
+        if (! $shipment->isSelfDelivery() && $shipment->courier_id === null) {
+            app(CourierService::class)->assignCourier($shipment, $actor->courierProfile, $this->b['agen']);
+        }
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $actor);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $actor, UploadedFile::fake()->image('proof.jpg'));
     }

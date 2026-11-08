@@ -38,7 +38,8 @@ Katalog fitur yang benar-benar ada di source code, dengan status implementasi da
 | Verifikasi pembayaran oleh Keuangan/super_admin (`verified_amount` terpisah) | IMPLEMENTED | `PaymentController::verify` + `assertMayVerifyPayment` |
 | DP & pembayaran parsial (`partially_paid`, `dp_amount`) | IMPLEMENTED | migrasi `2026_09_23_090000`, `PaymentService` |
 | Tanggal jatuh tempo per order + audit | IMPLEMENTED | `setDueDate`, `order_due_date_changes` |
-| Invoice dinamis (PDF, nomor = `order_no`, snapshot versi) | IMPLEMENTED | `InvoiceController`, `order_invoice_snapshots`, `InvoiceConfigController` |
+| Invoice dinamis (PDF, nomor = `order_no`, snapshot versi; logo cabang valid → logo Prime resmi bawaan `resources/branding/prime-logo.png` → teks) | IMPLEMENTED | `InvoiceController`, `InvoicePdfService`, `order_invoice_snapshots`, `InvoiceConfigController` |
+| Riwayat terkirim koordinator (`GET /dispatch/history`) & assignment retur kurir | IMPLEMENTED (lokal; belum diuji penuh) | `DispatchController::history`, `ReturnController::assignPickupCourier` |
 | Piutang (receivables) terpusat Admin+Keuangan | IMPLEMENTED | `ReceivablesView.vue`, `CollectibleReceivable` |
 | Gateway pembayaran eksternal (Xendit/Tripay/Stripe) | **DIHAPUS by Owner** | catatan §13 [05-BUSINESS-RULES](05-BUSINESS-RULES.md) |
 

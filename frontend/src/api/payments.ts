@@ -69,13 +69,13 @@ export async function setOrderDueDate(orderId: number, dueDate: string, reason: 
   return data.data
 }
 
-/** Private payment proofs are served only through an authorized endpoint, so they are fetched with the session and shown from a blob URL. */
-export async function openPaymentProof(proofUrl: string) {
-  const { data } = await http.get<Blob>(proofUrl, { responseType: 'blob' })
-  const objectUrl = URL.createObjectURL(data)
-  window.open(objectUrl, '_blank', 'noopener')
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
-}
+/**
+ * Private payment proofs are served only through an authorized endpoint. Use
+ * `<ProtectedFileViewer>` (components/ui) in views: it fetches via `fetchProtectedFile`
+ * and previews/downloads from a user-triggered control, which works in browsers and installed PWAs
+ * (no async `window.open`, which popup protection blocks).
+ */
+export { fetchProtectedFile, ProtectedFileError } from './protectedFile'
 
 export async function markCodPayment(orderId: number, paid: boolean) {
   const { data } = await http.patch<ApiEnvelope<Order>>(`/orders/${orderId}/payment/cod`, { paid })

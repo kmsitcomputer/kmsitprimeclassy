@@ -206,4 +206,24 @@ class ReturnController extends Controller
             'items' => $items->count(),
         ]);
     }
+
+    /**
+     * Owner decision (2026-11-08): the ONLY way a return pickup gets a kurir. Office/dispatch actors
+     * (super_admin/agen/admin/koordinator-kurir) assign an eligible same-branch courier; the service
+     * re-checks branch, return state and courier eligibility under row locks.
+     */
+    public function assignPickupCourier(Request $request, ReturnItem $item)
+    {
+        $data = $request->validate([
+            'courier_id' => ['required', 'integer', 'exists:couriers,id'],
+            'expected_courier_id' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $item = $this->returnService->assignPickupCourier(
+            $item, \App\Models\Courier::query()->findOrFail($data['courier_id']), $request->user(),
+            isset($data['expected_courier_id']) ? (int) $data['expected_courier_id'] : null,
+        );
+
+        return $this->ok(['id' => $item->id, 'courier_id' => $item->courier_id], __('messages.courier.assigned'));
+    }
 }

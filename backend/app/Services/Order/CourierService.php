@@ -281,41 +281,17 @@ class CourierService
     }
 
     /**
-     * A courier picking up an unassigned delivery self-assigns the moment
-     * they mark it 'dikirim' — never overwrites an existing assignment to a
-     * different courier (that shipment isn't theirs to take). A
-     * koordinator-kurir may only ever claim a delivery assigned to their OWN
-     * executor profile; they never take another courier's or an unassigned
-     * standard delivery on pickup (dispatch is their job — self-execution is
-     * a deliberate, audited assignment through the dispatch workspace). A
-     * sales-kurir-sub never claims on pickup either — its standard deliveries
-     * come only from an explicit office assignment (assertMayOperateShipment
-     * refuses anything not recorded to its own profile).
+     * Owner decision (2026-11-08) — assignment-only couriers. A kurir / koordinator-kurir may
+     * operate a standard shipment ONLY when an authorized dispatch workflow recorded it to their
+     * OWN Courier profile. There is no pickup self-claim: an unassigned shipment, or one assigned
+     * to another courier, is refused (403) and nothing is written. (The sole self-pickup exception
+     * is a SKS on an order they placed themselves — see Shipment::isSelfPickupAuthorizedFor.)
      */
-    public function selfAssignIfUnassigned(Shipment $shipment, User $kurirActor): void
+    private function assertAssignedToActor(Shipment $shipment, User $actor): void
     {
-        $courier = $kurirActor->courierProfile;
+        $assignedCourierUserId = $shipment->courier?->user_id;
 
-        if (! $courier) {
-            throw new ApiException(__('messages.courier.no_profile'), 422);
-        }
-
-        if ($kurirActor->isRole('koordinator-kurir')) {
-            // Koordinators never silently grab a queue delivery on pickup — they can only
-            // operate a shipment already explicitly assigned to their own executor profile.
-            if ((int) $shipment->courier_id !== (int) $courier->id) {
-                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
-            }
-
-            return;
-        }
-
-        $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
-
-        if ($shipment->courier_id === null) {
-            $this->assertAddedDemandFulfilled($shipment->order_id);
-            $shipment->update(['courier_id' => $courier->id]);
-        } elseif ($shipment->courier_id !== $courier->id) {
+        if ($assignedCourierUserId === null || (int) $assignedCourierUserId !== (int) $actor->id) {
             throw new ApiException(__('messages.courier.not_your_delivery'), 403);
         }
     }
@@ -331,7 +307,7 @@ class CourierService
      *    ONLY when an office dispatcher explicitly assigned it to their own Courier profile
      *    (`courier_id` → Courier.user_id === themselves) — the exact same recorded-executor
      *    ownership rule a normal Kurir passes. An unassigned standard shipment is never theirs
-     *    to claim (no self-assignment; `selfAssignIfUnassigned` still refuses them), and
+     *    to claim (no self-assignment; pickup never claims for them), and
      *    delivery proof stays mandatory to reach 'terkirim'.
      *
      * A1-01 (Koordinator self-executor): a Koordinator-Kurir may progress a
@@ -356,11 +332,9 @@ class CourierService
         }
 
         if ($shipment->isSelfDelivery()) {
-            $isOwner = $actor->isRole('sales-kurir-sub')
-                && $shipment->self_delivered_by_user_id !== null
-                && (int) $shipment->self_delivered_by_user_id === (int) $actor->id;
-
-            if (! $isOwner) {
+            // Owner decision (2026-11-08): creator-only SKS self-pickup. Branch/stock ownership
+            // alone is not enough; legacy orders without a recorded creator fail closed.
+            if (! $shipment->isSelfPickupAuthorizedFor($actor)) {
                 throw new ApiException(__('messages.courier.not_your_delivery'), 403);
             }
 
@@ -409,18 +383,12 @@ class CourierService
             return;
         }
 
-        if ($newStatus === 'dikirim' && $actor->isRole('kurir')) {
-            $this->selfAssignIfUnassigned($shipment, $actor);
-        }
+        if ($actor->isRole('kurir')) {
+            // Assignment-only: pickup ('dikirim') and delivery ('terkirim') both require the
+            // shipment to be recorded to this kurir's own profile — no claim on pickup.
+            $this->assertAssignedToActor($shipment, $actor);
 
-        if ($newStatus === 'terkirim' && $actor->isRole('kurir')) {
-            $assignedCourierUserId = $shipment->fresh()->courier?->user_id;
-
-            if ($assignedCourierUserId !== null && $assignedCourierUserId !== $actor->id) {
-                throw new ApiException(__('messages.courier.not_your_delivery'), 403);
-            }
-
-            if (! $proof) {
+            if ($newStatus === 'terkirim' && ! $proof) {
                 throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
             }
         }

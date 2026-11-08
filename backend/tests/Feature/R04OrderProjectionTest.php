@@ -176,6 +176,7 @@ class R04OrderProjectionTest extends TestCase
         $order = $this->placeAgentOrder();
         $shipment = $order->items()->firstOrFail()->shipment;
 
+        app(CourierService::class)->assignCourier($shipment, $this->b['courier'], $this->b['admin']);
         $flip = $this->actingAs($this->b['kurir'])->patchJson("/api/v1/shipments/{$shipment->id}/status", ['status' => 'dikirim'])->assertOk();
         $data = $flip->json('data');
 
@@ -185,17 +186,13 @@ class R04OrderProjectionTest extends TestCase
         $this->assertNoFinancialFields($data);
     }
 
-    public function test_kurir_queue_is_minimal_before_claim_and_full_after_assignment(): void
+    public function test_kurir_queue_is_invisible_before_assignment_and_full_after_assignment(): void
     {
         $order = $this->placeAgentOrder();
 
         $before = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
             ->firstWhere('id', $order->id);
-        $this->assertNotNull($before);
-        $this->assertFalse($before['detail_available']);
-        foreach (['recipient_name', 'recipient_phone', 'address', 'latitude'] as $key) {
-            $this->assertArrayNotHasKey($key, $before);
-        }
+        $this->assertNull($before, 'Unassigned work is invisible to ordinary couriers.');
 
         $shipment = $order->items()->firstOrFail()->shipment;
         app(CourierService::class)->assignCourier($shipment->fresh(), $this->b['courier'], $this->b['admin']);

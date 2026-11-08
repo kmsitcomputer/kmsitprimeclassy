@@ -142,16 +142,57 @@ const reassignTargetId = ref<number | null>(null)
 const reassignError = ref('')
 const reassigning = ref(false)
 
+// Candidate selector is bounded and server-filtered (never page-1 only, never the whole table):
+// at most CANDIDATE_LIMIT rows per target role, narrowed by a debounced server-side search.
+const CANDIDATE_LIMIT = 20
+const candidateSearch = ref('')
+const candidateTotal = ref(0)
+const candidatesLoading = ref(false)
+let candidateSeq = 0
+let candidateTimer: ReturnType<typeof setTimeout> | undefined
+
+async function loadCandidates() {
+  const user = reassigningUser.value
+  if (!user) return
+  const seq = ++candidateSeq
+  candidatesLoading.value = true
+  try {
+    const targetRoles = isSalesSeller(user) ? ['korsal'] : ['sales', 'sales-kurir-sub']
+    const pages = await Promise.all(
+      targetRoles.map((role) =>
+        listUsers(1, { role, agent_id: user.agent_id ?? undefined, status: 'active', search: candidateSearch.value.trim() || undefined, per_page: CANDIDATE_LIMIT }),
+      ),
+    )
+    if (seq !== candidateSeq) return
+    reassignCandidates.value = pages.flatMap((p) => p.users).filter((c) => c.id !== user.id)
+    candidateTotal.value = pages.reduce((sum, p) => sum + p.meta.total, 0)
+  } catch (e) {
+    if (seq !== candidateSeq) return
+    reassignError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat kandidat.'
+  } finally {
+    if (seq === candidateSeq) candidatesLoading.value = false
+  }
+}
+
+function onCandidateSearch() {
+  candidateSeq++
+  reassignTargetId.value = null
+  clearTimeout(candidateTimer)
+  candidateTimer = setTimeout(() => void loadCandidates(), 300)
+}
+
 async function openReassign(user: AuthUser) {
   reassigningUser.value = user
   reassignError.value = ''
   reassignTargetId.value = null
-  const targetRoles = isSalesSeller(user) ? ['korsal'] : ['sales', 'sales-kurir-sub']
-  const pages = await Promise.all(targetRoles.map((role) => listUsers(1, { role })))
-  reassignCandidates.value = pages.flatMap((p) => p.users).filter((c) => c.id !== user.id)
+  candidateSearch.value = ''
+  reassignCandidates.value = []
+  await loadCandidates()
 }
 
 function closeReassign() {
+  clearTimeout(candidateTimer)
+  candidateSeq++
   reassigningUser.value = null
 }
 
@@ -184,17 +225,64 @@ async function convertSales(user: AuthUser) {
   }
 }
 
-async function load() {
+// UI-USER-001: server-side pagination + search + role/status filters. Search/filter/page-size
+// changes reset to page 1; a sequence number drops stale responses so an older request can never
+// overwrite newer results.
+const PAGE_SIZES = [10, 25, 50, 100]
+const filters = ref({ search: '', role: '', status: '', per_page: 25 })
+const pageMeta = ref({ current_page: 1, last_page: 1, total: 0 })
+let loadSeq = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+
+const hasActiveFilters = computed(() => filters.value.search !== '' || filters.value.role !== '' || filters.value.status !== '')
+const filterRoleOptions = computed(() => Object.keys(ROLE_LABELS).filter((r) => r !== 'super_admin'))
+
+async function load(page = pageMeta.value.current_page) {
+  const seq = ++loadSeq
   loading.value = true
   errorMessage.value = ''
   try {
-    const { users: rows } = await listUsers()
+    const { users: rows, meta } = await listUsers(page, {
+      search: filters.value.search.trim() || undefined,
+      role: filters.value.role || undefined,
+      status: filters.value.status || undefined,
+      per_page: filters.value.per_page,
+    })
+    if (seq !== loadSeq) return
+    // A delete can empty the last page: step back instead of showing an empty table.
+    if (rows.length === 0 && page > 1 && meta.last_page < page) {
+      await load(meta.last_page)
+      return
+    }
     users.value = rows
-  } catch {
-    errorMessage.value = 'Gagal memuat daftar pengguna.'
+    pageMeta.value = { current_page: meta.current_page, last_page: meta.last_page, total: meta.total }
+  } catch (e) {
+    if (seq !== loadSeq) return
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memuat daftar pengguna.'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
+}
+
+function applyFilters() {
+  void load(1)
+}
+
+function onSearchInput() {
+  loadSeq++
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(applyFilters, 350)
+}
+
+function resetFilters() {
+  clearTimeout(searchTimer)
+  filters.value = { search: '', role: '', status: '', per_page: filters.value.per_page }
+  applyFilters()
+}
+
+function goToPage(delta: number) {
+  const next = Math.max(1, Math.min(pageMeta.value.last_page, pageMeta.value.current_page + delta))
+  if (next !== pageMeta.value.current_page) void load(next)
 }
 
 function openCreate() {
@@ -268,7 +356,7 @@ async function remove(user: AuthUser) {
   }
 }
 
-onMounted(load)
+onMounted(() => void load(1))
 </script>
 
 <template>
@@ -298,7 +386,41 @@ onMounted(load)
     >
       {{ errorMessage }}
     </p>
-    <p v-if="loading" class="text-sm text-stone-500 dark:text-stone-400">Memuat...</p>
+    <div class="mb-4 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
+      <label class="flex min-w-[12rem] flex-1 flex-col gap-1 text-xs text-stone-500">
+        Cari (nama, email, telepon)
+        <input v-model="filters.search" type="search" maxlength="100"
+          class="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950"
+          @input="onSearchInput" @keyup.enter="applyFilters" />
+      </label>
+      <label class="flex flex-col gap-1 text-xs text-stone-500">
+        Peran
+        <select v-model="filters.role" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" @change="applyFilters">
+          <option value="">Semua peran</option>
+          <option v-for="r in filterRoleOptions" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs text-stone-500">
+        Status
+        <select v-model="filters.status" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" @change="applyFilters">
+          <option value="">Semua status</option>
+          <option value="active">Aktif</option>
+          <option value="inactive">Nonaktif</option>
+          <option value="suspended">Suspended</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs text-stone-500">
+        Per halaman
+        <select v-model.number="filters.per_page" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" @change="applyFilters">
+          <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
+        </select>
+      </label>
+      <button v-if="hasActiveFilters" type="button" class="rounded-lg px-3 py-1.5 text-sm text-stone-500 underline dark:text-stone-400" @click="resetFilters">
+        Reset filter
+      </button>
+    </div>
+
+    <p v-if="loading" class="text-sm text-stone-500 dark:text-stone-400" role="status">Memuat...</p>
 
     <div
       v-else
@@ -319,7 +441,7 @@ onMounted(load)
         <tbody>
           <tr v-if="users.length === 0">
             <td colspan="5" class="px-4 py-6 text-center text-stone-400 dark:text-stone-500">
-              Tidak ada data.
+              {{ hasActiveFilters ? 'Tidak ada pengguna yang cocok dengan filter.' : 'Tidak ada data.' }}
             </td>
           </tr>
           <tr
@@ -395,6 +517,14 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="!loading" class="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-stone-500 dark:text-stone-400">
+      <span>Total {{ pageMeta.total }} pengguna · Halaman {{ pageMeta.current_page }} / {{ pageMeta.last_page }}</span>
+      <span class="flex gap-2">
+        <button type="button" class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium disabled:opacity-40 dark:bg-stone-800" :disabled="pageMeta.current_page <= 1" @click="goToPage(-1)">Sebelumnya</button>
+        <button type="button" class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium disabled:opacity-40 dark:bg-stone-800" :disabled="pageMeta.current_page >= pageMeta.last_page" @click="goToPage(1)">Berikutnya</button>
+      </span>
     </div>
 
     <!-- Create modal -->
@@ -582,6 +712,9 @@ onMounted(load)
         >
           {{ reassignError }}
         </p>
+        <input v-model="candidateSearch" type="search" maxlength="100" placeholder="Cari nama, email, telepon…"
+          class="mb-2 block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
+          @input="onCandidateSearch" />
         <select
           v-model.number="reassignTargetId"
           class="block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
@@ -591,8 +724,12 @@ onMounted(load)
           </option>
           <option v-for="c in reassignCandidates" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
-        <p v-if="reassignCandidates.length === 0" class="mt-2 text-xs text-stone-400">
-          Tidak ada kandidat lain di jaringan ini.
+        <p v-if="candidatesLoading" class="mt-2 text-xs text-stone-400" role="status">Memuat kandidat…</p>
+        <p v-else-if="reassignCandidates.length === 0" class="mt-2 text-xs text-stone-400">
+          Tidak ada kandidat yang cocok di jaringan ini.
+        </p>
+        <p v-else-if="candidateTotal > reassignCandidates.length" class="mt-2 text-xs text-stone-400">
+          Menampilkan {{ reassignCandidates.length }} dari {{ candidateTotal }} kandidat — persempit dengan pencarian.
         </p>
         <div class="mt-4 flex justify-end gap-2">
           <button
