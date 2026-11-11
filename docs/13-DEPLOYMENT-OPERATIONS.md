@@ -8,8 +8,8 @@ Runbook DEV / TEST / PRODUCTION berdasarkan repository (prosedur existing; **buk
 
 | | DEV | TEST | PRODUCTION |
 |---|---|---|---|
-| Path | `/www/dev/primeclassy` (server DEV) · `C:\ServBay\www\primeclassy` (workstation lokal) | checkout yang sama | `/www/wwwroot/primeccookies.com/primeclassy/{backend,public_html}` (bukan working tree Git kecuali diverifikasi) |
-| Database | `primeclassy_dev` (MariaDB 10.11) | `primeclassy_testing` | `primeclassy` (MariaDB 10.11.10, `log_bin=OFF`) |
+| Path | `/www/dev/primeclassy` (server DEV) · `C:\ServBay\www\primeclassy` (workstation lokal) | checkout yang sama | `/opt/primeccookies/app/{backend,public_html}` (Compose project `primeccookies` di `/opt/primeccookies`; container `primeccookies_php`/`_nginx`/`_db`; bukan working tree Git; diverifikasi 2026-11-11, path `/www/wwwroot/...` lama sudah usang) |
+| Database | `primeclassy_dev` (MariaDB 10.11) | `primeclassy_testing` | `sql_prime` (container `primeccookies_db`, MySQL 8.0.46; diverifikasi 2026-11-11) |
 | `APP_ENV` | `local` | `testing` | `production` (`APP_DEBUG=false`) |
 | Web | nginx vhost :8080 (DEV server) / `artisan serve` :8000 + Vite :5174 (lokal) | PHPUnit saja | nginx single-domain: SPA + `public_html/laravel.php` |
 | Config | `backend/.env` (DEV) | `backend/.env.testing` + `phpunit.xml` | `.env` produksi sendiri — **tidak pernah** diganti DEV |
@@ -191,3 +191,12 @@ Prosedur rinci `transactions:reset`/`products:reset` (boundary, syarat sukses, "
 | Pesan WA `rate_limited:*` | volume cap — dikirim ulang oleh delayed job |
 | Pesan WA stuck `queued` | worker tidak jalan (§7.7) |
 | Riwayat deploy REL005 | catatan lengkap ada di Git history (commit `38fee8f`/`87ef993`) |
+
+## Catatan rilis REL008 (2026-11-11)
+
+- **Revisi terpasang:** `5d34f25` (`origin/main`, fast-forward dari `d7997c4`, tanpa force); basis produksi sebelumnya = `d7997c4` + hotfix manual `ResetTransactions.php` (digantikan versi final `fc8e340`). Verifikasi: 118 file backend yang berbeda di produksi = persis `git diff d7997c4..5d34f25`; setelah deploy 0 selisih konten terhadap artefak rilis; frontend dibangun dari ekspor bersih commit (identik dengan `dist`), `sw.js` versi `cfa3b60ba266a673`.
+- **Gerbang:** Parallel Full Test run `4b6f27f7775b` PASS (2.227/2.227, 14.348 asersi). Rehearsal migrasi pada MySQL 8.4 dengan skema produksi: maju, `down`, maju (semua OK).
+- **Backup:** `/opt/primeccookies/deploy-backups/PRE-REL008-20261111T063050Z/` (dump `sql_prime`, tar backend, tar public_html, compose.yaml, md5sums); dump diuji restore pada MySQL 8.0 sementara (122 tabel; migrations 162, users 104, roles 11, orders 3 sama dengan produksi). Skrip rollback: `/root/rel008-5d34f25/rollback.sh`.
+- **Eksekusi:** `artisan down` → rsync backend tracked-only (tanpa `--delete`; `.env`, `vendor`, `storage`, `bootstrap/cache` tidak disentuh) → `config:clear` → `migrate --force` (5 DONE: 162 → 167) → `config/route/view:cache` sebagai www-data → ekstrak `dist` tanpa `config.js`/`.htaccess`/`laravel.php` (tanpa `--delete`) → `chown` storage dan bootstrap/cache → `docker compose restart php` → `artisan up`. Tanpa insiden.
+- **Smoke (non-destruktif):** `/`, `/up`, `/api/v1/install/status`, `/api/v1/homepage` 200; `/api/v1/auth/me` 401; 8 endpoint baru tanpa auth 401; rute terdaftar; skema baru ada (123 tabel); matriks otorisasi invoice 13/13 pada kode produksi (model di memori); tanpa 5xx. **Alur berdata (penugasan parsial, notifikasi kekurangan, invoice per akun) belum diuji di produksi** karena tidak ada data transaksi/akun uji dan tidak ada penulisan produksi yang diotorisasi; bukti fungsional berasal dari Full Test DEV.
+
