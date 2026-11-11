@@ -46,7 +46,7 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | GET | `/orders`, `/orders/regions`, `/orders/{order}` | semua ter-autentikasi (scope role) | filter: status, payment_status, search, delivery_date, wilayah, paid |
 | POST | `/orders/{order}/cancel` | scope matriks | jendela §14 |
 | PATCH | `/orders/{order}/status` | super_admin, agen, admin | bulk office |
-| GET | `/orders/{order}/invoice` | owner / role finansial cabang | PDF dinamis (409 bila belum layak terbit); logo: konfigurasi cabang valid → logo Prime resmi bawaan → teks nama perusahaan |
+| GET | `/orders/{order}/invoice` | `OrderPolicy::viewInvoice`: Pemesan (pembeli order itu, peran apa pun), super_admin/agen/admin/keuangan cabang, Sales dan Korsal yang order-nya dalam lingkup referral mereka (satu aturan yang sama untuk flag `viewer_can_download_invoice`); Koordinator Kurir, Kurir, Gudang ditolak | PDF dinamis (409 bila belum layak terbit); logo: konfigurasi cabang valid → logo Prime resmi bawaan → teks nama perusahaan |
 | PATCH | `/orders/{order}/items/{item}/fulfillment` / `reschedule` | super_admin, agen, admin | jendela fulfilment §21 |
 | POST | `/orders/{order}/items` | **admin** | SC-03 add-line (`Idempotency-Key`) |
 | POST | `/crm/customers/{customer}/orders` | agen, korsal, sales, SKS | assisted order CRM (D3) |
@@ -73,8 +73,15 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | PATCH | `/shipments/{shipment}/status` | super_admin, agen, admin, kurir, SKS, koordinator-kurir (executor) | per-shipment |
 | PATCH | `/shipments/{shipment}/items/{item}/status` | idem | per-item (model unit kerja §11) |
 | GET | `/shipments/{shipment}/receipt` | idem | resi termal (keuangan/korsal/sales/konsumen dikecualikan) |
-| PATCH | `/shipments/{shipment}/courier` | super_admin, agen, admin, koordinator-kurir | assignment (eligibilitas SKS CR-001) |
-| GET | `/shipments/{shipment}/eligible-couriers` | idem | daftar kurir + SKS eligible |
+| PATCH | `/shipments/{shipment}/courier` | **koordinator-kurir saja** (REM-003) | assignment; wajib accepted receipt; bukan rajaongkir/pickup (eligibilitas SKS CR-001) |
+| GET | `/shipments/{shipment}/eligible-couriers` | koordinator-kurir | daftar kurir + SKS eligible |
+| POST | `/dispatch/orders/{order}/request-fulfillment` | koordinator-kurir | REM-001 permintaan ke Gudang (satu Stock Request, tanpa duplikasi) |
+| POST | `/dispatch/order-items/{item}/split-batch` | koordinator-kurir | REM-003 `quantity` batch lanjutan |
+| POST/GET | `/orders/{order}/items/{item}/cancel-undelivered` / `…/cancel-eligibility` | super_admin, agen, admin (manageFulfillment) | REM-003 pembatalan parsial sisa belum-dikirim; body `quantity`, `expected_quantity`, `reason`; 409 bila stale |
+| GET | `/dispatch/refusals`, `/dispatch/expeditions` | dispatch roles | antrean penolakan / pengiriman ekspedisi + gerbang kesiapan |
+| POST | `/shipments/{s}/items/{item}/refuse` (+`quantity?` penolakan sebagian), `/delivery-refusals/{id}/hand-back` | executor pengiriman | REM-003 penolakan + serah-balik kurir |
+| POST | `/delivery-refusals/{id}/receive`, `/disposition` | koordinator-kurir | konfirmasi terima; `action`=redelivery\|return_to_warehouse |
+| PATCH (multipart) | `/shipments/{shipment}/expedition-handover` | koordinator-kurir | REM-003: `carrier`, `tracking_number`, `evidence` — serah terima RajaOngkir |
 | GET | `/dispatch(/couriers)(/regions)` | idem | workspace dispatch (KK scope cabang; SA `?agent_id=`) |
 | GET | `/dispatch/returns` | super_admin, agen, admin, koordinator-kurir | daftar item retur menunggu pickup, operasional saja, scope cabang + pagination |
 | GET | `/dispatch/history` | idem | riwayat shipment terkirim cabang (read-only, tanpa data uang); filter `delivered_from/to`, `courier_id`, region, `search`; `per_page` ≤ 50; SA wajib `agent_id` |
@@ -82,6 +89,8 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | GET/POST | `/shipments/{shipment}/delivery-verifications` | super_admin, admin | verifikasi delivery append-only |
 | GET | `/kurir/orders` | kurir, SKS, koordinator-kurir | dashboard kurir (scope self) |
 | GET/PATCH | `/kurir/returns(/pickup-today)…` | kurir | pickup/konfirmasi retur + laporan delivered |
+
+Verifikasi transfer additional payment menerima nominal aktual melalui kontrak verifikasi existing. Bila nominal terverifikasi kurang dari obligation, bagian diterima tercatat paid dan obligation asal tetap pending sebesar sisa, dengan transaksi additional_payment baru. Endpoint upload bukti order memilih transaksi manual terbaru tersebut; ID obligation/item tetap. Tidak ada endpoint atau metode pembayaran baru.
 
 ## 6. Retur & refund
 
@@ -134,9 +143,12 @@ Seluruh permukaan API dari `backend/routes/api_v1.php` (prefix global `/api/v1`,
 | GET | `/warehouse/opnames(…)` | super_admin, agen, admin, gudang |
 | POST | `/warehouse/opnames/{o}/approve|reject`, `/warehouse/transfers/{t}/approve|reject` | admin |
 | GET | `/warehouse/orders/diproses`, `/warehouse/orders/{order}/stock-request` | gudang |
-| POST | `/warehouse/stock-requests/{r}/fulfill`, `…/proposals` | gudang |
-| GET | `/warehouse/fulfillment-proposals(…)` | admin, gudang |
-| POST | `…/approve|reject` | admin |
+| POST | `/warehouse/stock-requests/{r}/fulfill` | gudang | dinonaktifkan (422) |
+| POST | `/warehouse/stock-requests/{r}/proposals` | gudang | multipart: `items[i][item_id,quantity,shortage_reason?]`, `shortages[i][item_id,reason]`, `proof` (image, wajib bila ada `items`); tanpa `items` = laporan kekurangan saja |
+| GET | `/warehouse/fulfillment-proposals(…)` | admin, gudang, koordinator-kurir |
+| POST | `…/{proposal}/receive` | koordinator-kurir | REM-002: `items[{item_id,accepted,short,damaged}]`, `note?` |
+| POST | `…/approve|reject` | admin | LEGACY pengecualian (tanpa UI): `reason` wajib (min 5), diaudit — kandidat pensiun |
+| POST | `/warehouse/stock-request-items/{item}/resolve-discrepancy` | admin | F07 `action=write_off`, `quantity`, `reason`, UUID `idempotency_key` wajib; replay item+kunci → 409; `restock` → 422 sampai aturan inspeksi disetujui |
 | POST | `/stock/adjust` | agen, admin (403 saat warehouse-authoritative) |
 
 ## 9. Katalog, promo & fee

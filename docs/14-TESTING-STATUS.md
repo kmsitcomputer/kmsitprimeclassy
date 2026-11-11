@@ -6,7 +6,7 @@ Harness uji, kebijakan pengujian agen, dan status terakhir yang tercatat. Perila
 
 ## 1. Satu runner per database uji
 
-- Semua tes otomatis memakai tepat satu database: `primeclassy_testing` (`APP_ENV=testing`; guard eksak `Tests\Support\TestDatabaseGuard` — bukan pola).
+- Tes serial memakai `primeclassy_testing`; infrastruktur parallel Owner-only mengizinkan tepat `primeclassy_testing_w1..w5` sesuai ID worker (§7). `APP_ENV=testing`, guard eksak `Tests\Support\TestDatabaseGuard` — bukan pola.
 - `Tests\Support\TestRunLock` mengambil **MySQL named lock** (`GET_LOCK('primeclassy:testrun:primeclassy_testing', 0)`) sebelum operasi schema pertama. Runner kedua ditolak langsung ("TEST DATABASE ALREADY IN USE …"). Crash: server melepas lock saat koneksi pemiliknya mati — tidak ada lock file untuk dihapus; ulangi saja.
 - Runner serial `backend/scripts/run-tests-serialized.php` menambah lock `flock` + menolak DB non-testing.
 - **Fail-closed lock loss:** kepemilikan lock dibuktikan ulang (`IS_USED_LOCK = CONNECTION_ID`) di setiap batas kritis (boot tes, pre-rebuild, pre/post actor batch). Kehilangan lock ⇒ "TEST RUN LOCK LOST: refusing …" dan tetap hilang sampai proses berakhir — hentikan run, preflight ulang, mulai run baru.
@@ -54,3 +54,16 @@ Baca baris akhir `RUN <uuid> exit=… failures: environment/migration/concurrenc
 - Runner CLI butuh `OPENSSL_CONF` untuk `GoogleAuthTest` (`$env:OPENSSL_CONF='C:\ServBay\packages\php\8.3\extras\ssl\openssl.cnf'`).
 - Noise CLI DEV: "Cannot load Zend OPcache", "Module mbstring already loaded" — jinak.
 - Tes konkurensi men-spawn proses PHP kedua nyata (`.phpunit-concurrency-actor.php`), ~10–20 s per suite.
+
+## 7. Parallel Full Test (5 worker) — terintegrasi, BELUM diaktifkan
+
+Infrastruktur Owner-only di `tools/parallel-test/` (README di sana). Status: *INTEGRATED — PENDING CODEX SAFETY AUDIT*; **tidak pernah dijalankan**, database worker belum dibuat, validasi runtime masih pending.
+
+- `Tests\Support\TestDatabaseGuard` kini menerima, selain `primeclassy_testing`, hanya `primeclassy_testing_w1..w5` (peta eksplisit) untuk worker `PRIMECLASSY_PARALLEL_WORKER=1..5`; host DB harus `127.0.0.1|localhost|::1|primeclassy-mariadb`; `primeclassy_db`/DEV/production tetap ditolak. Tanpa variabel itu perilaku lama (database kanonis) tidak berubah.
+- Tes konkurensi/aktor, tes yang membaca nama DB kanonis, dan tes yang memakai path storage bersama berjalan di *serial lane* (`primeclassy_testing`) setelah fase paralel; harness konkurensi tidak diubah.
+- Runner: PHP via `docker exec primeclassy-fpm`, Node via `docker run --rm` sementara; aktivasi hanya manual oleh Owner (runbook: `tools/parallel-test/docs/OWNER-RUNBOOK.md`). Kebijakan agen tetap: scoped test saja; Full Test (serial maupun paralel) eksklusif Owner.
+
+
+### Audit statis lanjutan Codex
+
+Lihat `tools/parallel-test/docs/CODEX-FINAL-SAFETY-AUDIT-AUTO-REMEDIATION.md`. Remediasi testing-only menambah guard sebelum provider boot dan saat pemilihan koneksi/query, pidfd ownership controller, heartbeat lease, recovery markers, discovery dinamis wajib serta agregasi setelah shutdown terbukti. **Seluruh regresi baru hanya source; tidak dijalankan sesuai instruksi Owner STATIC ONLY.** Runtime termasuk prasyarat Python/pidfd container, PHP lint, grants, provisioning, dependency preparation dan Full Test tetap belum diverifikasi/dijalankan. Tidak ada perubahan business logic atau produksi.

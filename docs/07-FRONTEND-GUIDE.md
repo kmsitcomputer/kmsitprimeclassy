@@ -61,7 +61,6 @@ Urutan `router.beforeEach`:
 | `/dashboard/warehouse/opnames` | gudang, admin, agen |
 | `/dashboard/warehouse/orders` (antrian diproses) | gudang |
 | `/dashboard/warehouse/returns` | gudang |
-| `/dashboard/warehouse/fulfillment-proposals` | admin |
 | `/dashboard/dispatch` | koordinator-kurir, super_admin, agen, admin |
 | `/dashboard/sub-stock` / `approvals` / `execution` | sales-kurir-sub / admin / gudang |
 | `/dashboard/products(/create/:id/edit)` | super_admin, agen, admin |
@@ -92,9 +91,9 @@ Urutan `router.beforeEach`:
 
 - **super_admin**: seluruh menu admin global + oversight cabang (`?agent_id=`) + dashboard.
 - **agen**: dashboard cabang, produk, promo, stok, warehouse (read), komisi, laporan cabang, CRM read, pengaturan cabang (payment/shipping/store/WA/Google Auth/invoice), Sheets, notification center.
-- **admin**: produk (CRUD tanpa delete), promo, stok, approval warehouse (transfer/opname/proposal/sub-stock/stock-request), order & fulfilment (SC-03 add-line), retur review/finalisasi, dispatch, laporan, piutang, notification center, WA + payment-method cabang.
+- **admin**: produk (CRUD tanpa delete), promo, stok, approval warehouse (transfer/opname/sub-stock/stock-request; **bukan** proposal fulfilment order), order & fulfilment (SC-03 add-line), retur review/finalisasi, dispatch, laporan, piutang, notification center, WA + payment-method cabang.
 - **keuangan**: finance, piutang, verifikasi pembayaran, laporan finansial, network summary, komisi (slice), notification center, refund ledger.
-- **gudang**: antrian order diproses, warehouse stock/transfers/opnames/returns, sub-stock execution, proposal fulfilment, stok read, KPI gudang.
+- **gudang**: antrian order diproses, warehouse stock/transfers/opnames/returns, sub-stock execution, setujui & serahkan pemenuhan ke Koordinator (bukti foto + alasan kurang), stok read, KPI gudang.
 - **kurir**: `/dashboard/kurir` (antrian delivery, retur pickup), komisi own, KPI kurir.
 - **koordinator-kurir**: dispatch workspace (tab *Antrean Dispatch* + *Riwayat Terkirim* — riwayat shipment terkirim cabang, filter tanggal/kurir/no. order, paginasi, bukti kirim via `ProtectedFileViewer`, *Buka Order*), assignment kurir, (executor self via profil kurir), komisi.
 - **Manajemen pengguna** (`UserManagementView`): paginasi + pencarian + filter peran/status server-side (page size 10/25/50/100, reset ke halaman 1 saat filter berubah, respons usang dibuang); selector kandidat pindah referral = pencarian server-side terbatas (20/role), bukan halaman-1 saja.
@@ -115,7 +114,7 @@ Contoh pemetaan (evidence: file modul):
 | Checkout | `checkout.ts` | `POST /checkout/quote`, `courier-options`, `geocode`; `GET /checkout/steps` |
 | Upload bukti & verifikasi | `payments.ts` | `POST /orders/{order}/payment/*`, `GET /payment-proofs/{id}` |
 | Order & status | `orders.ts` | `GET/POST /orders`, `POST /orders/{order}/cancel`, `PATCH /orders/{order}/status` |
-| Warehouse antrian | `warehouseFulfillment.ts` | `GET /warehouse/orders/diproses`, proposal/fulfillment |
+| Warehouse antrian | `warehouseFulfillment.ts` | `GET /warehouse/orders/diproses`, `POST …/proposals` (multipart), `receive` |
 | WA cabang | `agentWhatsapp.ts` | `/agent/whatsapp/*` |
 | Notification Center | `adminNotifications.ts` | `/notifications/admin/*` |
 | Invoice | `invoice.ts` | `GET /orders/{order}/invoice`, `/invoice/config` |

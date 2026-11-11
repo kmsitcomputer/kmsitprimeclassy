@@ -51,7 +51,8 @@ Katalog fitur yang benar-benar ada di source code, dengan status implementasi da
 | Status per item + kuantitas tracking (cancelled/returned/refund/additional) | IMPLEMENTED | migrasi `2026_09_09_090000` |
 | Multi-shipment per order (grouping key kanonis) | IMPLEMENTED | `ShipmentCanonicalizationService`, migrasi `2026_09_11_090000` |
 | Antrian "Order Diproses" Gudang (hanya diproses & belum ada kurir) | IMPLEMENTED | `WarehouseOrderController::diproses` |
-| Proposal fulfilment Gudang → approval Admin | IMPLEMENTED | `StockRequestProposalController` |
+| Koordinator minta → Gudang setujui & serahkan (bukti, alasan kurang) → Koordinator terima; tanpa approval Admin rutin | IMPLEMENTED | `StockRequestProposalController`, `StockRequestProposalService` |
+| PEMENUHAN KURANG: notifikasi + rincian per produk + keputusan Admin atas sisa (reschedule / cancel sisa) | IMPLEMENTED | `FulfillmentShortageService`, `FulfillmentShortagePanel.vue` |
 | Assignment kurir per shipment (dispatcher: KK/agen/admin/super_admin) | IMPLEMENTED | `ShipmentController::assign`, `eligibleCouriers` |
 | Dispatch workspace Koordinator-Kurir | IMPLEMENTED | `DispatchController`, `DispatchView.vue` |
 | Progres kurir per OrderItem + bukti foto saat `terkirim` | IMPLEMENTED | `ShipmentController::updateItemStatus` |

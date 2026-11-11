@@ -77,8 +77,8 @@ shipment_id (multi-shipment), split_from_order_item_id (lineage R-03), idempoten
 | `payment_methods` | code unique (cod, bank_transfer, down_payment), type enum(manual/gateway/cod) |
 | `payment_transactions` | type(payment/refund/additional_payment), status normalisasi(pending, paid, failed, expired, cancelled, refunded), gateway_reference, raw_payload |
 | `bank_transfer_verifications` | status(pending/verified/rejected), submitted/verified_amount + amount_adjustment_reason, channel(transfer/cash), cash_received_by/receipt_reference, proof_disk, paid_by_role, submitted_by/at, verified_by/at |
-| `cod_payment_proofs` | proof_media_id, status(pending/confirmed/rejected), submitted_by/paid_by_role |
-| `order_additional_payments` | status(pending/paid/failed/cancelled), method(transfer/cod), reason |
+| `cod_payment_proofs` | proof_media_id, **collected_amount** (REM-004: nominal nyata; NULL = legacy seluruh transaksi), status(pending/confirmed/rejected), submitted_by/paid_by_role |
+| `order_additional_payments` | status(pending/paid/failed/cancelled), method(transfer/cod), reason; verifikasi parsial: obligation asal pending sebesar sisa + transaksi residual baru, bagian diterima menjadi row paid terkait transaksi awal; total amount riwayat tetap; tautan item asal tidak dipindah |
 | `order_item_adjustments` | kuantitas dikurangi, refund_amount, refund_status |
 | `payment_webhook_logs` | (tabel ada; tanpa gateway aktif) |
 | `order_due_date_changes`, `order_invoice_snapshots` | audit due date; invoice versi immutable |
@@ -109,7 +109,7 @@ shipment_id (multi-shipment), split_from_order_item_id (lineage R-03), idempoten
 | `shipping_couriers` | master kurir provider-supported (RajaOngkir/Komerce) |
 | `delivery_verifications` | outcome(received/not_received/return), verified_by, idempotency_key; append-only |
 | `order_fulfillment_change_proposals` | usulan perubahan kuantitas/tanggal (diputuskan Admin) |
-| `stock_requests` (+items, +fulfillments) | satu per order (item Agent-source), status derived pending/partial/fulfilled; fulfilment idempotent |
+| `stock_requests` (+items, +fulfillments) | satu per order (item Agent-source), status derived pending/partial/fulfilled; fulfilment idempotent; **coordinator_requested_by/_at/_note** (REM-001: permintaan Koordinator terakhir; riwayat di activity_logs); item: **damaged_hold_qty** (F07: unit rusak tertahan sampai diselesaikan Admin) |
 | `inventory_cancellation_reversals` | pembalikan stok saat pembatalan (unique per item) |
 
 ## 5. Retur
@@ -130,7 +130,8 @@ shipment_id (multi-shipment), split_from_order_item_id (lineage R-03), idempoten
 | `stock_transfers` (+items) | source/destination bucket + sub_location, status(pending/completed/cancelled/rejected) |
 | `stock_handovers` | satu per transfer; status(pending/handed_over/received/cancelled) |
 | `stock_opnames` (+items) | type(physical_opname/plan_reconciliation/sellable_reconciliation), status(draft/submitted/approved/rejected/cancelled) |
-| `stock_request_proposals` (+items) | proposal Gudang → Admin; item decision(pending/approved/rejected) |
+| `stock_request_proposals` (+items) | proposal Gudang (= jumlah disiapkan) → **penerimaan Koordinator Kurir** (REM-002: `received_by/received_at/receipt_note`; item `accepted_qty/short_qty/damaged_qty`, NULL = disetujui Admin legacy/pengecualian); item decision(pending/approved/rejected) |
+| `delivery_refusals` | REM-003: penolakan pelanggan saat pengantaran — order_item/shipment, quantity, reason, status(with_courier→handed_back→received→redelivery\|returned_to_warehouse), recorded/handed_back/received/disposition by+at. Bukan `return_items` (retur pasca-delivery tidak berubah) |
 | `warehouse_stock_requests` | addition/sub_adjustment → approval Admin |
 | `sub_stock_requests` (+items) | direction(replenish/return), status(requested/approved/rejected/cancelled/executed/received), stock_transfer_id |
 | `warehouse_migration_runs/markers` | tooling migrasi legacy |

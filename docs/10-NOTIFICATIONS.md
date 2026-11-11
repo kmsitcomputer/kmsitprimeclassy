@@ -73,7 +73,7 @@ Setiap event punya `variables` allow-list + `required`; baris template dengan va
 
 - Tabel `admin_notifications`; fan-out **satu baris per penerima** (read selalu scope pemanggil — tanpa permukaan IDOR).
 - Penerima: operator cabang (Agen + Admin cabang itu) untuk fakta cabang; fakta platform (delivery failure, gateway status) + semua Super Admin.
-- Event yang difan-out (NTF-030): `order.created`, `payment.failed`, `return.requested`, `refund.requested`; plus `payment.proof_uploaded` (khusus Keuangan — §7), `delivery.failed`, `gateway.status`.
+- Event yang difan-out (NTF-030): `order.created`, `payment.failed`, `return.requested`, `refund.requested`; plus `payment.proof_uploaded` (khusus Keuangan — §7), `delivery.failed`, `gateway.status`, dan `fulfillment.shortage` (**PEMENUHAN KURANG**: Admin + Agen cabang, tertaut ke order, satu per penyerahan Gudang yang kurang).
 - Dedupe: `dedupe_key` unique per penerima; body ringkas operasional tanpa nomor telepon/kredensial/OTP/data bank.
 - Endpoint: `GET /notifications/admin`, `/unread-count`, `POST /read-all`, `/{id}/read` (role super_admin, agen, admin, keuangan). Frontend: `AdminNotificationsView.vue`.
 - Prune: `admin-notifications:prune`.

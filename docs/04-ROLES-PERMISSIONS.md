@@ -69,8 +69,10 @@ Format: aksi → role yang diizinkan route+policy (evidence route di `api_v1.php
 | Baca stok (produk/variasi/warehouse/sellable) | `super_admin`, `agen`, `admin`, `gudang` | oversight super_admin hanya baca |
 | Mengubah stok (`POST /stock/adjust`) | `agen`, `admin` — **403 pada mode warehouse-authoritative (default)** | `AdjustStockRequest::authorize` |
 | Buat Sub Location / assign owner | `agen`, `admin` (gudang tidak pernah) | `WarehouseSubLocationPolicy` |
-| Buat transfer/opname/proposal fulfilment/permintaan stok | `gudang` | |
-| Approve/reject transfer/opname/proposal/permintaan stok/toggle Factory Plan | `admin` saja | |
+| Buat transfer/opname/permintaan stok; **setujui & serahkan pemenuhan order ke Koordinator (bukti + alasan kurang)** | `gudang` | Keputusan Owner 2026-11-11 |
+| Minta pemenuhan ke Gudang; konfirmasi penerimaan; assign kurir & kirim yang diterima | `koordinator-kurir` | tanpa approval Admin |
+| Approve/reject transfer/opname/permintaan stok/toggle Factory Plan | `admin` saja | proposal fulfilment order **bukan** lagi approval rutin Admin |
+| Reschedule / cancel **sisa** pemenuhan kurang (+ SC-03 tambah item) | `admin` (+ `agen`, `super_admin` sesuai policy fulfilment) | hanya sisa; tidak menyentuh barang yang sudah diserahkan/dikirim |
 | Sub stock request create/cancel/receive | `sales-kurir-sub` (milik sendiri) | |
 | Sub stock request approve/reject | `admin` | |
 | Sub stock request execute | `gudang` | |
