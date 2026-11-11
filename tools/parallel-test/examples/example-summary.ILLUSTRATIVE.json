@@ -1,0 +1,17 @@
+{
+  "_example": "ILLUSTRATIVE SHAPE ONLY. No test has been run. Every number below is a placeholder, not a result.",
+  "schema_version": 1,
+  "verdict": "INCOMPLETE",
+  "run_id": "<run-id>",
+  "manifest_digest": "<sha256>",
+  "inventory_completeness": "INCOMPLETE",
+  "discovered_test_cases": null,
+  "static_lower_bound_cases": 0,
+  "executed_test_cases": 0,
+  "pass": 0, "fail": 0, "error": 0, "skip": 0,
+  "assertions_reported": 0,
+  "wall_clock": {"first_start": null, "last_end": null},
+  "jobs": [{"job_id": "worker-1-phpunit", "kind": "phpunit", "phase": "P", "worker": 1, "lane": "parallel", "exit_code": null, "duration_seconds": null, "executed": 0, "state": "NO_STATUS"}],
+  "problems": [{"code": "JOB_NOT_RUN", "severity": "fail", "message": "worker-1-phpunit: no status file"}],
+  "failures": [], "skipped_tests": [], "per_file": {}
+}

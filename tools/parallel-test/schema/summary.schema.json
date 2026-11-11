@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PrimeClassy parallel Full Test summary (summary.json)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "verdict",
+    "run_id",
+    "manifest_digest",
+    "inventory_completeness",
+    "discovered_test_cases",
+    "executed_test_cases",
+    "pass",
+    "fail",
+    "error",
+    "skip",
+    "jobs",
+    "problems",
+    "failures",
+    "skipped_tests"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "verdict": {
+      "enum": [
+        "PASS",
+        "PASS_WITH_SKIPS",
+        "FAIL",
+        "INCOMPLETE",
+        "BLOCKED",
+        "ABORTED"
+      ],
+      "description": "PASS requires full discovery/result reconciliation and verified process termination; BLOCKED/ABORTED are terminal and cannot be upgraded by offline aggregation."
+    },
+    "inventory_completeness": {
+      "enum": [
+        "RECONCILED",
+        "INCOMPLETE"
+      ]
+    },
+    "discovered_test_cases": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "null unless a runtime discovery step was reconciled; never fabricated from static counts."
+    },
+    "static_lower_bound_cases": {
+      "type": "integer"
+    },
+    "executed_test_cases": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "pass": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "fail": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "error": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "skip": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "assertions_reported": {
+      "type": "integer"
+    },
+    "wall_clock": {
+      "type": "object",
+      "properties": {
+        "first_start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "phase",
+          "exit_code",
+          "duration_seconds",
+          "executed",
+          "state"
+        ]
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "severity": {
+            "enum": [
+              "fail",
+              "incomplete",
+              "info"
+            ]
+          }
+        }
+      }
+    },
+    "failures": {
+      "type": "array"
+    },
+    "skipped_tests": {
+      "type": "array"
+    },
+    "per_file": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "enum": [
+              "PASS",
+              "PASS_WITH_SKIPS"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "discovered_test_cases": {
+            "type": "integer"
+          },
+          "executed_test_cases": {
+            "type": "integer"
+          },
+          "pass": {
+            "type": "integer"
+          },
+          "fail": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "integer"
+          },
+          "skip": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ]
+}

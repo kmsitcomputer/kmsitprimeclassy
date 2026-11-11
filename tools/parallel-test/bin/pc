@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stage A/B entry point. Stage B commands are gated inside the CLI (see docs/OWNER-RUNBOOK.md).
+exec python3 -B "$(dirname "$0")/../pctest/cli.py" "$@"

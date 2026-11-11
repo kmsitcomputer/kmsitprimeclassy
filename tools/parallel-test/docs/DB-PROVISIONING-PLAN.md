@@ -1,0 +1,18 @@
+# Worker database provisioning — DESIGN ONLY (nothing executed)
+
+Targets: `primeclassy_testing_w1..w5` on `primeclassy-mariadb` (MariaDB 10.11). Canonical `primeclassy_testing` and DEV `primeclassy_db` are never touched.
+
+1. **Plan (safe):** `bin/pc provision plan` prints the SQL. `CREATE DATABASE IF NOT EXISTS … utf8mb4/utf8mb4_unicode_ci` and `GRANT <explicit minimal list> ON <worker db>.*` (no `*.*`, no `GRANT OPTION`, no `DROP`). Names pass the same allowlist as the app guard (regex `^primeclassy_testing_w[1-5]$`); host/identity checks listed below.
+2. **Privilege list** (`required_db_privileges`): SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, TRIGGER, CREATE VIEW, SHOW VIEW — what `migrate:fresh` + the suite need. **Unverified** against the grants `primeclassy_test` has on `primeclassy_testing` (not read: no DB connection was made). Owner step before provisioning: compare with `SHOW GRANTS FOR 'primeclassy_test'@'<host>'` and `SELECT user,host FROM mysql.user WHERE user='primeclassy_test'` to learn `--user-host`.
+3. **Execute (Owner only):** `bin/pc provision create --i-am-the-owner --user-host <host> --confirm "CREATE PRIMECLASSY TEST WORKER DATABASES"`. Preflight must all pass or NOTHING runs: configured host allowlisted; `primeclassy-mariadb` running and a `mariadb*` image; names valid. SQL is piped to `docker exec -i primeclassy-mariadb sh -c 'exec mariadb -uroot -p"$(cat /run/secrets/maria_root_password)"'` — the root secret is read inside the container, never printed or passed through the host shell. Root is required for `CREATE DATABASE`/`GRANT`; no new user is created.
+4. **No migration/seed step.** Schema is built by the suite (`RefreshDatabase`/`migrate:fresh` on the first test of each worker). Databases start empty; no DEV/production data is copied.
+5. **Cleanup coordination (F06):** the runner holds a session-bound lease (`GET_LOCK('primeclassy:parallelrun:<db>')`) for the whole run and each test process holds `primeclassy:testrun:<db>` (`TestRunLock`). `provision cleanup` acquires all of these for all targets in ONE `mariadb` session before the first `DROP` (a held lock raises an error, the batch client aborts, nothing is dropped) and keeps them across the DDL, so there is no check-to-DDL race; locks die with the session. A host-side check for run directories without completion record is a secondary signal only. **Unverified at runtime.**
+6. **Reuse:** fine; never two runners per DB (named lock + preflight). **Cleanup (optional, Owner):** `provision cleanup --confirm "DROP PRIMECLASSY TEST WORKER DATABASES"` — worker names only. Privilege rollback: `REVOKE` the same list (manual).
+7. Stage B preflight re-checks, read-only and from inside the php container: databases exist, run-locks free, `SHOW GRANTS` covers the privilege list, server flavour.
+
+
+## Codex static safety follow-up
+
+No provisioning, grants or SQL were executed. Generated future worker GRANT statements escape underscores to prevent MariaDB schema-wildcard access; the privilege list and secret-file path are validated. Preflight refuses global/role/wildcard/non-testing grants (global USAGE is allowed). Existing canonical grants may need a separately approved Owner review; this audit does not alter them.
+
+Cleanup additionally refuses every run lacking a matching verified STOPPED.json, including BLOCKED/crashed runs. Lease release on runner death is not orphan proof. Never clear history/markers to bypass this refusal. The runtime semantics of named locks, ownership heartbeats and batch abort-before-DROP remain unverified. Root-secret use and any live privilege change require separate Owner authorization.

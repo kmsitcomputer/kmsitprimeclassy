@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "workers": 5,
+  "max_workers_allowed": 5,
+  "canonical_database": "primeclassy_testing",
+  "worker_database_pattern": "primeclassy_testing_w{N}",
+  "allowed_db_hosts": [
+    "primeclassy-mariadb",
+    "127.0.0.1",
+    "localhost",
+    "::1"
+  ],
+  "serial_lane": {
+    "mode": "exclusive_after_parallel",
+    "_modes": "exclusive_after_parallel (default, safest): serial lane starts only after every parallel worker has exited. No other mode is implemented on purpose.",
+    "database": "primeclassy_testing"
+  },
+  "phpunit": {
+    "bin": "vendor/phpunit/phpunit/phpunit",
+    "extra_args": [
+      "--colors=never",
+      "--do-not-cache-result",
+      "--display-skipped",
+      "--display-incomplete"
+    ],
+    "forbidden_args": [
+      "--filter",
+      "--group",
+      "--exclude-group",
+      "--testsuite",
+      "--exclude-testsuite",
+      "--list-tests",
+      "--list-suites",
+      "--list-groups",
+      "--stop-on-failure",
+      "--stop-on-error",
+      "--stop-on-defect"
+    ],
+    "serial_runner_script": "scripts/run-tests-serialized.php"
+  },
+  "vitest": {
+    "package_manager": "npm",
+    "extra_args": [],
+    "estimated_seconds": 180,
+    "estimated_seconds_source": "assumption (no timing evidence exists for the frontend suite)",
+    "forbidden_args": [
+      "--testNamePattern",
+      "-t",
+      "--changed",
+      "--related",
+      "--shard",
+      "--bail",
+      "--exclude",
+      "--project",
+      "--dir",
+      "--passWithNoTests",
+      "--allowOnly",
+      "--standalone",
+      "--watch",
+      "--update",
+      "-u"
+    ]
+  },
+  "timeouts_seconds": {
+    "worker_job": 14400,
+    "serial_job": 21600,
+    "frontend_job": 1800
+  },
+  "kill_grace_seconds": 15,
+  "inherit_env": [
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "TERM",
+    "OPENSSL_CONF"
+  ],
+  "retry_policy": "none (failures are never retried or hidden)",
+  "fail_fast": false,
+  "db": {
+    "host": "primeclassy-mariadb",
+    "port": "3306",
+    "_note": "Host as seen FROM the php container (DEV compose service name, verified via docker ps). .env.testing says 127.0.0.1, which is only valid from the DB container itself; the existing Codex/agent procedure overrides DB_HOST the same way."
+  },
+  "adapters": {
+    "php": {
+      "mode": "docker-exec",
+      "container": "primeclassy-fpm-test",
+      "container_backend": "/var/www/app/backend",
+      "php_bin": "php",
+      "_modes": "docker-exec | host. docker-exec: runs `docker exec` in the EXISTING container (never starts one). Paths are mapped host backend/ -> container_backend (only backend/ is mounted)."
+    },
+    "node": {
+      "mode": "docker-run",
+      "image": "node:24-alpine",
+      "network": "none",
+      "container_frontend": "/work",
+      "container_out": "/out",
+      "_modes": "docker-run only. Linux node_modules are prepared separately (`prepare-frontend`, Owner) and mounted over /work/node_modules; the host (darwin) node_modules is never executed in the container.",
+      "deps_dir_rel": "backend/storage/framework/testing/parallel-node-linux",
+      "host_mode_supported": false
+    },
+    "mariadb": {
+      "container": "primeclassy-mariadb",
+      "root_secret_path": "/run/secrets/maria_root_password",
+      "network": "primeclassy-net"
+    }
+  },
+  "out_root_rel": "backend/storage/framework/testing/parallel",
+  "required_db_privileges": [
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "CREATE",
+    "DROP",
+    "ALTER",
+    "INDEX",
+    "REFERENCES",
+    "CREATE TEMPORARY TABLES",
+    "LOCK TABLES",
+    "TRIGGER",
+    "CREATE VIEW",
+    "SHOW VIEW"
+  ],
+  "exit_codes": {
+    "0": "PASS / PASS_WITH_SKIPS",
+    "1": "FAIL (test or worker failure) / static-validation or inventory mismatch",
+    "2": "REFUSED: usage, Owner gate or preflight refusal \u2014 nothing was started",
+    "3": "INCOMPLETE (coverage not proven)",
+    "4": "BLOCKED: worker/process termination could not be verified; artifacts kept, nothing further was started",
+    "130": "aborted by signal"
+  },
+  "kill_verify_seconds": 30
+}

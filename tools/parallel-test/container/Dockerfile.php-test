@@ -1,0 +1,6 @@
+# Disposable PHP TESTING image for the parallel test runner (NOT the app runtime image).
+# Same PHP 8.3 + extensions as kmsit-php:8.3-fpm, plus Python 3 for the pidfd process controller.
+# Build:  docker build -f container/Dockerfile.php-test -t primeclassy-test-php:8.3-py container/
+FROM kmsit-php:8.3-fpm
+RUN apk add --no-cache python3 git
+CMD ["sleep", "infinity"]

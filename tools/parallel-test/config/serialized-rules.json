@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "comment": "A backend test FILE is routed to the serialized lane (canonical DB primeclassy_testing, run alone, after the parallel phase) when ANY rule matches, or when listed in path_overrides. Rules are static text heuristics; they are conservative, not proofs. Review the manifest's serial_reasons.",
+  "rules": [
+    {"id": "SER-ACTOR", "regex": "ConcurrencyHarness|Symfony\\\\Component\\\\Process|new Process\\(|\\.phpunit-concurrency-actor", "strip_comments": true,
+     "reason": "Spawns real PHP actor processes. ConcurrencyHarness::actorEnvironment() hard-codes DB_DATABASE=TestDatabaseGuard::DATABASE (primeclassy_testing) and its runtime dir is not worker-scoped, so actors would hit the wrong DB / shared dir."},
+    {"id": "SER-GUARD-LOCK", "regex": "TestRunLock|TestDatabaseGuard|TestRunnerSupport|run-tests-serialized|lock-probe|schema-probe", "strip_comments": true,
+     "reason": "Asserts the exact canonical database name / run-lock semantics or spawns probe scripts bound to it."},
+    {"id": "SER-HARDCODED-DB", "regex": "primeclassy_testing", "strip_comments": true,
+     "reason": "Non-comment reference to the literal canonical DB name; cannot be proven worker-safe statically."},
+    {"id": "SER-SHARED-STORAGE", "regex": "installed\\.lock|framework/testing/concurrency", "strip_comments": true,
+     "reason": "Writes/deletes a fixed path under storage/framework/testing shared by every process."},
+    {"id": "SER-APPLY-DB-NAME", "regex": "refunds:backfill-ledger", "strip_comments": true,
+     "reason": "The command refuses --apply unless the database name ends in _test/_testing (RefundLedgerBackfill safety rule); worker databases end in _wN, so these tests run on the canonical database."},
+    {"id": "SER-FINGERPRINT", "regex": "IsolatedSchemaFingerprint", "strip_comments": true,
+     "reason": "Exercises schema-fingerprint internals against the canonical database."}
+  ],
+  "path_overrides": {}
+}
