@@ -15,6 +15,24 @@ class OrderPolicy
      * to the user's own agent branch; this re-checks explicitly per record
      * as a second, independent layer (defense in depth).
      */
+    /**
+     * The invoice is a FINANCIAL document, narrower than {@see view()}: whoever may see the order AND is
+     * (a) the Pemesan (the order's own konsumen — whatever role they hold, e.g. a Sales buying for themselves),
+     * (b) same-branch Super Admin / Agen / Admin / Keuangan, or (c) the Sales / Korsal whose referral scope the
+     * order falls in (exactly the orders {@see view()} already grants them). Operational roles (Koordinator Kurir,
+     * Kurir, Gudang, Sales Kurir Sub acting as courier) never get it. One rule for the controller, the order
+     * resource capability flag and the frontend button, so they can never disagree.
+     */
+    public function viewInvoice(User $user, Order $order): bool
+    {
+        if (! $this->view($user, $order)) {
+            return false;
+        }
+
+        return (int) $order->konsumen_id === (int) $user->id
+            || $user->isRole('super_admin', 'agen', 'admin', 'keuangan', 'sales', 'korsal');
+    }
+
     public function view(User $user, Order $order): bool
     {
         if ($user->isRole('super_admin')) {
@@ -98,12 +116,11 @@ class OrderPolicy
         // Same-Agent is enforced here (the global BelongsToAgentScope is the first
         // layer; this explicit re-check is the second, per-record independent one).
         if ($user->isRole('gudang')) {
-            if ($order->status !== 'diproses' || $order->agent_id !== $user->agent_id) {
+            if (! in_array($order->status, ['diproses', 'dikirim'], true) || $order->agent_id !== $user->agent_id) {
                 return false;
             }
 
-            return ! $order->shipments()->whereNotNull('courier_id')->exists()
-                && ! $order->shipments()->whereNotNull('self_delivered_by_user_id')->exists();
+            return $order->isInWarehouseScope();
         }
 
         // R-04 / §C: a normal Kurir must NOT use the generic order list/detail — the generic

@@ -9,7 +9,7 @@ class StockRequestProposalPolicy
 {
     public function view(User $user, StockRequestProposal $proposal): bool
     {
-        return $user->isRole('super_admin') || ($user->isRole('agen', 'admin', 'gudang') && $proposal->agent_id === $user->agent_id);
+        return $user->isRole('super_admin') || ($user->isRole('agen', 'admin', 'gudang', 'koordinator-kurir') && $proposal->agent_id === $user->agent_id);
     }
 
     public function propose(User $user): bool
@@ -20,6 +20,12 @@ class StockRequestProposalPolicy
     public function approve(User $user, StockRequestProposal $proposal): bool
     {
         return $user->isRole('admin') && $proposal->agent_id === $user->agent_id;
+    }
+
+    /** REM-002: the Koordinator Kurir of the same branch confirms physical receipt. */
+    public function receive(User $user, StockRequestProposal $proposal): bool
+    {
+        return $user->isRole('koordinator-kurir') && $proposal->agent_id === $user->agent_id;
     }
 
     public function reject(User $user, StockRequestProposal $proposal): bool

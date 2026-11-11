@@ -26,6 +26,7 @@ class DeliveryVerificationTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     private array $b;
 
@@ -69,6 +70,7 @@ class DeliveryVerificationTest extends TestCase
         // domain instead of being fabricated. Writing `status/delivered_at` straight onto the shipment
         // used to leave its item still in `diproses` — an impossible state that bypassed exactly the
         // invariant this suite is about (see ShipmentAggregateLifecycleTest).
+        $this->makeDispatchable($id);
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$id}/status", ['status' => 'terkirim'])->assertOk();
 

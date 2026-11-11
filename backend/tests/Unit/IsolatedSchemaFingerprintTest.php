@@ -26,6 +26,11 @@ class IsolatedSchemaFingerprintTest extends TestCase
         return IsolatedSchemaFingerprint::take(DB::connection());
     }
 
+    private function isMariaDb(): bool
+    {
+        return IsolatedSchemaFingerprint::engine(DB::connection()) === IsolatedSchemaFingerprint::ENGINE_MARIADB;
+    }
+
     private function tmpName(string $prefix = 'fp_t_'): string
     {
         return $prefix.bin2hex(random_bytes(5));
@@ -160,8 +165,11 @@ class IsolatedSchemaFingerprintTest extends TestCase
             DB::statement("ALTER TABLE `{$t}` ADD COLUMN total INT AS (qty * 2) VIRTUAL");
             $this->assertNotSame($collated, $generated = $this->fp(), 'generated column');
             DB::statement("ALTER TABLE `{$t}` MODIFY COLUMN total INT AS (qty * 3) VIRTUAL");
-            $this->assertNotSame($generated, $this->fp(), 'generation expression');
-            DB::statement("ALTER TABLE `{$t}` DROP COLUMN total, DROP COLUMN note");
+            $this->assertNotSame($generated, $changedExpression = $this->fp(), 'generation expression');
+            DB::statement("ALTER TABLE `{$t}` DROP COLUMN total");
+            $this->assertNotSame($changedExpression, $this->fp(), 'drop column');
+            // `note` stays: the table is dropped by the caller, and the end state must still differ from the
+            // start state so the helper's own "must change" check is not vacuous on any engine.
         }, 'columns');
     }
 
@@ -173,7 +181,10 @@ class IsolatedSchemaFingerprintTest extends TestCase
             DB::statement("DROP INDEX idx_code ON `{$t}`");
             DB::statement("CREATE INDEX idx_code ON `{$t}` (code(5))");
             $this->assertNotSame($plain, $prefix = $this->fp(), 'prefix length');
-            DB::statement("ALTER TABLE `{$t}` ALTER INDEX idx_code INVISIBLE");
+            // Same property on both engines: MySQL INVISIBLE == MariaDB IGNORED.
+            DB::statement($this->isMariaDb()
+                ? "ALTER TABLE `{$t}` ALTER INDEX idx_code IGNORED"
+                : "ALTER TABLE `{$t}` ALTER INDEX idx_code INVISIBLE");
             $this->assertNotSame($prefix, $invisible = $this->fp(), 'visibility');
             DB::statement("DROP INDEX idx_code ON `{$t}`");
             DB::statement("CREATE INDEX idx_code ON `{$t}` (qty, code)");
@@ -181,7 +192,9 @@ class IsolatedSchemaFingerprintTest extends TestCase
             DB::statement("DROP INDEX idx_code ON `{$t}`");
             DB::statement("CREATE UNIQUE INDEX idx_code ON `{$t}` (qty, code)");
             $this->assertNotSame($order, $this->fp(), 'uniqueness');
-            DB::statement("CREATE INDEX idx_expr ON `{$t}` ((qty + 1))");
+            if (! $this->isMariaDb()) { // functional index keys exist on MySQL only
+                DB::statement("CREATE INDEX idx_expr ON `{$t}` ((qty + 1))");
+            }
         }, 'indexes');
     }
 
@@ -212,13 +225,16 @@ class IsolatedSchemaFingerprintTest extends TestCase
     public function test_add_change_and_drop_check_constraint_are_detected(): void
     {
         $this->assertMutationDetected(function (string $t) {
+            $mariaDb = $this->isMariaDb();
             DB::statement("ALTER TABLE `{$t}` ADD CONSTRAINT chk_{$t} CHECK (qty >= 0)");
             $added = $this->fp();
-            DB::statement("ALTER TABLE `{$t}` DROP CHECK chk_{$t}");
+            DB::statement($mariaDb ? "ALTER TABLE `{$t}` DROP CONSTRAINT chk_{$t}" : "ALTER TABLE `{$t}` DROP CHECK chk_{$t}");
             DB::statement("ALTER TABLE `{$t}` ADD CONSTRAINT chk_{$t} CHECK (qty >= 1)");
             $this->assertNotSame($added, $changed = $this->fp(), 'check clause');
-            DB::statement("ALTER TABLE `{$t}` ALTER CHECK chk_{$t} NOT ENFORCED");
-            $this->assertNotSame($changed, $this->fp(), 'enforcement');
+            if (! $mariaDb) { // MariaDB cannot declare a CHECK NOT ENFORCED: it is always enforced
+                DB::statement("ALTER TABLE `{$t}` ALTER CHECK chk_{$t} NOT ENFORCED");
+                $this->assertNotSame($changed, $this->fp(), 'enforcement');
+            }
         }, 'check');
     }
 
@@ -231,8 +247,11 @@ class IsolatedSchemaFingerprintTest extends TestCase
             $added = $this->fp();
             DB::unprepared("DROP TRIGGER `{$trigger}`");
             DB::unprepared("CREATE TRIGGER `{$trigger}` BEFORE INSERT ON `{$t}` FOR EACH ROW SET NEW.qty = NEW.qty + 2");
-            $this->assertNotSame($added, $this->fp(), 'trigger body');
+            $this->assertNotSame($added, $changed = $this->fp(), 'trigger body');
             DB::unprepared("DROP TRIGGER `{$trigger}`");
+            $this->assertNotSame($changed, $dropped = $this->fp(), 'drop trigger');
+            DB::unprepared("CREATE TRIGGER `{$trigger}` BEFORE UPDATE ON `{$t}` FOR EACH ROW SET NEW.qty = NEW.qty");
+            $this->assertNotSame($dropped, $this->fp(), 'trigger timing/event');
         }, 'trigger');
     }
 
@@ -333,12 +352,14 @@ class IsolatedSchemaFingerprintTest extends TestCase
 
     /* ----------------------------------------------------------------- metadata failures */
 
-    private function fakeConnection(callable $select): ConnectionInterface
+    private function fakeConnection(callable $select, string $version = '8.4.11'): ConnectionInterface
     {
         $db = Mockery::mock(ConnectionInterface::class);
         $db->shouldReceive('statement')->andReturn(true);
         $db->shouldReceive('getDatabaseName')->andReturn(self::DB);
-        $db->shouldReceive('select')->andReturnUsing($select);
+        $db->shouldReceive('select')->andReturnUsing(
+            static fn (string $sql) => str_starts_with($sql, 'select version()') ? [(object) ['v' => $version]] : $select($sql)
+        );
 
         return $db;
     }
@@ -393,6 +414,134 @@ class IsolatedSchemaFingerprintTest extends TestCase
         $this->assertFalse(IsolatedSchemaFingerprint::isClean('x', fn () => '', $reason), 'empty');
         $this->assertFalse(IsolatedSchemaFingerprint::isClean('x', fn () => 'y', $reason), 'differs');
         $this->assertTrue(IsolatedSchemaFingerprint::isClean('x', fn () => 'x', $reason), 'equal');
+    }
+
+    /* ----------------------------------------------------------------- engine paths (MySQL 8 / MariaDB) */
+
+    /** @return array<string, array{0: string, 1: ?string}> */
+    public static function serverVersions(): array
+    {
+        return [
+            'mysql 8.4' => ['8.4.11', IsolatedSchemaFingerprint::ENGINE_MYSQL],
+            'mysql 8.0' => ['8.0.36-0ubuntu0.22.04.1', IsolatedSchemaFingerprint::ENGINE_MYSQL],
+            'mariadb 10.11' => ['10.11.19-MariaDB-ubu2204', IsolatedSchemaFingerprint::ENGINE_MARIADB],
+            'mariadb 10.6' => ['10.6.0-MariaDB', IsolatedSchemaFingerprint::ENGINE_MARIADB],
+            'mariadb 11.4' => ['11.4.2-MariaDB', IsolatedSchemaFingerprint::ENGINE_MARIADB],
+            'mariadb replication banner' => ['5.5.5-10.11.19-MariaDB', IsolatedSchemaFingerprint::ENGINE_MARIADB],
+            'mysql 5.7 unsupported' => ['5.7.44', null],
+            'mariadb 10.5 unsupported' => ['10.5.23-MariaDB', null],
+            'mariadb 10.3 unsupported' => ['10.3.39-MariaDB', null],
+            'unknown server' => ['PostgreSQL 16', null],
+            'empty' => ['', null],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('serverVersions')]
+    public function test_engine_is_detected_explicitly_and_unsupported_servers_fail_closed(string $version, ?string $expected): void
+    {
+        if ($expected === null) {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('Fingerprint: unsupported');
+            IsolatedSchemaFingerprint::engineFromVersion($version);
+
+            return;
+        }
+
+        $this->assertSame($expected, IsolatedSchemaFingerprint::engineFromVersion($version));
+    }
+
+    public function test_live_engine_matches_the_server_and_is_part_of_the_fingerprint_input(): void
+    {
+        $engine = IsolatedSchemaFingerprint::engine(DB::connection());
+        $this->assertContains($engine, [IsolatedSchemaFingerprint::ENGINE_MYSQL, IsolatedSchemaFingerprint::ENGINE_MARIADB]);
+        $this->assertSame($engine, IsolatedSchemaFingerprint::parts(DB::connection())['engine']);
+    }
+
+    public function test_mysql_path_uses_the_original_queries_and_mariadb_path_never_selects_mysql_only_columns(): void
+    {
+        $mysql = IsolatedSchemaFingerprint::mysqlQueries();
+        $maria = IsolatedSchemaFingerprint::mariadbQueries();
+        $this->assertSame(array_keys($mysql), array_keys($maria), 'both engines cover the same property groups');
+
+        foreach (['SRS_ID', 'EXPRESSION', 'IS_VISIBLE', 'ENFORCED', 'DEFAULT_ENCRYPTION'] as $mysqlOnly) {
+            $pattern = '/\\b'.$mysqlOnly.'\\b/'; // whole word: GENERATION_EXPRESSION / PARTITION_EXPRESSION are not EXPRESSION
+            $this->assertMatchesRegularExpression($pattern, implode(' ', $mysql), "MySQL path keeps {$mysqlOnly}");
+            $this->assertDoesNotMatchRegularExpression($pattern, implode(' ', $maria), "MariaDB path must not select {$mysqlOnly}");
+        }
+        $this->assertStringContainsString('IGNORED', $maria['indexes'], 'MariaDB index visibility is IGNORED');
+        $this->assertStringContainsString("table_type <> 'VIEW'", $maria['tables'], 'system-versioned tables and sequences are not skipped');
+    }
+
+    /** Fake server that records every statement the fingerprint issues. */
+    private function recordingMetadata(string $version, array &$log): ConnectionInterface
+    {
+        $db = Mockery::mock(ConnectionInterface::class);
+        $db->shouldReceive('statement')->andReturnUsing(function (string $sql) use (&$log) {
+            $log[] = $sql;
+
+            return true;
+        });
+        $db->shouldReceive('getDatabaseName')->andReturn(self::DB);
+        $db->shouldReceive('select')->andReturnUsing(function (string $sql) use (&$log, $version) {
+            $log[] = $sql;
+            if (str_starts_with($sql, 'select version()')) {
+                return [(object) ['v' => $version]];
+            }
+            if (str_contains($sql, 'information_schema.tables')) {
+                return [(object) ['TABLE_NAME' => 'geo'], (object) ['TABLE_NAME' => 'plain']];
+            }
+            if (str_starts_with($sql, 'CHECKSUM TABLE')) {
+                return [(object) ['Table' => self::DB.'.geo', 'Checksum' => 1], (object) ['Table' => self::DB.'.plain', 'Checksum' => 2]];
+            }
+            if (str_contains($sql, 'information_schema.columns')) {
+                return [
+                    (object) ['TABLE_NAME' => 'geo', 'COLUMN_NAME' => 'p', 'COLUMN_TYPE' => 'point'],
+                    (object) ['TABLE_NAME' => 'plain', 'COLUMN_NAME' => 'id', 'COLUMN_TYPE' => 'bigint(20) unsigned'],
+                ];
+            }
+            if (str_starts_with($sql, 'SHOW CREATE TABLE')) {
+                return [(object) ['Table' => 'geo', 'Create Table' => 'CREATE TABLE `geo` (`p` point NOT NULL REF_SYSTEM_ID=4326) AUTO_INCREMENT=9']];
+            }
+
+            return [];
+        });
+
+        return $db;
+    }
+
+    public function test_mysql_path_sets_stats_expiry_and_does_not_read_create_table(): void
+    {
+        $log = [];
+        $parts = IsolatedSchemaFingerprint::parts($this->recordingMetadata('8.4.11', $log));
+
+        $this->assertSame('mysql', $parts['engine']);
+        $this->assertContains('SET SESSION information_schema_stats_expiry = 0', $log);
+        $this->assertArrayNotHasKey('spatial_definitions', $parts);
+        $this->assertEmpty(array_filter($log, static fn (string $s) => str_starts_with($s, 'SHOW CREATE TABLE')));
+    }
+
+    public function test_mariadb_path_skips_the_mysql_only_statement_and_hashes_spatial_definitions(): void
+    {
+        $log = [];
+        $parts = IsolatedSchemaFingerprint::parts($this->recordingMetadata('10.11.19-MariaDB', $log));
+
+        $this->assertSame('mariadb', $parts['engine']);
+        $this->assertNotContains('SET SESSION information_schema_stats_expiry = 0', $log);
+        $this->assertSame(['geo'], array_keys($parts['spatial_definitions']), 'only the spatial table is hashed');
+        $this->assertSame(
+            hash('sha256', 'CREATE TABLE `geo` (`p` point NOT NULL REF_SYSTEM_ID=4326)'),
+            $parts['spatial_definitions']['geo'],
+            'SRID is part of the hash, the AUTO_INCREMENT counter is not',
+        );
+    }
+
+    public function test_unsupported_server_makes_take_throw_before_any_metadata_is_hashed(): void
+    {
+        $db = $this->fakeConnection(fn (string $sql) => [], '5.7.44');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('unsupported database server');
+        IsolatedSchemaFingerprint::take($db);
     }
 
     /* ----------------------------------------------------------------- lifecycle (trait decision) */

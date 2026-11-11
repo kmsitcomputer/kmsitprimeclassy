@@ -333,9 +333,134 @@ class InvoiceTest extends TestCase
 
     public function test_bundled_default_logo_is_the_official_reference_asset(): void
     {
-        $this->assertSame(
-            hash_file('sha256', base_path('../design/assets/prime-logo-reference.png')),
-            hash_file('sha256', resource_path('branding/prime-logo.png')),
-        );
+        // Portable reference: a byte-identical copy of design/assets/prime-logo-reference.png lives in
+        // tests/Fixtures because design/ is outside the PHP container's bind mount (backend/ only).
+        $bundled = hash_file('sha256', resource_path('branding/prime-logo.png'));
+        $this->assertSame(hash_file('sha256', base_path('tests/Fixtures/prime-logo-reference.png')), $bundled);
+
+        // Where the repository-level design asset is reachable (host), the fixture must not have drifted from it.
+        $design = base_path('../design/assets/prime-logo-reference.png');
+        if (is_file($design)) {
+            $this->assertSame(hash_file('sha256', $design), $bundled);
+        }
+    }
+
+    private function renderedInvoiceHtml(Order $order): string
+    {
+        $config = InvoiceConfigService::resolved((int) $order->agent_id);
+
+        return app(\App\Services\Invoice\InvoicePdfService::class)
+            ->render($order->fresh(['paymentMethod']), $config)->getDom()->saveHTML();
+    }
+
+    public function test_unpaid_cod_invoice_states_cod_method_and_is_not_shown_as_paid(): void
+    {
+        $order = $this->placeOrder();
+        $this->assertNotNull($order->invoice_issued_at);
+
+        $html = $this->renderedInvoiceHtml($order);
+        $this->assertStringContainsString('COD / Cash on Delivery', $html);
+        $this->assertStringContainsString('Belum Dibayar', $html);
+        $this->assertStringNotContainsString('LUNAS', $html);
+    }
+
+    public function test_paid_cod_invoice_shows_paid_status(): void
+    {
+        $order = $this->placeOrder();
+        $order->forceFill(['payment_status' => 'paid', 'paid_amount' => $order->total_amount, 'remaining_amount' => 0])->save();
+
+        $this->assertStringContainsString('LUNAS', $this->renderedInvoiceHtml($order));
+    }
+
+    public function test_viewing_cod_invoice_repeatedly_does_not_change_payment_or_duplicate_issuance(): void
+    {
+        $order = $this->placeOrder();
+        $before = $order->fresh();
+
+        foreach ([1, 2, 3] as $_) {
+            $this->actingAs($this->b['konsumen'])->get("/api/v1/orders/{$order->id}/invoice")->assertOk();
+        }
+
+        $after = $order->fresh();
+        $this->assertSame($before->payment_status, $after->payment_status);
+        $this->assertSame($before->status, $after->status);
+        $this->assertSame((string) $before->paid_amount, (string) $after->paid_amount);
+        $this->assertEquals($before->invoice_issued_at, $after->invoice_issued_at);
+        $this->assertSame(1, \App\Models\OrderInvoiceSnapshot::where('order_id', $order->id)->count());
+    }
+
+    /** UAT-03: the one COD invoice is visible to Pemesan, Sales and Korsal in scope — and to nobody outside it. */
+    public function test_cod_invoice_is_visible_to_pemesan_sales_and_korsal_in_scope_only(): void
+    {
+        $agen = $this->b['agen'];
+        $sales = User::factory()->sales()->create(['agent_id' => $agen->id]);
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agen->id]);
+        $outsiderSales = User::factory()->sales()->create(['agent_id' => $agen->id]);
+        $outsiderKorsal = User::factory()->korsal()->create(['agent_id' => $agen->id]);
+        $otherBranchSales = User::factory()->sales()->create(['agent_id' => User::factory()->agen()->create()->id]);
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $agen->id]);
+        $gudang = User::factory()->gudang()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $otherKonsumen = User::factory()->konsumen()->create(['agent_id' => $agen->id]);
+
+        $order = $this->placeOrder();
+        $order->update(['sales_id' => $sales->id, 'korsal_id' => $korsal->id]);
+        $this->assertNotNull($order->fresh()->invoice_issued_at, 'COD invoice is issued at creation');
+        $before = $order->fresh();
+
+        $allowed = ['konsumen' => $this->b['konsumen'], 'sales' => $sales, 'korsal' => $korsal, 'admin' => $this->b['admin'], 'agen' => $agen, 'keuangan' => $this->b['keuangan']];
+        foreach ($allowed as $role => $user) {
+            $res = $this->actingAs($user)->get("/api/v1/orders/{$order->id}/invoice")->assertOk();
+            $this->assertStringContainsString('application/pdf', $res->headers->get('Content-Type') ?? '', "{$role} gets the PDF");
+            // The UI capability flag is derived from the same rule, so the button shows exactly when the download works.
+            $this->assertTrue($this->actingAs($user)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data.viewer_can_download_invoice'), "{$role} flag");
+        }
+
+        // Out of scope: another Sales/Korsal of the same branch, another branch, operational roles, another buyer.
+        foreach (['outsiderSales' => $outsiderSales, 'outsiderKorsal' => $outsiderKorsal, 'koordinator' => $koordinator, 'gudang' => $gudang, 'otherKonsumen' => $otherKonsumen] as $who => $user) {
+            $this->actingAs($user)->get("/api/v1/orders/{$order->id}/invoice")->assertForbidden();
+        }
+        $this->actingAs($otherBranchSales)->get("/api/v1/orders/{$order->id}/invoice")->assertNotFound();
+
+        // The same invoice, never a second one; payment truth and status are untouched by viewing it.
+        $after = $order->fresh();
+        $this->assertEquals($before->invoice_issued_at, $after->invoice_issued_at);
+        $this->assertSame($before->payment_status, $after->payment_status);
+        $this->assertSame((string) $before->paid_amount, (string) $after->paid_amount);
+        $this->assertSame(1, \App\Models\OrderInvoiceSnapshot::where('order_id', $order->id)->count());
+        $this->assertStringContainsString('Belum Dibayar', $this->renderedInvoiceHtml($order));
+    }
+
+    public function test_a_sales_who_bought_for_themselves_is_the_pemesan_of_that_invoice(): void
+    {
+        $agen = $this->b['agen'];
+        $sales = User::factory()->sales()->create(['agent_id' => $agen->id]);
+        $order = $this->placeOrder();
+        $order->update(['konsumen_id' => $sales->id]);
+
+        $this->actingAs($sales)->get("/api/v1/orders/{$order->id}/invoice")->assertOk();
+        $this->assertTrue($this->actingAs($sales)->getJson("/api/v1/orders/{$order->id}")->assertOk()->json('data.viewer_can_download_invoice'));
+    }
+
+    public function test_korsal_and_sales_flag_is_false_when_the_invoice_cannot_be_issued_yet_and_for_orders_outside_scope(): void
+    {
+        $agen = $this->b['agen'];
+        $korsal = User::factory()->korsal()->create(['agent_id' => $agen->id]);
+        $order = $this->placeOrder();
+
+        // Not the Korsal's order: the order itself is not visible to them, so there is no flag and no PDF.
+        $this->actingAs($korsal)->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
+        $this->actingAs($korsal)->get("/api/v1/orders/{$order->id}/invoice")->assertForbidden();
+    }
+
+    public function test_non_cod_invoice_has_no_cod_payment_block(): void
+    {
+        $order = $this->placeOrder();
+        $order->setRelation('paymentMethod', PaymentMethod::where('code', 'bank_transfer')->firstOrFail());
+
+        $config = InvoiceConfigService::resolved((int) $order->agent_id);
+        $html = app(\App\Services\Invoice\InvoicePdfService::class)->render($order, $config)->getDom()->saveHTML();
+
+        $this->assertStringNotContainsString('Cash on Delivery', $html);
+        $this->assertStringNotContainsString('Metode Pembayaran', $html);
     }
 }

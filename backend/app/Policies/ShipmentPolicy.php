@@ -48,6 +48,10 @@ class ShipmentPolicy
         }
 
         if ($user->isRole('koordinator-kurir')) {
+            // REM-003: RajaOngkir shipments are managed by the branch Koordinator directly.
+            if ($shipment->shipping_provider_code === Shipment::PROVIDER_EXPEDITION) {
+                return $shipment->order?->agent_id === $user->agent_id;
+            }
             // Executor-only: the shipment must be recorded to their own Courier profile.
             return $shipment->order?->agent_id === $user->agent_id
                 && ! $shipment->isSelfDelivery()
@@ -69,14 +73,18 @@ class ShipmentPolicy
         return $user->isRole('agen', 'admin') && $shipment->order?->agent_id === $user->agent_id;
     }
 
+    /** REM-003: carrier handover/tracking of a RajaOngkir shipment — Koordinator Kurir of the branch only. */
+    public function manageExpedition(User $user, Shipment $shipment): bool
+    {
+        return $user->isRole('koordinator-kurir') && $shipment->order?->agent_id === $user->agent_id;
+    }
+
     /** Proactively assigning a courier to a shipment is an office/dispatch decision — a kurir never self-assigns (assignment-only; SKS creator-only self-pickup is the sole exception). IMP-003: the Koordinator-Kurir (branch dispatcher) assigns too. */
     public function assignCourier(User $user, Shipment $shipment): bool
     {
-        if ($user->isRole('super_admin')) {
-            return true;
-        }
-
-        return $user->isRole('agen', 'admin', 'koordinator-kurir') && $shipment->order?->agent_id === $user->agent_id;
+        // REM-003 (Owner-locked): ONLY the Koordinator Kurir of the shipment's branch assigns or
+        // reassigns Kurir Toko — no Super Admin / Agen / Admin override, via UI or API.
+        return $user->isRole('koordinator-kurir') && $shipment->order?->agent_id === $user->agent_id;
     }
 
     /**

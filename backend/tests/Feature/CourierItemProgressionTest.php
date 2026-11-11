@@ -31,6 +31,7 @@ class CourierItemProgressionTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -120,7 +121,10 @@ class CourierItemProgressionTest extends TestCase
         $this->assertSame($items['F']->fresh()->shipment_id, $shipC->id, 'precondition: E and F share the 17-Oct unit');
 
         // Assign the 17-Oct unit to the branch courier through the canonical assignment path.
-        app(\App\Services\Order\CourierService::class)->assignCourier($shipC, $b['courier'], $b['admin']);
+        // REM-003: only the Koordinator assigns, and only accepted goods.
+        $this->acceptWarehouseDemand($order->id);
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $b['agen']->id]);
+        app(\App\Services\Order\CourierService::class)->assignCourier($shipC, $b['courier'], $koordinator);
 
         return [
             'order' => $order->fresh(),
@@ -255,6 +259,9 @@ class CourierItemProgressionTest extends TestCase
 
         // A mismatched (shipment, item) pair is rejected too.
         $shipmentA = Shipment::whereKey($items['A']->shipment_id)->firstOrFail();
+        // Assignment-only couriers reach the pair check only on a shipment assigned to them.
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $b['agen']->id]);
+        app(\App\Services\Order\CourierService::class)->assignCourier($shipmentA, $b['courier'], $koordinator);
         $this->itemAction($b['kurir'], $shipmentA, $items['E'], 'dikirim')->assertNotFound();
 
         // Invalid and repeated transitions are refused safely (422), changing nothing.

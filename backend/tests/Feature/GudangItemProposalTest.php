@@ -122,7 +122,7 @@ class GudangItemProposalTest extends TestCase
 
     private function propose(User $actor, int $requestId, array $lines)
     {
-        return $this->actingAs($actor)->postJson("/api/v1/warehouse/stock-requests/{$requestId}/proposals", ['items' => $lines]);
+        return $this->actingAs($actor)->post("/api/v1/warehouse/stock-requests/{$requestId}/proposals", $this->withHandoverProof(['items' => $lines]), ['Accept' => 'application/json']);
     }
 
     // ---------- 1 + 2. One item proposes; its sibling is untouched ----------
@@ -244,7 +244,7 @@ class GudangItemProposalTest extends TestCase
         ])->assertCreated()->json('data.id');
 
         $this->actingAs($b['admin'])
-            ->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposalA}/approve")
+            ->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposalA}/approve", ['reason' => 'pengecualian uji coba'])
             ->assertOk();
 
         // Then item B, independently.
@@ -253,7 +253,7 @@ class GudangItemProposalTest extends TestCase
         ])->assertCreated()->json('data.id');
 
         $this->actingAs($b['admin'])
-            ->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposalB}/approve")
+            ->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposalB}/approve", ['reason' => 'pengecualian uji coba'])
             ->assertOk();
 
         // Both lines are fulfilled, and both items sit on the single canonical shipment —

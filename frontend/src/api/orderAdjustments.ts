@@ -106,3 +106,26 @@ export async function markAdditionalPaymentStatus(paymentId: number, paid: boole
   const { data } = await http.patch<ApiEnvelope<AdditionalPayment>>(`/admin/additional-payments/${paymentId}/status`, { paid })
   return data.data
 }
+
+/** REM-003 (Owner Option A): is the undelivered/undispatched part of this line cancellable, and how much? */
+export interface CancellationEligibility {
+  eligible: boolean
+  reason_code: string | null
+  max_quantity: number
+  active_quantity: number
+}
+
+export async function getCancellationEligibility(orderId: number, itemId: number) {
+  const { data } = await http.get<ApiEnvelope<CancellationEligibility>>(`/orders/${orderId}/items/${itemId}/cancel-eligibility`)
+  return data.data
+}
+
+/** Cancels part of the undelivered remainder. `expectedQuantity` = the active quantity the caller saw (stale/duplicate → 409). */
+export async function cancelUndeliveredQuantity(orderId: number, itemId: number, quantity: number, expectedQuantity: number, reason: string) {
+  const { data } = await http.post<ApiEnvelope<OrderItem>>(`/orders/${orderId}/items/${itemId}/cancel-undelivered`, {
+    quantity,
+    expected_quantity: expectedQuantity,
+    reason,
+  })
+  return data.data
+}

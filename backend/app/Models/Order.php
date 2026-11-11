@@ -259,4 +259,26 @@ class Order extends Model
     {
         return \App\Support\CollectibleReceivable::forOrder($this) > 0;
     }
+
+    /**
+     * REM-001 — Gudang's scope. The legacy rule (diproses and no courier / self-delivery yet) is kept
+     * unchanged; additionally an order stays visible while it still has OUTSTANDING Agent demand on
+     * its Stock Request (pending/partial), even after a first batch was received, assigned or
+     * shipped — later batches need Gudang. Orders with a self-delivering Sales-Kurir-Sub shipment
+     * (SKS) are never widened.
+     */
+    public function isInWarehouseScope(): bool
+    {
+        $selfDelivery = $this->shipments()->whereNotNull('self_delivered_by_user_id')->exists();
+        if ($selfDelivery) {
+            return false;
+        }
+        if ($this->status === 'diproses' && ! $this->shipments()->whereNotNull('courier_id')->exists()) {
+            return true;
+        }
+
+        return in_array($this->status, ['diproses', 'dikirim'], true)
+            && \App\Models\StockRequest::withoutGlobalScopes()->where('order_id', $this->id)
+                ->whereIn('status', ['pending', 'partial'])->exists();
+    }
 }

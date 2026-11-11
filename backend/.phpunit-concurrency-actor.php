@@ -108,6 +108,7 @@ $longOptions = [
     'dispatch-race-item:',
     'dispatch-race-courier:',
     'dispatch-race-quantity:',
+    'dispatch-race-expected:',
     'dispatch-race-date:',
 ];
 
@@ -162,6 +163,12 @@ $releaseFile = trim((string) ($options['release-file'] ?? ''), " \t\n\r\0\x0B\"'
 $actorAResult = trim((string) ($options['actor-a-result'] ?? ''), " \t\n\r\0\x0B\"'");
 $actorBResult = trim((string) ($options['actor-b-result'] ?? ''), " \t\n\r\0\x0B\"'");
 
+// Refuse before even bootstrapping providers (which may query during boot).
+if (getenv('APP_ENV') !== 'testing' || ! in_array(getenv('DB_CONNECTION'), ['mysql', 'mariadb'], true) || getenv('DB_DATABASE') !== 'primeclassy_testing') {
+    fwrite(STDERR, "REFUSED: concurrency actor requires APP_ENV=testing and database primeclassy_testing.\n");
+    exit(3);
+}
+
 if (! is_dir($runtimeDir)) {
     mkdir($runtimeDir, 0775, true);
 }
@@ -176,6 +183,18 @@ require $autoload;
 actorBreadcrumb('autoload-done');
 
 $app = require __DIR__.'/bootstrap/app.php';
+$app->beforeBootstrapping(\Illuminate\Foundation\Bootstrap\RegisterProviders::class, static function ($app): void {
+    try {
+        \Tests\Support\TestDatabaseGuard::assertRunHistorySafe(__DIR__);
+        $target = \Tests\Support\TestDatabaseGuard::assertApplicationSafe($app);
+        \Tests\Support\TestDatabaseGuard::installConnectionGuards($app, $target);
+    } catch (\Throwable $e) {
+        // Laravel's console exception handler renders the refusal but the process would exit 0.
+        // A refusal must be a non-zero, machine-visible exit before any provider boots.
+        fwrite(STDERR, $e->getMessage()."\n");
+        exit(3);
+    }
+});
 $app->make(Kernel::class)->bootstrap();
 actorBreadcrumb('kernel-bootstrapped');
 
@@ -1064,6 +1083,7 @@ if (str_starts_with($role, 'dispatch-race-')) {
     $itemId = (int) ($options['dispatch-race-item'] ?? 0);
     $courierId = (int) ($options['dispatch-race-courier'] ?? 0);
     $quantity = (int) ($options['dispatch-race-quantity'] ?? 1);
+    $expectedQty = (int) ($options['dispatch-race-expected'] ?? 0);
     $raceDate = (string) ($options['dispatch-race-date'] ?? '');
     $startedAt = microtime(true);
 
@@ -1111,7 +1131,8 @@ if (str_starts_with($role, 'dispatch-race-')) {
             $proposal = app(StockRequestProposalService::class)->propose(
                 $actor,
                 $request,
-                [['item_id' => $itemId, 'quantity' => $quantity]],
+                // A partial handover must state why (shortage rule); the race is about locking, not the reason text.
+                [['item_id' => $itemId, 'quantity' => $quantity, 'shortage_reason' => 'uji konkurensi: sisa menyusul']],
             );
             $payload['proposal_id'] = $proposal->id;
             $payload['proposal_status'] = $proposal->status;
@@ -1124,6 +1145,9 @@ if (str_starts_with($role, 'dispatch-race-')) {
             );
             $payload['created_item_id'] = $item->id;
             $payload['was_replay'] = $replay;
+        } elseif ($operation === 'cancel-undelivered') {
+            $result = app(OrderFulfillmentService::class)->cancelUndeliveredQuantity(OrderItem::findOrFail($itemId), $quantity, $expectedQty, $actor, 'cancel race');
+            $payload['fulfilled_quantity'] = $result->fulfilled_quantity;
         } elseif ($operation === 'adjust') {
             $item = OrderItem::where('order_id', $orderId)->firstOrFail();
             $result = app(OrderFulfillmentService::class)->adjustItemQuantity($item, $quantity, $actor, 'delivery adjustment race');

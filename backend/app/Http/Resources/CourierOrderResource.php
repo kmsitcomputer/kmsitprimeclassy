@@ -73,6 +73,14 @@ class CourierOrderResource extends JsonResource
                     'quantity' => $item->fulfilled_quantity,
                     'status' => $item->status,
                     'requested_delivery_date' => $item->requested_delivery_date,
+                    // REM-003: the unresolved delivery refusal of this item, if any (drives hand-back).
+                    'delivery_mode' => $item->shipment_id ? \App\Models\Shipment::withoutGlobalScopes()->whereKey($item->shipment_id)->value('delivery_mode') : null,
+                    'open_refusal' => (function () use ($item) {
+                        $r = \App\Models\DeliveryRefusal::withoutGlobalScopes()->where('order_item_id', $item->id)
+                            ->whereIn('status', \App\Models\DeliveryRefusal::OPEN_STATUSES)->latest('id')->first();
+
+                        return $r ? ['id' => $r->id, 'status' => $r->status] : null;
+                    })(),
                 ])),
             'created_at' => $this->created_at,
         ];

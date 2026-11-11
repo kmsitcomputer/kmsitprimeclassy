@@ -91,6 +91,107 @@ class OrderFulfillmentService
         });
     }
 
+    /** Locks the order's Stock Request then this line's demand row (null for lines without Agent demand). */
+    private function lockDemandForItem(Order $order, OrderItem $item): ?StockRequestItem
+    {
+        $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->lockForUpdate()->first();
+        if (! $request || $request->status === 'cancelled') {
+            return null;
+        }
+
+        return StockRequestItem::query()->where('stock_request_id', $request->id)->where('order_item_id', $item->id)->lockForUpdate()->first();
+    }
+
+    /** Same pending/partial/fulfilled formula as the warehouse paths, from a locking read of the items. */
+    private function refreshStockRequestStatus(int $stockRequestId): void
+    {
+        $request = StockRequest::withoutGlobalScopes()->whereKey($stockRequestId)->first();
+        if (! $request || $request->status === 'cancelled') {
+            return;
+        }
+        $items = StockRequestItem::query()->where('stock_request_id', $stockRequestId)->lockForUpdate()->get();
+        $remaining = (int) $items->sum('remaining_qty');
+        $fulfilled = (int) $items->sum('fulfilled_qty');
+        $request->update([
+            'status' => $remaining === 0 ? 'fulfilled' : ($fulfilled > 0 ? 'partial' : 'pending'),
+            'fulfilled_at' => $remaining === 0 ? ($request->fulfilled_at ?? now()) : null,
+        ]);
+    }
+
+    /**
+     * Why (if at all) the UNDELIVERED part of this line cannot be cancelled right now. Read-only; the
+     * authoritative decision is re-made under locks in {@see cancelUndeliveredQuantity()}.
+     */
+    public function cancellationBlocker(Order $order, OrderItem $item): ?string
+    {
+        if (! in_array($order->status, ['diproses', 'dikirim'], true)) {
+            return 'order_window_closed';
+        }
+        if ($item->isSubSourced()) {
+            return 'sub_sourced'; // SKS keeps its own workflow
+        }
+        if ($item->status !== 'diproses') {
+            // dikirim = in the courier's custody, terkirim = delivered, pengembalian/kembali/dibatalkan = other flows
+            return 'not_undispatched';
+        }
+        if (\App\Services\Order\DeliveryRefusalService::hasOpenRefusal($item->id)) {
+            return 'open_refusal';
+        }
+        if ($item->fulfilled_quantity < 1) {
+            return 'nothing_to_cancel';
+        }
+        if ($item->additional_payment_id
+            && OrderAdditionalPayment::query()->whereKey($item->additional_payment_id)->where('status', 'pending')->exists()) {
+            return 'pending_additional_payment';
+        }
+
+        return null;
+    }
+
+    /**
+     * REM-003 / Owner Option A — cancel part of the UNDELIVERED, UNDISPATCHED remainder of a line, also
+     * after the first dispatch. A dedicated domain operation: it never goes through the quantity-freeze
+     * guard (assertQuantityAdjustable), so it must carry its own: the item has to be `diproses` (not in
+     * the courier's custody, not delivered, no open refusal), Agent-sourced, and the caller states the
+     * quantity it believes is active (`$expectedQuantity`) — a stale or repeated request is a 409 and
+     * changes nothing (no double cancellation).
+     *
+     * It reuses the canonical reduction: the frozen handover snapshot is only CONSUMED (units marked, never
+     * re-allocated), reservation is released for un-accepted units while accepted ones return
+     * Shipping → Transit, outstanding demand shrinks, totals are recalculated, and an overpayment becomes
+     * a refund row exactly like Admin QTY. Payments, delivered/dispatched history are untouched.
+     */
+    public function cancelUndeliveredQuantity(OrderItem $item, int $quantity, int $expectedQuantity, User $actor, string $reason): OrderItem
+    {
+        return DB::transaction(function () use ($item, $quantity, $expectedQuantity, $actor, $reason) {
+            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+
+            $blocker = $this->cancellationBlocker($order, $item);
+            if ($blocker !== null) {
+                throw new ApiException(__('messages.cancellation.not_eligible'), 422, ['code' => $blocker]);
+            }
+            if ((int) $item->fulfilled_quantity !== $expectedQuantity) {
+                throw new ApiException(__('messages.cancellation.stale'), 409, ['code' => 'quantity_changed']);
+            }
+            if ($quantity < 1 || $quantity > (int) $item->fulfilled_quantity) {
+                throw new ApiException(__('messages.fulfillment.invalid_quantity'), 422);
+            }
+
+            $this->reduceFulfillment($order, $item, $quantity, $actor, $reason);
+
+            ActivityLogger::log($actor->id, $item, 'order_item.undelivered_cancelled', $reason, [
+                'order_id' => $order->id, 'quantity_cancelled' => $quantity, 'remaining_active' => (int) $item->fresh()->fulfilled_quantity,
+                'actor_role' => $actor->role?->slug,
+            ]);
+
+            // Whatever is left may now all be delivered (or nothing live remains): keep the order aggregate honest.
+            app(CourierService::class)->recomputeOrderStatus($order->id);
+
+            return $item->fresh();
+        });
+    }
+
     /**
      * Canonical rule (never "product removed = refund"): a refund is only
      * ever eligible when TOTAL VALID PAID already exceeds the order's
@@ -132,14 +233,42 @@ class OrderFulfillmentService
         $courierPerUnit = $item->fulfilled_quantity > 0 ? (float) $item->courier_fee_amount / $item->fulfilled_quantity : 0.0;
         $releasedCourierFee = round($courierPerUnit * $quantityReduced, 2);
 
+        // REM-001/002: lock order is Order → Stock Request → inventory. The line's warehouse demand is
+        // locked BEFORE any stock row; only the UN-accepted part of the reduction releases reservation,
+        // the accepted part (already consumed from the reservation, sitting in Shipping) goes back to Transit.
+        $demand = $item->isSubSourced() ? null : $this->lockDemandForItem($order, $item);
+        // F07: units a receipt reported damaged are held, not sellable — a reduction may take un-accepted
+        // units that are NOT held, then accepted ones; it can never release a held unit (Admin resolves it first).
+        $releasable = $demand ? max(0, (int) $demand->remaining_qty - (int) $demand->damaged_hold_qty) : $quantityReduced;
+        if ($demand && $quantityReduced > $releasable + (int) $demand->fulfilled_qty) {
+            throw new ApiException(__('messages.cancellation.discrepancy_unresolved'), 422, ['code' => 'discrepancy_unresolved']);
+        }
+        $unaccepted = $demand ? min($quantityReduced, $releasable) : $quantityReduced;
+        $acceptedPart = $quantityReduced - $unaccepted;
+
         // R-03: a Sub-sourced line releases in its own Sub ledger (reservation shrunk, physical
         // Sub stock unchanged) — never Agent stock. Agent lines keep the existing release path.
         if ($item->isSubSourced()) {
             $this->subStockService->reduce($item, $quantityReduced, $actor, 'order_item_adjustment');
-        } elseif ($item->product_variation_id) {
-            $this->stockService->releaseVariation($order->agent_id, $item->product_variation_id, $quantityReduced, 'order_item_adjustment', $item->id, $actor->id);
         } else {
-            $this->stockService->releaseProduct($order->agent_id, $item->product_id, $quantityReduced, 'order_item_adjustment', $item->id, $actor->id);
+            if ($acceptedPart > 0) {
+                app(InventoryCancellationService::class)->reverseAcceptedUnits($order, $item, $acceptedPart, $actor->id);
+            }
+            if ($unaccepted > 0) {
+                if ($item->product_variation_id) {
+                    $this->stockService->releaseVariation($order->agent_id, $item->product_variation_id, $unaccepted, 'order_item_adjustment', $item->id, $actor->id);
+                } else {
+                    $this->stockService->releaseProduct($order->agent_id, $item->product_id, $unaccepted, 'order_item_adjustment', $item->id, $actor->id);
+                }
+            }
+            if ($demand) {
+                $demand->update([
+                    'requested_qty' => $demand->requested_qty - $quantityReduced,
+                    'remaining_qty' => $demand->remaining_qty - $unaccepted,
+                    'fulfilled_qty' => $demand->fulfilled_qty - $acceptedPart,
+                ]);
+                $this->refreshStockRequestStatus($demand->stock_request_id);
+            }
         }
 
         $totalValidPaid = (float) $order->paid_amount;
@@ -156,6 +285,14 @@ class OrderFulfillmentService
         // snapshot never gains units (Package A/B allows reduce/increase cycles pre-dispatch).
         // When the line has no unconsumed frozen units left, do NOT invent any — fall back to
         // the legacy reversal for that movement instead of double-counting a unit.
+        // F01: the legacy fallback exists ONLY for the pre-dispatch shortfall snapshot (re-increase cycles).
+        // Once a handover/return/cancellation snapshot rules, an exhausted unit pool must refuse — never pay a
+        // refund outside the ledger.
+        if ($snapshot->provenance !== 'provisional_legacy'
+            && $snapshot->trigger !== OrderFinancialSnapshotService::TRIGGER_FULFILLMENT_SHORTFALL
+            && $this->snapshotService->availableUnits($snapshot, $item->id) < $quantityReduced) {
+            throw new ApiException('Unit snapshot tidak mencukupi untuk pembatalan ini.', 409, ['code' => 'snapshot_units_exhausted']);
+        }
         $consumption = $this->snapshotService->availableUnits($snapshot, $item->id) >= $quantityReduced
             ? $this->snapshotService->consumeUnits(
                 $snapshot,
@@ -252,6 +389,9 @@ class OrderFulfillmentService
         $courierPerUnit = $item->fulfilled_quantity > 0 ? (float) $item->courier_fee_amount / $item->fulfilled_quantity : 0.0;
         $addedCourierFee = round($courierPerUnit * $quantityAdded, 2);
 
+        // REM-001: the line's warehouse demand grows with the quantity (Order → Stock Request → inventory).
+        $demand = $item->isSubSourced() ? null : $this->lockDemandForItem($order, $item);
+
         // R-03: a Sub-sourced increase grows the existing Sub reservation after re-checking Sub
         // sellable — never Agent stock, physical Sub stock unchanged.
         if ($item->isSubSourced()) {
@@ -260,6 +400,11 @@ class OrderFulfillmentService
             $this->stockService->reserveForVariation($order->agent_id, $item->variation, $quantityAdded, 'order_item_adjustment', $item->id, $actor->id);
         } else {
             $this->stockService->reserveForProduct($order->agent_id, $item->product, $quantityAdded, 'order_item_adjustment', $item->id, $actor->id);
+        }
+
+        if ($demand) {
+            $demand->update(['requested_qty' => $demand->requested_qty + $quantityAdded, 'remaining_qty' => $demand->remaining_qty + $quantityAdded]);
+            $this->refreshStockRequestStatus($demand->stock_request_id);
         }
 
         $totalValidPaid = (float) $order->paid_amount;
@@ -322,17 +467,50 @@ class OrderFulfillmentService
      */
     public function markAdditionalPaymentPaid(OrderAdditionalPayment $additionalPayment, User $actor, bool $paid): OrderAdditionalPayment
     {
-        return DB::transaction(function () use ($additionalPayment, $actor, $paid) {
+        // F03: ONE lock order for every settlement entry point: proof verification → Order → transaction → obligation
+        // (identical to PaymentService::verifyBankTransfer). Snapshot the linkage before taking those locks;
+        // partial verification may replace it with a residual transaction, so recheck it under the obligation lock.
+        $row = OrderAdditionalPayment::query()->whereKey($additionalPayment->id)->first(['order_id', 'payment_transaction_id']);
+        $orderId = (int) $row->order_id;
+        $txId = $row->payment_transaction_id;
+        $verificationId = $txId ? \App\Models\BankTransferVerification::query()->where('payment_transaction_id', $txId)->value('id') : null;
+
+        return DB::transaction(function () use ($additionalPayment, $actor, $paid, $orderId, $txId, $verificationId) {
+            $verification = $verificationId ? \App\Models\BankTransferVerification::query()->whereKey($verificationId)->lockForUpdate()->first() : null;
+            $order = Order::query()->whereKey($orderId)->lockForUpdate()->first();
+            $transaction = $txId ? \App\Models\PaymentTransaction::query()->whereKey($txId)->lockForUpdate()->first() : null;
             $additionalPayment = OrderAdditionalPayment::query()->whereKey($additionalPayment->id)->lockForUpdate()->firstOrFail();
 
-            if ($additionalPayment->status !== 'pending') {
+            if ($additionalPayment->status !== 'pending'
+                || (int) $additionalPayment->payment_transaction_id !== (int) $txId) {
                 throw new ApiException(__('messages.payment.already_processed'), 422);
+            }
+            // The obligation and its transfer transaction are ONE settlement: whichever entry point gets
+            // there first closes both, so the other can never apply the same money again.
+            if ($transaction && $transaction->status !== \App\Enums\PaymentTransactionStatus::PENDING->value) {
+                throw new ApiException(__('messages.payment.already_processed'), 422);
+            }
+
+            if ($paid && $order) {
+                $this->paymentService->assertPaymentAllowed($order, (float) $additionalPayment->amount, true); // REM-004: additional ≠ regular instalment
             }
 
             $additionalPayment->update(['status' => $paid ? 'paid' : 'failed']);
 
-            if ($paid && ($order = $additionalPayment->order)) {
+            if ($transaction) {
+                $transaction->update($paid
+                    ? ['status' => \App\Enums\PaymentTransactionStatus::PAID->value, 'paid_at' => now()]
+                    : ['status' => \App\Enums\PaymentTransactionStatus::FAILED->value]);
+                if ($verification && $verification->status === 'pending') {
+                    $verification->update($paid
+                    ? ['status' => 'verified', 'verified_by' => $actor->id, 'verified_at' => now(), 'verified_amount' => $transaction->amount]
+                        : ['status' => 'rejected', 'verified_by' => $actor->id, 'verified_at' => now(), 'rejection_reason' => 'additional payment marked failed']);
+                }
+            }
+
+            if ($paid && $order) {
                 $this->paymentService->applyPaymentToOrder($order, (float) $additionalPayment->amount);
+                app(\App\Services\Invoice\InvoiceIssuanceService::class)->syncAfterChange($order->fresh(), 'additional_payment_settled', $actor->id); // F09
             }
 
             ActivityLogger::log($actor->id, $additionalPayment, 'order_additional_payment.status_changed', null, [
@@ -381,7 +559,15 @@ class OrderFulfillmentService
             // shipment) a sibling item of an order already physically in transit, while
             // adjustItemQuantity on the very same item correctly refused — same service, same order,
             // two different answers. The Order row is already locked above, so this is free.
-            if (in_array($order->status, ['dikirim', 'terkirim', 'pengembalian', 'kembali', 'dibatalkan'], true)) {
+            //
+            // Owner decision (PEMENUHAN KURANG): the Admin's reschedule of a Gudang-reported SHORTAGE remainder
+            // must stay possible after the first batch shipped. The exception is exactly that: the order may be
+            // `dikirim` only when THIS line is itself still undispatched (item guard below) AND carries an open
+            // shortage report with outstanding quantity. Every other line keeps the original window.
+            $orderWindowClosed = in_array($order->status, ['dikirim', 'terkirim', 'pengembalian', 'kembali', 'dibatalkan'], true);
+            $shortageRemainder = $order->status === 'dikirim'
+                && app(FulfillmentShortageService::class)->lineHasOpenShortage($item->id);
+            if ($orderWindowClosed && ! $shortageRemainder) {
                 throw new ApiException(__('messages.fulfillment.window_closed'), 422);
             }
 
@@ -433,6 +619,48 @@ class OrderFulfillmentService
             ]);
 
             return $item->fresh();
+        });
+    }
+
+    /**
+     * REM-003 — Kurir Toko subsequent delivery batches. The Koordinator Kurir carves part of a line
+     * that has NOT been dispatched yet into its own later batch (own OrderItem + fresh pending Shipment,
+     * same delivery date), even after other batches of the order already shipped. It reuses the
+     * canonical item split: the unaccepted warehouse demand moves with the carved units (so
+     * requested/fulfilled/remaining stay conserved and nothing is reserved twice), price/fee are
+     * apportioned, and accepted units stay on the original line, ready to assign and ship.
+     * Refused for delivered/dispatched lines, assigned shipments, Sub (SKS), expedition and pickup.
+     */
+    public function splitItemIntoBatch(OrderItem $item, int $quantity, User $actor, ?string $note = null): OrderItem
+    {
+        if (! $actor->isRole('koordinator-kurir')) {
+            throw new ApiException(__('messages.courier.coordinator_only'), 403);
+        }
+
+        return DB::transaction(function () use ($item, $quantity, $actor, $note) {
+            $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
+            $item = OrderItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+
+            if ((int) $order->agent_id !== (int) $actor->agent_id) {
+                throw new ApiException(__('messages.system.unauthorized_action'), 403);
+            }
+            if (! in_array($order->status, ['diproses', 'dikirim'], true) || $item->status !== 'diproses') {
+                throw new ApiException(__('messages.fulfillment.window_closed'), 422);
+            }
+            if ($item->isSubSourced()) {
+                throw new ApiException(__('messages.order.line_addition_sub_not_supported'), 422);
+            }
+            $shipment = $item->shipment_id ? Shipment::query()->whereKey($item->shipment_id)->lockForUpdate()->first() : null;
+            if (! $shipment || $shipment->status !== 'pending' || $shipment->courier_id !== null
+                || $shipment->delivery_mode !== Shipment::DELIVERY_MODE_STANDARD
+                || in_array($shipment->shipping_provider_code, [Shipment::PROVIDER_EXPEDITION, Shipment::PROVIDER_PICKUP], true)) {
+                throw new ApiException(__('messages.courier.provider_not_assignable'), 422);
+            }
+            if ($quantity < 1 || $quantity >= $item->fulfilled_quantity) {
+                throw new ApiException(__('messages.fulfillment.invalid_quantity'), 422);
+            }
+
+            return $this->splitItemForReschedule($item, $quantity, $item->requested_delivery_date?->toDateString(), $actor, $note ?? 'batch lanjutan', false);
         });
     }
 
@@ -567,7 +795,7 @@ class OrderFulfillmentService
      * from the PRE-split snapshot (per-unit = pre fee / pre active qty), with the rounding remainder
      * kept on the parent, so parent + child exactly equals the pre-split courier fee.
      */
-    private function splitItemForReschedule(OrderItem $item, int $quantityMoved, string $newDate, User $actor, string $reason): OrderItem
+    private function splitItemForReschedule(OrderItem $item, int $quantityMoved, ?string $newDate, User $actor, string $reason, bool $consolidate = true): OrderItem
     {
         $order = Order::query()->whereKey($item->order_id)->lockForUpdate()->firstOrFail();
         $remainingQuantity = $item->fulfilled_quantity - $quantityMoved;
@@ -614,7 +842,9 @@ class OrderFulfillmentService
         // The child now has its own shipment, so it gets the same LOCKED canonical grouping the
         // whole-line reschedule applies: if another shipment of this order already IS the canonical
         // unit for the target date, the child joins it instead of becoming a duplicate.
-        $this->consolidateIntoShipmentForDate($newItem, $newDate, $actor, 'reschedule_split');
+        if ($consolidate) {
+            $this->consolidateIntoShipmentForDate($newItem, $newDate, $actor, 'reschedule_split');
+        }
 
         // R-03 / decision E: Sub inventory reconciliation — the source reservation is reduced by the
         // moved quantity, then the child receives its own ACTIVE reservation for it. Physical Sub

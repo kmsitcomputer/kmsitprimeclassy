@@ -25,12 +25,8 @@ class OrderResource extends JsonResource
         }
 
         /** @var \App\Models\User $user */
-        if ($user->isRole('super_admin', 'agen', 'admin', 'keuangan')) {
-            // BelongsToAgentScope already confines these to their branch.
-            return true;
-        }
-
-        return $user->isRole('konsumen') && (int) $this->konsumen_id === (int) $user->id;
+        // Single authority shared with InvoiceController (OrderPolicy::viewInvoice).
+        return $user->can('viewInvoice', $this->resource);
     }
 
     public function toArray(Request $request): array
@@ -197,6 +193,12 @@ class OrderResource extends JsonResource
                     ->map(fn ($courier) => ['name' => $courier->name, 'phone' => $courier->user?->phone])
             ),
             'items' => OrderItemResource::collection($this->whenLoaded('items')),
+            // PEMENUHAN KURANG: per-product shortage Gudang reported, for the office roles that decide on the remainder.
+            // Detail only (the payment relation is loaded by show() alone) so lists never pay for it.
+            'fulfillment_shortage' => $this->when(
+                $this->relationLoaded('paymentTransactions') && app(\App\Services\Order\FulfillmentShortageService::class)->visibleTo($user),
+                fn () => app(\App\Services\Order\FulfillmentShortageService::class)->forOrder($this->resource),
+            ),
             // UAT-005 LOCKED: Shipment is the DELIVERY-DATE unit, so the UI needs each shipment's
             // canonical delivery date to label its card / Print Resi row. Derived server-side from the
             // shipment's OWN items (never from arbitrary first-item UI state), and only when every item

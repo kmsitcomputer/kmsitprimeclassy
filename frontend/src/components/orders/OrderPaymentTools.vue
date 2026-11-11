@@ -97,6 +97,7 @@ async function saveDueDate() {
         Invoice <strong>{{ order.order_no }}</strong> terbit {{ formatDate(order.invoice_issued_at) }}
         &middot; {{ remaining > 0 ? (order.payment_method?.type === 'cod' ? 'COD — Belum Dibayar' : 'Belum Lunas') : 'Lunas' }}
       </template>
+      <template v-else-if="order.payment_method?.type === 'cod'">Invoice COD belum terbit.</template>
       <template v-else>Invoice belum terbit (terbit setelah pembayaran pertama diverifikasi).</template>
     </p>
 

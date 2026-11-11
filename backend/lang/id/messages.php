@@ -176,6 +176,11 @@ return [
         'verified_amount_exceeds_submitted' => 'Nominal terverifikasi tidak boleh melebihi nominal yang diajukan.',
         'adjustment_reason_required' => 'Alasan wajib diisi jika nominal terverifikasi berbeda dari nominal yang diajukan.',
         'installment_not_for_cod' => 'Pesanan COD dibayar melalui alur pembayaran COD.',
+        'payment_limit_reached' => 'Pembayaran Kurir Toko dibatasi maksimal 3 pembayaran berhasil per order; batas sudah tercapai.',
+        'third_payment_must_settle' => 'Pembayaran ketiga wajib melunasi seluruh sisa tagihan.',
+        'overpayment_refused' => 'Nominal melebihi sisa tagihan yang sah.',
+        'expedition_full_payment_only' => 'Order ekspedisi (RajaOngkir) hanya boleh dibayar lunas sekaligus, tanpa cicilan/DP/COD.',
+        'cod_undo_not_allowed' => 'Status COD tidak dapat dibatalkan karena sudah ada beberapa pembayaran berhasil.',
         'installment_not_allowed_yet' => 'Cicilan dapat dibayar setelah pesanan berstatus diproses.',
         'installment_amount_invalid' => 'Nominal harus lebih dari nol dan tidak melebihi sisa tagihan.',
         'invoice_not_issued' => 'Invoice belum terbit. Invoice terbit setelah pembayaran pertama diverifikasi.',
@@ -208,6 +213,9 @@ return [
     ],
 
     'fulfillment' => [
+        'shortage_reason_required' => 'Alasan kekurangan wajib diisi (min. 3 karakter) untuk item yang tidak dipenuhi seluruhnya.',
+        'shortage_item_invalid' => 'Item kekurangan tidak valid atau tidak memiliki sisa.',
+        'shortage_item_duplicate' => 'Item tidak boleh dicatat dua kali dalam satu penyerahan.',
         'invalid_quantity' => 'Jumlah pemenuhan tidak valid.',
         'window_closed' => 'Jumlah item hanya dapat diubah selama order berstatus diproses.',
         'adjusted' => 'Jumlah pemenuhan item berhasil diperbarui.',
@@ -216,6 +224,8 @@ return [
         'split_stock_request_locked' => 'Pemecahan tidak dapat dilakukan karena permintaan stok gudang sudah dipenuhi sebagian dan sisa tidak mencukupi.',
         'cannot_increase_cancelled' => 'Item yang sudah dibatalkan sepenuhnya tidak dapat ditambah kembali.',
         'pending_refund_blocks_increase' => 'Tidak dapat menambah jumlah selama masih ada refund yang belum diproses untuk item ini.',
+        'request_not_applicable' => 'Order tidak berada pada tahap yang dapat diminta ke Gudang.',
+        'request_nothing_outstanding' => 'Tidak ada kebutuhan barang yang masih outstanding untuk diminta.',
         'pending_additional_payment_blocks_reduction' => 'Tidak dapat mengurangi jumlah selama pembayaran tambahan untuk penambahan ini masih belum lunas.',
         'pending_additional_payment_blocks_increase' => 'Tidak dapat menambah jumlah lagi selama pembayaran tambahan sebelumnya masih belum lunas.',
     ],
@@ -223,6 +233,17 @@ return [
     'courier' => [
         'sc03_fulfillment_pending' => 'Selesaikan pemenuhan stok produk tambahan SC-03 sebelum menugaskan kurir.',
         'invalid_assignment' => 'Kurir yang dipilih tidak berada di cabang agen yang sama atau sedang nonaktif.',
+        'coordinator_only' => 'Hanya Koordinator Kurir yang dapat menugaskan kurir.',
+        'provider_not_assignable' => 'Pengiriman ekspedisi/ambil di tempat tidak dapat ditugaskan ke Kurir Toko.',
+        'receipt_not_accepted' => 'Barang belum diterima valid oleh Koordinator; penugasan kurir ditolak.',
+        'dispatch_requires_assignment' => 'Kurir Toko hanya dapat dikirim setelah ditugaskan oleh Koordinator.',
+        'expedition_unpaid' => 'Pengiriman ekspedisi wajib lunas penuh (termasuk ongkir) sebelum dikirim.',
+        'expedition_incomplete' => 'Barang belum lengkap diterima Koordinator; pengiriman ekspedisi ditahan.',
+        'expedition_partial' => 'Pengiriman ekspedisi tidak boleh parsial; seluruh barang order harus dalam satu pengiriman.',
+        'expedition_handover_required' => 'Catat resi dan bukti serah terima ke ekspedisi sebelum status dikirim.',
+        'expedition_carrier_mismatch' => 'Ekspedisi pada resi tidak sama dengan ekspedisi pilihan checkout.',
+        'expedition_tracking_conflict' => 'Resi sudah tercatat untuk pengiriman ini dengan nomor berbeda.',
+        'not_expedition' => 'Hanya pengiriman ekspedisi (RajaOngkir) yang memiliki serah terima ekspedisi.',
         'no_shipment' => 'Order ini belum memiliki data pengiriman.',
         'no_profile' => 'Akun Anda belum memiliki profil kurir.',
         'not_your_delivery' => 'Order ini sudah ditugaskan ke kurir lain.',
@@ -410,4 +431,19 @@ return [
         'test_body' => 'Ini pesan uji dari pengaturan SMTP PrimeClassy. Jika Anda dapat membacanya, pengiriman email berfungsi.',
     ],
 
+
+    'refusal' => [
+        'not_in_delivery' => 'Penolakan hanya dapat dicatat untuk barang yang sedang dikirim.',
+        'already_open' => 'Sudah ada penolakan terbuka untuk item ini.',
+        'invalid_state' => 'Status penolakan tidak sesuai untuk aksi ini.',
+        'stock_state_mismatch' => 'Kondisi stok tidak sesuai untuk pengembalian ke Gudang.',
+        'open_blocks_delivery' => 'Item dengan penolakan yang belum selesai tidak dapat ditandai terkirim.',
+        'not_applicable' => 'Penolakan dengan serah-balik ke Koordinator tidak berlaku untuk pengiriman mandiri SKS.',
+    ],
+
+    'cancellation' => [
+        'not_eligible' => 'Bagian ini tidak dapat dibatalkan: hanya sisa yang belum dikirim dan tidak dalam penolakan terbuka yang boleh dibatalkan.',
+        'stale' => 'Jumlah aktif item sudah berubah; muat ulang lalu ulangi pembatalan.',
+        'discrepancy_unresolved' => 'Ada selisih rusak yang belum diselesaikan Admin; barang tersebut tidak dapat dibatalkan atau dilepas ke stok.',
+    ],
 ];

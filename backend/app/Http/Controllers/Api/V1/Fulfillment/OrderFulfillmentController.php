@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Fulfillment;
 
+use Illuminate\Http\Request;
 use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Fulfillment\AddOrderItemRequest;
@@ -39,6 +40,41 @@ class OrderFulfillmentController extends Controller
             $request->string('reason')->toString(),
             $request->input('additional_payment_method', 'transfer'),
         );
+
+        return $this->ok(new OrderItemResource($item), __('messages.fulfillment.adjusted'));
+    }
+
+    /** REM-003: is the undelivered part of this line cancellable now, and how much? (read-only projection). */
+    public function cancellationEligibility(Request $request, Order $order, OrderItem $item)
+    {
+        $this->authorize('manageFulfillment', $order);
+        if ($item->order_id !== $order->id) {
+            abort(404);
+        }
+        $blocker = $this->fulfillmentService->cancellationBlocker($order, $item);
+
+        return $this->ok([
+            'eligible' => $blocker === null,
+            'reason_code' => $blocker,
+            'max_quantity' => $blocker === null ? (int) $item->fulfilled_quantity : 0,
+            'active_quantity' => (int) $item->fulfilled_quantity,
+        ]);
+    }
+
+    /** REM-003 (Owner Option A): cancel part of the undelivered/undispatched remainder, also after first dispatch. */
+    public function cancelUndelivered(Request $request, Order $order, OrderItem $item)
+    {
+        $this->authorize('manageFulfillment', $order);
+        if ($item->order_id !== $order->id) {
+            abort(404);
+        }
+        $data = $request->validate([
+            'quantity' => ['required', 'integer', 'min:1'],
+            'expected_quantity' => ['required', 'integer', 'min:1'],
+            'reason' => ['required', 'string', 'max:255'],
+        ]);
+
+        $item = $this->fulfillmentService->cancelUndeliveredQuantity($item, (int) $data['quantity'], (int) $data['expected_quantity'], $request->user(), $data['reason']);
 
         return $this->ok(new OrderItemResource($item), __('messages.fulfillment.adjusted'));
     }

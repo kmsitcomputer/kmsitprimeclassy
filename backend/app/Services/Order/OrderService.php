@@ -1028,6 +1028,24 @@ class OrderService
                 throw new ApiException(__('messages.order.payment_not_verified'), 422);
             }
 
+            if ($newStatus === 'dikirim') {
+                // REM-003: the office bulk override can never dispatch an unpaid/incomplete/no-handover
+                // expedition (RajaOngkir) shipment — nor (F02) a Kurir Toko shipment that is unassigned or whose
+                // goods the Koordinator has not accepted. Same guards as the courier path.
+                foreach ($order->shipments()->lockForUpdate()->get() as $candidate) {
+                    app(CourierService::class)->assertExpeditionDispatchReady($order, $candidate);
+                    app(CourierService::class)->assertKurirTokoDispatchReady($order, $candidate);
+                }
+            }
+            if ($newStatus === 'terkirim') {
+                // F02: refused goods are still in custody — the bulk override cannot mark them delivered.
+                foreach ($order->items as $candidateItem) {
+                    if ($candidateItem->status === 'dikirim' && DeliveryRefusalService::hasOpenRefusal($candidateItem->id)) {
+                        throw new ApiException(__('messages.refusal.open_blocks_delivery'), 422);
+                    }
+                }
+            }
+
             $previousStatus = $order->status;
             $order->update(['status' => $newStatus]);
 

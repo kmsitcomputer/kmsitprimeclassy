@@ -61,6 +61,18 @@
     </div>
     <div class="clear"></div>
 
+    {{-- COD-only: state the payment method and the ACTUAL payment status. Never "LUNAS" unless the order is paid. --}}
+    @if($order->paymentMethod?->type === 'cod')
+    <div class="info" data-invoice-payment="cod">
+        <strong>Metode Pembayaran:</strong> COD / Cash on Delivery (bayar di tempat)<br>
+        <strong>Status Pembayaran:</strong>
+        @if(($summary['payment_status'] ?? $order->payment_status) === 'paid') LUNAS
+        @elseif((float) ($summary['total_paid'] ?? 0) > 0) Dibayar Sebagian
+        @else Belum Dibayar (dibayar saat barang diterima)
+        @endif
+    </div>
+    @endif
+
     @if($config['show_items'])
     <table class="items">
         <thead>

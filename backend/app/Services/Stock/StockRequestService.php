@@ -121,4 +121,38 @@ class StockRequestService
             return $created;
         });
     }
+
+    /**
+     * REM-001 — the Koordinator Kurir asks Gudang to fulfil the order's outstanding Agent demand
+     * (first batch or a later one). Records the request on the order's single Stock Request — never
+     * creates a second request, never touches reservations or quantities — and is repeatable (the
+     * latest requester/time/note win; every call is audited). Refused when nothing is outstanding.
+     */
+    public function coordinatorRequestFulfillment(Order $order, \App\Models\User $actor, ?string $note = null): StockRequest
+    {
+        if (! $actor->isRole('koordinator-kurir') || (int) $actor->agent_id !== (int) $order->agent_id) {
+            throw new ApiException(__('messages.system.unauthorized_action'), 403);
+        }
+
+        return DB::transaction(function () use ($order, $actor, $note) {
+            $order = Order::withoutGlobalScopes()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            if (! in_array($order->status, ['diproses', 'dikirim'], true) || ! $order->isInWarehouseScope()) {
+                throw new ApiException(__('messages.fulfillment.request_not_applicable'), 422);
+            }
+            $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->lockForUpdate()->first();
+            $outstanding = $request
+                ? (int) StockRequestItem::query()->where('stock_request_id', $request->id)->lockForUpdate()->get()->sum('remaining_qty')
+                : 0;
+            if (! $request || in_array($request->status, ['cancelled', 'fulfilled'], true) || $outstanding <= 0) {
+                throw new ApiException(__('messages.fulfillment.request_nothing_outstanding'), 422);
+            }
+
+            $request->update(['coordinator_requested_by' => $actor->id, 'coordinator_requested_at' => now(), 'coordinator_request_note' => $note]);
+            \App\Services\Logging\ActivityLogger::log($actor->id, $request, 'stock_request.coordinator_requested', $note, [
+                'order_id' => $order->id, 'outstanding_qty' => $outstanding,
+            ]);
+
+            return $request->fresh();
+        });
+    }
 }

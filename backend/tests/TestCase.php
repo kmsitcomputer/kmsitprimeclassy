@@ -13,7 +13,15 @@ abstract class TestCase extends BaseTestCase
 
     public function createApplication()
     {
-        $app = parent::createApplication();
+        $app = require dirname(__DIR__).'/bootstrap/app.php';
+        // Guard configuration and acquire the schema lock BEFORE application providers can query.
+        $app->beforeBootstrapping(\Illuminate\Foundation\Bootstrap\RegisterProviders::class, static function ($app): void {
+            TestDatabaseGuard::assertRunHistorySafe(dirname(__DIR__));
+            TestDatabaseGuard::assertApplicationSafe($app);
+            TestDatabaseGuard::installConnectionGuards($app);
+            TestRunLock::acquireForApplication($app);
+        });
+        $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
         TestDatabaseGuard::assertApplicationSafe($app);
 
         // One runner per test database: refuse (fail-fast) before any schema work if another owns it.
@@ -56,5 +64,23 @@ abstract class TestCase extends BaseTestCase
     protected function futureDate(int $daysFromToday): string
     {
         return \Illuminate\Support\Carbon::today()->addDays($daysFromToday)->toDateString();
+    }
+
+    /**
+     * Gudang's fulfilment submission now carries the handover evidence (required) and a reason for every
+     * line handed over for less than its outstanding quantity. Fixtures that only care about the resulting
+     * stock/assignment behaviour use this to send a valid submission; tests of the reason/evidence rules
+     * post their own payload.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected function withHandoverProof(array $payload): array
+    {
+        foreach ($payload['items'] ?? [] as $i => $line) {
+            $payload['items'][$i]['shortage_reason'] ??= 'uji: sisa menyusul pada batch berikutnya';
+        }
+
+        return $payload + ['proof' => \Illuminate\Http\UploadedFile::fake()->image('serah-terima.jpg', 40, 40)];
     }
 }

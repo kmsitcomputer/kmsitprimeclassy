@@ -65,7 +65,11 @@ class DispatchController extends Controller
             ->where('delivery_mode', Shipment::DELIVERY_MODE_STANDARD)
             ->where('status', 'pending')
             ->whereNull('courier_id')
-            ->whereNull('self_delivered_by_user_id');
+            ->whereNull('self_delivered_by_user_id')
+            ->whereHas('orderItems', fn ($i) => $i->where('status', '!=', 'dibatalkan'))
+            // REM-003: RajaOngkir / pickup are never Kurir Toko work (persisted provider decides).
+            ->where(fn ($q) => $q->whereNull('shipping_provider_code')
+                ->orWhereNotIn('shipping_provider_code', [Shipment::PROVIDER_EXPEDITION, Shipment::PROVIDER_PICKUP]));
 
         // UAT follow-up: the delivery-date filter is SHIPMENT-level, not order-level. The
         // order prefilter above only narrows candidate orders; without this constraint a
@@ -85,6 +89,80 @@ class DispatchController extends Controller
             DispatchShipmentResource::collection($shipments)->resolve(),
             meta: ['current_page' => $shipments->currentPage(), 'last_page' => $shipments->lastPage(), 'total' => $shipments->total()],
         );
+    }
+
+    /**
+     * REM-003: RajaOngkir (expedition) shipments awaiting handover/dispatch, with the four readiness gates
+     * (operational booleans only — never amounts). Same gates CourierService enforces on dispatch.
+     */
+    public function expeditions(Request $request)
+    {
+        $actor = $request->user();
+        $agentId = $actor->isRole('super_admin') ? $this->resolveSuperAdminAgentId($request) : (int) $actor->agent_id;
+        $rows = Shipment::query()->where('shipping_provider_code', Shipment::PROVIDER_EXPEDITION)->where('status', 'pending')
+            ->whereHas('order', fn ($q) => $q->where('agent_id', $agentId)->whereIn('status', ['diproses', 'dikirim']))
+            ->with('order')->latest('id')->paginate(min(max($request->integer('per_page', 15), 1), 100));
+
+        return $this->ok($rows->getCollection()->map(function ($shipment) {
+            $order = $shipment->order;
+            $stock = \App\Models\StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->first();
+            $outstanding = $stock ? (int) \App\Models\StockRequestItem::query()->where('stock_request_id', $stock->id)->sum('remaining_qty') : 0;
+            $outside = \App\Models\OrderItem::query()->where('order_id', $order->id)->whereNotIn('status', ['dibatalkan'])
+                ->where(fn ($q) => $q->whereNull('shipment_id')->orWhere('shipment_id', '!=', $shipment->id))->exists();
+
+            return [
+                'shipment_id' => $shipment->id, 'order_id' => $order->id, 'order_no' => $order->order_no,
+                'recipient_name' => $order->recipient_name_snapshot,
+                'carrier' => $shipment->provider_meta['courier'] ?? null, 'service' => $shipment->provider_meta['service'] ?? null,
+                'tracking_number' => $shipment->tracking_number,
+                'handover_recorded' => ! empty($shipment->provider_meta['handover']['media_id'] ?? null),
+                'ready' => [
+                    'paid_in_full' => $order->payment_status === 'paid',
+                    'goods_complete' => $outstanding === 0 && (! $stock || ! in_array($stock->status, ['pending', 'partial'], true)),
+                    'single_shipment' => ! $outside,
+                ],
+                'fulfillment_outstanding_qty' => $outstanding,
+                'coordinator_requested_at' => $stock?->coordinator_requested_at?->toIso8601String(),
+            ];
+        })->values(), meta: ['current_page' => $rows->currentPage(), 'last_page' => $rows->lastPage(), 'total' => $rows->total()]);
+    }
+
+    /** REM-003: refusals awaiting the Koordinator (operational projection, branch scope). */
+    public function refusals(Request $request)
+    {
+        $actor = $request->user();
+        $agentId = $actor->isRole('super_admin') ? $this->resolveSuperAdminAgentId($request) : (int) $actor->agent_id;
+        $rows = \App\Models\DeliveryRefusal::withoutGlobalScopes()->where('agent_id', $agentId)
+            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')->toString()), fn ($q) => $q->whereIn('status', \App\Models\DeliveryRefusal::OPEN_STATUSES))
+            ->with(['orderItem', 'shipment.order'])->latest('id')->paginate(min(max($request->integer('per_page', 15), 1), 100));
+
+        return $this->ok($rows->getCollection()->map(fn ($r) => [
+            'id' => $r->id, 'status' => $r->status, 'quantity' => $r->quantity, 'reason' => $r->reason,
+            'order_id' => $r->order_id, 'order_no' => $r->shipment?->order?->order_no,
+            'product_name' => $r->orderItem?->product_name_snapshot, 'shipment_id' => $r->shipment_id,
+            'recorded_at' => $r->recorded_at?->toIso8601String(), 'handed_back_at' => $r->handed_back_at?->toIso8601String(),
+            'received_at' => $r->received_at?->toIso8601String(), 'disposition_note' => $r->disposition_note,
+        ])->values(), meta: ['current_page' => $rows->currentPage(), 'last_page' => $rows->lastPage(), 'total' => $rows->total()]);
+    }
+
+    /** REM-003: carve an undispatched part of a line into a later delivery batch. */
+    public function splitBatch(Request $request, \App\Models\OrderItem $orderItem)
+    {
+        $data = $request->validate(['quantity' => ['required', 'integer', 'min:1'], 'note' => ['nullable', 'string', 'max:255']]);
+        $child = app(\App\Services\Order\OrderFulfillmentService::class)
+            ->splitItemIntoBatch($orderItem, (int) $data['quantity'], $request->user(), $data['note'] ?? null);
+
+        return $this->created(['order_item_id' => $child->id, 'shipment_id' => $child->shipment_id, 'quantity' => (int) $child->fulfilled_quantity]);
+    }
+
+    /** REM-001: Koordinator Kurir requests Gudang to fulfil an order's outstanding demand. */
+    public function requestFulfillment(Request $request, \App\Models\Order $order)
+    {
+        $data = $request->validate(['note' => ['nullable', 'string', 'max:255']]);
+        $stockRequest = app(\App\Services\Stock\StockRequestService::class)
+            ->coordinatorRequestFulfillment($order, $request->user(), $data['note'] ?? null);
+
+        return $this->ok(new \App\Http\Resources\StockRequestResource($stockRequest->load('items')));
     }
 
     /** Return pickup assignments: operational projection, one row per awaiting item. */
@@ -151,7 +229,7 @@ class DispatchController extends Controller
                     }
                 }
                 if (! empty($filters['search'])) {
-                    $oq->where('order_no', 'like', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $filters['search']).'%');
+                    $oq->where('order_no', 'like', '%'.str_replace(['%', '_'], ['\%', '\_'], $filters['search']).'%');
                 }
             });
 
@@ -184,8 +262,9 @@ class DispatchController extends Controller
      */
     private function eligibleOrderQuery(Request $request, int $agentId)
     {
+        // REM-003: a later batch of an order whose first batch already shipped ('dikirim') is dispatchable too.
         $orderQuery = Order::query()
-            ->where('status', 'diproses');
+            ->whereIn('status', ['diproses', 'dikirim']);
 
         if ($agentId) {
             $orderQuery->where('agent_id', $agentId);

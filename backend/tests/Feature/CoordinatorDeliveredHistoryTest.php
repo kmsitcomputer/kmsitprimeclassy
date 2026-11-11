@@ -27,6 +27,7 @@ class CoordinatorDeliveredHistoryTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -68,6 +69,7 @@ class CoordinatorDeliveredHistoryTest extends TestCase
     private function deliver(array $b, Shipment $shipment): void
     {
         $courierId = Courier::where('user_id', $b['kurir']->id)->value('id');
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $courierId])->assertOk();
         $this->actingAs($b['kurir'])->patchJson("/api/v1/shipments/{$shipment->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['kurir'])->patch("/api/v1/shipments/{$shipment->id}/status", ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('p.jpg')])->assertOk();

@@ -645,8 +645,8 @@ class OrderLineAdditionTest extends TestCase
 
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
         $firstItem = $request->items()->firstOrFail();
-        $proposal = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $firstItem->id, 'quantity' => 2]]])->assertCreated()->json('data');
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
+        $proposal = $this->actingAs($gudang)->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $firstItem->id, 'quantity' => 2]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
         $this->assertSame('fulfilled', $request->fresh()->status);
         $this->assertNotNull($request->fresh()->fulfilled_at);
 
@@ -664,8 +664,8 @@ class OrderLineAdditionTest extends TestCase
         $newItem = $request->items()->where('product_id', $productB->id)->firstOrFail();
         $this->assertSame([3, 0, 3], [$newItem->requested_qty, $newItem->fulfilled_qty, $newItem->remaining_qty]);
 
-        $second = $this->actingAs($gudang)->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $newItem->id, 'quantity' => 3]]])->assertCreated()->json('data');
-        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
+        $second = $this->actingAs($gudang)->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $newItem->id, 'quantity' => 3]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($admin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
 
         $this->assertSame('fulfilled', $request->fresh()->status);
         $this->assertSame(3, $newItem->fresh()->fulfilled_qty);

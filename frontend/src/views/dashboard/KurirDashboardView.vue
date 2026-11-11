@@ -5,6 +5,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import { useAuthStore } from '@/stores/auth'
 import { updateShipmentItemStatus } from '@/api/shipments'
+import { handBackRefusal, refuseDelivery } from '@/api/koordinatorLogistics'
 import {
   listCourierOrders,
   listCourierReturns,
@@ -165,6 +166,43 @@ function closeProofPanel() {
   proofAbort?.abort()
   proofItemId.value = null
   proofFile.value = null
+}
+
+// REM-003: customer refuses the goods at the door → record it, then hand the goods back to the Koordinator.
+const refuseItemId = ref<number | null>(null)
+const refuseReason = ref('')
+const refuseQty = ref<number | null>(null) // partial refusal: refused units (blank = the whole item)
+const refuseError = ref<string | null>(null)
+
+async function submitRefusal(item: { id: number; shipment_id: number | null; quantity: number }) {
+  const reason = refuseReason.value.trim()
+  if (item.shipment_id === null || !reason) return
+  busyItemId.value = item.id
+  refuseError.value = null
+  try {
+    await refuseDelivery(item.shipment_id, item.id, reason, refuseQty.value && refuseQty.value < item.quantity ? refuseQty.value : undefined)
+    refuseItemId.value = null
+    refuseReason.value = ''
+    refuseQty.value = null
+    await loadOrders()
+  } catch (e) {
+    refuseError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mencatat penolakan.'
+  } finally {
+    busyItemId.value = null
+  }
+}
+
+async function handBack(refusalId: number, itemId: number) {
+  busyItemId.value = itemId
+  refuseError.value = null
+  try {
+    await handBackRefusal(refusalId)
+    await loadOrders()
+  } catch (e) {
+    refuseError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengonfirmasi serah terima balik.'
+  } finally {
+    busyItemId.value = null
+  }
 }
 
 async function markDelivered(item: { id: number; shipment_id: number | null }) {
@@ -375,7 +413,30 @@ onMounted(() => {
                 >
                   Ambil
                 </button>
+                <template v-else-if="item.shipment_id && item.status === 'dikirim' && item.open_refusal">
+                  <span class="text-xs text-amber-700">
+                    {{ item.open_refusal.status === 'with_courier' ? 'Ditolak pelanggan' : 'Menunggu konfirmasi Koordinator' }}
+                  </span>
+                  <button
+                    v-if="item.open_refusal.status === 'with_courier'"
+                    type="button"
+                    class="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                    :disabled="busyItemId === item.id"
+                    @click="handBack(item.open_refusal.id, item.id)"
+                  >
+                    Serahkan ke Koordinator
+                  </button>
+                </template>
                 <template v-else-if="item.shipment_id && item.status === 'dikirim'">
+                  <button
+                    v-if="item.delivery_mode !== 'self_sub'"
+                    type="button"
+                    class="rounded-lg border border-amber-600 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                    :disabled="busyItemId === item.id"
+                    @click="refuseItemId = item.id; refuseError = null"
+                  >
+                    Ditolak
+                  </button>
                   <button
                     type="button"
                     class="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
@@ -386,6 +447,19 @@ onMounted(() => {
                   </button>
                 </template>
               </span>
+              <div v-if="refuseItemId === item.id" class="mt-2 w-full basis-full rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs dark:bg-stone-900">
+                <label class="block font-medium">Alasan penolakan pelanggan
+                  <input v-model="refuseReason" type="text" maxlength="255" class="mt-1 w-full rounded-lg border border-stone-200 px-2 py-1 dark:border-stone-700 dark:bg-stone-950" />
+                </label>
+                <label v-if="item.quantity > 1" class="mt-2 block font-medium">Jumlah yang ditolak (kosongkan = semua {{ item.quantity }})
+                  <input v-model.number="refuseQty" type="number" min="1" :max="item.quantity" class="mt-1 w-24 rounded-lg border border-stone-200 px-2 py-1 dark:border-stone-700 dark:bg-stone-950" />
+                </label>
+                <p v-if="refuseError" role="alert" class="mt-1 text-red-600">{{ refuseError }}</p>
+                <div class="mt-2 flex gap-2">
+                  <button type="button" class="rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white disabled:opacity-50" :disabled="!refuseReason.trim() || busyItemId === item.id" @click="submitRefusal(item)">Catat Penolakan</button>
+                  <button type="button" class="rounded-lg px-3 py-1.5 font-medium text-stone-600" :disabled="busyItemId === item.id" @click="refuseItemId = null">Batal</button>
+                </div>
+              </div>
               <div v-if="proofItemId === item.id" class="mt-2 w-full basis-full rounded-xl border border-stone-200 bg-stone-50 p-3 dark:border-stone-700 dark:bg-stone-900">
                 <PrimeFileUpload
                   :model-value="proofFile ? [proofFile] : []"

@@ -34,6 +34,7 @@ class CourierFeeSplitTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     private array $b;
 
@@ -99,7 +100,7 @@ class CourierFeeSplitTest extends TestCase
     {
         $shipment = $item->shipment()->first();
         if (! $shipment->isSelfDelivery() && $shipment->courier_id === null) {
-            app(CourierService::class)->assignCourier($shipment, $actor->courierProfile, $this->b['agen']);
+            $this->assignAsKoordinator($shipment, $actor->courierProfile);
         }
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $actor);
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'terkirim', $actor, UploadedFile::fake()->image('proof.jpg'));
@@ -148,8 +149,8 @@ class CourierFeeSplitTest extends TestCase
         $this->markCourierOnline($item->order_id);
         $child = app(OrderFulfillmentService::class)->rescheduleItemDeliveryDate($item, '2026-12-20', $this->b['admin'], 'split', 2);
 
-        app(CourierService::class)->assignCourier($item->shipment()->first(), $this->b['courierA'], $this->b['admin']);
-        app(CourierService::class)->assignCourier($child->shipment()->first(), $this->b['courierB'], $this->b['admin']);
+        $this->assignAsKoordinator($item->shipment()->first(), $this->b['courierA']);
+        $this->assignAsKoordinator($child->shipment()->first(), $this->b['courierB']);
 
         $this->deliver($item, $this->b['kurirA']);
         $this->deliver($child, $this->b['kurirB']);

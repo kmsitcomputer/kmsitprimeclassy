@@ -35,6 +35,7 @@ class OrderPaymentBadgeTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use ResolvesCheckoutActor;
 
     protected function setUp(): void
@@ -191,6 +192,7 @@ class OrderPaymentBadgeTest extends TestCase
         // Dikirim + Belum Lunas: a COD order moved operationally while payment stays unpaid.
         $unpaid = $this->placeOrder($konsumen, $product, 'cod');
         $admin = User::factory()->admin()->create(['agent_id' => $agen->id]);
+        $this->makeDispatchable($unpaid->id);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$unpaid->id}/status", ['status' => 'dikirim'])->assertOk();
 
         $card = $this->cardProjection($konsumen, $unpaid->fresh());
@@ -205,6 +207,7 @@ class OrderPaymentBadgeTest extends TestCase
         // Verification settles the money but leaves the workflow alone; the office then moves
         // it step by step (diterima -> diproses requires the verified payment).
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$paid->id}/status", ['status' => 'diproses'])->assertOk();
+        $this->makeDispatchable($paid->id);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$paid->id}/status", ['status' => 'dikirim'])->assertOk();
 
         $card = $this->cardProjection($konsumen, $paid->fresh());

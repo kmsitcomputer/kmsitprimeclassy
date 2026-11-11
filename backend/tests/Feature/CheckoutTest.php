@@ -328,6 +328,44 @@ class CheckoutTest extends TestCase
         $this->assertSame('unpaid', $this->actingAs($konsumen)->getJson('/api/v1/orders/'.$response->json('data.id'))->json('data.payment_status'));
     }
 
+    public function test_cod_checkout_issues_the_invoice_once_without_marking_the_order_paid(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 100000, stockQty: 5);
+
+        $id = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
+            'payment_method_code' => 'cod',
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            ...$this->destination(),
+        ])->assertCreated()->json('data.id');
+
+        $order = \App\Models\Order::withoutGlobalScopes()->findOrFail($id);
+        $this->assertNotNull($order->invoice_issued_at);
+        $this->assertSame('unpaid', $order->payment_status);
+        $this->assertEquals(0, (float) $order->paid_amount);
+        $this->assertSame(1, \App\Models\OrderInvoiceSnapshot::where('order_id', $id)->count());
+        $this->assertSame(1, \App\Models\OrderInitialReportItem::withoutGlobalScopes()->where('order_id', $id)->count());
+    }
+
+    public function test_failed_cod_checkout_leaves_no_partial_order(): void
+    {
+        ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();
+        $product = $this->makeProduct($agen, price: 100000, stockQty: 1);
+
+        $response = $this->actingAs($agen)->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/v1/orders', [
+            'konsumen_id' => $konsumen->id,
+            'payment_method_code' => 'cod',
+            'items' => [['product_id' => $product->id, 'quantity' => 999]],
+            ...$this->destination(),
+        ]);
+
+        $this->assertGreaterThanOrEqual(400, $response->status());
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertDatabaseCount('order_items', 0);
+        $this->assertDatabaseCount('order_initial_report_items', 0);
+    }
+
     public function test_bank_transfer_requires_configuration_before_it_can_be_selected(): void
     {
         ['agen' => $agen, 'konsumen' => $konsumen] = $this->makeAgentBranch();

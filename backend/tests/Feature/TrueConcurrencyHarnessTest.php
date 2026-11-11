@@ -37,4 +37,45 @@ class TrueConcurrencyHarnessTest extends TestCase
         $this->assertSame([], $harness->staleBarrierPaths());
         $this->assertSame([], $harness->orphanProcesses());
     }
+
+    public function test_barrier_teardown_removes_actor_marker_files_but_only_in_its_own_run_directory(): void
+    {
+        $harness = new class extends ConcurrencyHarness
+        {
+            public function ownDirectory(): string
+            {
+                $this->ensureRuntimeDir();
+
+                return $this->runtimeDir;
+            }
+
+            public function teardown(): void
+            {
+                $this->cleanupBarrierDir();
+            }
+        };
+
+        $own = $harness->ownDirectory();
+        $other = dirname($own).'/concurrency-regression-sibling-'.bin2hex(random_bytes(4));
+
+        try {
+            mkdir($other, 0775, true);
+            file_put_contents($other.'/keep', 'another run');
+            foreach (['sr-a.ready', 'sr-a.ready.capacity-attempt', 'sr-b.ready.first-capacity-lock'] as $file) {
+                file_put_contents($own.'/'.$file, 'x');
+            }
+
+            $harness->teardown();
+
+            $this->assertDirectoryDoesNotExist($own, 'actor marker files must not leave the run directory behind');
+            $this->assertFileExists($other.'/keep', 'another run\'s directory must never be touched');
+        } finally {
+            @unlink($other.'/keep');
+            @rmdir($other);
+            foreach (glob($own.'/*') ?: [] as $file) {
+                @unlink($file);
+            }
+            @rmdir($own);
+        }
+    }
 }

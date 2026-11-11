@@ -71,6 +71,22 @@ final class AdminNotificationService
         }
     }
 
+    /**
+     * PEMENUHAN KURANG: Gudang handed over less than the order still needs. One notification per proposal and
+     * recipient (the proposal id is the dedupe subject), linked to the order so the detail opens from it. Branch
+     * Admin and Agen only; the detail and the Admin decision live on the Order page.
+     */
+    public function fulfillmentShortage(Order $order, string $subjectType, int $subjectId, int $shortLines): void
+    {
+        $this->record(
+            'fulfillment.shortage', AdminNotification::WARNING, 'PEMENUHAN KURANG',
+            sprintf('Pesanan %s: Gudang tidak dapat memenuhi %d item sepenuhnya. Tentukan reschedule atau cancel sisa di halaman Order.', $order->order_no, $shortLines),
+            $order->agent_id, $order->id, $subjectType, $subjectId, includeSuperAdmins: false,
+            // A shortage-only report has no proposal to key on: the minute keeps a double click from raising two.
+            dedupeSuffix: $subjectType === 'stock_request' ? now()->format('YmdHi') : '',
+        );
+    }
+
     /** NTF-033: a transactional message could not be delivered (WhatsApp failed/unknown, e-mail failed). */
     public function deliveryFailed(string $channel, string $event, ?int $agentId, ?int $orderId, string $subjectType, int $subjectId, string $status): void
     {

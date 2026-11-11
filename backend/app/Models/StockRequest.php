@@ -14,11 +14,11 @@ class StockRequest extends Model
         static::addGlobalScope(new BelongsToAgentScope);
     }
 
-    protected $fillable = ['agent_id', 'order_id', 'request_number', 'status', 'created_by', 'fulfilled_at', 'cancelled_at'];
+    protected $fillable = ['agent_id', 'order_id', 'request_number', 'status', 'created_by', 'fulfilled_at', 'cancelled_at', 'coordinator_requested_by', 'coordinator_requested_at', 'coordinator_request_note'];
 
     protected function casts(): array
     {
-        return ['agent_id' => 'integer', 'order_id' => 'integer', 'fulfilled_at' => 'datetime', 'cancelled_at' => 'datetime'];
+        return ['agent_id' => 'integer', 'order_id' => 'integer', 'fulfilled_at' => 'datetime', 'cancelled_at' => 'datetime', 'coordinator_requested_at' => 'datetime'];
     }
 
     public function agent(): BelongsTo

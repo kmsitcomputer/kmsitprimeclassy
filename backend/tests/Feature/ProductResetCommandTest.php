@@ -446,6 +446,48 @@ class ProductResetCommandTest extends TestCase
         $this->assertSame(1, DB::table('payment_transactions')->count());
     }
 
+    /* ── 4b. retained operator notifications: link cleared, row kept (SET NULL) ── */
+
+    public function test_operator_notifications_of_a_deleted_order_are_retained_with_the_order_link_cleared(): void
+    {
+        $agent = $this->makeAgent();
+        $konsumen = User::factory()->konsumen()->create(['agent_id' => $agent->id]);
+        $method = PaymentMethod::create(['code' => 'cod', 'name' => 'COD', 'type' => 'cod', 'is_active' => true]);
+        ['product' => $product, 'variation' => $variation] = $this->makeVariationProduct('NOTIF');
+        ['order' => $productOrder] = $this->makeOrder($agent, $konsumen, 'ORD-NOTIF-P', $product, $variation);
+        $cleanOrder = Order::withoutGlobalScopes()->create([
+            'order_no' => 'ORD-NOTIF-CLEAN', 'konsumen_id' => $konsumen->id, 'agent_id' => $agent->id,
+            'payment_method_id' => $method->id, 'status' => 'diterima', 'payment_status' => 'unpaid',
+            'subtotal_amount' => 0, 'total_amount' => 0,
+            'recipient_name_snapshot' => 'Customer', 'recipient_phone_snapshot' => '0800', 'address_snapshot' => 'Address',
+        ]);
+
+        $notification = fn (string $key, ?int $orderId) => DB::table('admin_notifications')->insertGetId([
+            'dedupe_key' => $key, 'recipient_user_id' => $agent->id, 'agent_id' => $agent->id, 'type' => 'order.created',
+            'severity' => 'info', 'title' => 't', 'body' => 'b', 'order_id' => $orderId,
+            'subject_type' => 'order', 'subject_id' => $orderId, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $ofDeleted = $notification('reset-notif-deleted', $productOrder->id);
+        $ofClean = $notification('reset-notif-clean', $cleanOrder->id);
+        $unlinked = $notification('reset-notif-none', null);
+
+        $notificationsBefore = DB::table('admin_notifications')->count();
+
+        $dry = Artisan::call('products:reset');
+        $this->assertSame(0, $dry, Artisan::output());
+        $this->assertSame($productOrder->id, (int) DB::table('admin_notifications')->where('id', $ofDeleted)->value('order_id'));
+
+        $code = Artisan::call('products:reset', ['--force' => true, '--backup-verified' => 'test-backup']);
+        $this->assertSame(0, $code, Artisan::output());
+
+        $this->assertDatabaseMissing('orders', ['id' => $productOrder->id]);
+        $this->assertSame($notificationsBefore, DB::table('admin_notifications')->count());
+        $this->assertSame(0, DB::table('admin_notifications')->where('order_id', $productOrder->id)->count());
+        $this->assertDatabaseHas('admin_notifications', ['id' => $ofDeleted, 'order_id' => null]);
+        $this->assertDatabaseHas('admin_notifications', ['id' => $ofClean, 'order_id' => $cleanOrder->id]);
+        $this->assertDatabaseHas('admin_notifications', ['id' => $unlinked, 'order_id' => null]);
+    }
+
     /* ─────────── 5. master data and configuration survive ─────────── */
 
     public function test_master_data_and_configuration_are_preserved(): void

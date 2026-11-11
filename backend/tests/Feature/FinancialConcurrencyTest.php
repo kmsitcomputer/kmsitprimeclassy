@@ -215,4 +215,34 @@ class FinancialConcurrencyTest extends TestCase
 
         return OrderAdditionalPayment::query()->latest('id')->firstOrFail();
     }
+
+    /** F03 — Keuangan marking the additional payment paid races a bank-transfer verification of its proof: one settlement. */
+    public function test_f03_direct_settlement_racing_transfer_verification_applies_the_money_once(): void
+    {
+        $base = $this->agentBase();
+        $keuangan = User::factory()->keuangan()->create(['agent_id' => $base['agen']->id]);
+        \App\Models\AgentPaymentGatewayConfig::create([
+            'agent_id' => $base['agen']->id, 'payment_method_id' => \App\Models\PaymentMethod::where('code', 'bank_transfer')->value('id'),
+            'environment' => 'sandbox', 'config' => ['bank_name' => 'BCA', 'account_name' => 'QA', 'account_number' => '123'],
+        ]);
+        $item = OrderItem::query()->findOrFail($base['item']->id);
+        app(OrderFulfillmentService::class)->adjustItemQuantity($item, 4, $base['admin'], 'increase', 'transfer');
+        $obligation = OrderAdditionalPayment::query()->latest('id')->firstOrFail();
+        $tx = \App\Models\PaymentTransaction::findOrFail($obligation->payment_transaction_id);
+        $verification = app(\App\Services\Payment\PaymentService::class)->submitBankTransferProof($tx, \Illuminate\Http\UploadedFile::fake()->image('p.jpg'), $base['konsumen']);
+        $paidBefore = (float) Order::withoutGlobalScopes()->findOrFail($item->order_id)->paid_amount;
+
+        $report = (new ConcurrencyHarness)->runServiceRace(
+            ['op' => 'additional-settle', 'actor_id' => $keuangan->id, 'subject_id' => $obligation->id, 'extra' => ['paid' => true]],
+            ['op' => 'verify-bank-transfer', 'actor_id' => $keuangan->id, 'subject_id' => $verification->id, 'extra' => ['approved' => true]],
+        );
+
+        $this->assertTrue($report['different_connections']);
+        $this->assertTrue($report['true_overlap']);
+        $this->assertNoDeadlock($report);
+        $order = Order::withoutGlobalScopes()->findOrFail($item->order_id);
+        $this->assertEquals($paidBefore + (float) $obligation->amount, (float) $order->paid_amount, 'the obligation amount is applied exactly once');
+        $this->assertSame('paid', $obligation->fresh()->status);
+        $this->assertSame('paid', $tx->fresh()->status);
+    }
 }

@@ -141,14 +141,6 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (auth) => isRole(auth, 'gudang'),
       },
       {
-        key: 'fulfillment-proposals',
-        label: 'Fulfillment Proposal',
-        routeName: 'fulfillment-proposals',
-        icon: 'document',
-        // Admin reviews the Gudang's fulfillment proposals (approve/reject).
-        show: (auth) => isRole(auth, 'admin'),
-      },
-      {
         key: 'warehouse-returns',
         label: 'Returns Inspection',
         routeName: 'warehouse-returns',

@@ -33,6 +33,7 @@ class FulfillmentWindowAfterShipmentTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     /** @var array{agen:User, admin:User, kurir:User, courier:Courier, konsumen:User} */
     private array $b;
@@ -100,7 +101,7 @@ class FulfillmentWindowAfterShipmentTest extends TestCase
         $shipment = Shipment::where('order_id', $order->id)->firstOrFail();
         $items = OrderItem::query()->where('order_id', $order->id)->orderBy('id')->get()->all();
 
-        app(\App\Services\Order\CourierService::class)->assignCourier($shipment->fresh(), $this->b['courier'], $this->b['admin']);
+        $this->assignAsKoordinator($shipment->fresh(), $this->b['courier']);
 
         // Deliver item #1 only: the ORDER advances to 'dikirim' while item #2 stays in 'diproses'.
         foreach (['dikirim', 'terkirim'] as $status) {
@@ -127,7 +128,7 @@ class FulfillmentWindowAfterShipmentTest extends TestCase
 
         $this->actingAs($this->b['admin'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$items[1]->id}/reschedule", [
-                'requested_delivery_date' => '2026-11-01', 'reason' => 'ubah tanggal setelah kirim',
+                'requested_delivery_date' => now()->addDays(3)->toDateString(), 'reason' => 'ubah tanggal setelah kirim',
             ])
             ->assertStatus(422);
 
@@ -152,7 +153,7 @@ class FulfillmentWindowAfterShipmentTest extends TestCase
             ]);
         $reschedule = $this->actingAs($this->b['admin'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$items[1]->id}/reschedule", [
-                'requested_delivery_date' => '2026-11-01', 'reason' => 'ubah tanggal',
+                'requested_delivery_date' => now()->addDays(3)->toDateString(), 'reason' => 'ubah tanggal',
             ]);
 
         $this->assertSame(422, $quantity->status(), 'quantity adjustment is outside the window');
@@ -166,7 +167,7 @@ class FulfillmentWindowAfterShipmentTest extends TestCase
         // Route authorization is not the boundary — the service is.
         $this->expectException(\App\Exceptions\ApiException::class);
         app(\App\Services\Order\OrderFulfillmentService::class)->rescheduleItemDeliveryDate(
-            $items[1]->fresh(), '2026-11-01', $this->b['admin'], 'direct service call'
+            $items[1]->fresh(), now()->addDays(3)->toDateString(), $this->b['admin'], 'direct service call'
         );
     }
 
@@ -196,11 +197,11 @@ class FulfillmentWindowAfterShipmentTest extends TestCase
 
         $this->actingAs($this->b['admin'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
-                'requested_delivery_date' => '2026-11-05', 'reason' => 'jadwal pelanggan',
+                'requested_delivery_date' => now()->addDays(5)->toDateString(), 'reason' => 'jadwal pelanggan',
             ])
             ->assertOk();
 
-        $this->assertSame('2026-11-05', $item->fresh()->requested_delivery_date->toDateString());
+        $this->assertSame(now()->addDays(5)->toDateString(), $item->fresh()->requested_delivery_date->toDateString());
         $this->assertSame('diproses', $order->fresh()->status, 'a reschedule never moves the order status');
     }
 }

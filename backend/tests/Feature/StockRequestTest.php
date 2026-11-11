@@ -68,16 +68,16 @@ class StockRequestTest extends TestCase
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 100]);
         $this->assertDatabaseCount('stock_movements', 0);
 
-        $proposal = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertCreated()->json('data');
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
+        $proposal = $this->actingAs($f['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 94]);
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'shipping', 'quantity' => 6]);
         $this->assertDatabaseHas('product_stocks', ['product_id' => $f['product']->id, 'quantity_reserved' => 4]);
         $request->refresh();
         $this->assertSame(4, $request->items()->firstOrFail()->remaining_qty);
         $this->assertSame('partial', $request->status);
-        $second = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 4]]])->assertCreated()->json('data');
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
+        $second = $this->actingAs($f['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 4]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 90]);
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'shipping', 'quantity' => 10]);
         $this->assertDatabaseHas('product_stocks', ['product_id' => $f['product']->id, 'quantity_reserved' => 0]);
@@ -96,9 +96,9 @@ class StockRequestTest extends TestCase
         $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/fulfill", ['idempotency_key' => 'same-key', 'items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertUnprocessable();
         $this->assertDatabaseHas('stock_requests', ['id' => $request->id, 'status' => 'pending']);
         WarehouseStock::withoutGlobalScopes()->where('agent_id', $f['agent']->id)->where('stock_type', 'transit')->update(['quantity' => 10]);
-        $proposal = $this->actingAs($f['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertCreated()->json('data');
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
-        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
+        $proposal = $this->actingAs($f['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 1]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
+        $this->actingAs($f['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
         $this->assertDatabaseHas('warehouse_stocks', ['product_id' => $f['product']->id, 'stock_type' => 'transit', 'quantity' => 9]);
         $this->assertDatabaseCount('stock_request_fulfillments', 1);
     }

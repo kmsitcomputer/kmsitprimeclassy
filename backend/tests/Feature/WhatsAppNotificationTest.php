@@ -33,6 +33,7 @@ class WhatsAppNotificationTest extends TestCase
     use HasTestRegion;
     use \Tests\Concerns\AssumesPairedAgentDevices;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     private const BASE = 'http://gowa.test';
 
@@ -100,6 +101,9 @@ class WhatsAppNotificationTest extends TestCase
 
     private function moveTo(User $by, Order $order, string $status): void
     {
+        if ($status === 'dikirim') {
+            $this->makeDispatchable($order->id);
+        }
         $this->actingAs($by)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => $status])->assertOk();
     }
 
@@ -191,7 +195,9 @@ class WhatsAppNotificationTest extends TestCase
         $this->enable([WhatsAppEvents::ORDER_SHIPPED, WhatsAppEvents::ORDER_DELIVERED]);
         $order = $this->accountOrder($b);
 
-        // No courier / tracking number yet: those lines are DROPPED, never invented.
+        // No courier / tracking number yet: those lines are DROPPED, never invented. (A pickup shipment has no courier by
+        // design; an unassigned Kurir Toko can no longer ship at all — F02.)
+        Shipment::query()->where('order_id', $order->id)->update(['shipping_provider_code' => 'pickup']);
         $this->moveTo($b['admin'], $order, 'dikirim');
         $shipped = $this->messages()->firstWhere('event', 'order_shipped');
         $this->assertNotNull($shipped);
@@ -348,6 +354,8 @@ class WhatsAppNotificationTest extends TestCase
         $order = $this->accountOrder($b);
         $this->fake(fn () => throw new ConnectionException('cURL error 7: Failed to connect to gowa.test'));
 
+        $this->makeDispatchable($order->id);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
 
         $this->assertSame('dikirim', $order->fresh()->status);
@@ -364,6 +372,8 @@ class WhatsAppNotificationTest extends TestCase
         $this->app->bind(WhatsAppDelivery::class, fn () => throw new \RuntimeException('delivery layer exploded'));
         $this->app->forgetInstance(OrderNotifier::class);
 
+        $this->makeDispatchable($order->id);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->assertSame('dikirim', $order->fresh()->status);
     }

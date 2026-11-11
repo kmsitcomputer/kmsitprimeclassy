@@ -15,6 +15,17 @@ if (! in_array($mode, ['create', 'drop'], true) || ! str_starts_with($table, 'fp
     exit(2);
 }
 
+require dirname(__DIR__, 3).'/vendor/autoload.php';
+// Testing-only endpoint validation before any PDO connection; never a fallback to DEV.
+if (! getenv('PROBE_DB_HOST') || ! getenv('PROBE_DB_USER')) {
+    throw new \RuntimeException('REFUSED: probe host and username are required.');
+}
+\Tests\Support\TestDatabaseGuard::assertRunHistorySafe(dirname(__DIR__, 3));
+\Tests\Support\TestDatabaseGuard::assertSafe(getenv('APP_ENV') ?: null, 'mysql', 'primeclassy_testing', getenv('PROBE_DB_HOST') ?: null, \Tests\Support\TestDatabaseGuard::workerFromEnvironment());
+if ((string) getenv('PROBE_DB_PORT') !== '3306') {
+    throw new \RuntimeException('REFUSED: probe requires testing MariaDB port 3306.');
+}
+
 $pdo = new PDO(
     'mysql:host='.(getenv('PROBE_DB_HOST') ?: '127.0.0.1').';port='.(getenv('PROBE_DB_PORT') ?: '3306').';dbname='.$database,
     getenv('PROBE_DB_USER') ?: '',

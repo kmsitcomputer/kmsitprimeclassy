@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
@@ -8,13 +8,14 @@ import PrimeFileUpload from '@/components/ui/PrimeFileUpload.vue'
 import ConsentPanel from '@/components/dashboard/ConsentPanel.vue'
 import RefundRecipientPanel from '@/components/dashboard/RefundRecipientPanel.vue'
 import OrderPaymentTools from '@/components/orders/OrderPaymentTools.vue'
+import FulfillmentShortagePanel from '@/components/orders/FulfillmentShortagePanel.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
 import { updateShipmentStatus, assignCourier } from '@/api/shipments'
 import { listEligibleCouriers, type EligibleCourier } from '@/api/dispatch'
 import { recordDeliveryVerification } from '@/api/deliveries'
-import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem } from '@/api/orderAdjustments'
+import { adjustItemFulfillment, rescheduleOrderItem, addOrderItem, getCancellationEligibility, cancelUndeliveredQuantity } from '@/api/orderAdjustments'
 import { downloadInvoice } from '@/api/invoice'
 import { listProducts } from '@/api/catalog'
 import {
@@ -376,15 +377,17 @@ function openReceipt(shipmentId: number) {
   window.open(target.href, '_blank')
 }
 
-/* IMP-002 invoice — order-level PDF. Owner konsumen + same-branch financial
- * roles (super_admin/agen/admin/keuangan) per the Order policy. The owner
+/* IMP-002 invoice — order-level PDF. Pemesan (any role buying for themselves), same-branch financial
+ * roles (super_admin/agen/admin/keuangan) and the Sales/Korsal in scope, per OrderPolicy::viewInvoice. The owner
  * half uses the server-derived capability (A1-15): konsumen_id is never
  * serialized, so previously the consumer button was permanently hidden. */
 const canDownloadInvoice = computed(() => {
   if (!order.value) return false
   const role = auth.user?.role
+  // Office roles: unchanged. Everyone else (Pemesan, Sales, Korsal in scope) follows the SERVER capability, which is
+  // derived from the same rule the download endpoint enforces (OrderPolicy::viewInvoice) — never a client-side role list.
   if (['super_admin', 'agen', 'admin', 'keuangan'].includes(role ?? '')) return true
-  return role === 'konsumen' && order.value.viewer_can_download_invoice === true
+  return order.value.viewer_can_download_invoice === true
 })
 const invoiceBusy = ref(false)
 
@@ -503,7 +506,10 @@ async function submitVerification(shipmentId: number) {
 }
 
 /* ---------- Office: proactively assign/reassign a courier to a shipment (a kurir otherwise self-assigns via pickupShipment) ---------- */
-const isOfficeRole = computed(() => ['super_admin', 'agen', 'admin'].includes(auth.user?.role ?? ''))
+// REM-003 (Owner-locked): only the Koordinator Kurir assigns Kurir Toko — the API refuses every other
+// role, so the assignment control and its eligible-courier fetch are shown/performed for them only.
+// (Name kept: it gates exactly the assignment UI.)
+const isOfficeRole = computed(() => auth.user?.role === 'koordinator-kurir')
 /** R-04: operational roles (gudang/kurir) receive no financial projection — hide money UI for them. */
 const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? ''))
 const assignTargets = reactive<Record<number, string | null>>({})
@@ -587,6 +593,7 @@ async function submitAssignCourier(shipmentId: number) {
 
 /* ---------- COD payment proof: konsumen uploads photo, requests Admin mark it paid ---------- */
 const codProofFile = ref<File | null>(null)
+const codAmount = ref<number | null>(null) // REM-004: nominal handed to the courier (blank = whole open amount)
 const submittingCodProof = ref(false)
 const confirmingCodProof = ref(false)
 const codRejectionReason = ref('')
@@ -596,7 +603,8 @@ async function uploadCodProof() {
   submittingCodProof.value = true
   paymentActionError.value = null
   try {
-    await submitCodPaymentProof(props.id, codProofFile.value, paidBy.value, beginUpload())
+    await submitCodPaymentProof(props.id, codProofFile.value, paidBy.value, beginUpload(), codAmount.value ?? undefined)
+    codAmount.value = null
     await load()
   } catch (e) {
     paymentActionError.value = isUploadCancelled(e) ? 'Upload dibatalkan.' : e instanceof ApiError ? e.message : t('orders.errors.codProofUpload')
@@ -711,7 +719,75 @@ async function submitAdjust(item: OrderItem) {
   }
 }
 
+/* ---------- Admin: cancel the undelivered / undispatched remainder (REM-003, also after first dispatch) ---------- */
+const undeliveredCancellingItemId = ref<number | null>(null)
+const undeliveredCancelForm = reactive({ quantity: 1, max: 0, active: 0, reason: '', confirmed: false })
+const undeliveredCancelling = ref(false)
+const undeliveredCancelError = ref<string | null>(null)
+const undeliveredCancelBlocked = ref<string | null>(null)
+
+async function openUndeliveredCancel(item: OrderItem) {
+  undeliveredCancelError.value = null
+  undeliveredCancelBlocked.value = null
+  try {
+    const el = await getCancellationEligibility(props.id, item.id)
+    if (!el.eligible) {
+      undeliveredCancellingItemId.value = item.id
+      undeliveredCancelBlocked.value = el.reason_code ?? 'not_eligible'
+      return
+    }
+    undeliveredCancelForm.quantity = 1
+    undeliveredCancelForm.max = el.max_quantity
+    undeliveredCancelForm.active = el.active_quantity
+    undeliveredCancelForm.reason = ''
+    undeliveredCancelForm.confirmed = false
+    undeliveredCancellingItemId.value = item.id
+  } catch (e) {
+    undeliveredCancellingItemId.value = item.id
+    undeliveredCancelError.value = e instanceof ApiError ? e.message : 'Gagal memeriksa kelayakan pembatalan.'
+  }
+}
+
+async function submitUndeliveredCancel(item: OrderItem) {
+  if (!undeliveredCancelForm.confirmed || !undeliveredCancelForm.reason.trim()) return
+  undeliveredCancelling.value = true
+  undeliveredCancelError.value = null
+  try {
+    await cancelUndeliveredQuantity(props.id, item.id, undeliveredCancelForm.quantity, undeliveredCancelForm.active, undeliveredCancelForm.reason.trim())
+    undeliveredCancellingItemId.value = null
+    await load()
+  } catch (e) {
+    undeliveredCancelError.value = e instanceof ApiError ? e.message : 'Gagal membatalkan sisa barang.'
+  } finally {
+    undeliveredCancelling.value = false
+  }
+}
+
 /* ---------- Office: reschedule an item's requested delivery date (only while order is 'diproses') ---------- */
+/* ---------- PEMENUHAN KURANG: the Admin's decision on the remainder reuses the item forms below ---------- */
+/** Order lines holding a reported-shortage remainder: the only lines whose reschedule stays open once the order shipped. */
+const shortageLineIds = computed(() => new Set(
+  (order.value?.fulfillment_shortage?.items ?? []).filter((l) => l.short_qty > 0 && l.order_item_id).map((l) => l.order_item_id as number),
+))
+
+function scrollToItem(itemId: number) {
+  void nextTick(() => document.getElementById(`order-item-${itemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+}
+
+function onShortageReschedule(orderItemId: number) {
+  const item = order.value?.items?.find((i) => i.id === orderItemId)
+  if (!item) return
+  openRescheduleForm(item)
+  scrollToItem(orderItemId)
+}
+
+async function onShortageCancel(orderItemId: number) {
+  const item = order.value?.items?.find((i) => i.id === orderItemId)
+  if (!item) return
+  await openUndeliveredCancel(item)
+  scrollToItem(orderItemId)
+}
+
 const reschedulingItemId = ref<number | null>(null)
 const rescheduleForm = reactive({ requested_delivery_date: '', reason: '', quantity: 1 })
 const rescheduling = ref(false)
@@ -939,6 +1015,14 @@ async function submitReturn(item: OrderItem) {
 
     <div v-else-if="order" class="space-y-4">
       <p v-if="orderError" class="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-400">{{ orderError }}</p>
+      <!-- PEMENUHAN KURANG (Admin/Agen): per-product shortage reported by Gudang + the Admin's decision on the remainder. -->
+      <FulfillmentShortagePanel
+        v-if="order.fulfillment_shortage"
+        :shortage="order.fulfillment_shortage"
+        :can-decide="auth.can('orders.manage.fulfillment')"
+        @reschedule="onShortageReschedule"
+        @cancel="onShortageCancel"
+      />
       <div class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <div class="flex items-center justify-between">
           <h1 class="font-display text-lg font-semibold text-stone-800 dark:text-stone-100">{{ order.order_no }}</h1>
@@ -1027,7 +1111,7 @@ async function submitReturn(item: OrderItem) {
         </div>
 
         <ul class="divide-y divide-stone-100 dark:divide-stone-800">
-          <li v-for="item in order.items" :key="item.id" class="py-2.5 text-sm">
+          <li v-for="item in order.items" :id="`order-item-${item.id}`" :key="item.id" class="py-2.5 text-sm">
             <div class="flex items-center justify-between">
               <div>
                 <p class="font-medium text-stone-700 dark:text-stone-200">{{ item.product_name }}</p>
@@ -1048,6 +1132,30 @@ async function submitReturn(item: OrderItem) {
                 </p>
               </div>
               <span v-if="item.subtotal !== undefined" class="font-medium text-stone-700 dark:text-stone-200">{{ formatRupiah(item.subtotal) }}</span>
+            </div>
+
+            <!-- REM-003: cancel the undelivered/undispatched remainder — also once the order is 'dikirim'.
+                 Delivered quantity and goods in a courier's custody are never offered (server-authoritative). -->
+            <div v-if="['diproses', 'dikirim'].includes(order.status) && item.status === 'diproses' && auth.can('orders.manage.fulfillment') && item.delivery_mode !== 'self_sub'" class="mt-1.5">
+              <button v-if="undeliveredCancellingItemId !== item.id" type="button" class="text-xs font-medium text-red-600" @click="openUndeliveredCancel(item)">
+                Batalkan sisa yang belum dikirim
+              </button>
+              <div v-else class="mt-1.5 space-y-2 rounded-lg bg-red-50 p-2.5 dark:bg-stone-800/60">
+                <p v-if="undeliveredCancelError" role="alert" class="text-xs text-red-600">{{ undeliveredCancelError }}</p>
+                <p v-if="undeliveredCancelBlocked" class="text-xs text-amber-700">Bagian ini tidak dapat dibatalkan ({{ undeliveredCancelBlocked }}). Hanya sisa yang belum dikirim dan tidak dalam penolakan terbuka yang boleh dibatalkan.</p>
+                <template v-else-if="!undeliveredCancelError || undeliveredCancelForm.max > 0">
+                  <div class="flex items-center gap-2">
+                    <label class="text-xs text-stone-500">Jumlah dibatalkan (maks. {{ undeliveredCancelForm.max }})</label>
+                    <input v-model.number="undeliveredCancelForm.quantity" type="number" min="1" :max="undeliveredCancelForm.max" class="w-20 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" data-testid="cancel-qty" />
+                  </div>
+                  <input v-model="undeliveredCancelForm.reason" type="text" maxlength="255" placeholder="Alasan pembatalan" class="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+                  <label class="flex items-center gap-2 text-xs text-stone-600"><input v-model="undeliveredCancelForm.confirmed" type="checkbox" /> Saya mengonfirmasi pembatalan ini; barang yang sudah dikirim/terkirim tidak terpengaruh.</label>
+                  <AppButton size="sm" :disabled="undeliveredCancelling || !undeliveredCancelForm.confirmed || !undeliveredCancelForm.reason.trim() || undeliveredCancelForm.quantity < 1 || undeliveredCancelForm.quantity > undeliveredCancelForm.max" @click="submitUndeliveredCancel(item)">
+                    {{ undeliveredCancelling ? 'Memproses…' : 'Batalkan' }}
+                  </AppButton>
+                </template>
+                <AppButton size="sm" variant="ghost" @click="undeliveredCancellingItemId = null">Tutup</AppButton>
+              </div>
             </div>
 
             <!-- Admin: adjust fulfilled quantity, only while order is 'diproses' -->
@@ -1089,7 +1197,7 @@ async function submitReturn(item: OrderItem) {
                  Convenience only: OrderFulfillmentService::rescheduleItemDeliveryDate is
                  authoritative and refuses forbidden methods server-side too. -->
             <div
-              v-if="order.status === 'diproses' && auth.can('orders.manage.fulfillment') && order.reschedule_allowed"
+              v-if="(order.status === 'diproses' || (order.status === 'dikirim' && shortageLineIds.has(item.id))) && auth.can('orders.manage.fulfillment') && order.reschedule_allowed"
               class="mt-1.5"
             >
               <button v-if="reschedulingItemId !== item.id" type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="openRescheduleForm(item)">
@@ -1416,6 +1524,13 @@ async function submitReturn(item: OrderItem) {
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.totalPaid') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.total_paid) }}</dd>
             </div>
+            <div v-if="order.payment_summary.regular_payments_limit" class="flex justify-between">
+              <dt class="text-stone-500 dark:text-stone-400">Pembayaran berhasil</dt>
+              <dd class="font-medium text-stone-800 dark:text-stone-100">
+                {{ order.payment_summary.regular_payments_count ?? 0 }} dari maks. {{ order.payment_summary.regular_payments_limit }}
+                <span v-if="(order.payment_summary.regular_payments_count ?? 0) === order.payment_summary.regular_payments_limit - 1" class="block text-[11px] font-normal text-amber-600">Pembayaran berikutnya wajib melunasi seluruh sisa.</span>
+              </dd>
+            </div>
             <div class="flex justify-between">
               <dt class="text-stone-500 dark:text-stone-400">{{ t('orders.remainingBalance') }}</dt>
               <dd class="font-medium text-stone-800 dark:text-stone-100">{{ formatRupiah(order.payment_summary.remaining_balance) }}</dd>
@@ -1568,6 +1683,9 @@ async function submitReturn(item: OrderItem) {
                 <option v-for="o in paidByOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
               </select>
             </label>
+              <label class="mb-2 block text-xs font-medium text-stone-600 dark:text-stone-300">Nominal yang diserahkan ke kurir (kosongkan = seluruh sisa)
+                <input v-model.number="codAmount" type="number" min="1" step="1" class="mt-1 w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-950" data-testid="cod-amount" />
+              </label>
               <label class="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300">{{ t('orders.uploadCodProof') }}</label>
               <PrimeFileUpload
                 :model-value="codProofFile ? [codProofFile] : []"

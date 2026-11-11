@@ -13,7 +13,7 @@
  *   /reports/finance-*         -> super_admin, agen, admin, keuangan
  *   /reports/transactions      -> super_admin, agen, admin, korsal
  *   /reports/my-customers      -> sales, sales-kurir-sub
- *   /warehouse/fulfillment-proposals -> admin, gudang
+ *   /warehouse/fulfillment-proposals -> admin, gudang, koordinator-kurir (read; no Admin approval step)
  *   /warehouse/orders/diproses -> gudang
  *   /dispatch, /dispatch/couriers    -> agen, admin, koordinator-kurir
  *     (super_admin requires an explicit agent scope, unavailable on this summary)
@@ -211,7 +211,7 @@ onMounted(async () => {
       }),
     )
   }
-  if (['admin', 'gudang'].includes(R.value)) {
+  if (R.value === 'gudang') {
     jobs.push(safe(listFulfillmentProposals({ status: 'pending' })).then((v) => void (proposalsPending.value = v?.meta.total ?? null)))
   }
   if (['agen', 'korsal', 'sales', 'sales-kurir-sub', 'gudang', 'kurir'].includes(R.value)) {
@@ -309,7 +309,6 @@ const kpiCards = computed<KpiCard[]>(() => {
     case 'admin':
       return [
         { label: 'Total Order', value: num(s?.total_orders), hint: 'Ringkasan cabang' },
-        { label: 'Approval Gudang', value: num(proposalsPending.value), hint: 'Proposal fulfillment pending' },
         { label: 'Belum Ditugaskan', value: num(dispatchQueue.value), hint: 'Antrean dispatch' },
         { label: 'Retur Tertunda', value: num(returnsAwaitingReview.value), hint: 'Retur menunggu review Admin' },
       ]
@@ -323,7 +322,7 @@ const kpiCards = computed<KpiCard[]>(() => {
     case 'gudang':
       return [
         { label: 'Stok Tersedia', value: num(kpis.value?.available_stock?.units), hint: 'Stok layak jual − reservasi (unit, seluruh produk cabang)' },
-        { label: 'Proposal Pending', value: num(proposalsPending.value), hint: 'Proposal fulfillment' },
+        { label: 'Menunggu Penerimaan', value: num(proposalsPending.value), hint: 'Penyerahan ke Koordinator Kurir menunggu konfirmasi penerimaan' },
         { label: 'Order Diproses', value: num(warehouseQueue.value), hint: 'Antrean gudang' },
         { label: 'Retur Inspeksi', value: num(returnsToInspect.value), hint: 'Retur disetujui, menunggu inspeksi' },
       ]

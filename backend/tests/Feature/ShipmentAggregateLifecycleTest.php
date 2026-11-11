@@ -34,6 +34,7 @@ class ShipmentAggregateLifecycleTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     /** @var array{agen:User, admin:User, kurir:User, courier:Courier, konsumen:User} */
     private array $b;
@@ -111,7 +112,7 @@ class ShipmentAggregateLifecycleTest extends TestCase
         $this->assertCount(1, Shipment::where('order_id', $order->id)->get(), 'same date => ONE canonical shipment');
         $this->assertCount(2, $items);
 
-        app(\App\Services\Order\CourierService::class)->assignCourier($shipment->fresh(), $this->b['courier'], $this->b['admin']);
+        $this->assignAsKoordinator($shipment->fresh(), $this->b['courier']);
 
         return ['order' => $order->fresh(), 'shipment' => $shipment->fresh(), 'items' => $items];
     }
@@ -214,6 +215,7 @@ class ShipmentAggregateLifecycleTest extends TestCase
         // The office order-wide override ships everything it can, then tries to deliver. Only the
         // item already 'dikirim' may advance (an item in 'diproses' cannot skip the step), so the
         // shipment must NOT be reported as delivered while the other item is still in the warehouse.
+        $this->makeDispatchable($order->id);
         $this->actingAs($this->b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->assertSame('dikirim', $items[0]->fresh()->status);
         $this->assertSame('dikirim', $items[1]->fresh()->status);

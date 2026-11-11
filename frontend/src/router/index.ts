@@ -214,13 +214,6 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAnyRole: ['koordinator-kurir', 'super_admin', 'agen', 'admin'] },
     },
     {
-      // Admin reviews/approves/rejects the Gudang's fulfillment proposals.
-      path: '/dashboard/warehouse/fulfillment-proposals',
-      name: 'fulfillment-proposals',
-      component: () => import('@/views/dashboard/FulfillmentProposalsView.vue'),
-      meta: { requiresAuth: true, requiresAnyRole: ['admin'] },
-    },
-    {
       path: '/dashboard/warehouse/returns',
       name: 'warehouse-returns',
       component: () => import('@/views/dashboard/WarehouseReturnsView.vue'),

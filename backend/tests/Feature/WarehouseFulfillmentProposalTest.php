@@ -96,8 +96,8 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $both = $requestA->fresh();
         $this->assertSame(2, $both->items()->count());
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$both->id}/proposals", ['items' => [['item_id' => $itemA->id, 'quantity' => 2], ['item_id' => $itemB->id, 'quantity' => 3]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$both->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $itemA->id, 'quantity' => 2], ['item_id' => $itemB->id, 'quantity' => 3]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])
             ->assertOk()->assertJsonPath('data.status', 'approved');
 
         $this->assertSame('approved', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal['id'])->status);
@@ -135,8 +135,8 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $itemB->update(['stock_request_id' => $requestA->id]);
         $requestB->delete();
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$requestA->id}/proposals", ['items' => [['item_id' => $itemA->id, 'quantity' => 4], ['item_id' => $itemB->id, 'quantity' => 4]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertUnprocessable();
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$requestA->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $itemA->id, 'quantity' => 4], ['item_id' => $itemB->id, 'quantity' => 4]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertUnprocessable();
 
         $this->assertSame('pending', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal['id'])->status);
         $this->assertSame(6, $this->bucket($b['agent']->id, $product->id, 'transit'));
@@ -149,7 +149,7 @@ class WarehouseFulfillmentProposalTest extends TestCase
 
         WarehouseStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->where('stock_type', 'transit')->update(['quantity' => 10]);
         ProductStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->update(['quantity_reserved' => 6]);
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertUnprocessable();
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertUnprocessable();
         $this->assertSame('pending', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal['id'])->status);
         $this->assertSame(10, $this->bucket($b['agent']->id, $product->id, 'transit'));
         $this->assertSame(0, StockMovement::query()->count());
@@ -169,7 +169,7 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $item = $request->items()->firstOrFail();
         $this->assertSame(10, $item->requested_qty);
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])
             ->assertCreated()->assertJsonPath('data.status', 'pending')->json('data');
 
         $this->assertSame(20, $this->bucket($b['agent']->id, $product->id, 'transit'));
@@ -192,8 +192,8 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $before = app(SellableStockService::class)->forProduct($b['agent']->id, $product->id)['available'];
         $this->assertSame(10, $before);
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])
             ->assertOk()->assertJsonPath('data.status', 'approved');
 
         $this->assertSame(14, $this->bucket($b['agent']->id, $product->id, 'transit'));
@@ -217,12 +217,12 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $item = $request->items()->firstOrFail();
 
-        $first = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$first['id']}/approve")->assertOk();
+        $first = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$first['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
         $this->assertSame('partial', $request->fresh()->status);
 
-        $second = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 4]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
+        $second = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 4]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
 
         $request->refresh();
         $this->assertSame('fulfilled', $request->status);
@@ -243,18 +243,18 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $item = $request->items()->firstOrFail();
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 10]]])->assertCreated()->json('data');
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 10]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
         WarehouseStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->where('stock_type', 'transit')->update(['quantity' => 7]);
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertUnprocessable();
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertUnprocessable();
         $this->assertSame('pending', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal['id'])->status);
         $this->assertSame(7, $this->bucket($b['agent']->id, $product->id, 'transit'));
         $this->assertSame(0, StockMovement::query()->count());
 
         WarehouseStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->where('stock_type', 'transit')->update(['quantity' => 20]);
-        $a = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertCreated()->json('data');
-        $second = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 7]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertOk();
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$a['id']}/approve")->assertUnprocessable();
+        $a = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $second = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 7]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$a['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertUnprocessable();
         $item->refresh();
         $this->assertSame(7, $item->fulfilled_qty);
         $this->assertSame(3, $item->remaining_qty);
@@ -269,17 +269,17 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $item = $request->items()->firstOrFail();
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
         $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/reject", ['reason' => 'late'])->assertUnprocessable();
         $this->assertSame('approved', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal['id'])->status);
         $this->assertSame(2, StockMovement::query()->count());
 
-        $second = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 2]]])->assertCreated()->json('data');
+        $second = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 2]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
         $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/reject", ['reason' => 'stok opname'])->assertOk();
         $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/reject", ['reason' => 'lagi'])->assertOk();
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve")->assertUnprocessable();
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$second['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertUnprocessable();
         $this->assertSame('rejected', StockRequestProposal::withoutGlobalScopes()->findOrFail($second['id'])->status);
         $this->assertSame(14, $this->bucket($b['agent']->id, $product->id, 'transit'));
         $this->assertSame(6, $this->bucket($b['agent']->id, $product->id, 'shipping'));
@@ -294,20 +294,20 @@ class WarehouseFulfillmentProposalTest extends TestCase
         $request = StockRequest::withoutGlobalScopes()->firstOrFail();
         $item = $request->items()->firstOrFail();
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 3]]])->assertCreated()->json('data');
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 3]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
 
-        $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertForbidden();
+        $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertForbidden();
         $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/reject", ['reason' => 'x'])->assertForbidden();
-        $this->actingAs($b['foreignAdmin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertNotFound();
+        $this->actingAs($b['foreignAdmin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertNotFound();
         $this->actingAs($b['foreignAdmin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/reject", ['reason' => 'x'])->assertNotFound();
-        $this->actingAs($b['foreignGudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 1]]])->assertNotFound();
+        $this->actingAs($b['foreignGudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 1]]]), ['Accept' => 'application/json'])->assertNotFound();
         $superAdmin = User::factory()->superAdmin()->create();
-        $this->actingAs($superAdmin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertForbidden();
+        $this->actingAs($superAdmin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertForbidden();
         $agen = User::factory()->agen()->create();
         $agen->update(['agent_id' => $agen->id]);
         $agenAdmin = User::factory()->admin()->create(['agent_id' => $agen->id]);
-        $this->actingAs($agenAdmin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertNotFound();
-        $this->actingAs($b['agent'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertForbidden();
+        $this->actingAs($agenAdmin)->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertNotFound();
+        $this->actingAs($b['agent'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertForbidden();
 
         $this->assertSame('pending', StockRequestProposal::withoutGlobalScopes()->findOrFail($proposal['id'])->status);
         $this->assertSame(0, StockMovement::query()->count());
@@ -330,8 +330,8 @@ class WarehouseFulfillmentProposalTest extends TestCase
 
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
         $item = $request->items()->firstOrFail();
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 4]]])->assertCreated()->json('data');
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertOk();
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 4]]]), ['Accept' => 'application/json'])->assertCreated()->json('data');
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
 
         $this->assertSame(6, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->where('product_variation_id', $small->id)->where('stock_type', 'transit')->value('quantity'));
         $this->assertSame(20, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->where('product_variation_id', $large->id)->where('stock_type', 'transit')->value('quantity'));

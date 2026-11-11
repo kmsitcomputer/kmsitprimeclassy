@@ -165,7 +165,7 @@ class FulfillmentConcurrencyTest extends TestCase
         WarehouseSetting::create(['agent_id' => $agent->id, 'factory_plan_enabled' => false]);
         $request = StockRequest::create(['agent_id' => $agent->id, 'order_id' => $order->id, 'request_number' => 'SR-'.Str::uuid(), 'status' => 'pending', 'created_by' => $agent->id]);
         $requestItem = StockRequestItem::create(['stock_request_id' => $request->id, 'order_item_id' => $orderItem->id, 'product_id' => $product->id, 'sku_snapshot' => $product->sku, 'requested_qty' => 10, 'fulfilled_qty' => 0, 'remaining_qty' => 10]);
-        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $requestItem->id, 'quantity' => 6]]);
+        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $requestItem->id, 'quantity' => 6, 'shortage_reason' => 'uji konkurensi: sisa menyusul']]);
 
         return [
             'agent' => $agent,

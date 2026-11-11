@@ -31,6 +31,7 @@ class CourierAssignmentIsolationTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     private array $b;
 
@@ -116,7 +117,7 @@ class CourierAssignmentIsolationTest extends TestCase
     private function assign(Shipment $shipment, User $kurir): void
     {
         $courierId = Courier::where('user_id', $kurir->id)->value('id');
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $courierId])->assertOk();
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $courierId])->assertOk();
     }
 
     private function listedOrderIds(User $actor): array

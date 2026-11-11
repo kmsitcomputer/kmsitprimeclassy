@@ -91,6 +91,16 @@ class InventoryCancellationService
         InventoryCancellationReversal::create(['agent_id' => $order->agent_id, 'order_id' => $order->id, 'order_item_id' => $item->id, 'stock_request_id' => $requestItem?->stock_request_id, 'fulfilled_quantity' => $fulfilled, 'released_quantity' => $released, 'processed_by' => $actorId]);
     }
 
+    /**
+     * REM-002 integration: units already ACCEPTED by the Koordinator (sitting in Shipping) that an Admin
+     * quantity reduction takes off the order go back to Transit — their reservation was consumed when
+     * they were accepted, so nothing is released a second time. Same movements as an order cancellation.
+     */
+    public function reverseAcceptedUnits(Order $order, OrderItem $item, int $qty, int $actorId): void
+    {
+        $this->reverseShippingToTransit($order, $item, $qty, $actorId);
+    }
+
     private function reverseShippingToTransit(Order $order, OrderItem $item, int $qty, int $actorId): void
     {
         $transit = $this->warehouse($order->agent_id, $item, 'transit')->lockForUpdate()->first();

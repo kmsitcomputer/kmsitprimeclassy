@@ -55,17 +55,59 @@ class WarehouseOrderController extends Controller
 
         $orders = Order::query()
             ->with(['items.shipment.courier.user', 'items.shipment.proof', 'konsumen', 'sales', 'korsal', 'paymentMethod', 'shipments.courier.user', 'shipments.proof'])
-            ->where('status', 'diproses')
-            ->whereDoesntHave('shipments', fn ($shipment) => $shipment
-                ->whereNotNull('courier_id')
-                ->orWhereNotNull('self_delivered_by_user_id'))
+            ->where(function ($scope) {
+                // Legacy rule (unchanged): diproses and no courier / self-delivery yet.
+                $scope->where(fn ($legacy) => $legacy->where('status', 'diproses')
+                    ->whereDoesntHave('shipments', fn ($shipment) => $shipment
+                        ->whereNotNull('courier_id')
+                        ->orWhereNotNull('self_delivered_by_user_id')))
+                    // REM-001: outstanding Agent demand keeps the order visible for later batches.
+                    ->orWhere(fn ($batch) => $batch->whereIn('status', ['diproses', 'dikirim'])
+                        ->whereDoesntHave('shipments', fn ($shipment) => $shipment->whereNotNull('self_delivered_by_user_id'))
+                        ->whereIn('id', StockRequest::withoutGlobalScopes()->whereIn('status', ['pending', 'partial'])->select('order_id')));
+            })
+            // `requested=1`: only orders the Koordinator Kurir has asked Gudang to fulfil and that still have demand open.
+            ->when($request->boolean('requested'), fn ($q) => $q->whereIn('id', StockRequest::withoutGlobalScopes()
+                ->whereNotNull('coordinator_requested_at')->whereIn('status', ['pending', 'partial'])->select('order_id')))
+            // The Koordinator's requests first (newest request first), then the rest by recency.
+            ->orderByRaw('(select max(sr.coordinator_requested_at) from stock_requests sr where sr.order_id = orders.id and sr.status in (\'pending\', \'partial\')) is null')
+            ->orderByRaw('(select max(sr.coordinator_requested_at) from stock_requests sr where sr.order_id = orders.id and sr.status in (\'pending\', \'partial\')) desc')
             ->latest()
             ->paginate($request->integer('per_page', 15));
 
-        return $this->ok(OrderResource::collection($orders)->resolve(), meta: [
+        $data = OrderResource::collection($orders)->resolve();
+        $requests = StockRequest::withoutGlobalScopes()->whereIn('order_id', $orders->pluck('id'))->with('items')->get()->keyBy('order_id');
+        $coordinators = \App\Models\User::query()->whereIn('id', $requests->pluck('coordinator_requested_by')->filter())->pluck('name', 'id');
+        $awaiting = \App\Models\StockRequestProposalItem::query()
+            ->whereHas('proposal', fn ($q) => $q->withoutGlobalScopes()->where('status', 'pending')->whereIn('stock_request_id', $requests->pluck('id')))
+            ->join('stock_request_proposals as p', 'p.id', '=', 'stock_request_proposal_items.stock_request_proposal_id')
+            ->selectRaw('p.stock_request_id, SUM(stock_request_proposal_items.quantity) AS qty')->groupBy('p.stock_request_id')->pluck('qty', 'stock_request_id');
+
+        // Real data only: identity and time come from the request row; nothing is inferred when the Koordinator never asked.
+        $data = array_map(function (array $row) use ($requests, $coordinators, $awaiting) {
+            $sr = $requests->get($row['id']);
+            $row['fulfillment_request'] = $sr ? [
+                'stock_request_id' => $sr->id,
+                'request_number' => $sr->request_number,
+                'status' => $sr->status,
+                'requested_by_coordinator' => $sr->coordinator_requested_at !== null,
+                'coordinator' => $sr->coordinator_requested_by ? ['id' => $sr->coordinator_requested_by, 'name' => $coordinators[$sr->coordinator_requested_by] ?? null] : null,
+                'requested_at' => $sr->coordinator_requested_at?->toIso8601String(),
+                'note' => $sr->coordinator_request_note,
+                'requested_qty' => (int) $sr->items->sum('requested_qty'),
+                'handed_over_qty' => (int) $sr->items->sum('fulfilled_qty'),
+                'awaiting_receipt_qty' => (int) ($awaiting[$sr->id] ?? 0),
+                'outstanding_qty' => (int) $sr->items->sum('remaining_qty'),
+            ] : null;
+
+            return $row;
+        }, $data);
+
+        return $this->ok($data, meta: [
             'current_page' => $orders->currentPage(),
             'last_page' => $orders->lastPage(),
             'total' => $orders->total(),
+            'requested_total' => StockRequest::query()->whereNotNull('coordinator_requested_at')->whereIn('status', ['pending', 'partial'])->count(),
         ]);
     }
 
@@ -86,13 +128,7 @@ class WarehouseOrderController extends Controller
         }
 
         // Same-Agent + the visibility invariant — a direct call cannot bypass it.
-        if ($order->status !== 'diproses' || $order->agent_id !== $user->agent_id) {
-            abort(404);
-        }
-        $hasCourier = $order->shipments()
-            ->where(fn ($q) => $q->whereNotNull('courier_id')->orWhereNotNull('self_delivered_by_user_id'))
-            ->exists();
-        if ($hasCourier) {
+        if ($order->agent_id !== $user->agent_id || ! $order->isInWarehouseScope()) {
             abort(404);
         }
 

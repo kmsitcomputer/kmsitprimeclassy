@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class StockRequestItem extends Model
 {
-    protected $fillable = ['stock_request_id', 'order_item_id', 'product_id', 'product_variation_id', 'sku_snapshot', 'requested_qty', 'fulfilled_qty', 'remaining_qty'];
+    protected $fillable = ['stock_request_id', 'order_item_id', 'product_id', 'product_variation_id', 'sku_snapshot', 'requested_qty', 'fulfilled_qty', 'remaining_qty', 'damaged_hold_qty'];
 
     protected function casts(): array
     {

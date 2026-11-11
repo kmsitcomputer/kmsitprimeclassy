@@ -38,6 +38,7 @@ class RefundLedgerTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -50,6 +51,7 @@ class RefundLedgerTest extends TestCase
     {
         $f = $this->fixture();
 
+        $this->makeDispatchable($f['order']->id);
         $this->actingAs($f['admin'])
             ->patchJson("/api/v1/orders/{$f['order']->id}/status", ['status' => 'dikirim'])
             ->assertOk();
@@ -80,6 +82,7 @@ class RefundLedgerTest extends TestCase
     public function test_post_snapshot_quantity_and_add_line_are_refused(): void
     {
         $f = $this->fixture();
+        $this->makeDispatchable($f['order']->id);
         $this->actingAs($f['admin'])
             ->patchJson("/api/v1/orders/{$f['order']->id}/status", ['status' => 'dikirim'])
             ->assertOk();

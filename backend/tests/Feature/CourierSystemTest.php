@@ -30,6 +30,7 @@ class CourierSystemTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -131,7 +132,7 @@ class CourierSystemTest extends TestCase
         }
         $kurir ??= $branch['kurir'];
         $courierId = Courier::where('user_id', $kurir->id)->value('id');
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])->assertOk();
     }
 
     /** Authorized assignment of a return pickup to a kurir (the only way a kurir gets a return). */
@@ -394,6 +395,9 @@ class CourierSystemTest extends TestCase
         $this->markCourierOnline($order->id);
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
 
+        // F02: even the office bulk override needs an assigned courier + accepted goods before `dikirim`.
+        $this->actingAsDispatcher($branch['admin'])->patchJson('/api/v1/shipments/'.Shipment::where('order_id', $order->id)->value('id').'/courier', ['courier_id' => Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
+        $this->makeDispatchable($order->id);
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
 
         $this->actingAs($branch['admin'])->patchJson("/api/v1/orders/{$order->id}/items/{$item->id}/reschedule", [
@@ -500,7 +504,7 @@ class CourierSystemTest extends TestCase
 
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])->assertStatus(403);
 
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId])
             ->assertOk()->assertJsonPath('data.couriers.0.name', 'Budi Kurir');
 
         $this->assertDatabaseHas('shipments', ['order_id' => $order->id, 'courier_id' => $courierId]);

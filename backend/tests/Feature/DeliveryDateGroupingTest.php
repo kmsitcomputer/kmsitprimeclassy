@@ -28,6 +28,23 @@ class DeliveryDateGroupingTest extends TestCase
 
     private array $b;
 
+    private ?string $initialDate = null;
+
+    /**
+     * Relative to the application clock (the same clock `after_or_equal:today` validates against),
+     * fixed once per test so a run that straddles midnight cannot observe two different "today"s.
+     * Far enough from today that the date boundary can never matter; never a calendar literal.
+     */
+    private function initialDeliveryDate(): string
+    {
+        return $this->initialDate ??= now()->addDays(7)->toDateString();
+    }
+
+    private function rescheduledDeliveryDate(): string
+    {
+        return \Illuminate\Support\Carbon::parse($this->initialDeliveryDate())->addDays(38)->toDateString();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -55,7 +72,7 @@ class DeliveryDateGroupingTest extends TestCase
             ->postJson('/api/v1/orders', [
             'konsumen_id' => $this->b['konsumen']->id,
                 'payment_method_code' => 'cod',
-                'delivery_date' => '2026-11-01',
+                'delivery_date' => $this->initialDeliveryDate(),
                 'items' => [
                     ['product_id' => $this->b['productA']->id, 'quantity' => 1],
                     ['product_id' => $this->b['productB']->id, 'quantity' => 1],
@@ -87,7 +104,7 @@ class DeliveryDateGroupingTest extends TestCase
 
         $groups = $response->json('data.delivery_groups');
         $this->assertCount(1, $groups);
-        $this->assertSame('2026-11-01', $groups[0]['delivery_date']);
+        $this->assertSame($this->initialDeliveryDate(), $groups[0]['delivery_date']);
         $this->assertCount(2, $groups[0]['item_ids']);
     }
 
@@ -100,17 +117,17 @@ class DeliveryDateGroupingTest extends TestCase
 
         $this->actingAs($this->b['admin'])
             ->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/reschedule", [
-                'requested_delivery_date' => '2026-12-15', 'reason' => 'stok belum siap',
+                'requested_delivery_date' => $this->rescheduledDeliveryDate(), 'reason' => 'stok belum siap',
             ])->assertOk();
 
         $response = $this->actingAs($this->b['admin'])->getJson("/api/v1/orders/{$order->id}")->assertOk();
         $groups = collect($response->json('data.delivery_groups'))->keyBy('delivery_date');
 
         $this->assertCount(2, $groups);
-        $this->assertTrue($groups->has('2026-12-15'));
-        $this->assertTrue($groups->has('2026-11-01'));
-        $this->assertCount(1, $groups['2026-12-15']['item_ids']);
-        $this->assertCount(1, $groups['2026-11-01']['item_ids']);
+        $this->assertTrue($groups->has($this->rescheduledDeliveryDate()));
+        $this->assertTrue($groups->has($this->initialDeliveryDate()));
+        $this->assertCount(1, $groups[$this->rescheduledDeliveryDate()]['item_ids']);
+        $this->assertCount(1, $groups[$this->initialDeliveryDate()]['item_ids']);
 
         // Payment truth stays Order-level and is never duplicated per delivery group.
         $this->assertSame($grandTotalBefore, (float) $response->json('data.payment_summary.grand_total'));

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AgentProfile;
+use App\Models\Courier;
 use App\Models\Order;
 use App\Models\OrderFinancialSnapshot;
 use App\Models\OrderItem;
@@ -21,6 +22,7 @@ use Database\Seeders\PaymentMethodSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Str;
 use Tests\Concerns\HasTestRegion;
+use Tests\Support\AcceptsWarehouseDemand;
 use Tests\Support\ConcurrencyHarness;
 use Tests\Support\RestoresIsolatedTestDatabase;
 use Tests\TestCase;
@@ -32,6 +34,7 @@ use Tests\TestCase;
  */
 class RefundLedgerConcurrencyTest extends TestCase
 {
+    use AcceptsWarehouseDemand;
     use HasTestRegion;
     use RestoresIsolatedTestDatabase;
 
@@ -45,6 +48,7 @@ class RefundLedgerConcurrencyTest extends TestCase
     public function test_concurrent_dispatch_creates_exactly_one_snapshot(): void
     {
         $f = $this->fixture();
+        $this->assignKurirTokoShipmentAsKoordinator($f);
 
         $report = (new ConcurrencyHarness)->runServiceRace(
             ['op' => 'order-dispatch', 'actor_id' => $f['admin']->id, 'subject_id' => $f['order']->id],
@@ -205,6 +209,24 @@ class RefundLedgerConcurrencyTest extends TestCase
         $item = OrderItem::query()->where('order_id', $orderId)->firstOrFail();
 
         return compact('agen', 'admin', 'konsumen', 'product', 'order', 'item');
+    }
+
+    /**
+     * Dispatch ('dikirim') of a Kurir Toko shipment requires the Koordinator's accepted receipt and an
+     * assigned courier (F02/REM-003, Owner-locked). The race under test is the SNAPSHOT creation, not the
+     * dispatch gate, so the fixture reaches the gate's legitimate precondition through the real
+     * CourierService::assignCourier as the branch Koordinator (see AcceptsWarehouseDemand) — the policy
+     * itself is neither bypassed nor altered.
+     */
+    private function assignKurirTokoShipmentAsKoordinator(array $f): void
+    {
+        $kurirUser = User::factory()->kurir()->create(['agent_id' => $f['agen']->id]);
+        $courier = Courier::create(['type' => 'internal', 'user_id' => $kurirUser->id, 'agent_id' => $f['agen']->id, 'name' => $kurirUser->name, 'is_active' => true]);
+        $shipment = \App\Models\Shipment::query()->where('order_id', $f['order']->id)->firstOrFail();
+
+        $this->assignAsKoordinator($shipment, $courier);
+
+        $this->assertNotNull($shipment->fresh()->courier_id, 'the shipment must be legitimately assigned before dispatch');
     }
 
     private function setPaid(Order $order, int $amount): void

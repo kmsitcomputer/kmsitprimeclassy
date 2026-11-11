@@ -29,6 +29,7 @@ class ReturnPickupScheduleTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -80,6 +81,7 @@ class ReturnPickupScheduleTest extends TestCase
 
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
         $adminActor = $admin;
+        $this->makeDispatchable($order->id);
         $this->actingAs($adminActor)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($adminActor)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
 

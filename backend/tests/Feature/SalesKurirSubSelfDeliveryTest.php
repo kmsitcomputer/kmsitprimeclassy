@@ -36,6 +36,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use ResolvesCheckoutActor;
 
     private array $b;
@@ -173,7 +174,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
         $courier = Courier::where('user_id', $this->b['kurir']->id)->firstOrFail();
 
         $this->expectException(ApiException::class);
-        app(CourierService::class)->assignCourier($shipment, $courier, $this->b['agen']);
+        $this->assignAsKoordinator($shipment, $courier);
     }
 
     public function test_sales_kurir_sub_cannot_operate_a_standard_agent_shipment(): void
@@ -209,6 +210,7 @@ class SalesKurirSubSelfDeliveryTest extends TestCase
 
         // No office role may bulk-ship the Sub line to 'dikirim'.
         foreach (['admin', 'agen', 'superAdmin'] as $role) {
+            $this->makeDispatchable($order->id);
             $this->actingAs($this->b[$role])
                 ->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])
                 ->assertStatus(422);

@@ -156,7 +156,7 @@ class ConcurrencyHarness
             }
 
             if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
-                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                || ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
                 throw new \RuntimeException('Checkout actors did not overlap in time.');
             }
 
@@ -209,7 +209,7 @@ class ConcurrencyHarness
             }
 
             if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
-                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                || ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
                 throw new \RuntimeException('Fulfillment actors did not overlap in time.');
             }
 
@@ -258,7 +258,7 @@ class ConcurrencyHarness
             }
 
             if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
-                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                || ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
                 throw new \RuntimeException('Fulfillment and cancellation did not overlap in time.');
             }
 
@@ -307,7 +307,7 @@ class ConcurrencyHarness
             }
 
             if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
-                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                || ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
                 throw new \RuntimeException('Transfer and opname actors did not overlap in time.');
             }
 
@@ -361,7 +361,7 @@ class ConcurrencyHarness
             }
 
             if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
-                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                || ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
                 throw new \RuntimeException('Service race actors did not overlap in time.');
             }
 
@@ -500,7 +500,7 @@ class ConcurrencyHarness
             }
 
             if (($aResult['started_at'] ?? 0) >= ($bResult['completed_at'] ?? 0)
-                && ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
+                || ($bResult['started_at'] ?? 0) >= ($aResult['completed_at'] ?? 0)) {
                 throw new \RuntimeException('Dispatch race actors did not overlap in time.');
             }
 
@@ -536,6 +536,7 @@ class ConcurrencyHarness
             '--dispatch-race-item='.(int) ($side['item_id'] ?? 0),
             '--dispatch-race-courier='.(int) ($side['courier_id'] ?? 0),
             '--dispatch-race-quantity='.(int) ($side['quantity'] ?? 1),
+            '--dispatch-race-expected='.(int) ($side['expected'] ?? 0),
             '--dispatch-race-date='.(string) ($side['date'] ?? ''),
         ];
 
@@ -935,6 +936,15 @@ class ConcurrencyHarness
                 $this->actorAResult,
                 $this->actorBResult,
             ]);
+            // Actors may drop extra marker files beside the declared barrier files (e.g. the capacity-race
+            // breadcrumbs `<ready>.capacity-attempt` / `<ready>.first-capacity-lock`). Only THIS harness
+            // instance's own per-run directory is swept, so a leftover can never survive to fail later tests
+            // and another run's directory is never touched.
+            foreach (glob($this->runtimeDir.'/*') ?: [] as $leftover) {
+                if (is_file($leftover) || is_link($leftover)) {
+                    @unlink($leftover);
+                }
+            }
             @rmdir($this->runtimeDir);
         }
     }

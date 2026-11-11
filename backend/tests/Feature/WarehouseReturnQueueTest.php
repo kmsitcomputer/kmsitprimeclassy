@@ -29,6 +29,7 @@ class WarehouseReturnQueueTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -83,6 +84,7 @@ class WarehouseReturnQueueTest extends TestCase
         ])->json('data.id');
 
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
         $items = OrderItem::where('order_id', $order->id)->orderBy('id')->get();

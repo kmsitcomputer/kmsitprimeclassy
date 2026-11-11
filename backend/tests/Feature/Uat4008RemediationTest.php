@@ -42,6 +42,7 @@ class Uat4008RemediationTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use ResolvesCheckoutActor;
 
     protected function setUp(): void
@@ -199,7 +200,7 @@ class Uat4008RemediationTest extends TestCase
         ['agen' => $agen, 'admin' => $admin, 'gudang' => $gudang, 'konsumen' => $konsumen, 'koordinator' => $koordinator] = $this->branch();
         // COD skips the payment-verification gate (canonical OrderService rule) — dispatch eligibility is about status/courier, not payment.
         // An explicit delivery date proves dates stay distinguishable per item/shipment.
-        $order = $this->placeOrder($konsumen, $agen, 'cod', null, '2026-11-01');
+        $order = $this->placeOrder($konsumen, $agen, 'cod', null, now()->addDays(3)->toDateString());
         $this->assertSame('diproses', $order->fresh()->status, 'COD orders start in the warehouse/dispatch queue');
 
         // Gudang sees the real demand, not just a count.
@@ -239,6 +240,7 @@ class Uat4008RemediationTest extends TestCase
         $this->assertNotNull($shipmentId);
 
         // UAT-006: explicit self-assignment through the existing sentinel contract.
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($koordinator)->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => 0])->assertOk();
 
         $courierId = Shipment::query()->withoutGlobalScopes()->whereKey($shipmentId)->value('courier_id');
@@ -268,13 +270,16 @@ class Uat4008RemediationTest extends TestCase
         $this->assertSame('diproses', $order->fresh()->status);
 
         $shipmentId = Shipment::query()->withoutGlobalScopes()->where('order_id', $order->id)->value('id');
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($koordinator)->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => 0])->assertOk();
 
         // A second coordinator claiming the same shipment fails safely (no overwrite, no 500).
         $other = User::factory()->koordinatorKurir()->create(['agent_id' => $agen->id, 'parent_id' => $agen->id]);
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($other)->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => 0])->assertStatus(422);
 
         // Idempotent replay by the SAME executor stays 200.
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($koordinator)->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => 0])->assertOk();
     }
 

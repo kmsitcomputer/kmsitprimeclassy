@@ -30,6 +30,7 @@ class ReportSystemTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -124,7 +125,7 @@ class ReportSystemTest extends TestCase
     {
         // The order (always COD here — see placeOrder) is already 'diproses' on creation.
         $shipmentId = Shipment::query()->where('order_id', $order->id)->value('id');
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch("/api/v1/shipments/{$shipmentId}/status", ['status' => 'terkirim', 'proof' => UploadedFile::fake()->image('proof.jpg')])->assertOk();
     }
@@ -514,8 +515,8 @@ class ReportSystemTest extends TestCase
         $this->spreadDeliveryDates($branch, $order, $itemB, $this->futureDate(5));
 
         // Item A picked up by Budi, item B by Andi — two independent shipments.
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$itemA->fresh()->shipment_id}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$itemB->fresh()->shipment_id}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $secondKurir->id)->value('id')])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$itemA->fresh()->shipment_id}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$itemB->fresh()->shipment_id}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $secondKurir->id)->value('id')])->assertOk();
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$itemA->fresh()->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($secondKurir)->patchJson("/api/v1/shipments/{$itemB->fresh()->shipment_id}/status", ['status' => 'dikirim'])->assertOk();
 
@@ -572,7 +573,7 @@ class ReportSystemTest extends TestCase
         $this->spreadDeliveryDates($branch, $order, $itemB, $this->futureDate(5));
 
         foreach ([[$itemA, $branch['kurir']], [$itemB, $secondKurir]] as [$assignedItem, $executor]) {
-            $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$assignedItem->fresh()->shipment_id}/courier", ['courier_id' => $executor->courierProfile->id])->assertOk();
+            $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$assignedItem->fresh()->shipment_id}/courier", ['courier_id' => $executor->courierProfile->id])->assertOk();
         }
 
         foreach ([['kurir' => $branch['kurir'], 'item' => $itemA], ['kurir' => $secondKurir, 'item' => $itemB]] as $leg) {
@@ -1140,7 +1141,7 @@ class ReportSystemTest extends TestCase
         $order = $this->placeOrder($branch['konsumen'], $product, 1);
 
         $shipmentId = Shipment::where('order_id', $order->id)->value('id');
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $branch['kurir']->courierProfile->id])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $branch['kurir']->courierProfile->id])->assertOk();
         $response = $this->actingAs($branch['kurir'])->getJson('/api/v1/kurir/orders');
         $response->assertOk();
         $row = collect($response->json('data'))->firstWhere('id', $order->id);

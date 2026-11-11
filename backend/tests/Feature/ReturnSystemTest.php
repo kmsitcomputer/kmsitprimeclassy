@@ -23,6 +23,7 @@ class ReturnSystemTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -66,6 +67,7 @@ class ReturnSystemTest extends TestCase
 
         // COD order is already 'diproses' on creation.
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
 

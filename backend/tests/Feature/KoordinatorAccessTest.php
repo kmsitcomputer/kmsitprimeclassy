@@ -80,7 +80,7 @@ class KoordinatorAccessTest extends TestCase
 
         // Gudang queue + fulfillment review.
         $this->actingAs($b['koordinator'])->getJson('/api/v1/warehouse/orders/diproses')->assertForbidden();
-        $this->actingAs($b['koordinator'])->getJson('/api/v1/warehouse/fulfillment-proposals')->assertForbidden();
+        $this->actingAs($b['koordinator'])->getJson('/api/v1/warehouse/fulfillment-proposals')->assertOk(); // REM-002: read-only, needed to confirm physical receipt
 
         // Normal-kurir return workflow (executor-only surfaces stay executor-only).
         $this->actingAs($b['koordinator'])->getJson('/api/v1/kurir/returns')->assertForbidden();

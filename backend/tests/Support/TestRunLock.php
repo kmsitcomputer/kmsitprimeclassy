@@ -58,12 +58,10 @@ final class TestRunLock
     /** Process-wide lock for the booted application (idempotent; also a keep-alive). */
     public static function acquireForApplication(object $app): self
     {
-        $connectionName = (string) $app['config']->get('database.default');
-        $config = (array) $app['config']->get("database.connections.{$connectionName}");
+        // The lock must target EXACTLY what the application will use: the guard's validated effective configuration
+        // (URL-resolved, no socket/read-write overrides). It never opens a lock connection for a forbidden target.
+        $config = TestDatabaseGuard::assertApplicationSafe($app);
         $database = (string) ($config['database'] ?? '');
-
-        // Never even open a lock connection for a database the guard forbids.
-        TestDatabaseGuard::assertSafe($app->environment(), $connectionName, $database);
 
         if (self::$current === null) {
             $dir = $app->storagePath('framework/testing');
@@ -78,11 +76,23 @@ final class TestRunLock
             self::$current = $lock;
             register_shutdown_function(static fn () => self::$current?->release());
         } else {
+            self::$current->assertConnectionTarget($config);
             // Every test boots an application: prove ownership before it may touch the schema.
             self::$current->assertOwned('boot a test');
         }
 
         return self::$current;
+    }
+
+    /** The lock and every selected connection must use the same effective endpoint and credentials. */
+    public function assertConnectionTarget(array $config): void
+    {
+        foreach (['host', 'port', 'database', 'username', 'password'] as $key) {
+            $expected = $key === 'database' ? $this->database : ($this->connection[$key] ?? '');
+            if ((string) ($config[$key] ?? '') !== (string) $expected) {
+                throw new RuntimeException('REFUSED: database connection differs from the held test lock target.');
+            }
+        }
     }
 
     public static function current(): ?self

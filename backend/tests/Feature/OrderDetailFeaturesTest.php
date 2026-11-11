@@ -32,6 +32,7 @@ class OrderDetailFeaturesTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use ResolvesCheckoutActor;
 
     protected function setUp(): void
@@ -107,7 +108,7 @@ class OrderDetailFeaturesTest extends TestCase
         $order = $this->placeOrder($branch['konsumen']);
 
         $shipmentId = Shipment::where('order_id', $order->id)->value('id');
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
 
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'terkirim'])
@@ -122,7 +123,7 @@ class OrderDetailFeaturesTest extends TestCase
         $order = $this->placeOrder($branch['konsumen']);
 
         $shipmentId = Shipment::where('order_id', $order->id)->value('id');
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
         $this->actingAs($branch['kurir'])->patchJson("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
 
         $this->actingAs($branch['kurir'])->patch("/api/v1/shipments/{$shipmentId}/status", [
@@ -255,7 +256,7 @@ class OrderDetailFeaturesTest extends TestCase
         $branch = $this->makeAgentBranch();
         $order = $this->placeOrder($branch['konsumen']);
         $shipmentId = Shipment::where('order_id', $order->id)->value('id');
-        $this->actingAs($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
+        $this->actingAsDispatcher($branch['admin'])->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => \App\Models\Courier::where('user_id', $branch['kurir']->id)->value('id')])->assertOk();
         $this->actingAs($branch['kurir'])->patch("/api/v1/shipments/{$shipmentId}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($branch['kurir'])->patch("/api/v1/shipments/{$shipmentId}/status", [
             'status' => 'terkirim', 'proof' => UploadedFile::fake()->image('bukti.jpg'),

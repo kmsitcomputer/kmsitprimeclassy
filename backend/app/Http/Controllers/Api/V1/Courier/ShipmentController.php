@@ -45,7 +45,7 @@ class ShipmentController extends Controller
         $shipment = $shipment->fresh();
         $order = $shipment->order;
 
-        if (! $order || $order->status !== 'diproses'
+        if (! $order || ! in_array($order->status, ['diproses', 'dikirim'], true)
             || $shipment->status !== 'pending'
             || $shipment->courier_id !== null
             || $shipment->self_delivered_by_user_id !== null) {
@@ -94,6 +94,33 @@ class ShipmentController extends Controller
             new OrderResource($shipment->order->load(['items', 'shipments.courier.user'])),
             __('messages.courier.assigned')
         );
+    }
+
+    /** REM-003: RajaOngkir carrier handover — tracking number + evidence, Koordinator Kurir only. */
+    public function recordExpeditionHandover(Request $request, Shipment $shipment)
+    {
+        $this->authorize('manageExpedition', $shipment);
+        $data = $request->validate([
+            'carrier' => ['required', 'string', 'max:30'],
+            'tracking_number' => ['required', 'string', 'min:6', 'max:40', 'regex:/^[A-Za-z0-9\-]+$/'],
+            'evidence' => ['required', 'file', 'image', 'max:5120'],
+        ]);
+
+        $shipment = $this->courierService->recordExpeditionHandover(
+            $shipment, $request->user(), $data['carrier'], $data['tracking_number'], $request->file('evidence')
+        );
+
+        return $this->ok(new OrderResource($shipment->order->load(['items', 'shipments.courier.user'])), __('messages.courier.assigned'));
+    }
+
+    /** REM-003: the executing courier records a customer's refusal of an item out for delivery. */
+    public function refuse(Request $request, Shipment $shipment, OrderItem $orderItem)
+    {
+        $this->authorize('updateStatus', $shipment);
+        $data = $request->validate(['reason' => ['required', 'string', 'max:255'], 'quantity' => ['nullable', 'integer', 'min:1']]);
+        $refusal = app(\App\Services\Order\DeliveryRefusalService::class)->record($shipment, $orderItem, $request->user(), $data['reason'], isset($data['quantity']) ? (int) $data['quantity'] : null);
+
+        return $this->created(['id' => $refusal->id, 'status' => $refusal->status, 'quantity' => $refusal->quantity, 'order_item_id' => $refusal->order_item_id]);
     }
 
     public function updateStatus(UpdateShipmentStatusRequest $request, Shipment $shipment)

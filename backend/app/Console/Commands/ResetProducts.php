@@ -270,6 +270,20 @@ class ResetProducts extends Command
      */
     private const SCOPE_BY_PAYMENT_REFERENCE = ['payment_webhook_logs'];
 
+    /**
+     * Preserved rows that reference a deleted order through a SET NULL foreign
+     * key and are RETAINED on purpose (operator notification history). They are
+     * mapped: the link is nulled explicitly before the order is deleted, the row
+     * itself is never deleted. A mapping applies only while the live schema
+     * still reports `SET NULL` for it; any other delete rule stays unmapped
+     * (fail closed) because RESTRICT would abort and CASCADE would delete rows.
+     *
+     * @var array<string, string> `table.column` => parent table
+     */
+    private const RETAINED_SET_NULL_REFERENCES = [
+        'admin_notifications.order_id' => 'orders',
+    ];
+
     /** Targeted slices of shared tables: `product_targeted` scope. */
     private const SCOPE_PRODUCT_TARGETED = [
         'product_discounts_product_targeted',
@@ -622,6 +636,7 @@ class ResetProducts extends Command
         // Every line is being removed anyway, so the links are broken for the
         // same atomic pass instead of depending on the statement's row order.
         $this->breakOrderItemCrossReferences($context);
+        $this->detachRetainedOrderReferences($context);
 
         foreach (self::DELETE_STEPS as $key) {
             $this->deleteStep($key, $context);
@@ -633,6 +648,38 @@ class ResetProducts extends Command
         }
 
         return $files;
+    }
+
+    /**
+     * @param  array{table:string, column:string, parent:string, delete_rule:string}  $constraint
+     */
+    private function isRetainedSetNullReference(array $constraint): bool
+    {
+        return (self::RETAINED_SET_NULL_REFERENCES[$constraint['table'].'.'.$constraint['column']] ?? null) === $constraint['parent']
+            && strtoupper($constraint['delete_rule']) === 'SET NULL';
+    }
+
+    /**
+     * Retained rows (notification history) keep existing; only their link to a
+     * deleted order is cleared, exactly what the SET NULL foreign key would do,
+     * done explicitly so no preserved row is rewritten implicitly or dangles.
+     *
+     * @param  array{order_ids:list<int>}  $context
+     */
+    private function detachRetainedOrderReferences(array $context): void
+    {
+        if ($context['order_ids'] === []) {
+            return;
+        }
+
+        foreach (self::RETAINED_SET_NULL_REFERENCES as $reference => $parent) {
+            [$table, $column] = explode('.', $reference, 2);
+            if ($parent === 'orders' && Schema::hasTable($table) && Schema::hasColumn($table, $column)) {
+                foreach (array_chunk($context['order_ids'], 1000) as $chunk) {
+                    DB::table($table)->whereIn($column, $chunk)->update([$column => null]);
+                }
+            }
+        }
     }
 
     /**
@@ -1114,6 +1161,9 @@ class ResetProducts extends Command
 
         foreach ($this->foreignKeysIntoDeleteScope() as $constraint) {
             $parent = $constraint['parent'];
+            if ($this->isRetainedSetNullReference($constraint)) {
+                continue;
+            }
             $steps = array_values(array_filter(self::DELETE_STEPS, fn (string $step): bool => $this->stepTable($step) === $parent));
             if ($steps === []) {
                 continue;

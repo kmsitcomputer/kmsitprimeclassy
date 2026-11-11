@@ -62,6 +62,25 @@ export async function assignCourier(
   return data.data
 }
 
+/**
+ * REM-003 (RajaOngkir): the Koordinator Kurir records the carrier handover — tracking number + evidence —
+ * before the shipment may be marked 'dikirim'. The carrier must be the one chosen at checkout.
+ */
+export async function recordExpeditionHandover(
+  shipmentId: number,
+  payload: { carrier: string; tracking_number: string; evidence: File },
+  opts?: UploadOptions,
+) {
+  const form = new FormData()
+  form.append('carrier', payload.carrier)
+  form.append('tracking_number', payload.tracking_number)
+  form.append('evidence', payload.evidence)
+  form.append('_method', 'PATCH')
+
+  const { data } = await http.post<ApiEnvelope<Order>>(`/shipments/${shipmentId}/expedition-handover`, form, uploadConfig(opts))
+  return data.data
+}
+
 export interface ShipmentReceiptItem {
   sku: string | null
   product_name: string

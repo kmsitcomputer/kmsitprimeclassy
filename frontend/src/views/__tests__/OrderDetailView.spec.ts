@@ -54,6 +54,8 @@ const api = vi.hoisted(() => ({
   adjustItemFulfillment: vi.fn(),
   rescheduleOrderItem: vi.fn(),
   addOrderItem: vi.fn(),
+  getCancellationEligibility: vi.fn(),
+  cancelUndeliveredQuantity: vi.fn(),
   downloadInvoice: vi.fn(),
   listProducts: vi.fn(),
   requestReturn: vi.fn(),
@@ -82,6 +84,8 @@ vi.mock('@/api/orderAdjustments', () => ({
   adjustItemFulfillment: api.adjustItemFulfillment,
   rescheduleOrderItem: api.rescheduleOrderItem,
   addOrderItem: api.addOrderItem,
+  getCancellationEligibility: api.getCancellationEligibility,
+  cancelUndeliveredQuantity: api.cancelUndeliveredQuantity,
 }))
 vi.mock('@/api/invoice', () => ({ downloadInvoice: api.downloadInvoice }))
 vi.mock('@/api/catalog', () => ({ listProducts: api.listProducts }))
@@ -101,7 +105,7 @@ vi.mock('@/api/crm', () => ({
 vi.mock('@/api/client', () => ({ ApiError }))
 
 const authState = vi.hoisted(() => ({
-  user: { id: 900, role: 'super_admin', agent_id: null } as {
+  user: { id: 900, role: 'koordinator-kurir', agent_id: null } as {
     id: number
     role: string
     agent_id: number | null
@@ -263,7 +267,7 @@ function assignButton(wrapper: VueWrapper) {
 describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422 + SKS-DELIVERY-001)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    authState.user = { id: 900, role: 'super_admin', agent_id: null }
+    authState.user = { id: 900, role: 'koordinator-kurir', agent_id: null }
     authState.permissions = [...OFFICE_PERMISSIONS]
     api.adjustItemFulfillment.mockResolvedValue(undefined)
   })
@@ -363,9 +367,22 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422 + SKS-D
   })
 
   it.each(['super_admin', 'agen', 'admin'] as const)(
-    '%s fetches candidates per shipment id with no branch param',
+    '%s never sees or fetches courier assignment (REM-003: Koordinator Kurir only)',
     async (role) => {
       authState.user = { id: 11, role, agent_id: role === 'super_admin' ? 999 : 10 }
+      api.getOrder.mockResolvedValue(orderFixture({ agent_id: 10, items: [stdItem({ shipment_id: 12 })] }))
+      const wrapper = mountDetail(1)
+      await flushPromises()
+      expect(api.listEligibleCouriers).not.toHaveBeenCalled()
+      expect(courierSelect(wrapper)).toBeUndefined()
+      expect(wrapper.html()).not.toContain('orders.assignCourierButton')
+    },
+  )
+
+  it.each(['koordinator-kurir'] as const)(
+    '%s fetches candidates per shipment id with no branch param',
+    async (role) => {
+      authState.user = { id: 11, role, agent_id: 10 }
       api.getOrder.mockResolvedValue(orderFixture({ agent_id: 10, items: [stdItem({ shipment_id: 12 })] }))
       api.listEligibleCouriers.mockResolvedValue([{ courier_id: 3, user_id: 33, name: 'Kurir Cabang' }])
       const wrapper = mountDetail(1)
@@ -519,5 +536,129 @@ describe('OrderDetailView courier assignment (FIX-COURIER-ASSIGNMENT-422 + SKS-D
     await assignButton(wrapper)!.trigger('click')
     await flushPromises()
     expect(api.assignCourier).toHaveBeenCalledWith(12, { courier_id: 5 })
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* PEMENUHAN KURANG on the Admin's Order detail                        */
+/* ------------------------------------------------------------------ */
+
+describe('OrderDetailView PEMENUHAN KURANG', () => {
+  const shortage = {
+    order_no: 'ORD-1', fulfillment_status: 'partial', has_open_shortage: true, open_lines: 1, ordered_qty: 4, handed_over_qty: 2, short_qty: 2,
+    last_reported_at: '2026-11-11T03:00:00Z', coordinator: { id: 9, name: 'Koord Rina' }, coordinator_requested_at: null, proofs: [],
+    items: [{
+      stock_request_item_id: 1, order_item_id: 102, product_name: 'Produk A', variation_label: null, sku: 'SKU-A', unit: null, ordered_qty: 4, handed_over_qty: 2,
+      awaiting_receipt_qty: 0, short_qty: 2, reason: 'Produksi baru 2 unit', reported_at: '2026-11-11T03:00:00Z', reported_by: { id: 5, name: 'Gudang Budi' },
+      status: 'pending_decision' as const, decision: null,
+    }],
+  }
+  /** Partial shipment: the shipped 2 (101) and the not-yet-handed-over 2 (102) on a courier-online order already `dikirim`. */
+  const shippedOrder = (withShortage: boolean) => orderFixture({
+    status: 'dikirim',
+    reschedule_allowed: true,
+    items: [stdItem({ id: 101, status: 'dikirim', fulfilled_quantity: 2 }), stdItem({ id: 102, status: 'diproses', fulfilled_quantity: 2, shipment_id: 13 })],
+    ...(withShortage ? { fulfillment_shortage: shortage } : {}),
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authState.user = { id: 1, role: 'admin', agent_id: 10 }
+    authState.permissions = [...OFFICE_PERMISSIONS]
+    api.listEligibleCouriers.mockResolvedValue([])
+  })
+
+  const rescheduleButtons = (w: VueWrapper) => w.findAll('button').filter((b) => b.text() === 'orders.rescheduleItem')
+
+  it('shows the notification with the per-product detail on the order page', async () => {
+    api.getOrder.mockResolvedValue(shippedOrder(true))
+    const w = mountDetail(1)
+    await flushPromises()
+    const panel = w.get('[data-testid="fulfillment-shortage"]')
+    expect(panel.text()).toContain('PEMENUHAN KURANG')
+    expect(panel.text()).toContain('Produksi baru 2 unit')
+    expect(panel.get('[data-testid="shortage-short"]').text()).toBe('2')
+  })
+
+  it('shows nothing when Gudang reported no shortage', async () => {
+    api.getOrder.mockResolvedValue(shippedOrder(false))
+    const w = mountDetail(1)
+    await flushPromises()
+    expect(w.find('[data-testid="fulfillment-shortage"]').exists()).toBe(false)
+  })
+
+  it('opens the reschedule form for the remainder line only, even though the order already shipped', async () => {
+    api.getOrder.mockResolvedValue(shippedOrder(true))
+    const w = mountDetail(1)
+    await flushPromises()
+    // Only the shortage remainder (102) keeps a reschedule control after dispatch; the shipped line (101) has none.
+    expect(rescheduleButtons(w)).toHaveLength(1)
+    await w.get('[data-testid="shortage-reschedule-102"]').trigger('click')
+    await flushPromises()
+    expect(w.find('#order-item-102 input[type="date"]').exists()).toBe(true)
+    expect(w.find('#order-item-101 input[type="date"]').exists()).toBe(false)
+  })
+
+  it('keeps the original window for an order that shipped without a reported shortage', async () => {
+    api.getOrder.mockResolvedValue(shippedOrder(false))
+    const w = mountDetail(1)
+    await flushPromises()
+    expect(rescheduleButtons(w)).toHaveLength(0)
+  })
+
+  it('checks the cancellation eligibility of the remainder line when the Admin chooses Cancel sisa', async () => {
+    api.getOrder.mockResolvedValue(shippedOrder(true))
+    api.getCancellationEligibility.mockResolvedValue({ eligible: true, max_quantity: 2, active_quantity: 2 })
+    const w = mountDetail(1)
+    await flushPromises()
+    await w.get('[data-testid="shortage-cancel-102"]').trigger('click')
+    await flushPromises()
+    expect(api.getCancellationEligibility).toHaveBeenCalledWith(1, 102)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* UAT-03: the one COD invoice is reachable by Pemesan, Sales, Korsal  */
+/* ------------------------------------------------------------------ */
+
+describe('OrderDetailView invoice access', () => {
+  const invoiceButton = (w: VueWrapper) => w.findAll('button').find((b) => b.text() === 'orders.invoiceDownload')
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.listEligibleCouriers.mockResolvedValue([])
+    api.downloadInvoice.mockResolvedValue(new Blob(['%PDF'], { type: 'application/pdf' }))
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }))
+  })
+
+  const as = (role: string, flag?: boolean) => {
+    authState.user = { id: 7, role, agent_id: 10 }
+    authState.permissions = []
+    api.getOrder.mockResolvedValue(orderFixture((flag === undefined ? {} : { viewer_can_download_invoice: flag }) as Partial<Order>))
+  }
+
+  it.each(['konsumen', 'sales', 'korsal'])('shows the invoice action to a %s when the server says they may', async (role) => {
+    as(role, true)
+    const w = mountDetail(1)
+    await flushPromises()
+    expect(invoiceButton(w), role).toBeTruthy()
+    await invoiceButton(w)!.trigger('click')
+    await flushPromises()
+    expect(api.downloadInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['konsumen', 'sales', 'korsal', 'koordinator-kurir', 'gudang'])('hides it from a %s when the server does not allow it', async (role) => {
+    as(role, false)
+    const w = mountDetail(1)
+    await flushPromises()
+    expect(invoiceButton(w), role).toBeUndefined()
+  })
+
+  it('keeps the existing Admin action unchanged', async () => {
+    as('admin')
+    authState.permissions = [...OFFICE_PERMISSIONS]
+    const w = mountDetail(1)
+    await flushPromises()
+    expect(invoiceButton(w)).toBeTruthy()
   })
 })

@@ -13,6 +13,10 @@ export interface CourierOrderItem {
   quantity: number
   status: string
   requested_delivery_date: string | null
+  /** self_sub = SKS self-delivery (no refusal/reverse-custody workflow there). */
+  delivery_mode?: string | null
+  /** REM-003: unresolved delivery refusal of this item (reverse custody in progress), if any. */
+  open_refusal?: { id: number; status: 'with_courier' | 'handed_back' | 'received' } | null
 }
 
 export interface CourierOrder {

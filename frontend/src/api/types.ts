@@ -190,6 +190,8 @@ export interface Order {
    * Convenience gate only — the backend enforces the same rule authoritatively.
    */
   reschedule_allowed?: boolean
+  /** PEMENUHAN KURANG — present for Admin/Agen/Super Admin only, when Gudang reported a shortage. */
+  fulfillment_shortage?: FulfillmentShortage | null
   /**
    * UAT-005 LOCKED: Shipment is the delivery-date unit. The canonical delivery date per shipment id,
    * derived server-side from that shipment's OWN items (null when unset or when its items disagree).
@@ -247,6 +249,9 @@ export interface DeliveryVerification {
 
 export interface PaymentSummary {
   grand_total: number
+  /** REM-004: successful regular payments so far, and the cap for Kurir Toko orders (null = uncapped). */
+  regular_payments_count?: number
+  regular_payments_limit?: number | null
   /** What the customer chose as DP at checkout — NOT yet money received. */
   requested_dp: number
   /** How much of the DP has actually cleared verification, capped at requested_dp. */
@@ -373,4 +378,45 @@ export interface AuthUser {
 export interface AuthPayload {
   user: AuthUser
   permissions: string[]
+}
+
+export interface FulfillmentShortageLine {
+  stock_request_item_id: number
+  /** The order line the Admin acts on (holds the remainder). */
+  order_item_id: number | null
+  product_name: string | null
+  variation_label: string | null
+  sku: string | null
+  unit: string | null
+  ordered_qty: number
+  handed_over_qty: number
+  awaiting_receipt_qty: number
+  short_qty: number
+  reason: string | null
+  reported_at: string | null
+  reported_by: { id: number; name: string } | null
+  status: 'pending_decision' | 'rescheduled' | 'cancelled' | 'resolved'
+  decision: {
+    action: 'reschedule' | 'cancel_remainder'
+    reason: string | null
+    quantity: number | null
+    date: string | null
+    by: { id: number; name: string } | null
+    at: string | null
+  } | null
+}
+
+export interface FulfillmentShortage {
+  order_no: string
+  fulfillment_status: string
+  has_open_shortage: boolean
+  open_lines: number
+  ordered_qty: number
+  handed_over_qty: number
+  short_qty: number
+  last_reported_at: string | null
+  coordinator: { id: number; name: string } | null
+  coordinator_requested_at: string | null
+  proofs: { proposal_id: number; url: string; at: string | null; gudang: { id: number; name: string } | null; received_at: string | null; koordinator: { id: number; name: string } | null; status: string }[]
+  items: FulfillmentShortageLine[]
 }

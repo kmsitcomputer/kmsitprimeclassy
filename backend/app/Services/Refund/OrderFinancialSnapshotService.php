@@ -217,6 +217,27 @@ class OrderFinancialSnapshotService
     }
 
     /** Unconsumed frozen units for one line (0 when the whole line was already refunded once). */
+    /**
+     * F01 — which item OWNS the frozen units backing `$orderItemId`. An item that existed when the snapshot
+     * was taken owns its own units. A split child created AFTER the freeze (batch split, partial refusal)
+     * has none: its units are the unconsumed ones of the nearest ancestor (`split_from_order_item_id`) that
+     * does. The frozen rows are never re-pointed or rewritten — the lineage link is read-only, so the
+     * historical snapshot stays immutable while a child's cancellation/return still hits the real ledger.
+     */
+    public function unitOwnerItemId(OrderFinancialSnapshot $snapshot, int $orderItemId): int
+    {
+        $current = $orderItemId;
+        for ($depth = 0; $depth < 10 && $current; $depth++) {
+            $owns = OrderFinancialSnapshotUnit::query()->where('snapshot_id', $snapshot->id)->where('order_item_id', $current)->exists();
+            if ($owns) {
+                return $current;
+            }
+            $current = (int) OrderItem::query()->whereKey($current)->value('split_from_order_item_id');
+        }
+
+        return $orderItemId;
+    }
+
     public function availableUnits(OrderFinancialSnapshot $snapshot, int $orderItemId): int
     {
         if ($snapshot->provenance === 'provisional_legacy') {
@@ -225,7 +246,7 @@ class OrderFinancialSnapshotService
 
         return (int) OrderFinancialSnapshotUnit::query()
             ->where('snapshot_id', $snapshot->id)
-            ->where('order_item_id', $orderItemId)
+            ->where('order_item_id', $this->unitOwnerItemId($snapshot, $orderItemId))
             ->whereNull('consumed_at')
             ->count();
     }
@@ -267,9 +288,10 @@ class OrderFinancialSnapshotService
             return ['units' => [], 'reduction_cents' => 0, 'route' => 'provisional_legacy'];
         }
 
+        $ownerItemId = $this->unitOwnerItemId($snapshot, $orderItemId); // F01: lineage-resolved, read-only
         $units = OrderFinancialSnapshotUnit::query()
             ->where('snapshot_id', $snapshot->id)
-            ->where('order_item_id', $orderItemId)
+            ->where('order_item_id', $ownerItemId)
             ->whereNull('consumed_at')
             ->orderBy('unit_index')
             ->lockForUpdate()
@@ -310,7 +332,7 @@ class OrderFinancialSnapshotService
 
         $basis = OrderItemFinancialBasis::query()
             ->where('snapshot_id', $snapshot->id)
-            ->where('order_item_id', $orderItemId)
+            ->where('order_item_id', $ownerItemId)
             ->lockForUpdate()
             ->first();
 

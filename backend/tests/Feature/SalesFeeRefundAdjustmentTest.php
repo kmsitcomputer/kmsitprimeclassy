@@ -31,6 +31,7 @@ class SalesFeeRefundAdjustmentTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -75,6 +76,7 @@ class SalesFeeRefundAdjustmentTest extends TestCase
         ])->json('data.id');
 
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
         // COD terkirim is still unpaid in cash — the refund gate enforces fully-paid, so mark the
@@ -162,6 +164,7 @@ class SalesFeeRefundAdjustmentTest extends TestCase
             'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
         ])->json('data.id');
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
         $this->actingAs($b['keuangan'])->patchJson("/api/v1/orders/{$order->id}/payment/cod", ['paid' => true])->assertOk();
@@ -233,6 +236,7 @@ class SalesFeeRefundAdjustmentTest extends TestCase
             'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
         ])->json('data.id');
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
@@ -269,6 +273,7 @@ class SalesFeeRefundAdjustmentTest extends TestCase
             'village_id' => $this->seedTestVillage(), 'latitude' => -6.9, 'longitude' => 107.6,
         ])->json('data.id');
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();

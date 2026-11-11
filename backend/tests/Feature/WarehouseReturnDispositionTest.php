@@ -28,6 +28,7 @@ class WarehouseReturnDispositionTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -69,6 +70,7 @@ class WarehouseReturnDispositionTest extends TestCase
             'latitude' => -6.914744, 'longitude' => 107.609810,
         ])->json('data.id');
         $order = Order::withoutGlobalScopes()->findOrFail($orderId);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'terkirim'])->assertOk();
         $item = OrderItem::where('order_id', $order->id)->firstOrFail();
@@ -231,6 +233,7 @@ class WarehouseReturnDispositionTest extends TestCase
             'village_id' => $this->seedTestVillage(),
             'latitude' => -6.914744, 'longitude' => 107.609810,
         ])->json('data.id');
+        $this->makeDispatchable($orderId);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$orderId}/status", ['status' => 'dikirim'])->assertOk();
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$orderId}/status", ['status' => 'terkirim'])->assertOk();
         $varItem = OrderItem::where('order_id', $orderId)->firstOrFail();

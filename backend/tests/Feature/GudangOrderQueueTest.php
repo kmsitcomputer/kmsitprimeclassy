@@ -40,6 +40,7 @@ use Tests\TestCase;
 class GudangOrderQueueTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -57,8 +58,9 @@ class GudangOrderQueueTest extends TestCase
         $konsumen = User::factory()->konsumen()->create(['agent_id' => $agent->id]);
         $courierUser = User::factory()->kurir()->create(['agent_id' => $agent->id]);
         $courier = Courier::create(['type' => 'internal', 'user_id' => $courierUser->id, 'agent_id' => $agent->id, 'name' => 'Kurir A', 'is_active' => true]);
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $agent->id]);
 
-        return compact('agent', 'admin', 'gudang', 'konsumen', 'courier');
+        return compact('agent', 'admin', 'gudang', 'konsumen', 'courier', 'koordinator');
     }
 
     private function product(array $b, string $tag = 'P'): Product
@@ -106,8 +108,11 @@ class GudangOrderQueueTest extends TestCase
 
     private function assignCourier(array $b, Order $order): void
     {
+        // REM-003: only the Koordinator assigns, and only accepted goods; fully accepted demand also
+        // leaves nothing outstanding for Gudang (REM-001), so the order drops out of the queue.
+        $this->acceptWarehouseDemand($order->id);
         $shipment = $order->shipments()->firstOrFail();
-        $this->actingAs($b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $b['courier']->id])->assertOk();
+        $this->actingAs($b['koordinator'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $b['courier']->id])->assertOk();
     }
 
     // ---------- visibility invariant ----------
@@ -154,6 +159,7 @@ class GudangOrderQueueTest extends TestCase
         $order = $this->diprosesOrder($b, $product, 'C');
 
         $this->assignCourier($b, $order);
+        $this->makeDispatchable($order->id);
         $this->actingAs($b['admin'])->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
 
         $this->actingAs($b['gudang'])->getJson('/api/v1/warehouse/orders/diproses')->assertOk()
@@ -196,12 +202,12 @@ class GudangOrderQueueTest extends TestCase
         $this->assertSame($request->id, $stockRequest['id']);
         $this->assertCount(1, $stockRequest['items']);
 
-        $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 2]]])->assertCreated();
+        $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 2]]]), ['Accept' => 'application/json'])->assertCreated();
 
         // Once a courier is assigned, the internal stock-request endpoint and proposing are both refused.
         $this->assignCourier($b, $order);
         $this->actingAs($b['gudang'])->getJson("/api/v1/warehouse/orders/{$order->id}/stock-request")->assertNotFound();
-        $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 2]]])->assertUnprocessable();
+        $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 2]]]), ['Accept' => 'application/json'])->assertUnprocessable();
     }
 
     public function test_internal_stock_request_endpoint_is_scoped_to_gudang_and_same_branch_only(): void
@@ -231,15 +237,15 @@ class GudangOrderQueueTest extends TestCase
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
         $item = $request->items()->firstOrFail();
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 6]]])
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 6]]]), ['Accept' => 'application/json'])
             ->assertCreated()->json('data');
 
         // Gudang cannot approve/reject its own proposal.
-        $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")->assertForbidden();
+        $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])->assertForbidden();
         $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/reject", ['reason' => 'x'])->assertForbidden();
 
         // Admin approves — canonical inventory move (transit -> shipping, reserved released).
-        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve")
+        $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/approve", ['reason' => 'pengecualian uji coba'])
             ->assertOk()->assertJsonPath('data.status', 'approved');
 
         $this->assertSame(14, (int) WarehouseStock::withoutGlobalScopes()->where('agent_id', $b['agent']->id)->where('product_id', $product->id)->where('stock_type', 'transit')->value('quantity'));
@@ -256,7 +262,7 @@ class GudangOrderQueueTest extends TestCase
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
         $item = $request->items()->firstOrFail();
 
-        $proposal = $this->actingAs($b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$request->id}/proposals", ['items' => [['item_id' => $item->id, 'quantity' => 3]]])
+        $proposal = $this->actingAs($b['gudang'])->post("/api/v1/warehouse/stock-requests/{$request->id}/proposals", $this->withHandoverProof(['items' => [['item_id' => $item->id, 'quantity' => 3]]]), ['Accept' => 'application/json'])
             ->assertCreated()->json('data');
 
         $this->actingAs($b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposal['id']}/reject", ['reason' => 'stok belum siap'])

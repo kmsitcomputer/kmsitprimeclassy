@@ -6,8 +6,10 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AgentPicker from '@/components/ui/AgentPicker.vue'
+import KoordinatorLogisticsPanel from '@/components/dispatch/KoordinatorLogisticsPanel.vue'
 import { listDispatchQueue, listDispatchCouriers, listDispatchRegionOptions, listDispatchHistory, listDispatchReturns, assignReturnCourier, type DispatchReturnRow, type DispatchCourier, type DispatchRow, type DispatchHistoryRow } from '@/api/dispatch'
 import { assignCourier } from '@/api/shipments'
+import { requestFulfillment, splitDeliveryBatch } from '@/api/koordinatorLogistics'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/client'
 import { formatApiError } from '@/utils/apiError'
@@ -118,7 +120,7 @@ const couriers = ref<DispatchCourier[]>([])
 
 // COURIER-002 — "Riwayat Terkirim": branch-wide, read-only delivered-shipment history. Operational
 // data only; the server scopes the branch and attributes the real executor.
-const tab = ref<'queue' | 'history' | 'returns'>('queue')
+const tab = ref<'queue' | 'history' | 'returns' | 'receipts' | 'refusals' | 'expeditions'>('queue')
 const history = ref<DispatchHistoryRow[]>([])
 const historyMeta = ref({ current_page: 1, last_page: 1, total: 0 })
 const historyLoading = ref(false)
@@ -199,7 +201,7 @@ async function assignReturn(row: DispatchReturnRow) {
   }
 }
 
-function switchTab(next: 'queue' | 'history' | 'returns') {
+function switchTab(next: 'queue' | 'history' | 'returns' | 'receipts' | 'refusals' | 'expeditions') {
   tab.value = next
   if (next === 'history') void loadHistory(1)
   if (next === 'returns') void loadReturns(1)
@@ -288,6 +290,42 @@ async function assign(row: DispatchRow) {
   }
 }
 
+// REM-003: carve an undispatched part of a line into a later delivery batch.
+const splitQty = ref<Record<number, number | null>>({})
+async function splitBatch(itemId: number) {
+  const qty = splitQty.value[itemId]
+  if (!qty || qty < 1 || assigningShipmentId.value !== null) return
+  assigningShipmentId.value = -itemId
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    await splitDeliveryBatch(itemId, qty)
+    splitQty.value[itemId] = null
+    successMessage.value = 'Batch lanjutan dibuat.'
+    await load(meta.value.current_page)
+  } catch (e) {
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal membuat batch lanjutan.'
+  } finally {
+    assigningShipmentId.value = null
+  }
+}
+
+async function requestGudang(row: DispatchRow) {
+  if (assigningShipmentId.value !== null) return
+  assigningShipmentId.value = row.shipment_id
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    await requestFulfillment(row.order_id)
+    successMessage.value = 'Permintaan pemenuhan dikirim ke Gudang.'
+    await load(meta.value.current_page)
+  } catch (e) {
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal meminta barang ke Gudang.'
+  } finally {
+    assigningShipmentId.value = null
+  }
+}
+
 async function selfAssign(row: DispatchRow) {
   if (!row.self_assignable || assigningShipmentId.value !== null) return
   assigningShipmentId.value = row.shipment_id
@@ -340,7 +378,16 @@ onMounted(() => {
         class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"
         :class="tab === 'returns' ? 'border-brand-600 text-brand-700' : 'border-transparent text-stone-500'"
         @click="switchTab('returns')">Penugasan Retur</button>
+      <!-- REM-002/003: Koordinator Kurir working panels (the API refuses every other role). -->
+      <template v-if="isKoordinator">
+        <button v-for="t2 in ([['receipts', 'Penerimaan Gudang'], ['refusals', 'Penolakan'], ['expeditions', 'Ekspedisi']] as const)" :key="t2[0]" type="button" role="tab" :aria-selected="tab === t2[0]"
+          class="-mb-px border-b-2 px-3 py-2 text-sm font-medium"
+          :class="tab === t2[0] ? 'border-brand-600 text-brand-700' : 'border-transparent text-stone-500'"
+          @click="switchTab(t2[0])">{{ t2[1] }}</button>
+      </template>
     </div>
+
+    <KoordinatorLogisticsPanel v-if="isKoordinator && (tab === 'receipts' || tab === 'refusals' || tab === 'expeditions')" :key="tab" :section="tab" />
 
     <section v-if="tab === 'returns'" aria-label="Penugasan Retur" class="space-y-3">
       <AgentPicker v-if="isSuperAdmin" v-model="agentId" :allow-all="false" label="Agen" @update:model-value="onAgentChange" />
@@ -561,20 +608,36 @@ onMounted(() => {
               <span class="text-stone-500"> × {{ item.quantity }}</span>
               <span class="ml-1 text-stone-400">({{ item.status }})</span>
             </span>
-            <span class="shrink-0 text-stone-500 dark:text-stone-400">
+            <span class="flex shrink-0 items-center gap-2 text-stone-500 dark:text-stone-400">
               Kirim: {{ item.requested_delivery_date ? formatDate(item.requested_delivery_date) : '—' }}
+              <span v-if="isKoordinator && item.status === 'diproses' && item.quantity > 1" class="flex items-center gap-1">
+                <input v-model.number="splitQty[item.id]" type="number" min="1" :max="item.quantity - 1" placeholder="Jml" aria-label="Jumlah untuk batch lanjutan"
+                  class="w-14 rounded border border-stone-200 px-1 py-0.5 text-xs dark:border-stone-700 dark:bg-stone-950" />
+                <AppButton size="sm" variant="secondary" :disabled="!splitQty[item.id] || assigningShipmentId !== null" @click="splitBatch(item.id)">Pisah batch</AppButton>
+              </span>
             </span>
           </li>
           <li v-if="!(row.items ?? []).length" class="text-stone-400">Tidak ada rincian item untuk pengiriman ini.</li>
         </ul>
 
         <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-3 dark:border-stone-800">
-          <select v-model="selectedCourier[row.shipment_id]"
+          <!-- REM-001/002: warehouse demand of this order + the Koordinator's request to Gudang. -->
+          <p v-if="row.fulfillment" class="w-full text-xs text-stone-500">
+            Barang diterima: <b>{{ row.fulfillment.accepted_qty }}</b> · outstanding di Gudang: <b>{{ row.fulfillment.outstanding_qty }}</b>
+            <span v-if="row.fulfillment.coordinator_requested_at"> · diminta {{ formatDate(row.fulfillment.coordinator_requested_at) }}</span>
+          </p>
+          <AppButton v-if="isKoordinator && row.fulfillment && row.fulfillment.outstanding_qty > 0" size="sm" variant="secondary"
+            :disabled="assigningShipmentId !== null" @click="requestGudang(row)">
+            {{ row.fulfillment.coordinator_requested_at ? 'Minta Lagi ke Gudang' : 'Minta ke Gudang' }}
+          </AppButton>
+          <!-- REM-003: only the Koordinator Kurir assigns Kurir Toko (the API refuses every other role). -->
+          <p v-if="!isKoordinator" class="text-xs text-stone-500">Penugasan kurir hanya dilakukan oleh Koordinator Kurir.</p>
+          <select v-if="isKoordinator" v-model="selectedCourier[row.shipment_id]"
             class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950">
             <option value="">— Pilih kurir —</option>
             <option v-for="c in couriers" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
-          <AppButton size="sm" :disabled="!selectedCourier[row.shipment_id] || assigningShipmentId !== null" @click="assign(row)">
+          <AppButton v-if="isKoordinator" size="sm" :disabled="!selectedCourier[row.shipment_id] || assigningShipmentId !== null" @click="assign(row)">
             {{ assigningShipmentId === row.shipment_id ? 'Menugaskan...' : 'Tugaskan Kurir' }}
           </AppButton>
           <!-- UAT-006: explicit self-assignment for the Koordinator — separate from assigning another
@@ -590,7 +653,7 @@ onMounted(() => {
           >
             {{ assigningShipmentId === row.shipment_id ? 'Mengambil...' : 'Ambil Pengiriman' }}
           </AppButton>
-          <span v-if="!couriers.length" class="text-xs text-stone-400">Belum ada kurir aktif di cabang ini.</span>
+          <span v-if="isKoordinator && !couriers.length" class="text-xs text-stone-400">Belum ada kurir aktif di cabang ini.</span>
         </div>
       </div>
 

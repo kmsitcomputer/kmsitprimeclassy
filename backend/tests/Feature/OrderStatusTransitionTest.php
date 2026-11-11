@@ -14,6 +14,7 @@ use Tests\TestCase;
 class OrderStatusTransitionTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -56,6 +57,7 @@ class OrderStatusTransitionTest extends TestCase
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])
             ->assertOk()->assertJsonPath('data.status', 'diproses');
 
+        $this->makeDispatchable($order->id);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])
             ->assertOk()->assertJsonPath('data.status', 'dikirim');
 

@@ -26,6 +26,7 @@ class OrderFulfillmentTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     protected function setUp(): void
     {
@@ -372,6 +373,7 @@ class OrderFulfillmentTest extends TestCase
 
         $order = $this->payInFull($order);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'diproses'])->assertOk();
+        $this->makeDispatchable($order->id);
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/status", ['status' => 'dikirim'])->assertOk();
 
         // Too late — already shipped.
@@ -771,10 +773,11 @@ class OrderFulfillmentTest extends TestCase
         ['order' => $order, 'itemA' => $itemA, 'itemB' => $itemB] = $this->placeTwoProductOrder($agen, $konsumen, $productA, 5, $productB, 3, splitDeliveryDates: true);
         $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
 
+        $this->acceptWarehouseDemand($order->id, null, true); // this test later reverses accepted units, so it needs the physical Shipping stock
         $courierBudiId = Courier::where('user_id', $kurirBudi->id)->value('id');
         $courierAndiId = Courier::where('user_id', $kurirAndi->id)->value('id');
-        $this->actingAs($admin)->patchJson("/api/v1/shipments/{$itemA->shipment_id}/courier", ['courier_id' => $courierBudiId])->assertOk();
-        $this->actingAs($admin)->patchJson("/api/v1/shipments/{$itemB->shipment_id}/courier", ['courier_id' => $courierAndiId])->assertOk();
+        $this->actingAsDispatcher($admin)->patchJson("/api/v1/shipments/{$itemA->shipment_id}/courier", ['courier_id' => $courierBudiId])->assertOk();
+        $this->actingAsDispatcher($admin)->patchJson("/api/v1/shipments/{$itemB->shipment_id}/courier", ['courier_id' => $courierAndiId])->assertOk();
 
         // Adjust item A only.
         $this->actingAs($admin)->patchJson("/api/v1/orders/{$order->id}/items/{$itemA->id}/fulfillment", [

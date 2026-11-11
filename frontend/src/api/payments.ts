@@ -83,9 +83,11 @@ export async function markCodPayment(orderId: number, paid: boolean) {
 }
 
 /** Konsumen submits a photo of the cash handed to the kurir, requesting Admin/Agen mark the COD order paid in full. */
-export async function submitCodPaymentProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen', opts?: UploadOptions) {
+export async function submitCodPaymentProof(orderId: number, proof: File, paidBy: 'konsumen' | 'sales' | 'korsal' = 'konsumen', opts?: UploadOptions, amount?: number) {
   const form = new FormData()
   form.append('proof', proof)
+  // REM-004: nominal actually handed over (partial COD). Omitted = the whole open amount.
+  if (amount !== undefined && amount > 0) form.append('amount', String(amount))
   form.append('paid_by', paidBy)
   const { data } = await http.post<ApiEnvelope<{ transaction: Order['payment_transaction'] }>>(
     `/orders/${orderId}/payment/cod-proof`,

@@ -165,6 +165,11 @@ return [
         'verified_amount_exceeds_submitted' => 'The verified amount cannot exceed the submitted amount.',
         'adjustment_reason_required' => 'A reason is required when the verified amount differs from the submitted amount.',
         'installment_not_for_cod' => 'COD orders are paid through the COD payment flow.',
+        'payment_limit_reached' => 'Store-courier orders allow at most 3 successful payments; the limit is reached.',
+        'third_payment_must_settle' => 'The third payment must settle the entire remaining balance.',
+        'overpayment_refused' => 'The amount exceeds the valid remaining balance.',
+        'expedition_full_payment_only' => 'Expedition (RajaOngkir) orders must be paid in full at once — no instalment/DP/COD.',
+        'cod_undo_not_allowed' => 'COD status cannot be undone: several successful payments already exist.',
         'installment_not_allowed_yet' => 'Installments can be paid once the order is being processed.',
         'installment_amount_invalid' => 'The amount must be greater than zero and not exceed the outstanding balance.',
         'invoice_not_issued' => 'The invoice has not been issued yet. It is issued after the first payment is verified.',
@@ -197,6 +202,9 @@ return [
     ],
 
     'fulfillment' => [
+        'shortage_reason_required' => 'A reason (min. 3 characters) is required for every item not fully handed over.',
+        'shortage_item_invalid' => 'The shortage item is invalid or has nothing outstanding.',
+        'shortage_item_duplicate' => 'An item cannot appear twice in one handover.',
         'invalid_quantity' => 'Invalid fulfillment quantity.',
         'window_closed' => 'Item quantity can only be changed while the order is diproses.',
         'adjusted' => 'Item fulfillment quantity updated successfully.',
@@ -205,6 +213,8 @@ return [
         'split_stock_request_locked' => 'The split cannot be performed because the warehouse stock request is already partially fulfilled and its remaining quantity is insufficient.',
         'cannot_increase_cancelled' => 'A fully cancelled item cannot be increased again.',
         'pending_refund_blocks_increase' => 'Cannot increase the quantity while an unprocessed refund obligation still exists for this item.',
+        'request_not_applicable' => 'This order is not at a stage where fulfilment can be requested from Gudang.',
+        'request_nothing_outstanding' => 'There is no outstanding demand to request.',
         'pending_additional_payment_blocks_reduction' => 'Cannot reduce the quantity while the additional payment for this increase is still outstanding.',
         'pending_additional_payment_blocks_increase' => 'Cannot increase the quantity again while the previous additional payment is still outstanding.',
     ],
@@ -212,6 +222,17 @@ return [
     'courier' => [
         'sc03_fulfillment_pending' => 'Fulfil the additional SC-03 product stock before assigning a courier.',
         'invalid_assignment' => 'The selected courier is not in the same agent branch, or is inactive.',
+        'coordinator_only' => 'Only the Koordinator Kurir may assign couriers.',
+        'provider_not_assignable' => 'Expedition/pickup shipments cannot be assigned to a store courier.',
+        'receipt_not_accepted' => 'The goods have not been accepted by the Koordinator yet; courier assignment refused.',
+        'dispatch_requires_assignment' => 'A store-courier shipment can only be dispatched once the Koordinator assigned it.',
+        'expedition_unpaid' => 'Expedition shipments must be fully paid (including shipping) before dispatch.',
+        'expedition_incomplete' => 'The goods are not completely received by the Koordinator; expedition dispatch is held.',
+        'expedition_partial' => 'Expedition shipments cannot be partial; every order item must be in one shipment.',
+        'expedition_handover_required' => 'Record the tracking number and carrier handover evidence before dispatch.',
+        'expedition_carrier_mismatch' => 'The carrier on the tracking number differs from the carrier chosen at checkout.',
+        'expedition_tracking_conflict' => 'A different tracking number is already recorded for this shipment.',
+        'not_expedition' => 'Only expedition (RajaOngkir) shipments have a carrier handover.',
         'no_shipment' => 'This order has no shipment record yet.',
         'no_profile' => 'Your account has no courier profile yet.',
         'not_your_delivery' => 'This order is already assigned to another courier.',
@@ -399,4 +420,19 @@ return [
         'test_body' => 'This is a test message from the PrimeClassy SMTP settings. If you can read it, outgoing e-mail works.',
     ],
 
+
+    'refusal' => [
+        'not_in_delivery' => 'A refusal can only be recorded for goods currently out for delivery.',
+        'already_open' => 'An open refusal already exists for this item.',
+        'invalid_state' => 'The refusal is not in the right state for this action.',
+        'stock_state_mismatch' => 'Stock state does not allow returning these goods to Gudang.',
+        'open_blocks_delivery' => 'An item with an unresolved refusal cannot be marked delivered.',
+        'not_applicable' => 'Refusal with Koordinator reverse custody does not apply to SKS self-delivery.',
+    ],
+
+    'cancellation' => [
+        'not_eligible' => 'This part cannot be cancelled: only undelivered, undispatched quantity with no open refusal may be cancelled.',
+        'stale' => 'The active quantity of this item has changed; reload and retry the cancellation.',
+        'discrepancy_unresolved' => 'Damaged units are still unresolved by an Admin; they cannot be cancelled or released to stock.',
+    ],
 ];

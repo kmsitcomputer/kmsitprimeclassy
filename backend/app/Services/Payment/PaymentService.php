@@ -56,6 +56,115 @@ class PaymentService
         private readonly MediaService $mediaService,
     ) {}
 
+    /** REM-004: Kurir Toko orders accept at most this many successful payments (COD + DP + transfer combined). */
+    public const KURIR_TOKO_MAX_SUCCESSFUL_PAYMENTS = 3;
+
+    /**
+     * Successful REGULAR payments on the order across all methods (COD, DP, transfer, settlement):
+     * paid/refunded payment transactions that are not an Admin-adjustment additional payment.
+     * Additional payments (order edits / SC-03 on an already-settled order, OrderAdditionalPayment
+     * mechanism) are a separate obligation and are NEVER counted as a regular instalment.
+     * Pending, failed, expired and cancelled-before-success never count; a later refund never
+     * erases a payment that really happened. Call under the Order row lock.
+     */
+    public function successfulPaymentCount(Order $order): int
+    {
+        return PaymentTransaction::query()->where('order_id', $order->id)
+            ->whereIn('status', [PaymentTransactionStatus::PAID->value, PaymentTransactionStatus::REFUNDED->value])
+            ->where('type', '!=', 'additional_payment')
+            ->lockForUpdate()->count();
+    }
+
+    /** Balance collectible through a REGULAR payment: remaining minus pending additional obligations. */
+    private function regularRemaining(Order $order): float
+    {
+        return round(max(0.0, (float) $order->total_amount - (float) $order->paid_amount - $this->pendingAdditionalAmount($order)), 2);
+    }
+
+    /** Amount of pending Admin-adjustment additional obligations (not collectible through a regular payment). */
+    private function pendingAdditionalAmount(Order $order): float
+    {
+        return round((float) \App\Models\OrderAdditionalPayment::query()->where('order_id', $order->id)
+            ->where('status', 'pending')->lockForUpdate()->sum('amount'), 2);
+    }
+
+    /** REM-004 display helper: the regular-payment cap for this order (null = no cap) — read-only, no locks. */
+    public function regularPaymentLimitFor(Order $order): ?int
+    {
+        return $this->paymentChannelKind($order) === 'kurir_toko' ? self::KURIR_TOKO_MAX_SUCCESSFUL_PAYMENTS : null;
+    }
+
+    /** REM-004 display helper: successful regular payments so far — plain read for the summary projection. */
+    public function regularPaymentCountFor(Order $order): int
+    {
+        return PaymentTransaction::query()->where('order_id', $order->id)
+            ->whereIn('status', [PaymentTransactionStatus::PAID->value, PaymentTransactionStatus::REFUNDED->value])
+            ->where('type', '!=', 'additional_payment')->count();
+    }
+
+    /** Provider classification from PERSISTED shipment data (never from delivery_mode alone). */
+    private function paymentChannelKind(Order $order): string
+    {
+        $shipments = \App\Models\Shipment::query()->where('order_id', $order->id)->get(['delivery_mode', 'shipping_provider_code']);
+        if ($shipments->contains('shipping_provider_code', \App\Models\Shipment::PROVIDER_EXPEDITION)) {
+            return 'expedition';
+        }
+        if ($shipments->isEmpty() || $shipments->contains(fn ($s) => $s->delivery_mode !== \App\Models\Shipment::DELIVERY_MODE_STANDARD
+            || $s->shipping_provider_code === \App\Models\Shipment::PROVIDER_PICKUP)) {
+            return 'other'; // SKS / pickup / unknown: payment rules unchanged
+        }
+
+        return 'kurir_toko';
+    }
+
+    /**
+     * REM-004 — the single payment admission rule, called under the Order row lock BEFORE any payment
+     * is applied (and, as a cheap pre-check, before one is requested):
+     *  - expedition (RajaOngkir): full payment at once only;
+     *  - Kurir Toko: never above the remaining balance, at most 3 successful payments, and the
+     *    third must settle everything that is still owed.
+     */
+    public function assertPaymentAllowed(Order $order, float $amount, bool $additional = false): void
+    {
+        $kind = $this->paymentChannelKind($order);
+        if ($kind === 'other') {
+            return;
+        }
+        $amount = round($amount, 2);
+        $remaining = round(max(0.0, (float) $order->total_amount - (float) $order->paid_amount), 2);
+
+        if ($kind === 'expedition') {
+            if ($amount + 0.004 < $remaining) {
+                throw new ApiException(__('messages.payment.expedition_full_payment_only'), 422);
+            }
+
+            return;
+        }
+
+        if ($additional) {
+            // Admin-adjustment obligation: outside the 3-regular-payment cap, but never above what is owed.
+            if ($amount > $remaining + 0.004) {
+                throw new ApiException(__('messages.payment.overpayment_refused'), 422);
+            }
+
+            return;
+        }
+
+        // A regular payment may only collect the regular balance — pending additional obligations
+        // have their own mechanism and must not be swallowed (or double collected) here.
+        $regularRemaining = round(max(0.0, $remaining - $this->pendingAdditionalAmount($order)), 2);
+        if ($amount > $regularRemaining + 0.004) {
+            throw new ApiException(__('messages.payment.overpayment_refused'), 422);
+        }
+        $successful = $this->successfulPaymentCount($order);
+        if ($successful >= self::KURIR_TOKO_MAX_SUCCESSFUL_PAYMENTS) {
+            throw new ApiException(__('messages.payment.payment_limit_reached'), 422);
+        }
+        if ($successful === self::KURIR_TOKO_MAX_SUCCESSFUL_PAYMENTS - 1 && $amount + 0.004 < $regularRemaining) {
+            throw new ApiException(__('messages.payment.third_payment_must_settle'), 422);
+        }
+    }
+
     public function initiate(Order $order, PaymentMethod $method): PaymentTransaction
     {
         // DP is a 'manual' method, but its first transaction covers only the
@@ -287,7 +396,6 @@ class PaymentService
             if ($verification->status !== 'pending') {
                 throw new ApiException(__('messages.payment.already_verified'), 422);
             }
-
             // Separation of duties: whoever submitted the record or received the cash can never approve it.
             if ($approved && in_array($actor->id, array_filter([$verification->submitted_by_user_id, $verification->cash_received_by_user_id]), true)) {
                 throw new ApiException(__('messages.payment.self_verification_forbidden'), 403);
@@ -297,6 +405,12 @@ class PaymentService
             // Locking re-read of the ORDER too — same row cancel() locks — so a concurrent
             // cancellation cannot race between the money application and its status write.
             $order = Order::query()->whereKey($transaction->order_id)->lockForUpdate()->firstOrFail();
+            // F03: canonical order verification → Order → transaction → obligation (same as markAdditionalPaymentPaid).
+            // A transaction already settled/closed through another entry point is never applied a second time.
+            $transaction = PaymentTransaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+            if (in_array($transaction->status, [PaymentTransactionStatus::PAID->value, PaymentTransactionStatus::REFUNDED->value], true)) {
+                throw new ApiException(__('messages.payment.already_verified'), 422);
+            }
 
             // The submitted nominal is preserved untouched (payment_transactions.amount); what Keuangan
             // actually confirmed is stored separately. Validation runs BEFORE any write.
@@ -321,6 +435,12 @@ class PaymentService
                 }
             }
 
+            if ($approved) {
+                // REM-004: admission (max 3 successful payments for Kurir Toko, no overpayment,
+                // expedition full-payment-only) decided on the locked Order, before any write.
+                $this->assertPaymentAllowed($order, $applied, $transaction->type === 'additional_payment');
+            }
+
             $verification->update([
                 'status' => $approved ? 'verified' : 'rejected',
                 'verified_by' => $actor->id,
@@ -335,6 +455,61 @@ class PaymentService
                 'status' => $approved ? PaymentTransactionStatus::PAID->value : PaymentTransactionStatus::FAILED->value,
                 'paid_at' => $approved ? now() : null,
             ]);
+
+            if ($approved && $transaction->type === 'additional_payment') {
+                // F03: settle the linked additional-payment obligation in the same atomic step.
+                $obligation = \App\Models\OrderAdditionalPayment::query()->where('payment_transaction_id', $transaction->id)->lockForUpdate()->first();
+                if ($obligation) {
+                    if ($obligation->status !== 'pending') {
+                        throw new ApiException(__('messages.payment.already_processed'), 422);
+                    }
+                    $remainingAdditional = round((float) $obligation->amount - $applied, 2);
+                    if ($remainingAdditional < -0.004) {
+                        throw new ApiException(__('messages.payment.overpayment_refused'), 422);
+                    }
+                    if ($remainingAdditional > 0) {
+                        // Owner decision: verified cash reduces the SAME outstanding obligation.
+                        // Preserve the submitted transaction/proof; the residual remains additional,
+                        // outside the regular-payment cap, and keeps the item's existing linkage.
+                        $residual = PaymentTransaction::create([
+                            'order_id' => $order->id,
+                            'payment_method_id' => $transaction->payment_method_id,
+                            'type' => 'additional_payment',
+                            'amount' => $remainingAdditional,
+                            'status' => PaymentTransactionStatus::PENDING->value,
+                            'gateway_reference' => 'AP-'.strtoupper(Str::random(10)),
+                            'raw_payload' => array_merge($transaction->raw_payload ?? [], [
+                                'residual_of' => $transaction->id,
+                                'additional_payment_id' => $obligation->id,
+                            ]),
+                        ]);
+                        $previousAmount = (float) $obligation->amount;
+                        // Keep settled and outstanding portions reconstructable in the existing
+                        // obligation history; their sum remains the original additional charge.
+                        $settledPortion = \App\Models\OrderAdditionalPayment::create([
+                            'order_id' => $obligation->order_id,
+                            'requested_by' => $obligation->requested_by,
+                            'method' => $obligation->method,
+                            'payment_transaction_id' => $transaction->id,
+                            'amount' => $applied,
+                            'reason' => $obligation->reason,
+                            'status' => 'paid',
+                        ]);
+                        $obligation->update([
+                            'amount' => $remainingAdditional,
+                            'payment_transaction_id' => $residual->id,
+                            'status' => 'pending',
+                        ]);
+                        ActivityLogger::log($actor->id, $obligation, 'order_additional_payment.partially_settled', $adjustmentReason, [
+                            'previous_amount' => $previousAmount, 'verified_amount' => $applied,
+                            'remaining_amount' => $remainingAdditional, 'payment_transaction_id' => $transaction->id,
+                            'residual_transaction_id' => $residual->id, 'settled_portion_id' => $settledPortion->id,
+                        ]);
+                    } else {
+                        $obligation->update(['status' => 'paid']);
+                    }
+                }
+            }
 
             if ($approved) {
                 // Accumulate the VERIFIED amount onto the order. remaining > 0 => 'partially_paid';
@@ -377,23 +552,78 @@ class PaymentService
     public function markCod(Order $order, User $actor, bool $paid): Order
     {
         return DB::transaction(function () use ($order, $actor, $paid) {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
             $previous = $order->payment_status;
-            // COD is collected in full on delivery: settling marks the whole
-            // total paid; un-marking returns the order to owing everything.
-            $this->recalculatePaymentStatus($order, $paid ? (float) $order->total_amount : 0.0);
 
-            $transaction = $order->paymentTransactions()->orderByDesc('id')->first();
-            $transaction?->update([
-                'status' => $paid ? PaymentTransactionStatus::PAID->value : PaymentTransactionStatus::PENDING->value,
-                'paid_at' => $paid ? now() : null,
-            ]);
+            if ($paid) {
+                // Marks whatever is still owed as collected (a COD that was never partially paid owes the
+                // whole total, exactly as before). Idempotent: nothing owed → no second payment.
+                $amount = $this->regularRemaining($order);
+                if ($amount > 0) {
+                    $transaction = $order->paymentTransactions()->where('status', PaymentTransactionStatus::PENDING->value)->orderByDesc('id')->first()
+                        ?? $order->paymentTransactions()->orderByDesc('id')->first();
+                    $this->settleCodCollection($order, $transaction, $amount, $actor);
+                }
+            } else {
+                // F04: a real collection is financial history — it cannot be wiped by a toggle. Only the legacy
+                // single FULL-order collection (one paid transaction covering the whole total, no residual) may
+                // be un-marked, and then the SAME paid transaction goes back to pending so paid_amount and the
+                // transaction history can never disagree. Any partial collection is refused (no reversal
+                // mechanism exists for it; money back goes through the refund ledger).
+                $paidTx = $order->paymentTransactions()->where('status', PaymentTransactionStatus::PAID->value)->lockForUpdate()->get();
+                $hasResidual = $order->paymentTransactions()->whereNotNull('raw_payload->residual_of')->exists();
+                $isSingleFullCollection = $paidTx->count() === 1 && ! $hasResidual
+                    && round((float) $paidTx->first()->amount, 2) >= round((float) $order->total_amount, 2) - 0.004
+                    && $this->successfulPaymentCount($order) <= 1;
+                if ($paidTx->isNotEmpty() && ! $isSingleFullCollection) {
+                    throw new ApiException(__('messages.payment.cod_undo_not_allowed'), 422);
+                }
+                $this->recalculatePaymentStatus($order, 0.0);
+                $paidTx->first()?->update(['status' => PaymentTransactionStatus::PENDING->value, 'paid_at' => null]);
+                app(InvoiceIssuanceService::class)->syncAfterChange($order->fresh(), 'cod_unmarked'); // F09
+            }
 
             ActivityLogger::log($actor->id, $order, 'payment.cod_status_changed', null, [
-                'from' => $previous, 'to' => $order->payment_status,
+                'from' => $previous, 'to' => $order->fresh()->payment_status,
             ]);
 
             return $order->fresh(['items', 'paymentMethod', 'paymentTransactions.bankTransferVerification']);
         });
+    }
+
+    /**
+     * REM-004 — one COD collection becomes one paid transaction carrying the nominal that was REALLY
+     * collected. A partial collection leaves a fresh pending COD transaction for the residual so the
+     * next hand-over has something to attach to; the order is never marked fully paid by a partial.
+     * Admission (max 3, third settles, no overpayment) is enforced here, under the Order lock.
+     */
+    private function settleCodCollection(Order $order, ?PaymentTransaction $transaction, float $collected, User $actor): void
+    {
+        $collected = round($collected, 2);
+        if ($collected <= 0) {
+            throw new ApiException(__('messages.payment.overpayment_refused'), 422);
+        }
+        $this->assertPaymentAllowed($order, $collected);
+
+        if ($transaction === null) {
+            $transaction = PaymentTransaction::create([
+                'order_id' => $order->id, 'payment_method_id' => $order->payment_method_id, 'type' => 'payment',
+                'amount' => $collected, 'status' => PaymentTransactionStatus::PENDING->value,
+                'raw_payload' => ['note' => 'cash_on_delivery'],
+            ]);
+        }
+        $transaction->update(['amount' => $collected, 'status' => PaymentTransactionStatus::PAID->value, 'paid_at' => now()]);
+
+        $order = $this->applyPaymentToOrder($order, $collected);
+        app(InvoiceIssuanceService::class)->syncAfterChange($order, 'cod_collected'); // F09
+        $remaining = $this->regularRemaining($order);
+        if ($remaining > 0) {
+            PaymentTransaction::create([
+                'order_id' => $order->id, 'payment_method_id' => $transaction->payment_method_id, 'type' => 'payment',
+                'amount' => $remaining, 'status' => PaymentTransactionStatus::PENDING->value,
+                'raw_payload' => ['note' => 'cash_on_delivery', 'residual_of' => $transaction->id],
+            ]);
+        }
     }
 
     /**
@@ -403,9 +633,9 @@ class PaymentService
      * itself (only confirmCodPayment(), an Admin/Agen action, ever does);
      * this only puts the request in front of them.
      */
-    public function submitCodPaymentProof(PaymentTransaction $transaction, UploadedFile $proof, User $actor, string $paidBy = 'konsumen'): CodPaymentProof
+    public function submitCodPaymentProof(PaymentTransaction $transaction, UploadedFile $proof, User $actor, string $paidBy = 'konsumen', ?float $amount = null): CodPaymentProof
     {
-        return DB::transaction(function () use ($transaction, $proof, $actor, $paidBy) {
+        return DB::transaction(function () use ($transaction, $proof, $actor, $paidBy, $amount) {
             // Same lock order as confirmCodPayment (proof row → order): a confirmed proof is never overwritten.
             $existing = CodPaymentProof::query()
                 ->where('payment_transaction_id', $transaction->id)->lockForUpdate()->first();
@@ -418,13 +648,18 @@ class PaymentService
                 throw new ApiException(__('messages.payment.proof_locked'), 422);
             }
 
+            // REM-004: a partial COD collection records the nominal really handed over; the admission
+            // rule (max 3, third settles, no overpayment) is pre-checked so a doomed request is refused now.
+            $open = $this->regularRemaining($order);
+            $this->assertPaymentAllowed($order, $amount ?? $open);
+
             $onBehalf = $actor->id !== $order->konsumen_id;
             $media = $this->mediaService->store($proof, 'cod_payment_proof', $transaction, $actor);
 
             $codProof = CodPaymentProof::updateOrCreate(
                 ['payment_transaction_id' => $transaction->id],
                 [
-                    'proof_media_id' => $media->id, 'status' => 'pending',
+                    'proof_media_id' => $media->id, 'collected_amount' => $amount, 'status' => 'pending',
                     'confirmed_by' => null, 'confirmed_at' => null, 'rejection_reason' => null,
                     'submitted_by_user_id' => $actor->id, 'submitted_on_behalf' => $onBehalf,
                     'paid_by_role' => $paidBy, 'submitted_at' => now(),
@@ -467,7 +702,9 @@ class PaymentService
             ]);
 
             if ($confirmed) {
-                $this->markCod($order, $actor, true);
+                $open = $this->regularRemaining($order);
+                $collected = $proof->collected_amount !== null ? (float) $proof->collected_amount : min((float) $transaction->amount, $open);
+                $this->settleCodCollection($order, $transaction, $collected, $actor);
             }
 
             ActivityLogger::log($actor->id, $order, 'payment.cod_proof_confirmed', $rejectionReason, [
@@ -523,11 +760,12 @@ public function requestSettlement(Order $order, User $actor): array
         // it can be arbitrarily stale relative to a concurrent payment or total change.
         $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
 
-        $remaining = round((float) $order->remaining_amount, 2);
+        $remaining = $this->regularRemaining($order); // pending additional obligations are settled by their own mechanism
 
         if ($remaining <= 0) {
             throw new ApiException(__('messages.payment.nothing_to_settle'), 422);
         }
+        $this->assertPaymentAllowed($order, $remaining); // REM-004: a settlement always pays everything that is owed
 
         $pending = $this->pendingSettlementFor($order->id);
 
@@ -654,13 +892,14 @@ private function pendingSettlementFor(int $orderId): ?PaymentTransaction
                 throw new ApiException(__('messages.payment.installment_not_allowed_yet'), 422);
             }
 
-            $remaining = round((float) $order->remaining_amount, 2);
+            $remaining = $this->regularRemaining($order);
             if ($remaining <= 0) {
                 throw new ApiException(__('messages.payment.nothing_to_settle'), 422);
             }
             if ($amount <= 0 || $amount > $remaining) {
                 throw new ApiException(__('messages.payment.installment_amount_invalid'), 422, ['amount' => __('messages.payment.installment_amount_invalid')]);
             }
+            $this->assertPaymentAllowed($order, $amount); // REM-004: max 3 / third settles / expedition full-only
 
             $methodId = PaymentMethod::query()->where('code', 'bank_transfer')->value('id');
             $pending = PaymentTransaction::query()
@@ -773,7 +1012,11 @@ private function pendingSettlementFor(int $orderId): ?PaymentTransaction
      */
     public function reverseAppliedPayment(Order $order, float $amount): Order
     {
-        return $this->recalculatePaymentStatus($order, max(0.0, (float) $order->paid_amount - $amount));
+        $order = $this->recalculatePaymentStatus($order, max(0.0, (float) $order->paid_amount - $amount));
+        // F09: the processed refund changes the balance — append an (idempotent) invoice balance snapshot.
+        app(InvoiceIssuanceService::class)->syncAfterChange($order, 'refund_processed');
+
+        return $order;
     }
 
     /**
@@ -785,7 +1028,12 @@ private function pendingSettlementFor(int $orderId): ?PaymentTransaction
      */
     public function reconcileTotals(Order $order): Order
     {
-        return $this->recalculatePaymentStatus($order);
+        $order = $this->recalculatePaymentStatus($order);
+        // F09: quantity adjustment / SC-03 / partial cancellation changed the total — record the new
+        // balance on the ONE main invoice (snapshot only if the balance really changed; never re-issues).
+        app(InvoiceIssuanceService::class)->syncAfterChange($order, 'order_total_changed');
+
+        return $order;
     }
 
     /**

@@ -37,6 +37,7 @@ use Tests\TestCase;
 class DispatchRemediationTest extends TestCase
 {
     use HasTestRegion;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -113,6 +114,7 @@ class DispatchRemediationTest extends TestCase
         $sid = $this->shipmentIdFor($order);
 
         // Self-assign via the koordinator executor sentinel (courier_id = 0).
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => 0,
         ])->assertOk();
@@ -175,6 +177,7 @@ class DispatchRemediationTest extends TestCase
 
         // A normal kurir is assigned by the dispatcher (not self).
         $kurirProfile = Courier::query()->where('user_id', $b['kurir']->id)->first();
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirProfile->id,
         ])->assertOk();
@@ -228,7 +231,8 @@ class DispatchRemediationTest extends TestCase
         $sid = $this->shipmentIdFor($order);
 
         $kurirProfile = Courier::query()->where('user_id', $b['kurir']->id)->first();
-        $this->actingAs($b['agen'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
+        $this->acceptAllWarehouseDemand();
+        $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirProfile->id,
         ])->assertOk();
 
@@ -238,20 +242,23 @@ class DispatchRemediationTest extends TestCase
         $secondKurir = User::factory()->kurir()->create(['agent_id' => $b['agen']->id, 'name' => 'Kurir Kedua']);
         $secondProfile = Courier::create(['type' => 'internal', 'user_id' => $secondKurir->id, 'agent_id' => $b['agen']->id, 'name' => $secondKurir->name, 'is_active' => true]);
 
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $secondProfile->id,
         ])->assertStatus(422);
         $this->assertDatabaseHas('shipments', ['id' => $sid, 'courier_id' => $kurirProfile->id]);
 
         // Same courier re-assignment is an idempotent replay (still 200).
-        $this->actingAs($b['agen'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
+        $this->acceptAllWarehouseDemand();
+        $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirProfile->id,
         ])->assertOk();
         $this->assertDatabaseHas('shipments', ['id' => $sid, 'courier_id' => $kurirProfile->id]);
 
         // Terminal work: cancel the order, then try to assign → refused.
         $order->update(['status' => 'dibatalkan']);
-        $this->actingAs($b['agen'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
+        $this->acceptAllWarehouseDemand();
+        $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirProfile->id,
         ])->assertStatus(422);
         $this->assertDatabaseHas('shipments', ['id' => $sid, 'courier_id' => $kurirProfile->id]);
@@ -314,6 +321,7 @@ class DispatchRemediationTest extends TestCase
 
         // Assign the FIRST shipment — the sibling must REMAIN dispatchable.
         $kurirProfile = Courier::query()->where('user_id', $b['kurir']->id)->first();
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$shipmentIds[0].'/courier', [
             'courier_id' => $kurirProfile->id,
         ])->assertOk();

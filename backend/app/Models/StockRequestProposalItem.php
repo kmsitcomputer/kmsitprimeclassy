@@ -7,11 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class StockRequestProposalItem extends Model
 {
-    protected $fillable = ['stock_request_proposal_id', 'stock_request_item_id', 'quantity'];
+    protected $fillable = ['stock_request_proposal_id', 'stock_request_item_id', 'quantity', 'accepted_qty', 'short_qty', 'damaged_qty'];
 
     protected function casts(): array
     {
-        return ['quantity' => 'integer'];
+        return ['quantity' => 'integer', 'accepted_qty' => 'integer', 'short_qty' => 'integer', 'damaged_qty' => 'integer'];
     }
 
     public function proposal(): BelongsTo

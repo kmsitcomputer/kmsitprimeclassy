@@ -20,7 +20,16 @@ export interface DispatchRowItem {
   requested_delivery_date: string | null
 }
 
+/** REM-001/002: warehouse demand state of the row's order (operational counts only). */
+export interface DispatchFulfillment {
+  status: string
+  outstanding_qty: number
+  accepted_qty: number
+  coordinator_requested_at: string | null
+}
+
 export interface DispatchRow {
+  fulfillment?: DispatchFulfillment | null
   id: number
   shipment_id: number
   order_id: number

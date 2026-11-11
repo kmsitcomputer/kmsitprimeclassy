@@ -63,6 +63,17 @@ class DispatchShipmentResource extends JsonResource
             // Items are read off the already-loaded order items (no new
             // query); grouping stays shipment-truth, never a new batch
             // subsystem.
+            // REM-001/002: warehouse demand state of the order (operational counts only, never money).
+            'fulfillment' => (function () {
+                $request = \App\Models\StockRequest::withoutGlobalScopes()->where('order_id', $this->order_id)->first();
+
+                return $request ? [
+                    'status' => $request->status,
+                    'outstanding_qty' => (int) \App\Models\StockRequestItem::query()->where('stock_request_id', $request->id)->sum('remaining_qty'),
+                    'accepted_qty' => (int) \App\Models\StockRequestItem::query()->where('stock_request_id', $request->id)->sum('fulfilled_qty'),
+                    'coordinator_requested_at' => $request->coordinator_requested_at?->toIso8601String(),
+                ] : null;
+            })(),
             'items' => $this->order->items
                 ->where('shipment_id', $this->id)
                 ->values()

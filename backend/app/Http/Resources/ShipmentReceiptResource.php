@@ -82,8 +82,11 @@ class ShipmentReceiptResource extends JsonResource
                 // createOrder), so "still owed" for COD is simply the
                 // order's own total while payment_status hasn't reached
                 // 'paid' — never recomputed here, just read straight off it.
+                // REM-004: the amount still collectible on the ORDER (total − already paid), so a
+                // follow-up batch receipt never re-bills what an earlier collection already settled.
+                // Order-level truth: it is the same bounded balance on every batch of the order.
                 'cod_amount_due' => $order->paymentMethod?->type === 'cod' && $order->payment_status !== 'paid'
-                    ? $order->total_amount
+                    ? number_format(max(0.0, (float) $order->total_amount - (float) $order->paid_amount), 2, '.', '')
                     : null,
                 'is_down_payment' => (float) $order->dp_amount > 0,
                 'dp_paid_amount' => (float) $order->dp_amount > 0 ? $order->paid_amount : null,

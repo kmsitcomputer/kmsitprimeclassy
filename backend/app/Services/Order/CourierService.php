@@ -69,7 +69,12 @@ class CourierService
             throw new ApiException(__('messages.courier.self_delivery_no_courier'), 422);
         }
 
-        $actorKoordinator = $actor->isRole('koordinator-kurir');
+        // REM-003: assignment/reassignment is Koordinator Kurir only (defence in depth behind the
+        // route + ShipmentPolicy), and only for Kurir Toko shipments — never RajaOngkir/pickup.
+        if (! $actor->isRole('koordinator-kurir')) {
+            throw new ApiException(__('messages.courier.coordinator_only'), 403);
+        }
+        $actorKoordinator = true;
 
         return DB::transaction(function () use ($shipment, $courier, $actor, $actorKoordinator) {
             $order = Order::query()->whereKey($shipment->order_id)->lockForUpdate()->firstOrFail();
@@ -88,11 +93,16 @@ class CourierService
             // Canonical eligibility under the lock (A1-03). Order-status + shipment-terminal
             // checks come FIRST: an idempotent replay is only ever valid on live, in-progress
             // work — never on a cancelled/completed order.
-            if ($order->status !== 'diproses') {
+            // REM-003: 'dikirim' is allowed — a later batch is assigned after the first one shipped.
+            if (! in_array($order->status, ['diproses', 'dikirim'], true)) {
                 throw new ApiException(__('messages.courier.invalid_assignment'), 422);
             }
             if ($shipment->status !== 'pending') {
                 throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+            // Persisted provider decides eligibility (not delivery_mode=standard alone).
+            if (in_array($shipment->shipping_provider_code, [Shipment::PROVIDER_EXPEDITION, Shipment::PROVIDER_PICKUP], true)) {
+                throw new ApiException(__('messages.courier.provider_not_assignable'), 422);
             }
 
             $courier = Courier::query()->whereKey($courier->id)->lockForUpdate()->firstOrFail();
@@ -132,6 +142,8 @@ class CourierService
             }
 
             $this->assertAddedDemandFulfilled($order->id);
+            $this->carveWhollyUnacceptedLines($order, $shipment, $actor);
+            $this->assertAcceptedReceiptCovers($order, $shipment);
 
             $previousCourierId = $shipment->courier_id;
             $shipment->update(['courier_id' => $courier->id]);
@@ -216,6 +228,197 @@ class CourierService
 
             return $profile->fresh();
         });
+    }
+
+    /**
+     * REM-003 (RajaOngkir) — dispatch readiness, enforced for every actor and path that moves an
+     * expedition shipment to 'dikirim': fully paid incl. shipping, every unit accepted by the
+     * Koordinator, the whole order in this ONE shipment (no partial shipment), and the carrier
+     * handover (tracking number + evidence) recorded. Called under the Order → Shipment lock.
+     */
+    public function assertExpeditionDispatchReady(Order $order, Shipment $shipment): void
+    {
+        if ($shipment->shipping_provider_code !== Shipment::PROVIDER_EXPEDITION) {
+            return;
+        }
+        if ($order->payment_status !== 'paid') {
+            throw new ApiException(__('messages.courier.expedition_unpaid'), 422);
+        }
+        $this->assertExpeditionGoodsComplete($order, $shipment);
+        if (empty($shipment->tracking_number) || empty($shipment->provider_meta['handover']['media_id'] ?? null)) {
+            throw new ApiException(__('messages.courier.expedition_handover_required'), 422);
+        }
+    }
+
+    private function assertExpeditionGoodsComplete(Order $order, Shipment $shipment): void
+    {
+        $outside = OrderItem::query()->where('order_id', $order->id)->whereNotIn('status', ['dibatalkan'])
+            ->where(fn ($q) => $q->whereNull('shipment_id')->orWhere('shipment_id', '!=', $shipment->id))->lockForUpdate()->exists();
+        if ($outside) {
+            throw new ApiException(__('messages.courier.expedition_partial'), 422);
+        }
+        $request = \App\Models\StockRequest::query()->where('order_id', $order->id)->lockForUpdate()->first();
+        $outstanding = $request
+            ? (int) \App\Models\StockRequestItem::query()->where('stock_request_id', $request->id)->lockForUpdate()->get()->sum('remaining_qty')
+            : 0;
+        if ($outstanding > 0 || ($request && in_array($request->status, ['pending', 'partial'], true))) {
+            throw new ApiException(__('messages.courier.expedition_incomplete'), 422);
+        }
+    }
+
+    /**
+     * REM-003 (RajaOngkir) — the Koordinator Kurir records the carrier handover: tracking number +
+     * handover evidence. The carrier must be the one chosen at checkout (persisted quote meta). No
+     * carrier-specific number format is invented here (none is defined in source); only a sane
+     * token shape is enforced. Idempotent for the same number; a different number is a conflict.
+     */
+    public function recordExpeditionHandover(Shipment $shipment, User $actor, string $carrier, string $trackingNumber, UploadedFile $evidence): Shipment
+    {
+        if (! $actor->isRole('koordinator-kurir')) {
+            throw new ApiException(__('messages.courier.coordinator_only'), 403);
+        }
+
+        return DB::transaction(function () use ($shipment, $actor, $carrier, $trackingNumber, $evidence) {
+            $order = Order::query()->whereKey($shipment->order_id)->lockForUpdate()->firstOrFail();
+            $shipment = Shipment::query()->whereKey($shipment->id)->lockForUpdate()->firstOrFail();
+
+            if ($shipment->shipping_provider_code !== Shipment::PROVIDER_EXPEDITION) {
+                throw new ApiException(__('messages.courier.not_expedition'), 422);
+            }
+            if ($order->status !== 'diproses' || $shipment->status !== 'pending') {
+                throw new ApiException(__('messages.courier.invalid_assignment'), 422);
+            }
+            if ((int) $order->agent_id !== (int) $actor->agent_id) {
+                throw new ApiException(__('messages.system.unauthorized_action'), 403);
+            }
+            if ($order->payment_status !== 'paid') {
+                throw new ApiException(__('messages.courier.expedition_unpaid'), 422);
+            }
+            $this->assertExpeditionGoodsComplete($order, $shipment);
+
+            $chosen = strtolower((string) ($shipment->provider_meta['courier'] ?? ''));
+            if ($chosen === '' || strtolower($carrier) !== $chosen) {
+                throw new ApiException(__('messages.courier.expedition_carrier_mismatch'), 422);
+            }
+
+            if (! empty($shipment->tracking_number)) {
+                if ($shipment->tracking_number === $trackingNumber) {
+                    return $shipment; // idempotent replay — no second evidence row
+                }
+                throw new ApiException(__('messages.courier.expedition_tracking_conflict'), 409);
+            }
+
+            $media = $this->mediaService->store($evidence, 'shipment_proof', $shipment, $actor);
+            $meta = $shipment->provider_meta ?? [];
+            $meta['handover'] = ['media_id' => $media->id, 'carrier' => $chosen, 'recorded_by' => $actor->id, 'recorded_at' => now()->toIso8601String()];
+            $shipment->update(['tracking_number' => $trackingNumber, 'provider_meta' => $meta]);
+
+            ActivityLogger::log($actor->id, $shipment, 'shipment.expedition_handover_recorded', null, [
+                'order_id' => $order->id, 'carrier' => $chosen, 'tracking_number' => $trackingNumber, 'media_id' => $media->id,
+            ]);
+
+            return $shipment->fresh();
+        });
+    }
+
+    /**
+     * A product Gudang could not hand over must never hold back the products the Koordinator already received.
+     * Checkout groups an order's lines of one delivery date into ONE shipment, so when some of those lines are
+     * accepted and others were never accepted at all (nothing of them was received), the unaccepted lines are
+     * moved — whole, with their own warehouse demand — onto a fresh pending shipment (the existing
+     * `assignFreshShipment` mechanism, same date, same provider) and the accepted remainder is assigned as usual.
+     *
+     * Deliberately narrow: nothing is moved when NOTHING on the shipment is accepted (the assignment stays
+     * refused), a line that is only PARTLY accepted stays on the explicit batch split (`split-batch`), and
+     * only a pending, unassigned, Kurir Toko shipment is touched. The accepted-receipt gate runs right after on
+     * what is left, so no unaccepted unit can ever be assigned or shipped. Called under the Order → Shipment lock.
+     */
+    private function carveWhollyUnacceptedLines(Order $order, Shipment $shipment, User $actor): void
+    {
+        if (! self::isKurirTokoShipment($shipment) || $shipment->status !== 'pending' || $shipment->courier_id !== null) {
+            return;
+        }
+        $mine = OrderItem::query()->where('order_id', $order->id)->where('shipment_id', $shipment->id)
+            ->where('stock_source', '!=', 'sub')->whereIn('status', ['diterima', 'diproses'])->lockForUpdate()->get();
+        if ($mine->count() < 2) {
+            return;
+        }
+        $request = \App\Models\StockRequest::query()->where('order_id', $order->id)->lockForUpdate()->first();
+        if (! $request) {
+            return;
+        }
+        $accepted = \App\Models\StockRequestItem::query()->where('stock_request_id', $request->id)->lockForUpdate()->get()->keyBy('order_item_id');
+
+        $acceptedAny = $mine->contains(fn (OrderItem $i) => (int) ($accepted->get($i->id)?->fulfilled_qty ?? 0) > 0);
+        $unaccepted = $mine->filter(fn (OrderItem $i) => (int) ($accepted->get($i->id)?->fulfilled_qty ?? 0) === 0);
+        if (! $acceptedAny || $unaccepted->isEmpty()) {
+            return;
+        }
+
+        $fulfillment = app(OrderFulfillmentService::class);
+        $target = null;
+        foreach ($unaccepted as $item) {
+            if ($target === null) {
+                $fulfillment->assignFreshShipment($item, $order, $actor, 'shipment.split_for_unaccepted');
+                $target = (int) $item->fresh()->shipment_id;
+
+                continue;
+            }
+            $item->update(['shipment_id' => $target]);
+        }
+    }
+
+    /**
+     * REM-003 / F06 — a shipment can be assigned or dispatched only for quantity the Koordinator has accepted
+     * FOR EACH OF ITS ITEMS: the accepted allocation is the line's own StockRequestItem.fulfilled_qty — the very
+     * figure the cancellation/refusal reversals move back — so accepted stock of one line can never authorise
+     * (or be reversed out from under) another line of the same product. Sub-sourced lines (SKS) are outside the
+     * gate. Called under the Order → Shipment lock.
+     */
+    public function assertAcceptedReceiptCovers(Order $order, Shipment $shipment): void
+    {
+        $mine = OrderItem::query()->where('order_id', $order->id)->where('shipment_id', $shipment->id)
+            ->where('stock_source', '!=', 'sub')->whereIn('status', ['diterima', 'diproses'])->lockForUpdate()->get();
+        if ($mine->isEmpty()) {
+            return;
+        }
+        $request = \App\Models\StockRequest::query()->where('order_id', $order->id)->lockForUpdate()->first();
+        $accepted = $request
+            ? \App\Models\StockRequestItem::query()->where('stock_request_id', $request->id)->lockForUpdate()->get()->keyBy('order_item_id')
+            : collect();
+
+        foreach ($mine as $item) {
+            if ((int) ($accepted->get($item->id)?->fulfilled_qty ?? 0) < (int) $item->fulfilled_quantity) {
+                throw new ApiException(__('messages.courier.receipt_not_accepted'), 422);
+            }
+        }
+    }
+
+    /** Kurir Toko = persisted standard-mode shipment whose provider is neither expedition nor pickup. */
+    public static function isKurirTokoShipment(Shipment $shipment): bool
+    {
+        return $shipment->delivery_mode === Shipment::DELIVERY_MODE_STANDARD
+            && ! in_array($shipment->shipping_provider_code, [Shipment::PROVIDER_EXPEDITION, Shipment::PROVIDER_PICKUP], true);
+    }
+
+    /**
+     * F02 — the dispatch ('dikirim') invariant for Kurir Toko, enforced on EVERY path that can start a
+     * delivery (courier per-shipment/per-item, office bulk override): the shipment must be assigned
+     * (custody) and every line accepted. Pickup, expedition and SKS shipments have their own rules.
+     */
+    public function assertKurirTokoDispatchReady(Order $order, Shipment $shipment): void
+    {
+        if (! self::isKurirTokoShipment($shipment)) {
+            return;
+        }
+        $hasLive = OrderItem::query()->where('shipment_id', $shipment->id)->whereIn('status', ['diterima', 'diproses'])->exists();
+        if (! $hasLive) {
+            return;
+        }
+        if ($shipment->courier_id === null) {
+            throw new ApiException(__('messages.courier.dispatch_requires_assignment'), 422);
+        }
+        $this->assertAcceptedReceiptCovers($order, $shipment);
     }
 
     /** Called only while the canonical Order boundary is held. SC-03-first must
@@ -370,6 +573,15 @@ class CourierService
         // They never develop dispatch authority over another courier's assignment, and can never
         // claim an unassigned delivery through the pickup path (that is dispatch's job).
         if ($actor->isRole('koordinator-kurir')) {
+            // REM-003: the Koordinator manages RajaOngkir shipments directly (carrier handover/tracking).
+            if ($shipment->shipping_provider_code === Shipment::PROVIDER_EXPEDITION
+                && (int) $shipment->order?->agent_id === (int) $actor->agent_id) {
+                if ($newStatus === 'terkirim' && ! $proof) {
+                    throw new ApiException(__('messages.courier.delivery_proof_required'), 422);
+                }
+
+                return;
+            }
             $assignedCourierUserId = $shipment->courier?->user_id;
 
             if ($assignedCourierUserId === null || (int) $assignedCourierUserId !== (int) $actor->id) {
@@ -434,7 +646,14 @@ class CourierService
                 $this->assertMayShipSubStock($shipment, $actor);
             }
             $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
+            if ($newStatus === 'dikirim') {
+                $this->assertExpeditionDispatchReady($order, $shipment);
+                $this->assertKurirTokoDispatchReady($order, $shipment);
+            }
             $items = OrderItem::query()->where('shipment_id', $shipment->id)->lockForUpdate()->get();
+            if ($newStatus === 'terkirim' && $items->contains(fn ($i) => DeliveryRefusalService::hasOpenRefusal($i->id))) {
+                throw new ApiException(__('messages.refusal.open_blocks_delivery'), 422);
+            }
 
             $anyTransitioned = false;
             $handoverOccurred = false;
@@ -526,7 +745,19 @@ class CourierService
                 $this->assertMayShipSubStock($shipment, $actor);
             }
             $this->assertMayOperateShipment($shipment, $actor, $newStatus, $proof);
+            if ($newStatus === 'dikirim') {
+                $this->assertExpeditionDispatchReady($order, $shipment);
+                $this->assertKurirTokoDispatchReady($order, $shipment);
+                // F05: an expedition shipment leaves as ONE unit — never a single item of several.
+                if ($shipment->shipping_provider_code === Shipment::PROVIDER_EXPEDITION
+                    && OrderItem::query()->where('shipment_id', $shipment->id)->whereKeyNot($item->id)->whereNotIn('status', ['dibatalkan', 'dikirim', 'terkirim'])->exists()) {
+                    throw new ApiException(__('messages.courier.expedition_partial'), 422);
+                }
+            }
 
+            if ($newStatus === 'terkirim' && DeliveryRefusalService::hasOpenRefusal($item->id)) {
+                throw new ApiException(__('messages.refusal.open_blocks_delivery'), 422);
+            }
             if (! $item->canTransitionTo($newStatus)) {
                 throw new InvalidStateTransitionException($item->status, $newStatus, 'order_item');
             }
@@ -635,7 +866,7 @@ class CourierService
      * Never moves the order backwards, and never touches it before dispatch
      * (still 'diterima'/'dibatalkan') — those remain OrderService's calls.
      */
-    private function recomputeOrderStatus(int $orderId): void
+    public function recomputeOrderStatus(int $orderId): void
     {
         $order = Order::query()->whereKey($orderId)->lockForUpdate()->first();
 

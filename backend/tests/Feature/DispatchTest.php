@@ -30,6 +30,7 @@ use Tests\TestCase;
 class DispatchTest extends TestCase
 {
     use HasTestRegion;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -116,7 +117,8 @@ class DispatchTest extends TestCase
 
         // Assign a courier to my order — it must leave the queue.
         $kurirMyBranch = Courier::query()->where('agent_id', $b['agen']->id)->first();
-        $this->actingAs($b['agen'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($myOrder).'/courier', [
+        $this->acceptAllWarehouseDemand();
+        $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($myOrder).'/courier', [
             'courier_id' => $kurirMyBranch->id,
         ])->assertOk();
 
@@ -153,6 +155,7 @@ class DispatchTest extends TestCase
 
         // Assign the courier as koordinator.
         $kurirMyBranch = Courier::query()->where('agent_id', $b['agen']->id)->first();
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirMyBranch->id,
         ])->assertOk();
@@ -171,7 +174,8 @@ class DispatchTest extends TestCase
 
         // A kurir claims the delivery first.
         $kurirMyBranch = Courier::query()->where('agent_id', $b['agen']->id)->first();
-        $this->actingAs($b['agen'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/courier', [
+        $this->acceptAllWarehouseDemand();
+        $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$this->shipmentIdFor($order).'/courier', [
             'courier_id' => $kurirMyBranch->id,
         ])->assertOk();
 
@@ -191,7 +195,11 @@ class DispatchTest extends TestCase
         $p2 = $this->makeProduct($b['agen2'], 'Kue F', 30000);
 
         $myOrder = $this->placeOrder($b['konsumen'], $p1);
-        $myOrder->update(['status' => 'dikirim']); // no longer dispatchable either
+        // Fully dispatched: order, its items and its shipment have all left (REM-003: an order in `dikirim`
+        // whose shipment is still pending IS dispatchable — that is a later batch).
+        $myOrder->update(['status' => 'dikirim']);
+        \App\Models\OrderItem::where('order_id', $myOrder->id)->update(['status' => 'dikirim']);
+        Shipment::where('order_id', $myOrder->id)->update(['status' => 'in_transit']);
         $other = $this->placeOrder(
             User::factory()->konsumen()->create(['agent_id' => $b['agen2']->id]),
             $p2, 1, $this->seedTestVillage()
@@ -286,6 +294,7 @@ class DispatchTest extends TestCase
 
         $kurirOtherBranch = Courier::query()->where('agent_id', $b['agen2']->id)->first();
 
+        $this->acceptAllWarehouseDemand();
         $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirOtherBranch->id,
         ])->assertStatus(422);
@@ -305,7 +314,8 @@ class DispatchTest extends TestCase
 
         // Deliver via the assigned kurir (as in CourierSystemTest).
         $kurirMyBranch = Courier::query()->where('agent_id', $b['agen']->id)->first();
-        $this->actingAs($b['agen'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
+        $this->acceptAllWarehouseDemand();
+        $this->actingAs($b['koordinator'])->patchJson('/api/v1/shipments/'.$sid.'/courier', [
             'courier_id' => $kurirMyBranch->id,
         ])->assertOk();
 

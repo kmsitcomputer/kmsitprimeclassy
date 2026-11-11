@@ -84,6 +84,15 @@ return [
             'max_height' => 8000,
         ],
 
+        // Gudang → Koordinator Kurir handover evidence (photo of the goods/handover note) attached to a fulfilment proposal.
+        'fulfillment_handover_proof' => [
+            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
+            'max_size' => 5 * 1024 * 1024,
+            'max_width' => 8000,
+            'max_height' => 8000,
+        ],
+
         // "Konsumen dapat memasukan bukti pembayaran COD" — the photo a konsumen submits, pending Admin/Agen confirmation.
         'cod_payment_proof' => [
             'mimes' => ['image/jpeg', 'image/png', 'image/webp'],

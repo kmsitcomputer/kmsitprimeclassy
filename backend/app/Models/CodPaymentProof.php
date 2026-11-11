@@ -8,13 +8,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class CodPaymentProof extends Model
 {
     protected $fillable = [
-        'payment_transaction_id', 'proof_media_id', 'status', 'confirmed_by', 'confirmed_at', 'rejection_reason',
+        'payment_transaction_id', 'proof_media_id', 'collected_amount', 'status', 'confirmed_by', 'confirmed_at', 'rejection_reason',
         'submitted_by_user_id', 'submitted_on_behalf', 'paid_by_role', 'submitted_at',
     ];
 
     protected function casts(): array
     {
-        return ['confirmed_at' => 'datetime', 'submitted_on_behalf' => 'boolean', 'submitted_at' => 'datetime'];
+        return ['collected_amount' => 'decimal:2', 'confirmed_at' => 'datetime', 'submitted_on_behalf' => 'boolean', 'submitted_at' => 'datetime'];
     }
 
     public function paymentTransaction(): BelongsTo

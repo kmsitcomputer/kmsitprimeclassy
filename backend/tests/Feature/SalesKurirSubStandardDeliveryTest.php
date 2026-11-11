@@ -38,6 +38,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
     use ResolvesCheckoutActor;
 
     private array $b;
@@ -94,7 +95,9 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $subOther = User::factory()->salesKurirSub()->create(['agent_id' => $agen2->id]);
         Courier::create(['type' => 'internal', 'user_id' => $subOther->id, 'agent_id' => $agen2->id, 'name' => $subOther->name, 'is_active' => true]);
 
-        return compact('agen', 'admin', 'gudang', 'kurir', 'sub1', 'sub2', 'subNoProfile', 'konsumen1', 'konsumen2', 'konsumenPlain', 'location1', 'product', 'agen2', 'subOther');
+        $koordinator = User::factory()->koordinatorKurir()->create(['agent_id' => $agen->id]);
+
+        return compact('agen', 'admin', 'koordinator', 'gudang', 'kurir', 'sub1', 'sub2', 'subNoProfile', 'konsumen1', 'konsumen2', 'konsumenPlain', 'location1', 'product', 'agen2', 'subOther');
     }
 
     private function location(User $agen, User $owner, string $code): WarehouseSubLocation
@@ -130,6 +133,9 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
 
     private function assign(User $actor, int $shipmentId, int $courierId)
     {
+        // REM-003: assignment is Koordinator-only and receipt-gated — callers pass the Koordinator.
+        $this->acceptAllWarehouseDemand();
+
         return $this->actingAs($actor)->patchJson("/api/v1/shipments/{$shipmentId}/courier", ['courier_id' => $courierId]);
     }
 
@@ -158,7 +164,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $this->assertSame('standard', $shipment->delivery_mode);
         $this->assertNull($shipment->courier_id);
 
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
 
         // Visible in the assignee's courier queue (and not the sibling's).
         $ids = fn (User $actor) => collect($this->actingAs($actor)->getJson('/api/v1/kurir/orders')->assertOk()->json('data'))->pluck('id');
@@ -196,7 +202,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $this->assertSame($this->b['sub1']->id, $order->sales_id);
         $shipment = $order->items()->firstOrFail()->shipment;
 
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
 
         app(CourierService::class)->updateOrderItemStatus(
             $order->items()->firstOrFail(), 'dikirim', $this->b['sub1']
@@ -216,10 +222,10 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $order = $this->placeOrder($this->b['konsumen2'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
 
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertStatus(422);
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertStatus(422);
 
         // …while the actual referrer is accepted.
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub2'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub2'])->id)->assertOk();
     }
 
     public function test_unrelated_consumer_without_referral_link_is_rejected(): void
@@ -227,7 +233,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $order = $this->placeOrder($this->b['konsumenPlain'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
 
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertStatus(422);
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertStatus(422);
     }
 
     public function test_different_agent_sub_is_rejected(): void
@@ -235,10 +241,10 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $order = $this->placeOrder($this->b['konsumen1'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
 
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['subOther'])->id)->assertStatus(422);
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['subOther'])->id)->assertStatus(422);
 
         // The cross-branch candidate is also absent from the eligible list.
-        $courierIds = collect($this->actingAs($this->b['admin'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'))->pluck('courier_id');
+        $courierIds = collect($this->actingAs($this->b['koordinator'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'))->pluck('courier_id');
         $this->assertFalse($courierIds->contains($this->subCourier($this->b['subOther'])->id));
     }
 
@@ -249,11 +255,11 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $courierId = $this->subCourier($this->b['sub1'])->id;
 
         $this->b['sub1']->update(['status' => 'inactive']);
-        $this->assign($this->b['admin'], $shipment->id, $courierId)->assertStatus(422);
+        $this->assign($this->b['koordinator'], $shipment->id, $courierId)->assertStatus(422);
         $this->b['sub1']->update(['status' => 'active']);
 
         Courier::whereKey($courierId)->update(['is_active' => false]);
-        $this->assign($this->b['admin'], $shipment->id, $courierId)->assertStatus(422);
+        $this->assign($this->b['koordinator'], $shipment->id, $courierId)->assertStatus(422);
     }
 
     public function test_sales_kurir_sub_cannot_assign_itself(): void
@@ -289,17 +295,17 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $subCourierId = $this->subCourier($this->b['sub1'])->id;
         $kurirCourierId = Courier::where('user_id', $this->b['kurir']->id)->firstOrFail()->id;
 
-        $this->assign($this->b['admin'], $shipment->id, $subCourierId)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $subCourierId)->assertOk();
 
         // Another courier cannot take it — neither operate nor reassign.
         $this->actingAs($this->b['kurir'])->patchJson("/api/v1/shipments/{$shipment->id}/status", ['status' => 'dikirim'])->assertForbidden();
-        $this->assign($this->b['admin'], $shipment->id, $kurirCourierId)->assertStatus(422);
+        $this->assign($this->b['koordinator'], $shipment->id, $kurirCourierId)->assertStatus(422);
 
         // The sibling Sub cannot operate it either.
         $this->actingAs($this->b['sub2'])->patchJson("/api/v1/shipments/{$shipment->id}/status", ['status' => 'dikirim'])->assertForbidden();
 
         // Same-executor replay is idempotent.
-        $this->assign($this->b['admin'], $shipment->id, $subCourierId)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $subCourierId)->assertOk();
         $this->assertSame($subCourierId, $shipment->fresh()->courier_id);
     }
 
@@ -307,7 +313,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
     {
         $order = $this->placeOrder($this->b['konsumen1'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
 
         app(CourierService::class)->updateShipmentStatus($shipment->fresh(), 'dikirim', $this->b['sub1']);
 
@@ -324,7 +330,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
 
         $onHandBefore = ProductStock::where('agent_id', $this->b['agen']->id)->where('product_id', $this->b['product']->id)->value('quantity_on_hand');
 
-        $this->assign($this->b['admin'], $shipment->id, $courierId)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $courierId)->assertOk();
 
         // Assignment is not a stock movement.
         $this->assertSame((int) $onHandBefore, (int) ProductStock::where('agent_id', $this->b['agen']->id)->where('product_id', $this->b['product']->id)->value('quantity_on_hand'));
@@ -350,7 +356,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $shipment = $order->items()->firstOrFail()->shipment;
         $couriersBefore = Courier::count();
 
-        $rows = collect($this->actingAs($this->b['admin'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'));
+        $rows = collect($this->actingAs($this->b['koordinator'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'));
 
         // READ-ONLY: listing never mints Courier rows.
         $this->assertSame($couriersBefore, Courier::count());
@@ -366,11 +372,11 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         // A self_sub shipment offers no assignable candidate at all.
         $subOrder = $this->placeOrder($this->b['sub1'], 1, ['stock_source' => 'sub']);
         $subShipment = $subOrder->items()->firstOrFail()->shipment;
-        $this->actingAs($this->b['admin'])->getJson("/api/v1/shipments/{$subShipment->id}/eligible-couriers")->assertOk()->assertJsonCount(0, 'data');
+        $this->actingAs($this->b['koordinator'])->getJson("/api/v1/shipments/{$subShipment->id}/eligible-couriers")->assertOk()->assertJsonCount(0, 'data');
 
         // An already-assigned shipment lists nobody.
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
-        $this->actingAs($this->b['admin'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->assertJsonCount(0, 'data');
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->actingAs($this->b['koordinator'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->assertJsonCount(0, 'data');
 
         // The endpoint itself is office-gated.
         $this->actingAs($this->b['sub1'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertForbidden();
@@ -383,21 +389,21 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         // subNoProfile is not in anyone's referral scope yet → not listed.
         $order = $this->placeOrder($this->b['konsumen1'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
-        $userIds = collect($this->actingAs($this->b['admin'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'))->pluck('user_id');
+        $userIds = collect($this->actingAs($this->b['koordinator'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'))->pluck('user_id');
         $this->assertFalse($userIds->contains($this->b['subNoProfile']->id));
         $this->assertNull(Courier::where('user_id', $this->b['subNoProfile']->id)->first());
 
         // After an audited referral move into their scope, listing shows them with
         // courier_id = null — and STILL creates nothing.
         $this->b['konsumen1']->update(['sales_id' => $this->b['subNoProfile']->id]);
-        $rows = collect($this->actingAs($this->b['admin'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'));
+        $rows = collect($this->actingAs($this->b['koordinator'])->getJson("/api/v1/shipments/{$shipment->id}/eligible-couriers")->assertOk()->json('data'));
         $row = $rows->firstWhere('user_id', $this->b['subNoProfile']->id);
         $this->assertNotNull($row, 'C3 candidate listed');
         $this->assertNull($row['courier_id']);
         $this->assertNull(Courier::where('user_id', $this->b['subNoProfile']->id)->first(), 'GET performs no write');
 
         // …and the office assigns them by user id; the profile is created on this write path.
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
             'executor_user_id' => $this->b['subNoProfile']->id,
         ])->assertOk();
         $profileId = Courier::where('user_id', $this->b['subNoProfile']->id)->value('id');
@@ -412,28 +418,28 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $courierId = $this->subCourier($this->b['sub1'])->id;
 
         // Ineligible Sales-Kurir-Sub by user id.
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
             'executor_user_id' => $this->b['sub2']->id,
         ])->assertStatus(422);
         $this->assertNull(Courier::where('user_id', $this->b['subNoProfile']->id)->first(), 'refused resolve mints nothing');
 
         // Non-SKS user id.
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
             'executor_user_id' => $this->b['kurir']->id,
         ])->assertStatus(422);
 
         // Unknown user id.
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
             'executor_user_id' => 999999,
         ])->assertStatus(422);
 
         // Both identifiers at once.
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [
             'courier_id' => $courierId, 'executor_user_id' => $this->b['sub1']->id,
         ])->assertStatus(422);
 
         // Neither identifier.
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [])->assertStatus(422);
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", [])->assertStatus(422);
 
         $this->assertNull($shipment->fresh()->courier_id);
     }
@@ -447,8 +453,8 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $assigned = $this->placeOrder($this->b['konsumen1'], 1);
         $assignedShipment = $assigned->items()->firstOrFail()->shipment;
         $kurirCourierId = Courier::where('user_id', $this->b['kurir']->id)->firstOrFail()->id;
-        $this->assign($this->b['admin'], $assignedShipment->id, $kurirCourierId)->assertOk();
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$assignedShipment->id}/courier", [
+        $this->assign($this->b['koordinator'], $assignedShipment->id, $kurirCourierId)->assertOk();
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$assignedShipment->id}/courier", [
             'executor_user_id' => $this->b['subNoProfile']->id,
         ])->assertStatus(422);
         $this->assertNull(Courier::where('user_id', $this->b['subNoProfile']->id)->first());
@@ -457,7 +463,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $terminal = $this->placeOrder($this->b['konsumen1'], 1);
         $terminalShipment = $terminal->items()->firstOrFail()->shipment;
         $terminal->update(['status' => 'terkirim']);
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$terminalShipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$terminalShipment->id}/courier", [
             'executor_user_id' => $this->b['subNoProfile']->id,
         ])->assertStatus(422);
         $this->assertNull(Courier::where('user_id', $this->b['subNoProfile']->id)->first());
@@ -465,7 +471,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         // (c) self_sub shipment (never assignable, courier ban stays DB-enforced)
         $selfSub = $this->placeOrder($this->b['sub1'], 1, ['stock_source' => 'sub']);
         $selfSubShipment = $selfSub->items()->firstOrFail()->shipment;
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$selfSubShipment->id}/courier", [
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$selfSubShipment->id}/courier", [
             'executor_user_id' => $this->b['subNoProfile']->id,
         ])->assertStatus(422);
         $this->assertNull($selfSubShipment->fresh()->courier_id);
@@ -479,7 +485,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $order = $this->placeOrder($this->b['konsumen1'], 1);
         $item = $order->items()->firstOrFail();
         $shipment = $item->shipment;
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
 
         $rowFor = fn (User $actor) => collect(
             $this->actingAs($actor)->getJson('/api/v1/kurir/orders')->assertOk()->json('data')
@@ -521,12 +527,12 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
             'item_id' => \App\Models\StockRequestItem::where('stock_request_id', $requestId)->where('order_item_id', $it->id)->value('id'),
             'quantity' => $it->fulfilled_quantity,
         ])->all();
-        $proposalId = $this->actingAs($this->b['gudang'])->postJson("/api/v1/warehouse/stock-requests/{$requestId}/proposals", ['items' => $lines])->assertCreated()->json('data.id');
-        $this->actingAs($this->b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposalId}/approve")->assertOk();
+        $proposalId = $this->actingAs($this->b['gudang'])->post("/api/v1/warehouse/stock-requests/{$requestId}/proposals", $this->withHandoverProof(['items' => $lines]), ['Accept' => 'application/json'])->assertCreated()->json('data.id');
+        $this->actingAs($this->b['admin'])->postJson("/api/v1/warehouse/fulfillment-proposals/{$proposalId}/approve", ['reason' => 'pengecualian uji coba'])->assertOk();
 
-        $this->assign($this->b['admin'], $items[0]->shipment_id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $items[0]->shipment_id, $this->subCourier($this->b['sub1'])->id)->assertOk();
         $kurirCourierId = Courier::where('user_id', $this->b['kurir']->id)->firstOrFail()->id;
-        $this->assign($this->b['admin'], $items[1]->shipment_id, $kurirCourierId)->assertOk();
+        $this->assign($this->b['koordinator'], $items[1]->shipment_id, $kurirCourierId)->assertOk();
 
         // Each executor picks up their own shipment: from then on the work is exclusive.
         app(CourierService::class)->updateOrderItemStatus($items[0]->fresh(), 'dikirim', $this->b['sub1']);
@@ -551,7 +557,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
     {
         $order = $this->placeOrder($this->b['konsumen1'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
-        $this->assign($this->b['admin'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $this->subCourier($this->b['sub1'])->id)->assertOk();
 
         $this->b['sub1']->update(['status' => 'inactive']);
 
@@ -574,7 +580,7 @@ class SalesKurirSubStandardDeliveryTest extends TestCase
         $order = $this->placeOrder($this->b['konsumen1'], 1);
         $shipment = $order->items()->firstOrFail()->shipment;
         $kurirCourierId = Courier::where('user_id', $this->b['kurir']->id)->firstOrFail()->id;
-        $this->assign($this->b['admin'], $shipment->id, $kurirCourierId)->assertOk();
+        $this->assign($this->b['koordinator'], $shipment->id, $kurirCourierId)->assertOk();
 
         $this->b['kurir']->update(['status' => 'inactive']);
 

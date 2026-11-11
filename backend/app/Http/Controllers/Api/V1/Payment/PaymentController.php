@@ -205,7 +205,7 @@ class PaymentController extends Controller
         }
 
         $transaction = $this->latestCodTransaction($order);
-        $proof = $this->paymentService->submitCodPaymentProof($transaction, $request->file('proof'), $request->user(), $this->resolvePaidBy($request));
+        $proof = $this->paymentService->submitCodPaymentProof($transaction, $request->file('proof'), $request->user(), $this->resolvePaidBy($request), $request->filled('amount') ? (float) $request->input('amount') : null);
 
         return $this->ok([
             'transaction' => new PaymentTransactionResource($transaction->fresh('codPaymentProof.proof')),

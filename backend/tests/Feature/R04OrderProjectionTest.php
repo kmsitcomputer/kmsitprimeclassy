@@ -30,6 +30,7 @@ class R04OrderProjectionTest extends TestCase
 {
     use HasTestRegion;
     use RefreshDatabase;
+    use \Tests\Support\AcceptsWarehouseDemand;
 
     private array $b;
 
@@ -117,7 +118,7 @@ class R04OrderProjectionTest extends TestCase
 
         // The moment a courier is assigned, the order leaves the gudang surface.
         $shipment = $order->shipments()->firstOrFail();
-        $this->actingAs($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $this->b['courier']->id])->assertOk();
+        $this->actingAsDispatcher($this->b['admin'])->patchJson("/api/v1/shipments/{$shipment->id}/courier", ['courier_id' => $this->b['courier']->id])->assertOk();
         $this->assertNull(collect($this->actingAs($this->b['gudang'])->getJson('/api/v1/orders')->assertOk()->json('data'))->firstWhere('id', $order->id), 'once a courier is assigned the order must leave the gudang list');
         $this->actingAs($this->b['gudang'])->getJson("/api/v1/orders/{$order->id}")->assertForbidden();
     }
@@ -176,7 +177,7 @@ class R04OrderProjectionTest extends TestCase
         $order = $this->placeAgentOrder();
         $shipment = $order->items()->firstOrFail()->shipment;
 
-        app(CourierService::class)->assignCourier($shipment, $this->b['courier'], $this->b['admin']);
+        $this->assignAsKoordinator($shipment, $this->b['courier']);
         $flip = $this->actingAs($this->b['kurir'])->patchJson("/api/v1/shipments/{$shipment->id}/status", ['status' => 'dikirim'])->assertOk();
         $data = $flip->json('data');
 
@@ -195,7 +196,7 @@ class R04OrderProjectionTest extends TestCase
         $this->assertNull($before, 'Unassigned work is invisible to ordinary couriers.');
 
         $shipment = $order->items()->firstOrFail()->shipment;
-        app(CourierService::class)->assignCourier($shipment->fresh(), $this->b['courier'], $this->b['admin']);
+        $this->assignAsKoordinator($shipment->fresh(), $this->b['courier']);
 
         $after = collect($this->actingAs($this->b['kurir'])->getJson('/api/v1/kurir/orders?status=diproses')->assertOk()->json('data'))
             ->firstWhere('id', $order->id);
@@ -228,8 +229,8 @@ class R04OrderProjectionTest extends TestCase
         $itemB = $itemB->fresh();
         $this->assertNotSame($itemA->shipment_id, $itemB->shipment_id);
 
-        app(CourierService::class)->assignCourier($itemA->shipment()->first(), $this->b['courier'], $this->b['admin']);
-        app(CourierService::class)->assignCourier($itemB->shipment()->first(), $this->b['courierB'], $this->b['admin']);
+        $this->assignAsKoordinator($itemA->shipment()->first(), $this->b['courier']);
+        $this->assignAsKoordinator($itemB->shipment()->first(), $this->b['courierB']);
 
         // Each Kurir picks up their own shipment.
         $this->actingAs($this->b['kurir'])->patchJson("/api/v1/shipments/{$itemA->shipment_id}/status", ['status' => 'dikirim'])->assertOk();

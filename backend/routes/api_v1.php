@@ -299,6 +299,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         // the same ShipmentPolicy::updateStatus executor rule as the bulk path; the service
         // additionally verifies the item still belongs to this order and shipment under lock.
         Route::patch('/shipments/{shipment}/items/{orderItem}/status', [ShipmentController::class, 'updateItemStatus']);
+        Route::post('/shipments/{shipment}/items/{orderItem}/refuse', [ShipmentController::class, 'refuse']);
+        Route::post('/delivery-refusals/{refusal}/hand-back', [\App\Http\Controllers\Api\V1\Courier\DeliveryRefusalController::class, 'handBack']);
         // Thermal shipping receipt — read-only, before/after pickup mode is
         // derived server-side (ShipmentReceiptResource), never picked by the
         // caller. keuangan/korsal/sales/konsumen deliberately excluded from
@@ -308,7 +310,14 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // IMP-003: Koordinator-Kurir (branch dispatcher) assigns couriers; the
     // kurir that executes the delivery then progresses it. Both assignment
     // and dispatch read are same-agent, server-authoritative routes.
-    Route::middleware('role:super_admin,agen,admin,koordinator-kurir')->group(function () {
+    Route::middleware('role:koordinator-kurir')->group(function () {
+        Route::get('/dispatch/refusals', [DispatchController::class, 'refusals']);
+        Route::get('/dispatch/expeditions', [DispatchController::class, 'expeditions']);
+        Route::post('/delivery-refusals/{refusal}/receive', [\App\Http\Controllers\Api\V1\Courier\DeliveryRefusalController::class, 'receive']);
+        Route::post('/delivery-refusals/{refusal}/disposition', [\App\Http\Controllers\Api\V1\Courier\DeliveryRefusalController::class, 'dispose']);
+        Route::post('/dispatch/order-items/{orderItem}/split-batch', [DispatchController::class, 'splitBatch']);
+        Route::post('/dispatch/orders/{order}/request-fulfillment', [DispatchController::class, 'requestFulfillment']);
+        Route::patch('/shipments/{shipment}/expedition-handover', [ShipmentController::class, 'recordExpeditionHandover']);
         Route::patch('/shipments/{shipment}/courier', [ShipmentController::class, 'assign']);
         // CR-SALES-KURIR-SUB-DELIVERY-001: per-shipment assignable couriers (branch
         // kurir/koordinator + the Sales-Kurir-Sub executors eligible for THIS order
@@ -347,6 +356,8 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         // ledger row; settling that row financially is Keuangan's job below.
         Route::patch('/orders/{order}/items/{item}/fulfillment', [OrderFulfillmentController::class, 'adjust']);
         Route::patch('/orders/{order}/items/{item}/reschedule', [OrderFulfillmentController::class, 'reschedule']);
+        Route::get('/orders/{order}/items/{item}/cancel-eligibility', [OrderFulfillmentController::class, 'cancellationEligibility']);
+        Route::post('/orders/{order}/items/{item}/cancel-undelivered', [OrderFulfillmentController::class, 'cancelUndelivered']);
 
         // Return review is an operational decision (approve/reject, restock).
         Route::get('/admin/returns', [ReturnController::class, 'index']);
@@ -680,11 +691,16 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::post('/warehouse/stock-requests/{stockRequest}/fulfill', [StockRequestController::class, 'fulfill']);
         Route::post('/warehouse/stock-requests/{stockRequest}/proposals', [StockRequestProposalController::class, 'store']);
     });
-    Route::middleware('role:admin,gudang')->group(function () {
+    Route::middleware('role:admin,gudang,koordinator-kurir')->group(function () {
         Route::get('/warehouse/fulfillment-proposals', [StockRequestProposalController::class, 'index']);
         Route::get('/warehouse/fulfillment-proposals/{proposal}', [StockRequestProposalController::class, 'show']);
     });
+    // REM-002: routine settlement = the Koordinator Kurir's physical receipt (accepted/short/damaged).
+    Route::middleware('role:koordinator-kurir')->group(function () {
+        Route::post('/warehouse/fulfillment-proposals/{proposal}/receive', [StockRequestProposalController::class, 'receive']);
+    });
     Route::middleware('role:admin')->group(function () {
+        Route::post('/warehouse/stock-request-items/{item}/resolve-discrepancy', [StockRequestProposalController::class, 'resolveDiscrepancy']);
         Route::post('/warehouse/fulfillment-proposals/{proposal}/approve', [StockRequestProposalController::class, 'approve']);
         Route::post('/warehouse/fulfillment-proposals/{proposal}/reject', [StockRequestProposalController::class, 'reject']);
     });

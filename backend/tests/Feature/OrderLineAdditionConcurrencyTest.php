@@ -149,7 +149,7 @@ class OrderLineAdditionConcurrencyTest extends TestCase
 
         $request = StockRequest::withoutGlobalScopes()->where('order_id', $order->id)->firstOrFail();
         $firstItem = $request->items()->firstOrFail();
-        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $firstItem->id, 'quantity' => 1]]);
+        $proposal = app(StockRequestProposalService::class)->propose($gudang, $request, [['item_id' => $firstItem->id, 'quantity' => 1, 'shortage_reason' => 'uji konkurensi: sisa menyusul']]);
 
         $report = (new ConcurrencyHarness)->runServiceRace(
             ['op' => 'add-line', 'actor_id' => $admin->id, 'subject_id' => $order->id, 'extra' => ['line' => ['product_id' => $productA->id, 'quantity' => 2], 'key' => (string) Str::uuid()]],
