@@ -161,6 +161,8 @@ Jangan salin `.env`/kredensial DEV ke produksi · pertahankan `.env`, uploads, k
 | `otp:retention-purge` | purge OTP expired (kontrak 30 hari) |
 | `primeclassy:admin-notifications-prune` | prune notification center (dry-run/`--execute`; tidak di-schedule; produksi = langkah Owner) |
 
+`transactions:reset` mencakup snapshot finansial dan invoice, laporan awal, perubahan jatuh tempo, ledger refund, penyesuaian komisi, consent terkait order, bukti penerima refund, dan penolakan pengiriman. Log WhatsApp/email/notifikasi admin yang terkait order atau subject transaksi ikut dihapus sebelum order; log OTP/akun/sistem yang tidak terkait transaksi dipertahankan. Penghapusan child-before-parent serta pemutusan self-reference/cycle return–consent berjalan dalam satu transaksi DB; kegagalan FK membatalkan seluruh perubahan DB. Ini operasi maintenance destruktif yang diotorisasi tersendiri, bukan perubahan aturan append-only pada alur bisnis normal. Master CRM, konfigurasi, dan semantik stok existing tetap dipertahankan (stok Agent dipulihkan dari movement transaksi; stok fisik warehouse tidak diubah). `primeclassy:reset-dev-transactions` adalah command terpisah dengan guard database eksak; jangan mengganti konfigurasi database untuk melewati guard.
+
 Prosedur rinci `transactions:reset`/`products:reset` (boundary, syarat sukses, "on error STOP") mengikuti praktik terdokumentasi: dry-run → tinjau audit lengkap → eksekusi → verifikasi; jangan substitusi `migrate:fresh/refresh/reset`, `db:wipe`, `TRUNCATE`, `FOREIGN_KEY_CHECKS=0`.
 
 ## 9. Catatan operasional integrasi

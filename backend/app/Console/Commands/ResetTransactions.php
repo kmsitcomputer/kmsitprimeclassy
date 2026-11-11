@@ -57,6 +57,23 @@ class ResetTransactions extends Command
      * @var list<string>
      */
     private const TRANSACTION_TABLES = [
+        // Maintenance reset only: financial/consent ledgers remain append-only in normal flows.
+        // Delete their children first; self/cyclic references are broken inside the same transaction.
+        'commission_adjustments',
+        'refund_ledger_events',
+        'refund_payouts',
+        'refund_attempts',
+        'refund_obligations',
+        'refund_recipient_evidences',
+        'consent_events',
+        'order_financial_snapshot_units',
+        'order_item_financial_bases',
+        'order_financial_snapshots',
+        'order_sales_reductions',
+        'order_initial_report_items',
+        'order_invoice_snapshots',
+        'order_due_date_changes',
+        'delivery_refusals',
         'sub_stock_reservations',
         'stock_request_proposal_items',
         'stock_request_proposals',
@@ -84,6 +101,9 @@ class ResetTransactions extends Command
         'stock_transfer_items',
         'stock_transfers',
     ];
+
+    /** @var list<string> */
+    private const NOTIFICATION_TABLES = ['whatsapp_messages', 'email_messages', 'admin_notifications'];
 
     /** @var list<string> */
     private const MASTER_TABLES = [
@@ -121,6 +141,9 @@ class ResetTransactions extends Command
         $legacyPaths = DB::table('bank_transfer_verifications')->pluck('proof_image_path')->filter()->unique()->values()->all();
         $activityCount = $this->transactionActivityQuery()->count();
         $sheetLogCount = DB::table('sheets_sync_logs')->count();
+        $notificationCounts = collect(self::NOTIFICATION_TABLES)
+            ->filter(fn (string $table) => Schema::hasTable($table))
+            ->mapWithKeys(fn (string $table) => [$table => $this->transactionNotificationQuery($table)->count()])->all();
 
         $this->newLine();
         $this->info('TRANSACTION RESET AUDIT');
@@ -129,6 +152,9 @@ class ResetTransactions extends Command
         $this->table(['Table', 'Rows to delete'], collect($before)->map(fn (int $count, string $table) => [$table, $count])->values()->all());
         $this->line("Transaction activity logs: {$activityCount}");
         $this->line("Google Sheets sync logs: {$sheetLogCount}");
+        foreach ($notificationCounts as $table => $count) {
+            $this->line("Transaction notifications ({$table}): {$count}");
+        }
         $this->line('Referenced transaction media: '.$media->count());
         $this->line('Legacy bank-transfer proof paths: '.count($legacyPaths));
         $this->line('Transaction stock movements: '.$inventory['movement_count']);
@@ -157,10 +183,14 @@ class ResetTransactions extends Command
             return self::FAILURE;
         }
 
-        DB::transaction(function () use ($inventory, $tables): void {
+        DB::transaction(function () use ($inventory, $tables, $notificationCounts): void {
             $this->restoreInventory($inventory['rows']);
 
-            $this->breakOrderItemCrossReferences();
+            $this->breakTransactionCrossReferences();
+
+            foreach (array_keys($notificationCounts) as $table) {
+                $this->transactionNotificationQuery($table)->delete();
+            }
 
             foreach ($tables as $table) {
                 DB::table($table)->delete();
@@ -190,8 +220,11 @@ class ResetTransactions extends Command
         $this->line("Remaining transaction stock movements: {$remainingTransactionMovements}");
         $this->line("Remaining reserved-stock rows: {$remainingReservations}");
         $this->line('Transaction file deletion failures: '.count($fileFailures));
+        $remainingNotifications = collect(array_keys($notificationCounts))
+            ->sum(fn (string $table) => $this->transactionNotificationQuery($table)->count());
+        $this->line("Remaining transaction notifications: {$remainingNotifications}");
 
-        if ($notEmpty->isNotEmpty() || $remainingTransactionMovements !== 0 || $remainingReservations !== 0 || $masterChanged->isNotEmpty() || $fileFailures !== []) {
+        if ($remainingNotifications !== 0 || $notEmpty->isNotEmpty() || $remainingTransactionMovements !== 0 || $remainingReservations !== 0 || $masterChanged->isNotEmpty() || $fileFailures !== []) {
             $this->error('Reset verification failed. Review the reported counts.');
 
             return self::FAILURE;
@@ -226,13 +259,26 @@ class ResetTransactions extends Command
     }
 
     /**
-     * Break the in-table / cross-table references among rows that are all being
+     * Break the financial/consent self-links and return-consent cycle, then order-item
+     * references among rows that are all being
      * deleted anyway: order_items.split_from_order_item_id is RESTRICT ON DELETE,
      * so a blanket delete with split rows present would fail with 1451; the
      * shipment/additional-payment links are nulled for the same atomic pass.
      */
-    private function breakOrderItemCrossReferences(): void
+    private function breakTransactionCrossReferences(): void
     {
+        foreach ([
+            'refund_obligations' => 'parent_obligation_id',
+            'refund_recipient_evidences' => 'supersedes_id',
+            'consent_events' => 'root_event_id',
+            // returns -> consent_events -> returns is a cycle.
+            'returns' => 'consent_event_id',
+        ] as $table => $column) {
+            if (Schema::hasColumn($table, $column)) {
+                DB::table($table)->whereNotNull($column)->update([$column => null]);
+            }
+        }
+
         if (! Schema::hasTable('order_items')) {
             return;
         }
@@ -311,6 +357,10 @@ class ResetTransactions extends Command
             'App\\Models\\InventoryCancellationReversal', 'App\\Models\\DeliveryVerification',
             'App\\Models\\StockTransfer', 'App\\Models\\StockHandover',
             'App\\Models\\SubStockRequest', 'App\\Models\\SubStockReservation',
+            'App\\Models\\OrderFinancialSnapshot', 'App\\Models\\OrderItemFinancialBasis',
+            'App\\Models\\RefundObligation', 'App\\Models\\RefundAttempt', 'App\\Models\\RefundPayout',
+            'App\\Models\\RefundRecipientEvidence', 'App\\Models\\ConsentEvent',
+            'App\\Models\\CommissionAdjustment', 'App\\Models\\DeliveryRefusal',
         ];
 
         return DB::table('activity_logs')->where(function ($query) use ($subjectTypes): void {
@@ -324,7 +374,19 @@ class ResetTransactions extends Command
                 ->orWhere('event', 'like', 'stock_request.%')
                 ->orWhere('event', 'like', 'stock_transfer.%')
                 ->orWhere('event', 'like', 'sub_stock_request.%')
-                ->orWhere('event', 'like', 'fulfillment.%');
+                ->orWhere('event', 'like', 'fulfillment.%')
+                ->orWhere('event', 'like', 'refund.%')
+                ->orWhere('event', 'like', 'consent.%')
+                ->orWhere('event', 'like', 'delivery_refusal.%');
+        });
+    }
+
+    private function transactionNotificationQuery(string $table)
+    {
+        // These ledgers also contain OTP/account/system events: preserve those rows.
+        return DB::table($table)->where(function ($query): void {
+            $query->whereNotNull('order_id')
+                ->orWhereIn('subject_type', ['order', 'return', 'refund_payout', 'bank_transfer_verification']);
         });
     }
 

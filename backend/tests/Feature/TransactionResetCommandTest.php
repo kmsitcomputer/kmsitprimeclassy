@@ -37,6 +37,7 @@ use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
+use App\Services\Refund\OrderFinancialSnapshotService;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -52,6 +53,11 @@ class TransactionResetCommandTest extends TestCase
     private function transactionTables(): array
     {
         return array_values(array_filter([
+            'commission_adjustments', 'refund_ledger_events', 'refund_payouts', 'refund_attempts',
+            'refund_obligations', 'refund_recipient_evidences', 'consent_events',
+            'order_financial_snapshot_units', 'order_item_financial_bases', 'order_financial_snapshots',
+            'order_sales_reductions', 'order_initial_report_items', 'order_invoice_snapshots',
+            'order_due_date_changes', 'delivery_refusals',
             'sub_stock_reservations',
             'stock_request_proposal_items',
             'stock_request_proposals',
@@ -257,14 +263,108 @@ class TransactionResetCommandTest extends TestCase
             'subject_id' => $transfer->id, 'event' => 'stock_transfer.approved',
         ]);
 
+        $this->seedFinancialAndConsentDependencies($order, $item, $shipment, $return, $agent, $customer);
+
         return compact('agent', 'customer', 'product', 'method', 'order', 'location');
+    }
+
+    /** Populate the real RESTRICT edges missing from the old reset, including self-links and a cycle. */
+    private function seedFinancialAndConsentDependencies(Order $order, OrderItem $item, Shipment $shipment, ReturnRequest $return, User $agent, User $customer): void
+    {
+        $snapshot = DB::transaction(fn () => app(OrderFinancialSnapshotService::class)
+            ->ensure($order, 'return_approval', $agent));
+        $obligation = DB::table('refund_obligations')->insertGetId([
+            'order_id' => $order->id, 'obligation_no' => 'RESET-REFUND',
+            'obligation_key' => 'reset-refund', 'source_type' => 'return_stage',
+            'source_id' => $return->id, 'snapshot_id' => $snapshot->id, 'amount' => 1000,
+        ]);
+        DB::table('refund_obligations')->insert([
+            'order_id' => $order->id, 'obligation_no' => 'RESET-DEFERRED',
+            'obligation_key' => 'reset-deferred', 'source_type' => 'deferred',
+            'parent_obligation_id' => $obligation,
+        ]);
+        $attempt = DB::table('refund_attempts')->insertGetId([
+            'obligation_id' => $obligation, 'attempt_no' => 1, 'method' => 'cash',
+            'amount' => 1000, 'status' => 'succeeded', 'idempotency_key' => 'reset-attempt',
+        ]);
+        $payout = DB::table('refund_payouts')->insertGetId([
+            'obligation_id' => $obligation, 'order_id' => $order->id, 'attempt_id' => $attempt,
+            'payout_no' => 'RESET-PAYOUT', 'payout_key' => 'reset-payout',
+            'amount' => 1000, 'method' => 'cash', 'paid_at' => now(),
+        ]);
+        DB::table('refund_ledger_events')->insert([
+            'order_id' => $order->id, 'obligation_id' => $obligation, 'attempt_id' => $attempt,
+            'payout_id' => $payout, 'event_type' => 'refund.paid', 'occurred_at' => now(),
+        ]);
+        DB::table('commission_adjustments')->insert([
+            'commission_id' => DB::table('commissions')->where('order_id', $order->id)->value('id'),
+            'order_id' => $order->id, 'order_item_id' => $item->id,
+            'return_item_id' => DB::table('return_items')->where('return_id', $return->id)->value('id'),
+            'refund_obligation_id' => $obligation, 'beneficiary_user_id' => $agent->id,
+            'beneficiary_role' => 'agent', 'amount' => -100,
+        ]);
+        DB::table('order_sales_reductions')->insert([
+            'order_id' => $order->id, 'source_type' => 'return_stage', 'amount' => 1000,
+        ]);
+        $crm = DB::table('crm_customers')->insertGetId([
+            'agent_id' => $agent->id, 'owner_user_id' => $agent->id, 'name' => 'Preserved CRM',
+        ]);
+        $consentData = [
+            'agent_id' => $agent->id, 'subject_user_id' => $customer->id,
+            'order_id' => $order->id, 'return_id' => $return->id,
+            'actor_id' => $agent->id, 'event_type' => 'consent_captured',
+            'purpose' => 'return', 'policy_version' => 'test-v1', 'occurred_at' => now(),
+        ];
+        $consent = DB::table('consent_events')->insertGetId($consentData);
+        DB::table('consent_events')->insert(array_replace($consentData, [
+            'root_event_id' => $consent, 'event_type' => 'withdrawn',
+        ]));
+        DB::table('returns')->where('id', $return->id)->update(['consent_event_id' => $consent]);
+        $recipientData = [
+            'agent_id' => $agent->id, 'order_id' => $order->id, 'crm_customer_id' => $crm,
+            'return_id' => $return->id, 'consent_event_id' => $consent,
+            'recipient_name' => 'Recipient', 'method' => 'cash', 'authorization_note' => 'Test',
+            'captured_by' => $agent->id, 'occurred_at' => now(),
+        ];
+        $recipient = DB::table('refund_recipient_evidences')->insertGetId($recipientData);
+        DB::table('refund_recipient_evidences')->insert($recipientData + ['supersedes_id' => $recipient]);
+        DB::table('delivery_refusals')->insert([
+            'agent_id' => $agent->id, 'order_id' => $order->id, 'order_item_id' => $item->id,
+            'shipment_id' => $shipment->id, 'quantity' => 1, 'reason' => 'Declined',
+            'recorded_by' => $agent->id, 'recorded_at' => now(),
+        ]);
+        foreach ([null, $order->id] as $notificationOrderId) {
+            $key = $notificationOrderId === null ? 'preserved-account' : 'transaction-order';
+            DB::table('whatsapp_messages')->insert([
+                'idempotency_key' => $key, 'purpose' => $notificationOrderId === null ? 'otp' : 'transaction',
+                'order_id' => $notificationOrderId, 'subject_type' => $notificationOrderId === null ? 'otp_challenge' : 'order',
+            ]);
+            DB::table('email_messages')->insert([
+                'idempotency_key' => $key, 'event' => $notificationOrderId === null ? 'account_registered' : 'order_created',
+                'order_id' => $notificationOrderId, 'recipient_role' => 'admin', 'recipient_user_id' => $agent->id,
+                'recipient_email' => 'admin@example.test', 'subject' => 'Test', 'body' => 'Test',
+            ]);
+            DB::table('admin_notifications')->insert([
+                'dedupe_key' => $key, 'recipient_user_id' => $agent->id, 'order_id' => $notificationOrderId,
+                'type' => $notificationOrderId === null ? 'account.registered' : 'order.created',
+                'title' => 'Test', 'body' => 'Test',
+            ]);
+        }
+        DB::table('order_due_date_changes')->insert([
+            'order_id' => $order->id, 'reason' => 'Test', 'changed_by' => $agent->id,
+        ]);
+        DB::table('order_invoice_snapshots')->insert([
+            'order_id' => $order->id, 'version' => 1, 'trigger' => 'issued',
+            'invoice_number' => $order->order_no, 'total_amount' => 40000,
+            'verified_paid_amount' => 0, 'outstanding_amount' => 40000, 'payment_status' => 'unpaid',
+        ]);
     }
 
     public function test_dry_run_does_not_mutate_data(): void
     {
         $this->seedTransactionGraph();
 
-        $counts = fn () => collect($this->transactionTables())
+        $counts = fn () => collect(array_merge($this->transactionTables(), ['whatsapp_messages', 'email_messages', 'admin_notifications']))
             ->mapWithKeys(fn (string $table) => [$table => DB::table($table)->count()])->all();
         $before = $counts();
         $this->assertGreaterThan(0, $before['orders']);
@@ -278,6 +378,35 @@ class TransactionResetCommandTest extends TestCase
         $this->assertSame($before, $counts());
         $this->assertSame($movementsBefore, DB::table('stock_movements')->count());
         $this->assertSame($activityBefore, DB::table('activity_logs')->count());
+        $this->assertDatabaseHas('product_stocks', ['quantity_on_hand' => 18, 'quantity_reserved' => 2]);
+    }
+
+    public function test_failure_after_financial_deletion_rolls_back_rows_links_and_stock(): void
+    {
+        $this->seedTransactionGraph();
+        $before = [];
+        foreach (array_merge($this->transactionTables(), ['whatsapp_messages', 'email_messages', 'admin_notifications']) as $table) {
+            $before[$table] = DB::table($table)->orderBy('id')->get()->toJson();
+        }
+        $fired = false;
+        DB::listen(function ($query) use (&$fired): void {
+            if (! $fired && $query->sql === 'delete from `order_items`') {
+                $fired = true;
+                throw new \RuntimeException('Injected reset interruption');
+            }
+        });
+
+        try {
+            $this->artisan('transactions:reset', ['--force' => true])->run();
+            $this->fail('Expected the injected interruption.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Injected reset interruption', $exception->getMessage());
+        }
+
+        $this->assertTrue($fired);
+        foreach ($before as $table => $rows) {
+            $this->assertSame($rows, DB::table($table)->orderBy('id')->get()->toJson(), $table);
+        }
         $this->assertDatabaseHas('product_stocks', ['quantity_on_hand' => 18, 'quantity_reserved' => 2]);
     }
 
@@ -303,6 +432,13 @@ class TransactionResetCommandTest extends TestCase
     {
         $this->seedTransactionGraph();
 
+        // Financial projections, refund/deferred chains, consent cycles and refusal rows are populated.
+        foreach (['order_financial_snapshot_units', 'order_item_financial_bases', 'order_financial_snapshots',
+            'refund_obligations', 'refund_attempts', 'refund_payouts', 'refund_ledger_events',
+            'commission_adjustments', 'refund_recipient_evidences', 'consent_events',
+            'order_sales_reductions', 'delivery_refusals', 'order_due_date_changes', 'order_invoice_snapshots'] as $table) {
+            $this->assertGreaterThan(0, DB::table($table)->count(), "expected seeded rows in {$table}");
+        }
         // Every FK edge from the production recon is populated.
         foreach (['delivery_verifications', 'return_items', 'returns', 'order_item_adjustments', 'commissions', 'cod_payment_proofs', 'bank_transfer_verifications', 'order_additional_payments', 'payment_transactions', 'shipments', 'stock_handovers', 'sub_stock_request_items', 'sub_stock_requests', 'stock_transfer_items', 'stock_transfers'] as $table) {
             $this->assertGreaterThan(0, DB::table($table)->count(), "expected seeded rows in {$table}");
@@ -312,6 +448,10 @@ class TransactionResetCommandTest extends TestCase
 
         foreach ($this->transactionTables() as $table) {
             $this->assertDatabaseCount($table, 0);
+        }
+        foreach (['whatsapp_messages', 'email_messages', 'admin_notifications'] as $table) {
+            $this->assertDatabaseCount($table, 1);
+            $this->assertDatabaseHas($table, ['order_id' => null]);
         }
         // Reset is idempotent: a second run on empty tables still succeeds.
         $this->artisan('transactions:reset', ['--force' => true])->assertSuccessful();
@@ -331,6 +471,7 @@ class TransactionResetCommandTest extends TestCase
 
         // E. Master / configuration data survives.
         $this->assertDatabaseCount('users', 2);
+        $this->assertDatabaseHas('crm_customers', ['name' => 'Preserved CRM']);
         $this->assertDatabaseHas('products', ['id' => $seed['product']->id, 'sku' => 'MASTER-001']);
         $this->assertDatabaseHas('product_fees', ['product_id' => $seed['product']->id, 'beneficiary_role' => 'agent', 'amount' => 1000]);
         $this->assertDatabaseHas('payment_methods', ['id' => $seed['method']->id, 'code' => 'test']);
