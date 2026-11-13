@@ -119,7 +119,7 @@ Pertahankan juga `public_html/storage` (symlink), `.well-known` (ACME), `config.
 9. `php artisan up`.
 10. **Smoke** (§7.4). Catat path backup, migrasi Ran, angka rekonsiliasi, hasil smoke di checkpoint.
 
-**Catatan migrasi:** `2026_10_01_100000` membuat 2 trigger BEFORE INSERT/UPDATE `shipments` — server dengan binary logging aktif butuh `SUPER`/`log_bin_trust_function_creators=1` (produksi `log_bin=OFF`, aman). `down()` migrasi rename role Package A bukan inverse bersih — jangan andalkan rollback. Migrasi REL005 (`email_messages`, `admin_notifications`) ter-apply produksi; migrasi REL006 (`2026_11_02_100000` dst., `2026_11_04_*`) — status produksi: rilis ter-deploy (laporan Owner REL006 merge & deploy berhasil); verifikasi `migrate:status` saat preflight berikutnya.
+**Catatan migrasi:** `2026_10_01_100000` membuat 2 trigger BEFORE INSERT/UPDATE `shipments` — server dengan binary logging aktif butuh `SUPER`/`log_bin_trust_function_creators=1`. **Diverifikasi 2026-11-13 (REL009): produksi `log_bin=ON`, `log_bin_trust_function_creators=OFF`, dan `prime_app` tanpa SUPER** — migrasi yang membuat trigger (`2026_11_14_110000_add_physical_stock_revision`) gagal fail-closed (error 1419) bila dijalankan sebagai `prime_app`; jalankan migrasi itu saja (`--path=…`) dengan kredensial root lewat `docker exec --env-file <(…)` (tanpa mencetak/command-line password), tanpa mengubah variabel server; trigger berdefiner `root@%`. `down()` migrasi rename role Package A bukan inverse bersih — jangan andalkan rollback. Migrasi REL005 (`email_messages`, `admin_notifications`) ter-apply produksi; migrasi REL006 (`2026_11_02_100000` dst., `2026_11_04_*`) — status produksi: rilis ter-deploy (laporan Owner REL006 merge & deploy berhasil); verifikasi `migrate:status` saat preflight berikutnya.
 
 ### 7.4 Smoke test
 
@@ -200,3 +200,12 @@ Prosedur rinci `transactions:reset`/`products:reset` (boundary, syarat sukses, "
 - **Eksekusi:** `artisan down` → rsync backend tracked-only (tanpa `--delete`; `.env`, `vendor`, `storage`, `bootstrap/cache` tidak disentuh) → `config:clear` → `migrate --force` (5 DONE: 162 → 167) → `config/route/view:cache` sebagai www-data → ekstrak `dist` tanpa `config.js`/`.htaccess`/`laravel.php` (tanpa `--delete`) → `chown` storage dan bootstrap/cache → `docker compose restart php` → `artisan up`. Tanpa insiden.
 - **Smoke (non-destruktif):** `/`, `/up`, `/api/v1/install/status`, `/api/v1/homepage` 200; `/api/v1/auth/me` 401; 8 endpoint baru tanpa auth 401; rute terdaftar; skema baru ada (123 tabel); matriks otorisasi invoice 13/13 pada kode produksi (model di memori); tanpa 5xx. **Alur berdata (penugasan parsial, notifikasi kekurangan, invoice per akun) belum diuji di produksi** karena tidak ada data transaksi/akun uji dan tidak ada penulisan produksi yang diotorisasi; bukti fungsional berasal dari Full Test DEV.
 
+
+## Catatan rilis REL009 (2026-11-13)
+
+- **Revisi terpasang:** `bfe88a3` (branch `release/primeclassy-v2-20261113`, basis `6a14041`; `main` belum di-merge). Semua pekerjaan kecuali REM-11 (ON HOLD, tidak ada kode/rute/migrasi/tabel REM-11 di produksi).
+- **Gerbang:** Parallel Full Test run `0299a90e4e6c` PASS (2408/2408, 15.098 asersi, inventori RECONCILED); `vue-tsc` + build OK. Rehearsal migrasi MySQL 8.0.46 (skema produksi, `log_bin=ON`): tanpa SUPER → error 1419 pada migrasi trigger; prosedur root-satu-langkah → OK.
+- **Backup:** `/opt/primeccookies/deploy-backups/PRE-REL009-20261113T105648Z/` (dump, backend, public_html, compose, md5sums; restore diuji: 123 tabel/167 migrasi/53 produk/106 user).
+- **Migrasi:** 167 → 172 (5 DONE; trigger oleh root, sisanya `prime_app`); baris tabel tidak berubah.
+- **Frontend:** `rsync --delete` dengan `--exclude` eksplisit (`laravel.php config.js storage .well-known .htaccess index.html.* sw.js.*`) dan `--filter='P /assets/*'`. **Pelajaran:** di zsh variabel `$EX` berisi beberapa `--exclude` tidak dipecah — selalu tulis argumen eksplisit dan baca dry-run (dry-run pertama menunjukkan `laravel.php` akan terhapus).
+- Laporan lengkap: [PRIMECLASSY-FULL-TEST-PRODUCTION-RELEASE-20261113](PRIMECLASSY-FULL-TEST-PRODUCTION-RELEASE-20261113.md).

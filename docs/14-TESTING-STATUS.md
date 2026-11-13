@@ -57,7 +57,7 @@ Baca baris akhir `RUN <uuid> exit=… failures: environment/migration/concurrenc
 
 ## 7. Parallel Full Test (5 worker) — terintegrasi, BELUM diaktifkan
 
-Infrastruktur Owner-only di `tools/parallel-test/` (README di sana). Status: *INTEGRATED — PENDING CODEX SAFETY AUDIT*; **tidak pernah dijalankan**, database worker belum dibuat, validasi runtime masih pending.
+Infrastruktur Owner-only di `tools/parallel-test/` (README di sana). **Status terbaru (2026-11-13): dijalankan dan terverifikasi** — run `0299a90e4e6c` PASS, 2408/2408 tes, 15.098 asersi, 0 gagal/error/skip, inventori RECONCILED (lihat `PRIMECLASSY-FULL-TEST-PRODUCTION-RELEASE-20261113.md`; Owner mengotorisasi Full Test untuk rilis ini). Catatan operasional: perintah tooling (type-check/lint/build) **jangan** memakai mount `parallel-node-linux/node_modules` milik harness — guard `FRONTEND_DEPS_CONTENT_CHANGED` akan menolak run; pakai salinan terpisah.
 
 - `Tests\Support\TestDatabaseGuard` kini menerima, selain `primeclassy_testing`, hanya `primeclassy_testing_w1..w5` (peta eksplisit) untuk worker `PRIMECLASSY_PARALLEL_WORKER=1..5`; host DB harus `127.0.0.1|localhost|::1|primeclassy-mariadb`; `primeclassy_db`/DEV/production tetap ditolak. Tanpa variabel itu perilaku lama (database kanonis) tidak berubah.
 - Tes konkurensi/aktor, tes yang membaca nama DB kanonis, dan tes yang memakai path storage bersama berjalan di *serial lane* (`primeclassy_testing`) setelah fase paralel; harness konkurensi tidak diubah.
