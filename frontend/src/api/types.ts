@@ -14,6 +14,7 @@ export interface ProductVariation {
   price: string
   weight_grams: number
   is_active: boolean
+  attributes?: Record<string, string>
   agent_available_quantity?: number
   stock?: { available: number; in_stock: boolean; login_to_view: boolean }
 }

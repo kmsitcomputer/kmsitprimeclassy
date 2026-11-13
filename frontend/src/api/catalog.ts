@@ -28,6 +28,7 @@ export async function deleteCategory(id: number) {
 }
 
 export interface ListProductsFilters {
+  stock_source?: 'agent' | 'sub'
   search?: string
   category?: string
   sort?: 'newest' | 'price_asc' | 'price_desc'
@@ -44,16 +45,37 @@ export async function listProducts(filters: ListProductsFilters = {}) {
   return { products: data.data, meta: data.meta as unknown as PaginationMeta }
 }
 
+export type ManagedStatusFilter = 'all' | 'active' | 'draft' | 'inactive'
+
+/** REM-05: management listing — every status; "all" is a filter value, not a database status. */
+export async function listManagedProducts(
+  filters: { status?: ManagedStatusFilter; search?: string; category_id?: number; per_page?: number; page?: number } = {},
+) {
+  const { data } = await http.get<ApiEnvelope<Product[]>>('/manage/products', { params: filters })
+  return { products: data.data, meta: data.meta as unknown as PaginationMeta }
+}
+
+/** REM-03: complete management detail (all images, all variants) for the edit form. */
+export async function getManagedProduct(id: number) {
+  const { data } = await http.get<ApiEnvelope<Product>>(`/manage/products/${id}`)
+  return data.data
+}
+
+/** REM-04: guarded permanent delete — rejected with 409 while the product is still referenced. */
+export async function hardDeleteProduct(id: number) {
+  await http.delete(`/products/${id}/permanent`, { data: { confirm: true } })
+}
+
 /** "Produk lainnya" on the product detail page — a small random slice of the active catalog, excluding the product being viewed. */
-export async function listRelatedProducts(excludeProductId: number, limit = 8) {
+export async function listRelatedProducts(excludeProductId: number, limit = 8, stockSource?: 'agent' | 'sub') {
   const { data } = await http.get<ApiEnvelope<Product[]>>('/products', {
-    params: { random: true, exclude: excludeProductId, per_page: limit },
+    params: { random: true, exclude: excludeProductId, per_page: limit, stock_source: stockSource },
   })
   return data.data
 }
 
-export async function getProduct(slug: string) {
-  const { data } = await http.get<ApiEnvelope<Product>>(`/products/${slug}`)
+export async function getProduct(slug: string, stockSource?: 'agent' | 'sub') {
+  const { data } = await http.get<ApiEnvelope<Product>>(`/products/${slug}`, { params: { stock_source: stockSource } })
   return data.data
 }
 
@@ -104,7 +126,7 @@ export async function createVariation(
 export async function updateVariation(
   productId: number,
   variationId: number,
-  payload: Partial<{ sku: string; price: number; weight_grams: number; is_active: boolean }>,
+  payload: Partial<{ sku: string; price: number; weight_grams: number; is_active: boolean; attributes: Record<string, string> }>,
 ) {
   const { data } = await http.patch<ApiEnvelope<ProductVariation>>(
     `/products/${productId}/variations/${variationId}`,
@@ -150,6 +172,15 @@ export async function setPrimaryProductImage(productId: number, imageId: number)
   return data.data
 }
 
+/** REM-02: persist the order of ONE gallery scope (`ids` = every image of that scope, in order). */
+export async function reorderProductImages(productId: number, variationId: number | null, ids: number[]) {
+  const { data } = await http.put<ApiEnvelope<ProductImage[]>>(`/products/${productId}/images/order`, {
+    product_variation_id: variationId,
+    ids,
+  })
+  return data.data
+}
+
 export interface FeeSet {
   agent_fee: number
   sales_fee: number
@@ -186,4 +217,74 @@ export async function setVariationFees(
     payload,
   )
   return data.data
+}
+
+/* ---------- REM-01: catalogue import / export ---------- */
+
+export interface CatalogStockContext {
+  agent_id?: number
+  stock_type?: 'transit' | 'shipping' | 'sub'
+  sub_location_id?: number
+}
+
+export interface CatalogImportRowResult {
+  line: number
+  sku: string
+  type: string
+  action: 'create' | 'update' | 'none'
+  valid: boolean
+  errors: string[]
+  stock_target: number | null
+  outcome: string | null
+}
+
+export interface CatalogImportResult {
+  summary: Record<string, number>
+  rows: CatalogImportRowResult[]
+  context: CatalogStockContext | null
+}
+
+export async function downloadCatalogExport(format: 'csv' | 'xlsx', ctx: CatalogStockContext = {}) {
+  const { data } = await http.get<Blob>('/catalog/export', {
+    params: { format, ...ctx },
+    responseType: 'blob',
+  })
+  return data
+}
+
+function importForm(file: File, ctx: CatalogStockContext, key?: string) {
+  const form = new FormData()
+  form.append('file', file)
+  if (key) form.append('idempotency_key', key)
+  if (ctx.agent_id) form.append('agent_id', String(ctx.agent_id))
+  if (ctx.stock_type) form.append('stock_type', ctx.stock_type)
+  if (ctx.sub_location_id) form.append('sub_location_id', String(ctx.sub_location_id))
+  return form
+}
+
+/** Validation only — nothing is written. */
+export async function previewCatalogImport(file: File, ctx: CatalogStockContext = {}) {
+  const { data } = await http.post<ApiEnvelope<CatalogImportResult>>(
+    '/catalog/imports/preview',
+    importForm(file, ctx),
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return data.data
+}
+
+/** Applies row-by-row. Reuse the SAME idempotency key when retrying the same file. */
+export async function applyCatalogImport(file: File, idempotencyKey: string, ctx: CatalogStockContext = {}) {
+  const { data } = await http.post<ApiEnvelope<CatalogImportResult>>(
+    '/catalog/imports',
+    importForm(file, ctx, idempotencyKey),
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return data.data
+}
+
+/* ---------- REM-07: bestsellers (public; Agent resolved server-side) ---------- */
+
+export async function listBestsellers(params: { period?: '7' | '30' | '90' | 'all'; limit?: 4 | 8 | 12; ref?: string; agent_id?: number } = {}) {
+  const { data } = await http.get<ApiEnvelope<Product[]>>('/bestsellers', { params })
+  return { products: data.data, hidden: Boolean((data.meta as Record<string, unknown> | undefined)?.hidden) }
 }

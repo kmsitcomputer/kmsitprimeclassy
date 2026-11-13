@@ -17,9 +17,12 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\AccountRecoveryController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\ProfileController;
+use App\Http\Controllers\Api\V1\Catalog\BestsellerController;
+use App\Http\Controllers\Api\V1\Catalog\CatalogImportExportController;
 use App\Http\Controllers\Api\V1\Catalog\ProductCategoryController;
 use App\Http\Controllers\Api\V1\Catalog\ProductController;
 use App\Http\Controllers\Api\V1\Catalog\ProductImageController;
+use App\Http\Controllers\Api\V1\Catalog\ProductManagementController;
 use App\Http\Controllers\Api\V1\Catalog\ProductVariationController;
 use App\Http\Controllers\Api\V1\Checkout\CheckoutController;
 use App\Http\Controllers\Api\V1\Checkout\GeocodeController;
@@ -40,6 +43,8 @@ use App\Http\Controllers\Api\V1\Invoice\InvoiceController;
 use App\Http\Controllers\Api\V1\Language\LanguageController;
 use App\Http\Controllers\Api\V1\Media\MediaController;
 use App\Http\Controllers\Api\V1\Order\DeliveryVerificationController;
+use App\Http\Controllers\Api\V1\Order\OrderItemReceiptController;
+use App\Http\Controllers\Api\V1\Order\ReturnReceiptAllocationController;
 use App\Http\Controllers\Api\V1\Order\OrderController;
 use App\Http\Controllers\Api\V1\Payment\PaymentController;
 use App\Http\Controllers\Api\V1\Promo\ProductDiscountController;
@@ -109,6 +114,7 @@ Route::post('/auth/reset-password', [AccountRecoveryController::class, 'reset'])
 
 Route::get('/categories', [ProductCategoryController::class, 'index']);
 Route::get('/products', [ProductController::class, 'index']);
+Route::get('/bestsellers', [BestsellerController::class, 'index']);
 Route::get('/products/{slug}', [ProductController::class, 'show']);
 
 Route::get('/referral/{code}', [ReferralController::class, 'show']);
@@ -340,12 +346,18 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/return-items/{item}/courier', [ReturnController::class, 'assignPickupCourier']);
     });
 
+
     // R-03: Admin final delivery verification — append-only operational outcome (received /
     // not_received / return), separate from payment verification, transaction verification and the
     // courier's own shipment delivery action. Admin only, same-Agent (DeliveryVerificationPolicy).
     Route::middleware('role:super_admin,admin')->group(function () {
         Route::get('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'index']);
         Route::post('/shipments/{shipment}/delivery-verifications', [DeliveryVerificationController::class, 'store']);
+
+        // REM-07 / D-06 A: actual per-item recipient receipt events (Admin own Agent / Super Admin).
+        Route::get('/order-items/{item}/receipts', [OrderItemReceiptController::class, 'index']);
+        Route::post('/order-items/{item}/receipts', [OrderItemReceiptController::class, 'store']);
+        Route::post('/return-items/{returnItem}/receipt-allocations', [ReturnReceiptAllocationController::class, 'store']);
     });
 
     Route::middleware('role:super_admin,agen,admin')->group(function () {
@@ -523,10 +535,10 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::put('/invoice/config', [InvoiceConfigController::class, 'update']);
     });
 
-    // Category taxonomy — super_admin only (ProductCategoryPolicy); structural,
-    // never opened to agen the way product CRUD itself now is.
+    // Category taxonomy (global). REM-06: CREATE is open to super_admin/admin/agen (ProductCategoryPolicy::create);
+    // edit/reparent/delete stay super_admin only — the policy re-checks both server-side.
+    Route::middleware('role:super_admin,admin,agen')->post('/categories', [ProductCategoryController::class, 'store']);
     Route::middleware('role:super_admin')->group(function () {
-        Route::post('/categories', [ProductCategoryController::class, 'store']);
         Route::patch('/categories/{category}', [ProductCategoryController::class, 'update']);
         Route::delete('/categories/{category}', [ProductCategoryController::class, 'destroy']);
     });
@@ -537,6 +549,15 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // super_admin here (confirmed decision, not an oversight): one agent can
     // create or edit any product, same as super_admin. See ProductPolicy.
     Route::middleware('role:super_admin,agen,admin')->group(function () {
+        // REM-01: catalogue import/export (stock only ever through the existing opname approval).
+        Route::get('/catalog/export', [CatalogImportExportController::class, 'export']);
+        Route::post('/catalog/imports/preview', [CatalogImportExportController::class, 'preview']);
+        Route::post('/catalog/imports', [CatalogImportExportController::class, 'apply']);
+
+        // REM-03/05: management reads (all statuses, complete image/variant set).
+        Route::get('/manage/products', [ProductManagementController::class, 'index']);
+        Route::get('/manage/products/{product}', [ProductManagementController::class, 'show']);
+
         Route::post('/products', [ProductController::class, 'store']);
         Route::patch('/products/{product}', [ProductController::class, 'update']);
 
@@ -544,6 +565,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
         Route::patch('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update']);
 
         Route::post('/products/{product}/images', [ProductImageController::class, 'store']);
+        Route::put('/products/{product}/images/order', [ProductImageController::class, 'reorder']);
         Route::patch('/products/{product}/images/{image}', [ProductImageController::class, 'update']);
         Route::delete('/products/{product}/images/{image}', [ProductImageController::class, 'destroy']);
     });
@@ -553,6 +575,7 @@ Route::middleware(['auth:sanctum', 'agent.linked'])->group(function () {
     // boundary server-side (defense in depth) for forged requests.
     Route::middleware('role:super_admin,agen')->group(function () {
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+        Route::delete('/products/{id}/permanent', [ProductController::class, 'forceDestroy'])->whereNumber('id');
         Route::delete('/products/{product}/variations/{variation}', [ProductVariationController::class, 'destroy']);
     });
 

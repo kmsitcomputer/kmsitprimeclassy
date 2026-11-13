@@ -9,6 +9,7 @@ use App\Http\Resources\ProductVariationResource;
 use App\Models\Product;
 use App\Models\ProductVariation;
 use App\Services\Product\ProductVariationService;
+use Illuminate\Support\Facades\DB;
 
 class ProductVariationController extends Controller
 {
@@ -31,9 +32,16 @@ class ProductVariationController extends Controller
     {
         $this->authorize('update', $product);
 
-        $variation->update($request->only('sku', 'price', 'weight_grams', 'is_active'));
+        abort_unless($variation->product_id === $product->id, 404);
 
-        return $this->ok(new ProductVariationResource($variation));
+        DB::transaction(function () use ($request, $product, $variation) {
+            $variation->update($request->only('sku', 'price', 'weight_grams', 'is_active'));
+            if ($request->has('attributes')) {
+                $this->variationService->updateAttributes($product, $variation, $request->array('attributes'));
+            }
+        });
+
+        return $this->ok(new ProductVariationResource($variation->fresh()->load('compositions.attribute', 'compositions.option')));
     }
 
     public function destroy(Product $product, ProductVariation $variation)

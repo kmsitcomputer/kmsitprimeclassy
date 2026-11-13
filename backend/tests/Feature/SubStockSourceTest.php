@@ -355,4 +355,17 @@ class SubStockSourceTest extends TestCase
         $this->expectException(ApiException::class);
         app(SubStockService::class)->assertPhysicalDecreaseAllowed($this->b['location']->id, $this->b['product']->id, null, 10, 5);
     }
+    public function test_catalog_source_uses_owned_sub_and_keeps_agent_availability_separate(): void
+    {
+        $b = $this->b;
+        $p = $b['product'];
+        $this->actingAs($b['sub'])->getJson('/api/v1/products/'.$p->slug.'?stock_source=sub')->assertOk()
+            ->assertJsonPath('data.stock.available', 10)->assertJsonPath('data.agent_available_quantity', 20);
+        $this->getJson('/api/v1/products?stock_source=sub')->assertOk()->assertJsonPath('data.0.stock.available', 10);
+        $this->getJson('/api/v1/products/'.$p->slug.'?stock_source=agent')->assertOk()->assertJsonPath('data.stock.available', 20);
+        $this->getJson('/api/v1/products/'.$p->slug.'?stock_source=sub&sub_location_id='.$b['otherLocation']->id)->assertForbidden();
+        $this->actingAs($b['sales'])->getJson('/api/v1/products/'.$p->slug.'?stock_source=sub')->assertForbidden();
+        $this->actingAs($b['referred'])->getJson('/api/v1/products?stock_source=sub')->assertForbidden();
+        $this->actingAs($b['sub'])->getJson('/api/v1/products/'.$p->slug.'?stock_source=mixed')->assertUnprocessable();
+    }
 }

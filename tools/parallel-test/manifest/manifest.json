@@ -1,30 +1,30 @@
 {
   "schema_version": 1,
   "kind": "primeclassy-parallel-test-manifest",
-  "generated_at": "2026-11-11T05:44:41+00:00",
-  "repo_root": "/Users/kmsitcomputer/KMSIT-Server/apps/primeclassy",
-  "git_head": "fc8e3400435ae7b751a84f88d020c6b97f192e6a",
-  "git_dirty_paths": 157,
+  "generated_at": "2026-11-13T10:00:35+00:00",
+  "repo_root": "/Users/kmsitcomputer/KMSIT-Server/apps/primeclassy-release",
+  "git_head": "6a14041c06e6258c9f011fcb11271c7d34d65d17",
+  "git_dirty_paths": 115,
   "workers": 5,
   "timing_evidence": "/Users/kmsitcomputer/KMSIT-Server/apps/primeclassy/backend/storage/framework/testing/runs/5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json",
   "counts": {
-    "php_files": 209,
-    "php_parallel_files": 178,
-    "php_serial_files": 31,
-    "frontend_files": 36,
-    "php_static_test_methods_lower_bound": 1804,
-    "frontend_static_cases_lower_bound": 292,
-    "files_with_datasets_or_parameterised_cases": 8
+    "php_files": 225,
+    "php_parallel_files": 190,
+    "php_serial_files": 35,
+    "frontend_files": 49,
+    "php_static_test_methods_lower_bound": 1900,
+    "frontend_static_cases_lower_bound": 370,
+    "files_with_datasets_or_parameterised_cases": 11
   },
   "count_disclaimer": "Static counts are LOWER BOUNDS from text scanning. Datasets, parameterised cases and inherited tests are only known at runtime. They are NOT discovered test-case totals.",
   "estimated_parallel_load_seconds": {
     "1": 825.9,
-    "2": 598.7,
-    "3": 598.8,
-    "4": 598.8,
-    "5": 598.8
+    "2": 608.3,
+    "3": 608.3,
+    "4": 608.3,
+    "5": 608.2
   },
-  "estimated_serial_lane_seconds": 4525.1,
+  "estimated_serial_lane_seconds": 4535.6,
   "frontend": {
     "include_patterns": [
       "src/**/__tests__/**/*.spec.ts"
@@ -69,7 +69,7 @@
       "class": "Tests\\Unit\\ExampleTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -82,7 +82,7 @@
       "weight_seconds": 1.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "ffacae5c1a2a44c809420af5b3b404910da1b12167d58764dac6d10b8ba8cfaf",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Unit/IsolatedSchemaFingerprintTest.php",
@@ -232,7 +232,7 @@
       "class": "Tests\\Feature\\AdditionalPaymentAfterRegularPaymentsTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -245,7 +245,7 @@
       "weight_seconds": 3.5,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "ebdf04d251579db60fcb6ff2c07f9ce9bd0c7273d2e59ce2eb4b325a8abd8c99",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/AgentContactTest.php",
@@ -301,7 +301,7 @@
       "class": "Tests\\Feature\\AgentShippingCourierSettingsTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -314,7 +314,7 @@
       "weight_seconds": 4.994,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "b08b069fb301753ae896687e135902cd870e899b38d23f5ce8b028ade7ea872f",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/AgentSubCapacityConcurrencyTest.php",
@@ -373,7 +373,7 @@
       "class": "Tests\\Feature\\AssistedConsumerPaymentTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -386,7 +386,7 @@
       "weight_seconds": 6.742,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "f51016ef40b8fa51d6d7a39ee967ef1fbf477a51414d2a0901ee4f1af25bfcd1",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/AssistedOrderTest.php",
@@ -442,7 +442,7 @@
       "class": "Tests\\Feature\\AuditLogTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -455,7 +455,7 @@
       "weight_seconds": 2.339,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "098bc38b64b31fbd38259c1f488818a8f817d3959cdcb21258cd30d2b9d6dd83",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/AuthRecoveryTest.php",
@@ -465,7 +465,7 @@
       "class": "Tests\\Feature\\AuthRecoveryTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -478,7 +478,7 @@
       "weight_seconds": 3.217,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "17899bcb8a3b0ae4a6970b364e11175a6bff69e3362bea18c74d8928d26debe5",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/AuthTest.php",
@@ -488,7 +488,7 @@
       "class": "Tests\\Feature\\AuthTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -501,7 +501,7 @@
       "weight_seconds": 1.498,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "3e12b5a5a6cf3b6d878fb65de1c20ca50e92ed41f5c529db0f155aeca27f5d82",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CancellationReplenishmentConcurrencyTest.php",
@@ -576,6 +576,78 @@
       "expected_result_artifact": "junit/worker-4.xml"
     },
     {
+      "test_id": "php:backend/tests/Feature/CatalogImportConcurrencyTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CatalogImportConcurrencyTest.php",
+      "class": "Tests\\Feature\\CatalogImportConcurrencyTest",
+      "lane": "serial",
+      "serial_reasons": [
+        {
+          "rule": "SER-ACTOR",
+          "reason": "Spawns real PHP actor processes. ConcurrencyHarness::actorEnvironment() hard-codes DB_DATABASE=TestDatabaseGuard::DATABASE (primeclassy_testing) and its runtime dir is not worker-scoped, so actors would hit the wrong DB / shared dir."
+        }
+      ],
+      "worker": null,
+      "isolation_requirements": [
+        "canonical_database_exclusive",
+        "no_other_runner_on_canonical_db"
+      ],
+      "static_test_methods": 3,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "e8712d01d246c489e71b6d97fd350ac859e757114a8074b23ae889a037ff4656",
+      "expected_result_artifact": "junit/serial.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CatalogImportExportTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CatalogImportExportTest.php",
+      "class": "Tests\\Feature\\CatalogImportExportTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 11,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 5.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "471d6c3ea955a6d4585f7aceba8129b84349aa7f49f65747d73a867fe45858ad",
+      "expected_result_artifact": "junit/worker-3.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CatalogRemediationTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CatalogRemediationTest.php",
+      "class": "Tests\\Feature\\CatalogRemediationTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 2,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 9,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 4.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "2a7a490bc5147ce3fe70113f1eb928e0056481eddd1e5a13d37707eefa93d8d4",
+      "expected_result_artifact": "junit/worker-2.xml"
+    },
+    {
       "test_id": "php:backend/tests/Feature/CatalogSearchTest.php",
       "framework": "phpunit",
       "suite": "Feature",
@@ -597,6 +669,153 @@
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "a1d5bea0af13612d0ca32ca3e3730ef9bb0dfb853758b5399e3d2bea47b1e1aa",
       "expected_result_artifact": "junit/worker-5.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CategoryCreateConcurrencyTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CategoryCreateConcurrencyTest.php",
+      "class": "Tests\\Feature\\CategoryCreateConcurrencyTest",
+      "lane": "serial",
+      "serial_reasons": [
+        {
+          "rule": "SER-ACTOR",
+          "reason": "Spawns real PHP actor processes. ConcurrencyHarness::actorEnvironment() hard-codes DB_DATABASE=TestDatabaseGuard::DATABASE (primeclassy_testing) and its runtime dir is not worker-scoped, so actors would hit the wrong DB / shared dir."
+        }
+      ],
+      "worker": null,
+      "isolation_requirements": [
+        "canonical_database_exclusive",
+        "no_other_runner_on_canonical_db"
+      ],
+      "static_test_methods": 3,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "1361c2a6bd48586b0c81cfe393eb8d4f7be10dace69f98b6cf276aca26759fe2",
+      "expected_result_artifact": "junit/serial.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CategoryCreateOnlyTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CategoryCreateOnlyTest.php",
+      "class": "Tests\\Feature\\CategoryCreateOnlyTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 4,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 15,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 7.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "aa4c797865f3754aa88e9a18fb1e85a1675df6b9f4c6d3fef99ed7461515a317",
+      "expected_result_artifact": "junit/worker-4.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CategoryDuplicateScannerTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CategoryDuplicateScannerTest.php",
+      "class": "Tests\\Feature\\CategoryDuplicateScannerTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 6,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 3.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "c3e63d82cea8beb158b300558d12bd80aa35a38f7a761edc492995fd5d30bf87",
+      "expected_result_artifact": "junit/worker-3.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CategoryHierarchyApiTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CategoryHierarchyApiTest.php",
+      "class": "Tests\\Feature\\CategoryHierarchyApiTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 5,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 2,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "a094195ba19f357cd4d950573a72d3786b3a9c2a2295aca39b57c30823460195",
+      "expected_result_artifact": "junit/worker-5.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CategoryHierarchyConcurrencyTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CategoryHierarchyConcurrencyTest.php",
+      "class": "Tests\\Feature\\CategoryHierarchyConcurrencyTest",
+      "lane": "serial",
+      "serial_reasons": [
+        {
+          "rule": "SER-ACTOR",
+          "reason": "Spawns real PHP actor processes. ConcurrencyHarness::actorEnvironment() hard-codes DB_DATABASE=TestDatabaseGuard::DATABASE (primeclassy_testing) and its runtime dir is not worker-scoped, so actors would hit the wrong DB / shared dir."
+        }
+      ],
+      "worker": null,
+      "isolation_requirements": [
+        "canonical_database_exclusive",
+        "no_other_runner_on_canonical_db"
+      ],
+      "static_test_methods": 1,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "b017600564b726e124b67ef4551f50ace43871c1e18653843f19cc7ce15fbeff",
+      "expected_result_artifact": "junit/serial.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/CategoryUniqueKeyMigrationTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/CategoryUniqueKeyMigrationTest.php",
+      "class": "Tests\\Feature\\CategoryUniqueKeyMigrationTest",
+      "lane": "serial",
+      "serial_reasons": [
+        {
+          "rule": "SER-ACTOR",
+          "reason": "Spawns real PHP actor processes. ConcurrencyHarness::actorEnvironment() hard-codes DB_DATABASE=TestDatabaseGuard::DATABASE (primeclassy_testing) and its runtime dir is not worker-scoped, so actors would hit the wrong DB / shared dir."
+        }
+      ],
+      "worker": null,
+      "isolation_requirements": [
+        "canonical_database_exclusive",
+        "no_other_runner_on_canonical_db"
+      ],
+      "static_test_methods": 13,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 6.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "436685828acec01d7ce5b7e24c8ece12e14ab4f90ea10ea7d0e4ba79e30ea236",
+      "expected_result_artifact": "junit/serial.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CheckoutConcurrencyTest.php",
@@ -747,7 +966,7 @@
       "class": "Tests\\Feature\\CmsHomepageTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -760,7 +979,7 @@
       "weight_seconds": 6.062,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "4fc9b5ba5766ab3e7d672fe2904fcb948d258e24667e6120516339556e5064e1",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/ConsentEvidenceRetentionTest.php",
@@ -770,7 +989,7 @@
       "class": "Tests\\Feature\\ConsentEvidenceRetentionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -783,7 +1002,7 @@
       "weight_seconds": 1.019,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "56c5354c537b86472c48af8b9a22c2ad934e75c6a77dd160a0b5480d6cab99d2",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/ConsentOtpTest.php",
@@ -793,7 +1012,7 @@
       "class": "Tests\\Feature\\ConsentOtpTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -806,7 +1025,7 @@
       "weight_seconds": 4.341,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "1fba99df0e7ff69c57c6eb612988d7df0ec60c5284cbe4cab7cb5881712fb076",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CoordinatorDeliveredHistoryTest.php",
@@ -816,7 +1035,7 @@
       "class": "Tests\\Feature\\CoordinatorDeliveredHistoryTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -829,7 +1048,7 @@
       "weight_seconds": 3.5,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "6fe630fdff49fbb8d434a82487a2b3af28ce33f19e6ce250a43d035c02165c56",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CoordinatorReceiptTest.php",
@@ -839,7 +1058,7 @@
       "class": "Tests\\Feature\\CoordinatorReceiptTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -852,7 +1071,7 @@
       "weight_seconds": 4.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "4e6317173fb6228a1471281a80260c1db086930ef9220274001879ff95a80762",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CourierAssignmentIsolationTest.php",
@@ -862,7 +1081,7 @@
       "class": "Tests\\Feature\\CourierAssignmentIsolationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -875,7 +1094,7 @@
       "weight_seconds": 4.5,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "cac74a794fbbc5e5c08a3ad3334b992a5e6b3f61bcfd5765e179442a8dd3d919",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CourierAssignmentReceiptGateTest.php",
@@ -885,7 +1104,7 @@
       "class": "Tests\\Feature\\CourierAssignmentReceiptGateTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -898,7 +1117,7 @@
       "weight_seconds": 2.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "1b3e1ddf11ecde19622993065d26846ef3a5a58e67c4ff3c2ea5793bd8a926c3",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CourierFeeSplitTest.php",
@@ -908,7 +1127,7 @@
       "class": "Tests\\Feature\\CourierFeeSplitTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -921,7 +1140,7 @@
       "weight_seconds": 2.001,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "5b73cc35eacb081c0b1c01b9c6ec4bddc490b712253a35ab88937336dff471dd",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CourierItemProgressionTest.php",
@@ -1000,7 +1219,7 @@
       "class": "Tests\\Feature\\CrmExportTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1013,7 +1232,7 @@
       "weight_seconds": 5.295,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "195d63962f777227a8470e35b79188d888fa6a26256178111d71d36e3ad60ba1",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CrmFollowUpKpiTest.php",
@@ -1023,7 +1242,7 @@
       "class": "Tests\\Feature\\CrmFollowUpKpiTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1036,7 +1255,7 @@
       "weight_seconds": 0.408,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "8de18cda8a5e9fd00c46bdde8450814ed779ba31034593909ce3f3e90e2f133e",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CrmLinkTest.php",
@@ -1046,7 +1265,7 @@
       "class": "Tests\\Feature\\CrmLinkTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1059,7 +1278,7 @@
       "weight_seconds": 2.108,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "7790d09ca5e212c676377766946f44c127997aac5c5b5b1ea681921f23f3c3bd",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CrmReturnConsentTest.php",
@@ -1069,7 +1288,7 @@
       "class": "Tests\\Feature\\CrmReturnConsentTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1082,7 +1301,7 @@
       "weight_seconds": 6.942,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "3fc8def57d3b0a392fb6d354d3b2c18f69f12425a3f68afedbcb2f7ff3f68558",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/CrossAgentIsolationTest.php",
@@ -1115,7 +1334,7 @@
       "class": "Tests\\Feature\\DashboardKpiContractTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1128,7 +1347,7 @@
       "weight_seconds": 4.905,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "14f6055d04c9b5df556dc0b588f71b8eb6781e63d1e6efaf3970bbd12b58f0a2",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DeliveryBatchRefusalTest.php",
@@ -1138,7 +1357,7 @@
       "class": "Tests\\Feature\\DeliveryBatchRefusalTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1151,7 +1370,7 @@
       "weight_seconds": 4.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "47bdeec45f1be4703ebce031afeb49158b00617a471ba57c0c26b1905d50df50",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DeliveryDateGroupingTest.php",
@@ -1161,7 +1380,7 @@
       "class": "Tests\\Feature\\DeliveryDateGroupingTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1174,7 +1393,7 @@
       "weight_seconds": 0.609,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "54a3f9d81b8498bd5a9ba1dad713760f92cfe1527543112b47a766e0bca7b699",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DeliveryDateRescheduleRuleTest.php",
@@ -1184,7 +1403,7 @@
       "class": "Tests\\Feature\\DeliveryDateRescheduleRuleTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1197,7 +1416,7 @@
       "weight_seconds": 4.824,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "30444ab0ace4812a81a39729e2830242280887f5558d39ae241a3eb5a2e5111d",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DeliveryVerificationConcurrencyTest.php",
@@ -1374,7 +1593,7 @@
       "class": "Tests\\Feature\\DispatchRegionFilterTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1387,7 +1606,7 @@
       "weight_seconds": 3.084,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "e13ecb2f02672c0edf1fe6bc078e925ae4330fb126a3144c272c79019bcbfe3c",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DispatchRemediationTest.php",
@@ -1397,7 +1616,7 @@
       "class": "Tests\\Feature\\DispatchRemediationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1410,7 +1629,7 @@
       "weight_seconds": 3.045,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "d15a137556d75e692721408e940ae4b4da41dba0a9fcd9059ff2228b50114a53",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DispatchTest.php",
@@ -1420,7 +1639,7 @@
       "class": "Tests\\Feature\\DispatchTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1433,7 +1652,7 @@
       "weight_seconds": 3.347,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "abba9cdbf1ec58e61da42039bf24b296a5a474111fe5111bb9fcb7ac97d93950",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DownPaymentTest.php",
@@ -1443,7 +1662,7 @@
       "class": "Tests\\Feature\\DownPaymentTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1456,7 +1675,7 @@
       "weight_seconds": 5.877,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "fae97df9b62a0dc6d4b3e44b98a48623ba24b9147be5836dfe217b7f66f1a176",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/DsPbrFollowUpTest.php",
@@ -1512,7 +1731,7 @@
       "class": "Tests\\Feature\\ExpeditionDispatchGateTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1525,7 +1744,7 @@
       "weight_seconds": 3.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "3de8e6b546fdad3d5449a109151f7023ed5c99ae68c8e39b86b814142d2be585",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/FeeSystemTest.php",
@@ -1535,7 +1754,7 @@
       "class": "Tests\\Feature\\FeeSystemTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1548,7 +1767,7 @@
       "weight_seconds": 3.085,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "56dd54825a077202d0f22e481f62fad69b53de89141c430b4c3da45e77787f6e",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/FinancialConcurrencyTest.php",
@@ -1682,7 +1901,7 @@
       "class": "Tests\\Feature\\FulfillmentShortageWorkflowTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1695,7 +1914,7 @@
       "weight_seconds": 6.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "183361a56366aec052b01cf28b58840fdbf4d99235aef0aa2b1a2c674433369b",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/FulfillmentWindowAfterShipmentTest.php",
@@ -1728,7 +1947,7 @@
       "class": "Tests\\Feature\\GenericTransferOwnershipBypassTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1741,7 +1960,7 @@
       "weight_seconds": 0.816,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "4150e649d75e5db31536f4def178c46491d9a9ecb80608bc14ffd38d7abe2470",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/GeocodeTest.php",
@@ -1774,7 +1993,7 @@
       "class": "Tests\\Feature\\GlobalSkuTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1787,7 +2006,7 @@
       "weight_seconds": 0.677,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "ffa1b254b99784dc979a1ac7fd9eef5384afa1bff245440297f1ef753b981262",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/GoogleAuthConfigTest.php",
@@ -1797,7 +2016,7 @@
       "class": "Tests\\Feature\\GoogleAuthConfigTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1810,7 +2029,7 @@
       "weight_seconds": 1.573,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "5302c0120044cbdd5666aa416478dcf4bb9c669217e97a5a9d32b8510dadfd05",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/GoogleAuthTest.php",
@@ -1843,7 +2062,7 @@
       "class": "Tests\\Feature\\GoogleSheetsCatalogTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1856,7 +2075,7 @@
       "weight_seconds": 0.932,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "35788b83a0a3f9fa689af72d9353962a2ecab304e140e68e773d34dd0e9d1d2c",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/GoogleSheetsFormulaInjectionTest.php",
@@ -1866,7 +2085,7 @@
       "class": "Tests\\Feature\\GoogleSheetsFormulaInjectionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1879,7 +2098,7 @@
       "weight_seconds": 0.4,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "4e4a92851fdda273cfdf86cb224dfb7737c13d2fc6702dd0e7e46cfb3a34e106",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/GoogleSheetsOrderReportsTest.php",
@@ -1912,7 +2131,7 @@
       "class": "Tests\\Feature\\GoogleSheetsStaffWorksheetTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1924,8 +2143,8 @@
       "has_datasets": false,
       "weight_seconds": 2.609,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
-      "sha256": "a1f5e1b996c3e6b225e9b60a3f60a8bba5ef89e135d23180e4ae67c4a914762f",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "sha256": "938bdfe1d15399abd952e5c28de17781a49bca7ce775a942cfdc03fa3cce4976",
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/GoogleSheetsTest.php",
@@ -1981,7 +2200,7 @@
       "class": "Tests\\Feature\\GudangOrderQueueTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -1994,7 +2213,7 @@
       "weight_seconds": 2.9,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "22c1705df7f3d7a7c9227c64807c70cd447b1558ae1ff58b24ff8511124c8130",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/InstallerTest.php",
@@ -2076,6 +2295,29 @@
       "expected_result_artifact": "junit/serial.xml"
     },
     {
+      "test_id": "php:backend/tests/Feature/InvoiceLayoutTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/InvoiceLayoutTest.php",
+      "class": "Tests\\Feature\\InvoiceLayoutTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 4,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 5,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 2.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "2cb67e41b463ae3b713037b8298e74bf94cbf318da9fa2110814b0c5e13df2d2",
+      "expected_result_artifact": "junit/worker-4.xml"
+    },
+    {
       "test_id": "php:backend/tests/Feature/InvoiceNumberTest.php",
       "framework": "phpunit",
       "suite": "Feature",
@@ -2096,6 +2338,29 @@
       "weight_seconds": 42.589,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "dc7a2ef6d2153041a36c7606dd49f9698fe11b89efe5cacc38209171e354853b",
+      "expected_result_artifact": "junit/worker-4.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/InvoiceOfficialLogoTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/InvoiceOfficialLogoTest.php",
+      "class": "Tests\\Feature\\InvoiceOfficialLogoTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 4,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 2,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "116858f8465ae66fdd3a64702eb800bc593299e2476340652f88191ed56dbbbf",
       "expected_result_artifact": "junit/worker-4.xml"
     },
     {
@@ -2122,6 +2387,29 @@
       "expected_result_artifact": "junit/worker-3.xml"
     },
     {
+      "test_id": "php:backend/tests/Feature/ItemReceiptBestsellerTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/ItemReceiptBestsellerTest.php",
+      "class": "Tests\\Feature\\ItemReceiptBestsellerTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 5,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 9,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 4.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "5409f8fa93c2eadc0ed3d4741ac99e6ffe5347a6599877b896085878017de067",
+      "expected_result_artifact": "junit/worker-5.xml"
+    },
+    {
       "test_id": "php:backend/tests/Feature/KeuanganReportingTest.php",
       "framework": "phpunit",
       "suite": "Feature",
@@ -2129,7 +2417,7 @@
       "class": "Tests\\Feature\\KeuanganReportingTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2142,7 +2430,7 @@
       "weight_seconds": 3.761,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "29162633dbd4f0ba81b1979e8ac06786bc4d1e2f04226575416fc62a39dc6512",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/KeuanganRoleTest.php",
@@ -2198,7 +2486,7 @@
       "class": "Tests\\Feature\\KonsumenAddressTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2211,7 +2499,7 @@
       "weight_seconds": 0.797,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "fbc7b3dc834f265fe132ac06d839d488c5f39a00ed8589fa410e81c4b3dd2cd9",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/KoordinatorAccessTest.php",
@@ -2221,7 +2509,7 @@
       "class": "Tests\\Feature\\KoordinatorAccessTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2234,7 +2522,7 @@
       "weight_seconds": 0.561,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "5c397f98a9191f30b00f69083a8f7ff9c9888f9dc7aaf19186eeba11035f0e4b",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/KurirTokoPaymentLimitTest.php",
@@ -2244,7 +2532,7 @@
       "class": "Tests\\Feature\\KurirTokoPaymentLimitTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2257,7 +2545,7 @@
       "weight_seconds": 5.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "070dcb92b7942e8d3eaca336acd9bb70edd82e2f0e833f688ae03ef7b478680c",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/KurirTokoTariffTest.php",
@@ -2267,7 +2555,7 @@
       "class": "Tests\\Feature\\KurirTokoTariffTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2280,7 +2568,7 @@
       "weight_seconds": 1.693,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "cca244720399fbcd099bae6cdf8b378df35d2151a528baa8c38bda92a90708d8",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/LanguageManagementTest.php",
@@ -2290,7 +2578,7 @@
       "class": "Tests\\Feature\\LanguageManagementTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2303,7 +2591,7 @@
       "weight_seconds": 0.485,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "5f11859594e027135261a0081d9a00de5d957154f10c34d08603e485e1c5e6d9",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/LegacyStockAdjustmentLockdownTest.php",
@@ -2313,7 +2601,7 @@
       "class": "Tests\\Feature\\LegacyStockAdjustmentLockdownTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2326,7 +2614,7 @@
       "weight_seconds": 1.102,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "7011edbf6f7283eec8005ddb2e71437fe448989b86d307a58bf10f48a1437022",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/MasterV2PaymentCoreTest.php",
@@ -2336,7 +2624,7 @@
       "class": "Tests\\Feature\\MasterV2PaymentCoreTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2349,7 +2637,7 @@
       "weight_seconds": 6.205,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "74d7664b656a2011c1bde9f69411988291ca45d80bb7cab60db68922d366f66c",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/MediaSystemTest.php",
@@ -2359,7 +2647,7 @@
       "class": "Tests\\Feature\\MediaSystemTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2372,7 +2660,7 @@
       "weight_seconds": 1.579,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "6805554fcf5a0de6fefb751f82010c278fbfdbb8a907cf591db58ed985dba94e",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/MigrationVerificationTest.php",
@@ -2461,7 +2749,7 @@
       "class": "Tests\\Feature\\OrderDetailFeaturesTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2474,7 +2762,7 @@
       "weight_seconds": 3.656,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "7887fbf4c40eead8010aa86c8a1a69a40c5ab1abbbab0b00b8aae04a6b910ff8",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/OrderFulfillmentTest.php",
@@ -2507,7 +2795,7 @@
       "class": "Tests\\Feature\\OrderInventoryTargetResolutionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2520,7 +2808,7 @@
       "weight_seconds": 0.968,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "00d5d3ac06ab1393751d7fd09455b6f52a9b8abd388e7d398150c3fd413c70ae",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/OrderLineAdditionConcurrencyTest.php",
@@ -2628,7 +2916,7 @@
       "class": "Tests\\Feature\\OrderStatusTransitionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2641,7 +2929,7 @@
       "weight_seconds": 0.798,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "3e3af2b57bbc2ba15e1057f08062907cb93384bf70ce6293242d63df3d24dda5",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/OrderTest.php",
@@ -2700,7 +2988,7 @@
       "class": "Tests\\Feature\\PartialCancellationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2713,7 +3001,7 @@
       "weight_seconds": 5.5,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "4ff0a8547be06f4106c6341aadf0de4b753e614aee229ec03fa475cbd5432bab",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/PaymentGatewayRemovalTest.php",
@@ -2723,7 +3011,7 @@
       "class": "Tests\\Feature\\PaymentGatewayRemovalTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2736,7 +3024,7 @@
       "weight_seconds": 0.809,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "6f31ad42bf030f3fc807389cdd0f45b88b05443580da30b7f331e6c89a53cc75",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/PaymentGatewayTest.php",
@@ -2746,7 +3034,7 @@
       "class": "Tests\\Feature\\PaymentGatewayTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2759,7 +3047,7 @@
       "weight_seconds": 1.194,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "625bc6a62089f76fc45baf426de23680a5ce4ebfd5a3779470d8e462c304d70a",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/PaymentProofConcurrencyTest.php",
@@ -2795,7 +3083,7 @@
       "class": "Tests\\Feature\\PaymentProofNotificationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2808,7 +3096,7 @@
       "weight_seconds": 5.5,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "9557d1f4b7d064ffb53e609eac64442435256eacd9f2ce5139c09fcbb6795991",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/PbrRemediationTest.php",
@@ -2841,7 +3129,7 @@
       "class": "Tests\\Feature\\PermissionMapTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2854,7 +3142,7 @@
       "weight_seconds": 0.649,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "8949f3ec5bdbf6f88692c054cee7ed5615f42a62a33a3fd6ee11b5c3b3f5f73e",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/PreInstallSafetyTest.php",
@@ -2945,7 +3233,7 @@
       "has_datasets": false,
       "weight_seconds": 4.636,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
-      "sha256": "d1bd6ffb3ce9b4ee93a621dca0b43fdb8033166c20db5eb97ab4aaa4240e54f8",
+      "sha256": "2a0bb4f185be3da8165b4346e2e6dea860ddca3be4227aab3737f6f35e2cfcc1",
       "expected_result_artifact": "junit/worker-3.xml"
     },
     {
@@ -2979,7 +3267,7 @@
       "class": "Tests\\Feature\\ProfileTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -2992,7 +3280,7 @@
       "weight_seconds": 0.791,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "471f2e4c25f27745441ecad4e9ae7d7caaf0b929e7260cb561f85e1051ef9d84",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/R04OrderProjectionTest.php",
@@ -3002,7 +3290,7 @@
       "class": "Tests\\Feature\\R04OrderProjectionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3015,7 +3303,7 @@
       "weight_seconds": 5.0,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "0376fddc2942d04177fb2713596f94a43e5d20396eaa42079dd1d00b7c636e92",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/R04ReportTest.php",
@@ -3048,7 +3336,7 @@
       "class": "Tests\\Feature\\ReferralLinkRegistrationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3061,7 +3349,7 @@
       "weight_seconds": 0.875,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "5a72614646d743097159adc0bd3515306465187f305a72517629f0ddcb83b4e2",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/ReferralSystemTest.php",
@@ -3071,7 +3359,7 @@
       "class": "Tests\\Feature\\ReferralSystemTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3084,7 +3372,7 @@
       "weight_seconds": 2.923,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "e1f9c83a5a2fd220e2f9ad0653441c282ea65e5daf8778a04ff504b9a6a3929c",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RefundBackfillTest.php",
@@ -3192,7 +3480,7 @@
       "class": "Tests\\Feature\\RefundLedgerInvariantTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3205,7 +3493,7 @@
       "weight_seconds": 2.797,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "18e8b3ff09a995258bae17da71f032d64890427b27fdc358ed6aa16b1561cd27",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RefundLedgerTest.php",
@@ -3215,7 +3503,7 @@
       "class": "Tests\\Feature\\RefundLedgerTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3228,7 +3516,7 @@
       "weight_seconds": 2.317,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "a47c9c0a13f22a514e808b0a110206c96a621bb96a82cb4257db712939dea327",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RefundLedgerUatTest.php",
@@ -3238,7 +3526,7 @@
       "class": "Tests\\Feature\\RefundLedgerUatTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3251,7 +3539,7 @@
       "weight_seconds": 1.289,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "99029305ce72f364ff719dab881652804c33f361334b70ab6860fe21772f7de3",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RefundMetricsTest.php",
@@ -3261,7 +3549,7 @@
       "class": "Tests\\Feature\\RefundMetricsTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3274,7 +3562,7 @@
       "weight_seconds": 0.581,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "a4813f1d2032bb3b48d13f12b3dcc6ecefba282836fe2c6fe7188d64e09075b6",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RegionImporterTest.php",
@@ -3284,7 +3572,7 @@
       "class": "Tests\\Feature\\RegionImporterTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3297,7 +3585,7 @@
       "weight_seconds": 0.989,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "b41cd9dc2b8e204d464cf32e8ea3b43b41f45a5a740b4e2a893afaccc8e79007",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RegionTest.php",
@@ -3307,7 +3595,7 @@
       "class": "Tests\\Feature\\RegionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3320,7 +3608,7 @@
       "weight_seconds": 0.732,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "6f7ac1e5371047c230fbfb5173634288868d2a834f3d64d4be65f4161ab071eb",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RegistrationNotificationTest.php",
@@ -3330,7 +3618,7 @@
       "class": "Tests\\Feature\\RegistrationNotificationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3343,7 +3631,7 @@
       "weight_seconds": 2.086,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "05c0d55eef30737950548b89223f5293057807c5aa108eff7ddecba387c6ad6f",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/ReportSystemTest.php",
@@ -3376,7 +3664,7 @@
       "class": "Tests\\Feature\\ResetDevTransactionsTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3389,7 +3677,7 @@
       "weight_seconds": 1.365,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "493d1d79c87f270fd65a077a86d8472871fce11aeba7083e34b7d11675f2cd91",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/ReturnPickupScheduleTest.php",
@@ -3422,7 +3710,7 @@
       "class": "Tests\\Feature\\ReturnSystemTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3435,7 +3723,7 @@
       "weight_seconds": 5.016,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "436f53a2e227b31594d63c6d353ff63f0d3d04d355e5d4cd5d50cb62a89cf144",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/RoleBasedPaymentMethodsTest.php",
@@ -3445,7 +3733,7 @@
       "class": "Tests\\Feature\\RoleBasedPaymentMethodsTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3458,7 +3746,7 @@
       "weight_seconds": 0.391,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "d42111a13dcd02aa76d92bcd839c5564e3780dcf44bd69b459bfbd2a9f5407bb",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SalesCourierDualFeeTest.php",
@@ -3468,7 +3756,7 @@
       "class": "Tests\\Feature\\SalesCourierDualFeeTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3481,7 +3769,7 @@
       "weight_seconds": 1.799,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "166ab8806397f2c56e1ef888bf56168e4a2a55b6ec574362ed1874936d26709b",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SalesCourierOrderIsolationTest.php",
@@ -3514,7 +3802,7 @@
       "class": "Tests\\Feature\\SalesFeeRefundAdjustmentTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3527,7 +3815,7 @@
       "weight_seconds": 3.433,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "f667c0555b684be892c730d6e594f48f54aee91bab7ffd5f7f62cd0ec3273f9d",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SalesKurirSubParityTest.php",
@@ -3537,7 +3825,7 @@
       "class": "Tests\\Feature\\SalesKurirSubParityTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3550,7 +3838,7 @@
       "weight_seconds": 1.127,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "99b16fe59170ba26a9082678e6d0a1dc42015be36602d5b24b9f95d72d38e3c8",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SalesKurirSubRoleTest.php",
@@ -3560,7 +3848,7 @@
       "class": "Tests\\Feature\\SalesKurirSubRoleTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3573,7 +3861,7 @@
       "weight_seconds": 1.189,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "d097da0db28278502d3eaf79934178da478ee21d0d40fa08a755632e5a8b715f",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SalesKurirSubSelfDeliveryTest.php",
@@ -3652,7 +3940,7 @@
       "class": "Tests\\Feature\\SelfPurchaseAndFeeAttributionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3665,7 +3953,7 @@
       "weight_seconds": 6.292,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "32d96daeac78f96d89f9e7ceeda9811445cdef5142aef8ce729e25e7ea38f6f7",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SelfPurchaseAttributionReportTest.php",
@@ -3675,7 +3963,7 @@
       "class": "Tests\\Feature\\SelfPurchaseAttributionReportTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3688,7 +3976,7 @@
       "weight_seconds": 0.501,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "9fcdf20c6dd2e63a110cc564580450b30da01eba4ba1102bce8a92951f8c6bce",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SellableStockFormulaTest.php",
@@ -3744,7 +4032,7 @@
       "class": "Tests\\Feature\\SettledOrderPendingProofProjectionTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3757,7 +4045,7 @@
       "weight_seconds": 1.748,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "b26165475ec2cfb460d93b109a1df656ec8284daa3b1bdb929e35219c109aa48",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SettlementRequestIdempotencyTest.php",
@@ -3816,7 +4104,7 @@
       "class": "Tests\\Feature\\ShipmentCanonicalizationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3829,7 +4117,7 @@
       "weight_seconds": 4.31,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "a53ffdca39654c307b5af5761bb9874c9245a62e47a9d874806db875a6d9ee15",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/ShipmentReceiptPrintTest.php",
@@ -3885,7 +4173,7 @@
       "class": "Tests\\Feature\\SmtpSettingsTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3898,7 +4186,7 @@
       "weight_seconds": 6.367,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "4c443ddf9a4036267776e0226eba327a6fa4c964484b8dc35a01d00c5dab2e16",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/StockDiscrepancyTest.php",
@@ -3908,7 +4196,7 @@
       "class": "Tests\\Feature\\StockDiscrepancyTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -3921,83 +4209,14 @@
       "weight_seconds": 3.0,
       "weight_source": "heuristic: max(1, 0.5 x static test methods)",
       "sha256": "045a57d6b6fb4684a266ef233c3333daa1f12431a4426104742c3dbb61228c4e",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
-      "test_id": "php:backend/tests/Feature/StockOpnameTest.php",
+      "test_id": "php:backend/tests/Feature/StockOpnameSubOwnershipTest.php",
       "framework": "phpunit",
       "suite": "Feature",
-      "source_file": "backend/tests/Feature/StockOpnameTest.php",
-      "class": "Tests\\Feature\\StockOpnameTest",
-      "lane": "parallel",
-      "serial_reasons": [],
-      "worker": 2,
-      "isolation_requirements": [
-        "own_database",
-        "own_storage_path",
-        "own_tmpdir",
-        "own_cache_and_session_namespace"
-      ],
-      "static_test_methods": 5,
-      "count_confidence": "static_exact_unverified",
-      "has_datasets": false,
-      "weight_seconds": 1.812,
-      "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
-      "sha256": "e26263f4c6ef67c033aa108fb0375faccbaa0a87d546a45383337a4bf08e3683",
-      "expected_result_artifact": "junit/worker-2.xml"
-    },
-    {
-      "test_id": "php:backend/tests/Feature/StockPaymentOrderFiltersChangeRequestTest.php",
-      "framework": "phpunit",
-      "suite": "Feature",
-      "source_file": "backend/tests/Feature/StockPaymentOrderFiltersChangeRequestTest.php",
-      "class": "Tests\\Feature\\StockPaymentOrderFiltersChangeRequestTest",
-      "lane": "parallel",
-      "serial_reasons": [],
-      "worker": 3,
-      "isolation_requirements": [
-        "own_database",
-        "own_storage_path",
-        "own_tmpdir",
-        "own_cache_and_session_namespace"
-      ],
-      "static_test_methods": 13,
-      "count_confidence": "static_exact_unverified",
-      "has_datasets": false,
-      "weight_seconds": 4.43,
-      "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
-      "sha256": "bd1204b863a29b353ec2b6252f9a8d3068382925a59052fc47e02d83775fefc8",
-      "expected_result_artifact": "junit/worker-3.xml"
-    },
-    {
-      "test_id": "php:backend/tests/Feature/StockRequestSplitTest.php",
-      "framework": "phpunit",
-      "suite": "Feature",
-      "source_file": "backend/tests/Feature/StockRequestSplitTest.php",
-      "class": "Tests\\Feature\\StockRequestSplitTest",
-      "lane": "parallel",
-      "serial_reasons": [],
-      "worker": 5,
-      "isolation_requirements": [
-        "own_database",
-        "own_storage_path",
-        "own_tmpdir",
-        "own_cache_and_session_namespace"
-      ],
-      "static_test_methods": 4,
-      "count_confidence": "static_exact_unverified",
-      "has_datasets": false,
-      "weight_seconds": 0.747,
-      "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
-      "sha256": "027cca709a6f6f1e62f6f8befe32470d77a2a67152163999664c5ce61afbe158",
-      "expected_result_artifact": "junit/worker-5.xml"
-    },
-    {
-      "test_id": "php:backend/tests/Feature/StockRequestTest.php",
-      "framework": "phpunit",
-      "suite": "Feature",
-      "source_file": "backend/tests/Feature/StockRequestTest.php",
-      "class": "Tests\\Feature\\StockRequestTest",
+      "source_file": "backend/tests/Feature/StockOpnameSubOwnershipTest.php",
+      "class": "Tests\\Feature\\StockOpnameSubOwnershipTest",
       "lane": "parallel",
       "serial_reasons": [],
       "worker": 2,
@@ -4010,10 +4229,125 @@
       "static_test_methods": 3,
       "count_confidence": "static_exact_unverified",
       "has_datasets": false,
+      "weight_seconds": 1.5,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "fbbf572e6cfe31afe66e2b8f7dc9636f7a796608a20276d64f76bffff1a3de72",
+      "expected_result_artifact": "junit/worker-2.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/StockOpnameTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/StockOpnameTest.php",
+      "class": "Tests\\Feature\\StockOpnameTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 5,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.812,
+      "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
+      "sha256": "e26263f4c6ef67c033aa108fb0375faccbaa0a87d546a45383337a4bf08e3683",
+      "expected_result_artifact": "junit/worker-3.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/StockPaymentOrderFiltersChangeRequestTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/StockPaymentOrderFiltersChangeRequestTest.php",
+      "class": "Tests\\Feature\\StockPaymentOrderFiltersChangeRequestTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 2,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 13,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 4.43,
+      "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
+      "sha256": "bd1204b863a29b353ec2b6252f9a8d3068382925a59052fc47e02d83775fefc8",
+      "expected_result_artifact": "junit/worker-2.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/StockRequestSplitTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/StockRequestSplitTest.php",
+      "class": "Tests\\Feature\\StockRequestSplitTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 4,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 4,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 0.747,
+      "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
+      "sha256": "027cca709a6f6f1e62f6f8befe32470d77a2a67152163999664c5ce61afbe158",
+      "expected_result_artifact": "junit/worker-4.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/StockRequestTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/StockRequestTest.php",
+      "class": "Tests\\Feature\\StockRequestTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 3,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
       "weight_seconds": 0.974,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "52719dc83abc270b6cedf525125b9fc69805e111b98cd27af2e650106390e204",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/StockRevisionMigrationTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/StockRevisionMigrationTest.php",
+      "class": "Tests\\Feature\\StockRevisionMigrationTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 1,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 1.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "c0f79b599c1fb6d7d7a1bae8503b09199cbd7dd786c478f433446005d2d8dff5",
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/StockStateRaceConcurrencyTest.php",
@@ -4171,7 +4505,7 @@
       "class": "Tests\\Feature\\SubQuantityAdjustmentTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4184,7 +4518,7 @@
       "weight_seconds": 2.122,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "b7648f8c961fb9fcbd2f840702f445511b091a7a3d3cf2bb13c2a2e2c67d953a",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SubReservationConcurrencyTest.php",
@@ -4292,7 +4626,7 @@
       "class": "Tests\\Feature\\SubStockRequestFlowTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4305,7 +4639,7 @@
       "weight_seconds": 2.872,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "8cb5a574ed1bdccfd3a44d6765ab4a44bc4039c7cdf4ea15c8f31a2fbd1b530e",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/SubStockSourceTest.php",
@@ -4315,20 +4649,20 @@
       "class": "Tests\\Feature\\SubStockSourceTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
         "own_tmpdir",
         "own_cache_and_session_namespace"
       ],
-      "static_test_methods": 17,
+      "static_test_methods": 18,
       "count_confidence": "static_exact_unverified",
       "has_datasets": false,
       "weight_seconds": 5.651,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
-      "sha256": "e428869bf622369768aa0ba2c928e76471e00d603dbfe0d9160494cc8590bd23",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "sha256": "8f04e2d0414df4e0045875af9d46118c4d32fa694f15288d3f0109717988974b",
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/TransactionResetCommandTest.php",
@@ -4338,7 +4672,7 @@
       "class": "Tests\\Feature\\TransactionResetCommandTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4351,7 +4685,7 @@
       "weight_seconds": 2.722,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "935e4bb9441c5115722f1f2e3e3c26db21f0cb43b41bc185e307aebf4e597a9e",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/TransactionalNotificationChannelsTest.php",
@@ -4501,6 +4835,52 @@
       "expected_result_artifact": "junit/worker-2.xml"
     },
     {
+      "test_id": "php:backend/tests/Feature/ValidAgentResolverTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/ValidAgentResolverTest.php",
+      "class": "Tests\\Feature\\ValidAgentResolverTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 5,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 4,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 2.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "8c30bb5d5572c0017aa71617fe78509dcf3fda6fac545f638be8ab4f4a2ffe8a",
+      "expected_result_artifact": "junit/worker-5.xml"
+    },
+    {
+      "test_id": "php:backend/tests/Feature/VariationGalleryTest.php",
+      "framework": "phpunit",
+      "suite": "Feature",
+      "source_file": "backend/tests/Feature/VariationGalleryTest.php",
+      "class": "Tests\\Feature\\VariationGalleryTest",
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 5,
+      "isolation_requirements": [
+        "own_database",
+        "own_storage_path",
+        "own_tmpdir",
+        "own_cache_and_session_namespace"
+      ],
+      "static_test_methods": 8,
+      "count_confidence": "static_exact_unverified",
+      "has_datasets": false,
+      "weight_seconds": 4.0,
+      "weight_source": "heuristic: max(1, 0.5 x static test methods)",
+      "sha256": "6728abb3132173e6adaafa677344f1b6a1a54fef11d472c89112a7ede16c771c",
+      "expected_result_artifact": "junit/worker-5.xml"
+    },
+    {
       "test_id": "php:backend/tests/Feature/VoucherTest.php",
       "framework": "phpunit",
       "suite": "Feature",
@@ -4508,7 +4888,7 @@
       "class": "Tests\\Feature\\VoucherTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4521,7 +4901,7 @@
       "weight_seconds": 1.546,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "0ee79a7380f0aa7a6dea14cad0bad7b9500ebacaf5c335810486c3b40722846c",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WarehouseFulfillmentProposalTest.php",
@@ -4531,7 +4911,7 @@
       "class": "Tests\\Feature\\WarehouseFulfillmentProposalTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4544,7 +4924,7 @@
       "weight_seconds": 2.964,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "6de8b99fca2cff0e71e6e41e164175e27b8397005c3dab39c71a09a9445f8e13",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WarehouseLegacyMigrationRetryTest.php",
@@ -4554,7 +4934,7 @@
       "class": "Tests\\Feature\\WarehouseLegacyMigrationRetryTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 4,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4567,7 +4947,7 @@
       "weight_seconds": 0.407,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "b1256e3eaaf3bd96c0f04f97d560a02154c1062e8adf1a7f3f998e8ac671bc81",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-4.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WarehousePlanTransferTest.php",
@@ -4623,7 +5003,7 @@
       "class": "Tests\\Feature\\WarehouseReturnQueueTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4636,7 +5016,7 @@
       "weight_seconds": 2.606,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "ce57655be1813dbbf9a6eb1da701de6aeae2caaadb1d19902b4f419bdc6934d0",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WarehouseStockAdditionApprovalTest.php",
@@ -4646,7 +5026,7 @@
       "class": "Tests\\Feature\\WarehouseStockAdditionApprovalTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4659,7 +5039,7 @@
       "weight_seconds": 2.431,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "7ccc0365a4c64a07031939887f420cd6a0bda30e47aa08c81f26056eaa084fc5",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WarehouseStockTest.php",
@@ -4715,7 +5095,7 @@
       "class": "Tests\\Feature\\WarehouseSubLocationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4728,7 +5108,7 @@
       "weight_seconds": 1.058,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "457a34c8ec03a2f187c2a79e1d6cda728708fa7fb585ddc462a93c475c83dcb3",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WebsiteSettingsTest.php",
@@ -4761,7 +5141,7 @@
       "class": "Tests\\Feature\\WhatsAppAgentScopeTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 3,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4774,7 +5154,7 @@
       "weight_seconds": 3.981,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "cecb80283ef2d13d0e89babe20e7440a2913c84b42e3effcefc56b9018ff3a41",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-3.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WhatsAppGatewayTest.php",
@@ -4784,7 +5164,7 @@
       "class": "Tests\\Feature\\WhatsAppGatewayTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 5,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4797,7 +5177,7 @@
       "weight_seconds": 3.278,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "0816dd3a09541532aa031a9de756eda6d6a907de0c96d17ba8ca2a0fa4f7414b",
-      "expected_result_artifact": "junit/worker-5.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WhatsAppNotificationTest.php",
@@ -4830,7 +5210,7 @@
       "class": "Tests\\Feature\\WhatsAppNotifyInfraTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4843,7 +5223,7 @@
       "weight_seconds": 0.415,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "ec41b2a1ac9b99b632a12e336e49ae5925e14bd57cd44361082a69a1305fc271",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WhatsAppNumberVerificationTest.php",
@@ -4853,7 +5233,7 @@
       "class": "Tests\\Feature\\WhatsAppNumberVerificationTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 4,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4866,7 +5246,7 @@
       "weight_seconds": 5.319,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "7c546fe83f20a87d7cc16326d83679ab2e03d4da84e54adcbd8af4e002645fc9",
-      "expected_result_artifact": "junit/worker-4.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WhatsAppOtpTest.php",
@@ -4899,7 +5279,7 @@
       "class": "Tests\\Feature\\WhatsAppRestrictedDeliveryTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 2,
+      "worker": 5,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4912,7 +5292,7 @@
       "weight_seconds": 3.022,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "80a4f857cd73a2a5a9203569de620a04ae7d1462ee79f812c60f41b36e0152e6",
-      "expected_result_artifact": "junit/worker-2.xml"
+      "expected_result_artifact": "junit/worker-5.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WhatsAppRetentionPlanTest.php",
@@ -4922,7 +5302,7 @@
       "class": "Tests\\Feature\\WhatsAppRetentionPlanTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4935,7 +5315,7 @@
       "weight_seconds": 1.447,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "0827313dd85af899c700234c386f6197b7080feeee9047bf0f24ba294aaba9a2",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
     },
     {
       "test_id": "php:backend/tests/Feature/WhatsAppThreeRecipientTest.php",
@@ -4968,7 +5348,7 @@
       "class": "Tests\\Feature\\WhatsAppVolumeLimitTest",
       "lane": "parallel",
       "serial_reasons": [],
-      "worker": 3,
+      "worker": 2,
       "isolation_requirements": [
         "own_database",
         "own_storage_path",
@@ -4981,7 +5361,29 @@
       "weight_seconds": 1.661,
       "weight_source": "evidence: run 5ca38852-af26-441c-bcaf-d288d3d0fc67 stats (5ca38852-af26-441c-bcaf-d288d3d0fc67.stats-51804.json)",
       "sha256": "aeb4c3515472c57d581b84792fd85c18ed9e70dee2ce217ff9f47e0c05b82e9c",
-      "expected_result_artifact": "junit/worker-3.xml"
+      "expected_result_artifact": "junit/worker-2.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/api/__tests__/orderStockSource.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/api/__tests__/orderStockSource.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 0,
+      "count_confidence": "lower_bound",
+      "has_datasets": true,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "3dc86c2dd9c022ccdec0445a357b71c1694fc0ff34ef1f1f208f092d356fed17",
+      "expected_result_artifact": "junit/frontend.xml"
     },
     {
       "test_id": "vitest:frontend/src/api/__tests__/protectedFile.spec.ts",
@@ -5000,7 +5402,7 @@
       "static_test_methods": 2,
       "count_confidence": "lower_bound",
       "has_datasets": true,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "6aa1861348bd8015e02a5f3103820f6d57f8bbf83463eea0ee46b9a2766493df",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5022,7 +5424,7 @@
       "static_test_methods": 5,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "8aaa530145070fb2e32dfebc1e42166639e7ce7fbc59b8cd1a3f33f72ce215c5",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5044,9 +5446,31 @@
       "static_test_methods": 7,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "9a33691652eaf9f628296ae9ec0db1b16a2fdd17ccfd7823c9ea3e771cabbbd7",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/components/catalog/__tests__/VariationGalleryManager.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/components/catalog/__tests__/VariationGalleryManager.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 8,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "e41a72789a209a7abc937d8330bcbdd137c8f2c899fdb06970cd35fb41ee72df",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5066,9 +5490,31 @@
       "static_test_methods": 1,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "fc9129a3dfa9cfdee75633f64c07fcc9603a6e77ddc91ca0f6c53ebae43ca27c",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/components/cms/__tests__/BestsellerBlock.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/components/cms/__tests__/BestsellerBlock.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 2,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "6ae15699bb40e6ff88be4985b1bf49d20b19e185b178ad8291dda1aaf96df9b1",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5088,7 +5534,7 @@
       "static_test_methods": 42,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "76b945d5a0f7fb97d60a3cf0068b1fec5d6695b4f1494d890d27afe321310765",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5107,12 +5553,12 @@
         "jsdom_per_file_isolation (vitest default)",
         "single_invocation_no_sharding"
       ],
-      "static_test_methods": 18,
+      "static_test_methods": 11,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
-      "sha256": "ceaf0263e0dfcef07cc5a7d78a413caf8fd660f1031cce5d8bdaf4a147221c95",
+      "sha256": "400688239b4fd91f411adf60e3e4ff2b3be3dd3093eca831f020772d8fd883db",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5129,12 +5575,34 @@
         "jsdom_per_file_isolation (vitest default)",
         "single_invocation_no_sharding"
       ],
-      "static_test_methods": 12,
+      "static_test_methods": 18,
       "count_confidence": "lower_bound",
       "has_datasets": true,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
-      "sha256": "1bc76054adb8959b1b4cf43a6055ee197de29c4e385c549819a2c34109364636",
+      "sha256": "43bac765697af236f4eec8fe2b8380fd965cb4ab1bb480dddee1b14056502888",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/components/cms/__tests__/SocialMarketplaceCard.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/components/cms/__tests__/SocialMarketplaceCard.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 10,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "3a5908635588a59b721cee601312a4428784e3706de89e7a45243c406a84dab8",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5154,9 +5622,9 @@
       "static_test_methods": 6,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
-      "sha256": "2be79db037a3d3f835266e2ac5723164025f79fb3eb21b171927359a04d5dee7",
+      "sha256": "746d73ae055aa17f84a596c86ae8d095b968ed219072e5067a1f1db5a2e088b1",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5176,7 +5644,7 @@
       "static_test_methods": 9,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "4801559af00a17c2d623f5058f9e9723caa8b8df51ffc9ef3fc0a487de7fd69b",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5198,7 +5666,7 @@
       "static_test_methods": 5,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "4e6c089af850fa6ebf9f66e35c36968e876ea1c3241675a74c4bdcaa65fb9f62",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5220,7 +5688,7 @@
       "static_test_methods": 11,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "339e2a291f70cc6f7dbd41652f52f8ad060123068bccd8ec6d4234d8b472587d",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5242,7 +5710,7 @@
       "static_test_methods": 4,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "759e37e2a2444edf9504c8442edf4f4bc6ee17b9559038e1b995b68b0bdca087",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5264,7 +5732,7 @@
       "static_test_methods": 4,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "5153b398b79acc31e70dda98107efcd04f564b1da57b68130616f3c1ac7d01ad",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5286,7 +5754,7 @@
       "static_test_methods": 8,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "c4efc6d4d6cbd2c308df7341026dbe4b961d4895b57b46c7121283ce44f6816e",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5308,7 +5776,7 @@
       "static_test_methods": 6,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "5d5018b710b91c8b9aa211f89e19de97d8fc2d8969440aaa11dee185d20b0e6c",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5330,7 +5798,7 @@
       "static_test_methods": 8,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "664fd0422814260874c2afada48617f2d58ef3bb52bc8fe9b483de3a7b77104f",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5352,7 +5820,7 @@
       "static_test_methods": 2,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "595f32089e8e5174545668e60518c93fdf72725cdc6aa6d81d425618fd151510",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5374,9 +5842,31 @@
       "static_test_methods": 6,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "7ea46333ef8c3f32a4e391a5affb85f39296b38443c8b166a51c5a1edd61bc14",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/utils/__tests__/categoryTree.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/utils/__tests__/categoryTree.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 4,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "7d914b025e020f2ef9efbf13dd50f8bd67d585148222a68332f1e6f24ef38eba",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5396,9 +5886,75 @@
       "static_test_methods": 3,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "73c4c734d7178a6eb89d6b3dd5c122eb36ffed75c31223a8818c548fd9e22de2",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/__tests__/CatalogStockSource.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/__tests__/CatalogStockSource.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 4,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "104108f9ab2e2014b7c2e10f3580c7b8f510715bd55d89ad4b8d26eedbf6b61f",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/__tests__/CategoriesView.tree.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/__tests__/CategoriesView.tree.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 2,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "588d42c55bd19a7c3995dc27a01a2a562f3697209e07c3cce3204e2e68a4e9c6",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/__tests__/CheckoutView.stockSource.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/__tests__/CheckoutView.stockSource.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 2,
+      "count_confidence": "lower_bound",
+      "has_datasets": true,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "3b5eb0a0e4b28f1d29190c297fe29e34a6f2a8de945d1eecd27148fda2f32203",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5418,9 +5974,53 @@
       "static_test_methods": 17,
       "count_confidence": "lower_bound",
       "has_datasets": true,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "16da4167d6c056c11aee2953fe4b73a5237b6e061dfc21522e6922ae2936d5da",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/__tests__/ProductDetailView.gallery.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/__tests__/ProductDetailView.gallery.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 13,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "a393bf64d539eb05dca59e1e9fbace0cf8ac997ee848e5ea7f0bcd99db1d838e",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/__tests__/ProductListingView.catalog.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/__tests__/ProductListingView.catalog.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 12,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "29efa30284e848fb42238254ff91f6e34c65d29b207b29b9b85ef3f0ba31f0d0",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5440,7 +6040,7 @@
       "static_test_methods": 4,
       "count_confidence": "lower_bound",
       "has_datasets": true,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "ea7e30915c61f3ab866a8d6585f9390035af0c1a55f6220cea40343674adf9aa",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5462,7 +6062,7 @@
       "static_test_methods": 4,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "0015533ddd67899da7284bacca538ba0a5fdb801020c850de619f7e4f56d93ee",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5481,12 +6081,12 @@
         "jsdom_per_file_isolation (vitest default)",
         "single_invocation_no_sharding"
       ],
-      "static_test_methods": 7,
+      "static_test_methods": 8,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
-      "sha256": "77bc7b4362f3450d28a4455413ceb1f9ba9967d099d8ccf29216102aa84c63ec",
+      "sha256": "e73bf8c6a75af66fbf308975181171749d75d329597d48e40dac941182d7c890",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5506,7 +6106,7 @@
       "static_test_methods": 6,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "a4a83df6adcb943263f98f1b1202b0adf2815d726539dbc62e98cc3a54a63afd",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5528,7 +6128,7 @@
       "static_test_methods": 7,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "1340a826780de6814e2dc15b0f348dc97aaea1f869ea883832cb4265ced36154",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5550,7 +6150,7 @@
       "static_test_methods": 12,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "04407bca9d25c5d4c5354883bb22d3ea2dcaa80b01d2ccaf275fb94a0e3be534",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5572,7 +6172,7 @@
       "static_test_methods": 5,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "9619373d9e58eed152859be01af2c36d80676c965e841cf1cdafe347e91ee38a",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5594,7 +6194,7 @@
       "static_test_methods": 6,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "8c3f85f34b018b24a4fba7af72d7dc177b5a0e6ba54266993d77e692fd248147",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5616,7 +6216,7 @@
       "static_test_methods": 9,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "a10e5ec9cd0737fba52b75f913a821cece4523629189fc5c6e525d285b7ce38d",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5638,7 +6238,7 @@
       "static_test_methods": 7,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "1ea6005085c2f572080c771db0e6c170e8e56ab1509d2ec90077d2ee65f13cfc",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5660,7 +6260,7 @@
       "static_test_methods": 3,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "a0a69edd7c402e493285c85434f4dd4030cc296b6738479f9e1ab6bad8821829",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5682,7 +6282,7 @@
       "static_test_methods": 4,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "a934ffc374c5e4332655b7e768ec364b8df6d59084f8fe107c13bd748d40d39c",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5704,9 +6304,75 @@
       "static_test_methods": 11,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "b8b9c45039081858d0df42513fb4a47577fcf9fc7a94365bd2559b1834bc3911",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/dashboard/__tests__/ProductFormView.gallery.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/dashboard/__tests__/ProductFormView.gallery.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 5,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "ef8bf1ad65dc3a1ba3c994c12a99f0f3197d04a7ff5ede4c33a3e494e4eb41f5",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/dashboard/__tests__/ProductFormView.variants.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/dashboard/__tests__/ProductFormView.variants.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 3,
+      "count_confidence": "lower_bound",
+      "has_datasets": false,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "38c213627a2137a14b45d31bb07ffbc2c2860a3f1c13915fa62606b13c95e87d",
+      "expected_result_artifact": "junit/frontend.xml"
+    },
+    {
+      "test_id": "vitest:frontend/src/views/dashboard/__tests__/ProductManagementView.categories.spec.ts",
+      "framework": "vitest",
+      "suite": "frontend",
+      "source_file": "frontend/src/views/dashboard/__tests__/ProductManagementView.categories.spec.ts",
+      "class": null,
+      "lane": "parallel",
+      "serial_reasons": [],
+      "worker": 3,
+      "isolation_requirements": [
+        "no_database",
+        "jsdom_per_file_isolation (vitest default)",
+        "single_invocation_no_sharding"
+      ],
+      "static_test_methods": 13,
+      "count_confidence": "lower_bound",
+      "has_datasets": true,
+      "weight_seconds": 3.673,
+      "weight_source": "frontend unit weight assigned below",
+      "sha256": "39bd802e442b7cf58708fbbc4fe94a9a555f8ad04f62cda3feda8daaf8b7544c",
       "expected_result_artifact": "junit/frontend.xml"
     },
     {
@@ -5726,7 +6392,7 @@
       "static_test_methods": 9,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "67f3e79acf7b934a20adb0de6daf337501c95f8d4d5b716c334e68bb94ce1923",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5748,7 +6414,7 @@
       "static_test_methods": 8,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "febb2c021c0c778ccc654efb59d84e6e7fbd77e666ae9d717ddd33b5f4fa0738",
       "expected_result_artifact": "junit/frontend.xml"
@@ -5770,11 +6436,11 @@
       "static_test_methods": 14,
       "count_confidence": "lower_bound",
       "has_datasets": false,
-      "weight_seconds": 5.0,
+      "weight_seconds": 3.673,
       "weight_source": "frontend unit weight assigned below",
       "sha256": "020dc4f9683751c9db3930a22011f8a6da5140a03b2d4a576c7ac0dc4224333c",
       "expected_result_artifact": "junit/frontend.xml"
     }
   ],
-  "digest": "7a723a1d1400cd27441a13dda6202646a9758e59f8e2fa868223af3692d28c98"
+  "digest": "d2dc8ab30d7f1ecb708789f69f6d5d8d2d85baec1d5152e934fc92a1d6a6ced3"
 }

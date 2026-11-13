@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import HomepageBlockRenderer from '@/components/cms/HomepageBlockRenderer.vue'
+import { mergeSocialMarketplaceBlocks } from '@/utils/socialMarketplace'
 import { getHomepage, type HomepageBlock } from '@/api/cms'
 import AppIcon from '@/components/ui/AppIcon.vue'
 
 const { t } = useI18n()
 const blocks = ref<HomepageBlock[]>([])
+/** Social Media + Marketplace render as ONE card (Owner-approved); everything else is untouched. */
+const displayBlocks = computed(() => mergeSocialMarketplaceBlocks(blocks.value))
 const loading = ref(true)
 const error = ref<string | null>(null)
 
@@ -41,7 +44,7 @@ onMounted(async () => {
 
     <!-- One source of block spacing (blocks add no outer margin/padding): 20 / 28 / 36 px. Flex gap, not space-y, so a fixed (floating) block never adds a gap. The extra mobile bottom padding keeps the last block clear of the floating WhatsApp button. -->
     <div v-else class="flex flex-col gap-5 pb-16 sm:gap-7 sm:pb-0 lg:gap-9">
-      <HomepageBlockRenderer v-for="block in blocks" :key="block.id" :block="block" />
+      <HomepageBlockRenderer v-for="block in displayBlocks" :key="`${block.type}-${block.id}`" :block="block" />
     </div>
   </ShopLayout>
 </template>

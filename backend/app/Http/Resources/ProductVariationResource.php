@@ -17,6 +17,9 @@ class ProductVariationResource extends JsonResource
             'price' => $this->price,
             'weight_grams' => $this->weight_grams,
             'is_active' => $this->is_active,
+            // REM-08: attribute-name => option-value, only when compositions are eager-loaded.
+            'attributes' => $this->whenLoaded('compositions', fn () => $this->compositions
+                ->mapWithKeys(fn ($c) => [$c->attribute?->name => $c->option?->value])->all()),
             'agent_available_quantity' => $this->when(
                 isset($this->agent_available_quantity),
                 fn () => $this->agent_available_quantity

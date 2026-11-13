@@ -25,6 +25,7 @@ export default {
     apply: 'Terapkan',
     back: 'Kembali',
     next: 'Lanjut',
+    previous: 'Sebelumnya',
     copyright: '© {year} Prime Classy Cake & Cookies.',
   },
   roles: {
@@ -90,6 +91,15 @@ export default {
     applyFilter: 'Terapkan Filter',
     noResults: 'Tidak ada produk yang cocok dengan pencarian/filter Anda.',
     filterAndSort: 'Filter & Urutkan',
+    home: 'Beranda',
+    breadcrumb: 'Navigasi halaman',
+    activeFilters: 'Filter aktif:',
+    resetFilters: 'Reset filter',
+    removeFilter: 'Hapus filter {name}',
+    chipMin: 'Min {value}',
+    chipMax: 'Maks {value}',
+    expandCategory: 'Buka subkategori {name}',
+    collapseCategory: 'Tutup subkategori {name}',
   },
   categories: {
     title: 'Semua Kategori',

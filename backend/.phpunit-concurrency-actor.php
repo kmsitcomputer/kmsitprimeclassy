@@ -451,11 +451,60 @@ if (str_starts_with($role, 'sr-')) {
             case 'transfer-cancel':
                 $result = app(StockTransferService::class)->cancel($actor, StockTransfer::withoutGlobalScopes()->findOrFail($subjectId));
                 break;
+            case 'physical-stock-aba':
+                $peerReady = (string) $options[$isA ? 'sr-ready-b' : 'sr-ready-a'];
+                DB::transaction(function () use ($subjectId, $ready, $peerReady) {
+                    $stock = \App\Models\WarehouseStock::withoutGlobalScopes()->whereKey($subjectId)->lockForUpdate()->firstOrFail();
+                    file_put_contents($ready.'.aba-held', 'locked');
+                    $deadline = microtime(true) + 10;
+                    while (! file_exists($peerReady.'.aba-attempt')) {
+                        if (microtime(true) > $deadline) throw new RuntimeException('ABA approval attempt barrier timed out');
+                        usleep(10000);
+                    }
+                    $stock->increment('quantity', 3);
+                    $stock->decrement('quantity', 3);
+                });
+                $result = null;
+                break;
             case 'opname-approve':
+                if (! empty($extra['wait_for_aba'])) {
+                    $peerReady = (string) $options[$isA ? 'sr-ready-b' : 'sr-ready-a'];
+                    $deadline = microtime(true) + 10;
+                    while (! file_exists($peerReady.'.aba-held')) {
+                        if (microtime(true) > $deadline) throw new RuntimeException('ABA stock lock barrier timed out');
+                        usleep(10000);
+                    }
+                    DB::connection()->beforeExecuting(function ($query) use ($ready) {
+                        if (str_contains(strtolower($query), '`warehouse_stocks`') && str_contains(strtolower($query), 'for update')) {
+                            file_put_contents($ready.'.aba-attempt', 'attempted');
+                        }
+                    });
+                }
                 $result = app(StockOpnameService::class)->approve($actor, StockOpname::withoutGlobalScopes()->findOrFail($subjectId));
                 break;
             case 'opname-reject':
                 $result = app(StockOpnameService::class)->reject($actor, StockOpname::withoutGlobalScopes()->findOrFail($subjectId), 'concurrency rejection');
+                break;
+            case 'category-create':
+                $result = app(\App\Services\Product\CategoryHierarchyService::class)->create(
+                    ['name' => $extra['name'], 'parent_id' => $extra['parent_id'] ?? null, 'slug' => \Illuminate\Support\Str::slug($extra['name']).'-'.uniqid()],
+                    $actor,
+                );
+                break;
+            case 'category-raw-insert':
+                // Direct SQL path (NO service, NO advisory lock): only the database constraint can stop a duplicate.
+                $id = DB::table('product_categories')->insertGetId([
+                    'parent_id' => $extra['parent_id'] ?? null, 'name' => $extra['name'], 'name_key' => $extra['name_key'],
+                    'slug' => $extra['slug'], 'created_at' => now(), 'updated_at' => now(),
+                ]);
+                $result = \App\Models\ProductCategory::query()->findOrFail($id);
+                break;
+            case 'category-reparent':
+                $result = app(\App\Services\Product\CategoryHierarchyService::class)->update(\App\Models\ProductCategory::findOrFail($subjectId), ['parent_id' => $extra['parent_id']]);
+                break;
+            case 'catalog-import-rows':
+                $applied = app(\App\Services\Catalog\CatalogImportService::class)->apply($actor, $extra['rows'], $extra['context'], (string) $extra['batch_key']);
+                $result = ['outcomes' => array_column($applied['rows'], 'outcome'), 'errors' => array_column($applied['rows'], 'errors')];
                 break;
             case 'sub-reserve':
                 $item = OrderItem::findOrFail($subjectId);
@@ -854,6 +903,7 @@ if (str_starts_with($role, 'sr-')) {
         $payload['outcome'] = 'success';
         $payload['exit_code'] = 0;
     } catch (Throwable $e) {
+        $payload['business_status'] = $e instanceof \App\Exceptions\ApiException ? $e->status() : null;
         $payload['exception'] = get_class($e);
         $payload['message'] = $e->getMessage();
         $payload['sql_state'] = $e instanceof QueryException ? $e->errorInfo[0] ?? null : null;

@@ -38,6 +38,9 @@ export interface CreateOrderPayload {
   /** The specific courier+service picked under "Ekspedisi" (e.g. JNE REG) — only meaningful with shippingMethod: 'rajaongkir'. */
   courier?: CourierSelection | null
   konsumenId?: number | null
+  /** REM-09: Sales-Kurir-Sub only — exactly ONE stock source per order. The server (StockSourceResolver) derives
+   *  the Sub Location from the account and rejects anything not owned; the client never sends a location. */
+  stockSource?: 'agent' | 'sub' | null
   /** IMP-002 voucher code — server re-validates everything. */
   voucherCode?: string | null
   /** Client-generated key (e.g. secureUuid() from @/utils/uuid) — a retried submission with the
@@ -57,6 +60,7 @@ export async function createOrder(payload: CreateOrderPayload) {
       ...(payload.courier ? { courier: payload.courier.courier, service: payload.courier.service } : {}),
       ...(payload.dpAmount ? { dp_amount: payload.dpAmount } : {}),
       ...(payload.konsumenId ? { konsumen_id: payload.konsumenId } : {}),
+      ...(payload.stockSource ? { stock_source: payload.stockSource } : {}),
       ...(payload.voucherCode ? { voucher_code: payload.voucherCode } : {}),
     },
     { headers: { 'Idempotency-Key': payload.idempotencyKey } },

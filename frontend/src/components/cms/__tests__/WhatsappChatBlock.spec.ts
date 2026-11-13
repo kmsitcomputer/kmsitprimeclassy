@@ -40,17 +40,17 @@ describe('WhatsappChatBlock', () => {
 })
 
 describe('brand icons in link blocks', () => {
-  it('social links use the configured url and carry an icon plus a text label', () => {
+  it('social links use the configured url and carry an icon plus an accessible name (icon-only circles)', () => {
     const w = mount(SocialMediaBlock, {
       props: { content: { layout: 'cards', platforms: { instagram: { enabled: true, url: 'https://instagram.com/x' }, tiktok: { enabled: true, url: 'https://tiktok.com/@x' }, facebook: { enabled: true, url: 'https://facebook.com/x' } } } },
     })
     const links = w.findAll('a')
     expect(links.map((l) => l.attributes('href'))).toEqual(['https://instagram.com/x', 'https://tiktok.com/@x', 'https://facebook.com/x'])
     links.forEach((l) => expect(l.find('svg path').attributes('d')).toBeTruthy())
-    expect(links[0]!.text()).toContain('Instagram')
+    expect(links[0]!.attributes('aria-label')).toBe('Instagram')
   })
 
-  it('marketplace shows the bundled Tokopedia PNG and the Shopee SVG, with CMS urls and text labels', () => {
+  it('marketplace shows the bundled Tokopedia PNG and the Shopee SVG, with CMS urls and accessible names', () => {
     const w = mount(MarketplaceLinksBlock, {
       props: { content: { layout: 'cards', platforms: { tokopedia: { enabled: true, url: 'https://tokopedia.com/x' }, shopee: { enabled: true, url: 'https://shopee.co.id/x' } } } },
     })
@@ -58,7 +58,7 @@ describe('brand icons in link blocks', () => {
     expect(toko!.attributes('href')).toBe('https://tokopedia.com/x')
     expect(toko!.find('img').attributes('src')).toMatch(/tokopedia-com-logo.*\.png$/)
     expect(toko!.find('svg').exists()).toBe(false)
-    expect(toko!.text()).toBe('Tokopedia')
+    expect(toko!.attributes('aria-label')).toBe('Tokopedia')
     expect(shopee!.find('img').exists()).toBe(false)
     expect(shopee!.find('svg path').attributes('d')).toBeTruthy()
   })

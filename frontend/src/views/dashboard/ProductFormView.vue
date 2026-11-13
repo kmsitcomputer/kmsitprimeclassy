@@ -19,18 +19,17 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
+import VariationGalleryManager from '@/components/catalog/VariationGalleryManager.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   listCategories,
-  listProducts,
+  getManagedProduct,
   createProduct,
   updateProduct,
   createVariation,
   updateVariation,
   deleteVariation,
   uploadProductImage,
-  deleteProductImage,
-  setPrimaryProductImage,
   getProductFees,
   setProductFees,
   getVariationFees,
@@ -40,6 +39,7 @@ import { adjustStock } from '@/api/stock'
 import type { Category, Product, ProductVariation } from '@/api/types'
 import { ApiError } from '@/api/client'
 import { formatApiError } from '@/utils/apiError'
+import { buildCategoryTree, flattenCategoryTree } from '@/utils/categoryTree'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,6 +57,8 @@ const isEditing = computed(() => productId.value !== null)
 
 const loading = ref(true)
 const categories = ref<Category[]>([])
+/** Hierarchy order with indentation, so a child is never confused with a same-named category elsewhere. */
+const categoryOptions = computed(() => flattenCategoryTree(buildCategoryTree(categories.value)))
 const product = ref<Product | null>(null)
 
 const form = reactive({
@@ -84,6 +86,8 @@ interface AttributeRow { key: string; value: string }
 interface StagedVariant {
   sku: string; price: number; weight_grams: number; stock: number; attributes: AttributeRow[]
   agent_fee: number; sales_fee: number; courier_fee: number
+  /** create-mode: images staged for THIS variant only; uploaded to its own gallery right after it is created. */
+  files: File[]
 }
 const showVariantBuilder = ref(false)
 const stagedVariants = ref<StagedVariant[]>([])
@@ -94,7 +98,7 @@ const hasVariations = computed(() => (isEditing.value ? !!product.value?.has_var
 function blankVariant(): StagedVariant {
   return {
     sku: '', price: 0, weight_grams: 0, stock: 0, attributes: [{ key: '', value: '' }],
-    agent_fee: 0, sales_fee: 0, courier_fee: 0,
+    agent_fee: 0, sales_fee: 0, courier_fee: 0, files: [],
   }
 }
 const newVariant = ref<StagedVariant>(blankVariant())
@@ -133,7 +137,10 @@ const editingVariationId = ref<number | null>(null)
 const variationEditForm = reactive({
   sku: '', price: 0, weight_grams: 0, is_active: true, stock: 0,
   agent_fee: 0, sales_fee: 0, courier_fee: 0,
+  // REM-08: attributes of THIS variant only (siblings are never touched).
+  attributes: [] as AttributeRow[],
 })
+let originalAttributes: Record<string, string> = {}
 
 async function openEditVariation(variation: ProductVariation) {
   editingVariationId.value = variation.id
@@ -142,6 +149,9 @@ async function openEditVariation(variation: ProductVariation) {
   variationEditForm.weight_grams = variation.weight_grams
   variationEditForm.is_active = variation.is_active
   variationEditForm.stock = variation.stock?.available ?? 0
+  originalAttributes = { ...variation.attributes }
+  variationEditForm.attributes = Object.entries(originalAttributes).map(([key, value]) => ({ key, value }))
+  if (variationEditForm.attributes.length === 0) variationEditForm.attributes.push({ key: '', value: '' })
   variationEditForm.agent_fee = 0
   variationEditForm.sales_fee = 0
   variationEditForm.courier_fee = 0
@@ -158,9 +168,17 @@ async function saveVariationEdit() {
   variationSaving.value = true
   variationError.value = ''
   try {
+    const editedAttributes = attributesToMap(variationEditForm.attributes)
+    if (Object.keys(editedAttributes).length === 0) {
+      variationError.value = 'Varian harus memiliki minimal satu atribut.'
+      variationSaving.value = false
+      return
+    }
+    const attributesChanged = JSON.stringify(Object.entries(editedAttributes).sort()) !== JSON.stringify(Object.entries(originalAttributes).sort())
     await updateVariation(product.value.id, editingVariationId.value, {
       sku: variationEditForm.sku, price: variationEditForm.price,
       weight_grams: variationEditForm.weight_grams, is_active: variationEditForm.is_active,
+      ...(attributesChanged ? { attributes: editedAttributes } : {}),
     })
     if (canManageFees.value) {
       await setVariationFees(product.value.id, editingVariationId.value, {
@@ -227,7 +245,6 @@ interface StagedImage { file: File; previewUrl: string; isDefault: boolean }
 const stagedImages = ref<StagedImage[]>([])
 const imageError = ref('')
 const imageBusy = ref(false)
-const dragOver = ref(false)
 
 function handleFiles(files: FileList | File[] | null) {
   if (!files) return
@@ -270,25 +287,19 @@ async function uploadFiles(files: File[]) {
     imageBusy.value = false
   }
 }
-async function removeImage(imageId: number) {
-  if (!product.value) return
-  await deleteProductImage(product.value.id, imageId)
-  await load()
-}
-async function makePrimary(imageId: number) {
-  if (!product.value) return
-  await setPrimaryProductImage(product.value.id, imageId)
-  await load()
-}
-
 /* ---------- Load ---------- */
 async function load() {
   loading.value = true
   categories.value = await listCategories()
 
   if (isEditing.value) {
-    const { products } = await listProducts({ per_page: 100 })
-    const found = products.find((p) => p.id === productId.value)
+    // REM-03: management detail — never the active-only, first-100 storefront listing.
+    let found: Product | null = null
+    try {
+      found = await getManagedProduct(productId.value as number)
+    } catch {
+      found = null
+    }
     if (found) {
       product.value = found
       form.category_id = found.category?.id ?? null
@@ -378,6 +389,10 @@ async function submit() {
           if (canManageStock.value && variant.stock > 0) {
             await adjustStock({ product_variation_id: createdVariant.id, delta: variant.stock, reason: 'Stok awal' })
           }
+          // each variant's images go to ITS OWN gallery, keyed by the id the server just returned
+          for (const [n, file] of variant.files.entries()) {
+            await uploadProductImage(created.id, file, { product_variation_id: createdVariant.id, is_primary: n === 0 })
+          }
         }
         let defaultSet = false
         for (const img of stagedImages.value) {
@@ -438,7 +453,7 @@ async function submit() {
           Kategori
           <select v-model="form.category_id" class="mt-1 block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950">
             <option :value="null">— Tanpa kategori —</option>
-            <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+            <option v-for="row in categoryOptions" :key="row.category.id" :value="row.category.id">{{ '— '.repeat(row.depth) }}{{ row.category.name }}</option>
           </select>
         </label>
 
@@ -510,22 +525,15 @@ async function submit() {
         <div>
           <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">Gambar Produk (bisa lebih dari satu)</label>
 
-          <!-- Existing images (edit mode, immediate actions) -->
-          <div v-if="isEditing && product && product.images.length" class="mb-3 grid grid-cols-3 gap-3 sm:grid-cols-4">
-            <div v-for="img in product.images" :key="img.id" class="relative overflow-hidden rounded-xl border border-stone-200 dark:border-stone-700">
-              <img :src="img.url" class="h-24 w-full object-cover" />
-              <span v-if="img.is_primary" class="absolute left-1.5 top-1.5 rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-medium text-white">Default</span>
-              <div class="absolute inset-x-0 bottom-0 flex justify-between gap-1 bg-black/50 p-1.5">
-                <button v-if="!img.is_primary" type="button" class="rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-medium text-stone-700" @click="makePrimary(img.id)">
-                  Jadikan Default
-                </button>
-                <span v-else class="flex-1"></span>
-                <button type="button" class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-medium text-white" @click="removeImage(img.id)">
-                  <AppIcon name="trash" :size="11" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <!-- Edit mode: the PARENT gallery only (variation galleries are managed under each variation) -->
+          <VariationGalleryManager
+            v-if="isEditing && product"
+            :product-id="product.id"
+            :variation-id="null"
+            :images="product.images.filter((i) => i.product_variation_id === null)"
+            :title="hasVariations ? 'Galeri produk (cadangan bila varian belum punya gambar)' : 'Galeri produk'"
+            @changed="load"
+          />
 
           <!-- Staged images (create mode, or newly added in edit before... actually edit uploads immediately below) -->
           <div v-if="!isEditing && stagedImages.length" class="mb-3 grid grid-cols-3 gap-3 sm:grid-cols-4">
@@ -546,6 +554,7 @@ async function submit() {
 
           <!-- Universal Upload Standard: selection/validation/drag-drop here; the gallery above stays the specialized adapter. -->
           <PrimeFileUpload
+            v-if="!isEditing"
             :model-value="[]"
             label="Tambah gambar"
             accept="image/jpeg,image/png,image/webp"
@@ -611,6 +620,15 @@ async function submit() {
                     <input v-model.number="variationEditForm.courier_fee" type="number" min="0" class="mt-0.5 block w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" />
                   </label>
                 </div>
+                <div class="mt-2">
+                  <p class="mb-1 text-xs font-medium text-stone-600 dark:text-stone-300">Atribut varian ini</p>
+                  <div v-for="(row, i) in variationEditForm.attributes" :key="i" class="mb-1.5 flex gap-2">
+                    <input v-model="row.key" type="text" placeholder="Nama atribut" class="block w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" />
+                    <input v-model="row.value" type="text" placeholder="Nilai" class="block w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950" />
+                    <button type="button" class="shrink-0 text-stone-400 hover:text-red-600" @click="variationEditForm.attributes.splice(i, 1)"><AppIcon name="trash" :size="14" /></button>
+                  </div>
+                  <button type="button" class="text-xs font-medium text-brand-600 dark:text-brand-400" @click="variationEditForm.attributes.push({ key: '', value: '' })">+ Tambah atribut</button>
+                </div>
                 <label class="mt-2 flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300">
                   <input v-model="variationEditForm.is_active" type="checkbox" /> Aktif
                 </label>
@@ -637,6 +655,15 @@ async function submit() {
                     </button>
                   </div>
                 </div>
+                <VariationGalleryManager
+                  v-if="product"
+                  class="mt-3"
+                  :product-id="product.id"
+                  :variation-id="variation.id"
+                  :images="product.images.filter((i) => i.product_variation_id === variation.id)"
+                  :title="`Gambar varian ${variation.label}`"
+                  @changed="load"
+                />
               </template>
             </div>
           </div>
@@ -648,6 +675,7 @@ async function submit() {
                 <strong>{{ variant.sku }}</strong> — {{ Object.entries(attributesToMap(variant.attributes)).map(([k, v]) => `${k}: ${v}`).join(', ') }}
                 &middot; Rp{{ variant.price.toLocaleString('id-ID') }} &middot; {{ variant.weight_grams }}g
                 <span v-if="canManageStock"> &middot; Stok: {{ variant.stock }}</span>
+                <span v-if="variant.files.length"> &middot; {{ variant.files.length }} gambar</span>
               </span>
               <button type="button" class="text-stone-400 hover:text-red-600" @click="unstageVariant(i)"><AppIcon name="trash" :size="14" /></button>
             </div>
@@ -696,6 +724,11 @@ async function submit() {
             <button type="button" class="mb-3 flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400" @click="addAttributeRow(newVariant)">
               <AppIcon name="plus" :size="12" /> Tambah atribut
             </button>
+            <div v-if="!isEditing" class="mb-3">
+              <label for="new-variant-images" class="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">Gambar varian ini (opsional; gambar pertama = utama)</label>
+              <input id="new-variant-images" type="file" multiple accept="image/jpeg,image/png,image/webp" class="block w-full text-xs" data-testid="new-variant-images" @change="(e) => (newVariant.files = Array.from((e.target as HTMLInputElement).files ?? []).filter((f) => f.type.startsWith('image/')))" />
+              <p v-if="newVariant.files.length" class="mt-1 text-xs text-stone-400">{{ newVariant.files.length }} gambar dipilih</p>
+            </div>
             <div class="flex gap-2">
               <AppButton size="sm" type="button" :disabled="variationSaving" @click="isEditing ? addVariationNow() : stageVariant()">
                 {{ isEditing ? (variationSaving ? 'Menyimpan...' : 'Tambah Varian') : 'Tambahkan ke Daftar' }}

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Catalog;
 
+use App\Http\Controllers\Api\V1\Catalog\Concerns\AttachesAgentAvailability;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Catalog\StoreProductRequest;
 use App\Http\Requests\Catalog\UpdateProductRequest;
@@ -25,7 +26,13 @@ use Illuminate\Support\Str;
  */
 class ProductController extends Controller
 {
-    public function __construct(private readonly HtmlSanitizerService $sanitizer, private readonly WarehouseStockService $warehouseStockService) {}
+    use AttachesAgentAvailability;
+
+    public function __construct(
+        private readonly HtmlSanitizerService $sanitizer,
+        private readonly WarehouseStockService $warehouseStockService,
+        private readonly \App\Services\Product\ProductHardDeleteService $hardDelete,
+    ) {}
 
     /**
      * Catalog browsing is reachable on a completely fresh, unmigrated
@@ -64,11 +71,14 @@ class ProductController extends Controller
             )
             ->select('products.*')
             ->addSelect('cheapest_variation.min_price as variations_min_price')
-            ->with(['category', 'images' => fn ($q) => $q->where('is_primary', true), 'variations' => fn ($q) => $q->where('is_active', true)])
-            ->when($request->filled('category'), fn ($q) => $q->whereHas(
-                'category',
-                fn ($c) => $c->where('slug', $request->string('category'))
-            ))
+            ->with(['category', 'images' => fn ($q) => $q->where('is_primary', true)->whereNull('product_variation_id'), 'variations' => fn ($q) => $q->where('is_active', true)])
+            // REM-06: a parent category also lists its descendants' products.
+            ->when($request->filled('category'), function ($q) use ($request) {
+                $root = \App\Models\ProductCategory::query()->where('slug', $request->string('category'))->first();
+                $ids = $root ? app(\App\Services\Product\CategoryHierarchyService::class)->selfAndDescendantIds($root->id) : [];
+
+                return $q->whereIn('products.category_id', $ids ?: [0]);
+            })
             ->when($request->filled('search'), fn ($q) => $q->where(function ($qq) use ($request) {
                 // DS-PBR-001: warehouse product picker searches by name OR
                 // SKU (additive — name matches behave exactly as before).
@@ -123,7 +133,7 @@ class ProductController extends Controller
         $product = Product::query()
             ->where('status', 'active')
             ->where('slug', $slug)
-            ->with(['category', 'images', 'variations' => fn ($q) => $q->where('is_active', true)])
+            ->with(['category', 'images' => fn ($q) => $q->orderBy('sort_order')->orderBy('id'), 'variations' => fn ($q) => $q->where('is_active', true)])
             ->firstOrFail();
 
         $this->attachAgentAvailability($request, collect([$product]));
@@ -185,32 +195,18 @@ class ProductController extends Controller
     }
 
     /**
-     * Mutates the given Product models in place, attaching a plain,
-     * non-persisted `agent_available_quantity` attribute (and the same on
-     * each loaded variation) resolved strictly from the viewer's own
-     * agent_id — read via a single batched query per level, not N+1.
+     * REM-04: guarded permanent delete. Soft delete (destroy) stays the default;
+     * this requires explicit confirmation and no remaining references.
+     * Admin is denied by ProductPolicy::delete (and by the route role group).
      */
-    private function attachAgentAvailability(Request $request, Collection $products): void
+    public function forceDestroy(Request $request, int $id)
     {
-        $agentId = $request->user()?->agent_id;
+        $product = Product::withTrashed()->findOrFail($id);
+        $this->authorize('delete', $product);
+        $request->validate(['confirm' => ['required', 'accepted']]);
 
-        if (! $agentId) {
-            return;
-        }
+        $this->hardDelete->delete($product, $request->user()->id, $request->user()->role?->slug);
 
-        $simpleProductIds = $products->where('has_variations', false)->pluck('id');
-        $variationIds = $products->flatMap(fn ($p) => $p->has_variations ? $p->variations->pluck('id') : collect());
-        $stock = $this->warehouseStockService->sellableForTargets($agentId, $simpleProductIds, $variationIds);
-        foreach ($products as $product) {
-            if (! $product->has_variations) {
-                $product->sellable_stock = $stock['p:'.$product->id] ?? ['available' => 0];
-                $product->agent_available_quantity = $product->sellable_stock['available'];
-            } else {
-                foreach ($product->variations as $variation) {
-                    $variation->sellable_stock = $stock['v:'.$variation->id] ?? ['available' => 0];
-                    $variation->agent_available_quantity = $variation->sellable_stock['available'];
-                }
-            }
-        }
+        return $this->ok(null, __('messages.product.deleted'));
     }
 }

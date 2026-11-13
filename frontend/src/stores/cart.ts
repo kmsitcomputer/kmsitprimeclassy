@@ -23,6 +23,14 @@ export interface CartLine {
 }
 
 const STORAGE_KEY = 'pc-cart'
+const SOURCE_KEY = 'pc-cart-stock-source'
+type StockChoice = { actorId: number; source: 'agent' | 'sub' }
+function loadStockChoice(): StockChoice | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(SOURCE_KEY) ?? 'null') as StockChoice | null
+    return value && Number.isInteger(value.actorId) && ['agent', 'sub'].includes(value.source) ? value : null
+  } catch { return null }
+}
 
 function loadFromStorage(): CartLine[] {
   try {
@@ -44,6 +52,7 @@ function persist(lines: CartLine[]) {
 export const useCartStore = defineStore('cart', {
   state: () => ({
     lines: loadFromStorage() as CartLine[],
+    stockChoice: loadStockChoice(),
   }),
   getters: {
     count: (state) => state.lines.reduce((sum, l) => sum + l.quantity, 0),
@@ -51,9 +60,24 @@ export const useCartStore = defineStore('cart', {
     isEmpty: (state) => state.lines.length === 0,
   },
   actions: {
+    stockSourceFor(actorId: number): 'agent' | 'sub' {
+      return this.stockChoice?.actorId === actorId ? this.stockChoice.source : 'agent'
+    },
+    setStockSource(actorId: number, source: 'agent' | 'sub') {
+      // One choice for the entire shopping list. No client location identity.
+      if (this.stockChoice?.actorId !== actorId || this.stockChoice.source !== source) {
+        // Display ceilings belong to the former source. Preserve requested quantities;
+        // checkout validates every line against the newly selected canonical source.
+        this.lines.forEach(line => { line.stockLimit = null })
+        persist(this.lines)
+      }
+      this.stockChoice = { actorId, source }
+      try { sessionStorage.setItem(SOURCE_KEY, JSON.stringify(this.stockChoice)) } catch { /* optional persistence */ }
+    },
     add(line: Omit<CartLine, 'quantity'>, quantity = 1) {
       const existing = this.lines.find((l) => l.key === line.key)
       if (existing) {
+        existing.stockLimit = line.stockLimit
         existing.quantity = Math.min(existing.quantity + quantity, existing.stockLimit ?? 999)
       } else {
         this.lines.push({ ...line, quantity })
@@ -75,6 +99,8 @@ export const useCartStore = defineStore('cart', {
       persist(this.lines)
     },
     clear() {
+      this.stockChoice = null
+      try { sessionStorage.removeItem(SOURCE_KEY) } catch { /* optional persistence */ }
       this.lines = []
       persist(this.lines)
     },

@@ -27,6 +27,7 @@ export default {
     apply: 'Apply',
     back: 'Back',
     next: 'Next',
+    previous: 'Previous',
     copyright: '© {year} Prime Classy Cake & Cookies.',
   },
   roles: {
@@ -92,6 +93,15 @@ export default {
     applyFilter: 'Apply Filter',
     noResults: 'No products match your search/filter.',
     filterAndSort: 'Filter & Sort',
+    home: 'Home',
+    breadcrumb: 'Page navigation',
+    activeFilters: 'Active filters:',
+    resetFilters: 'Reset filters',
+    removeFilter: 'Remove filter {name}',
+    chipMin: 'Min {value}',
+    chipMax: 'Max {value}',
+    expandCategory: 'Show subcategories of {name}',
+    collapseCategory: 'Hide subcategories of {name}',
   },
   categories: {
     title: 'All Categories',

@@ -74,7 +74,8 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
 
     private function makeProduct(User $agen): \App\Models\Product
     {
-        $category = \App\Models\ProductCategory::create(['name' => 'Kue Kering', 'slug' => 'kue-kering-'.Str::random(6)]);
+        // REM-06: root category names are unique; this helper is called several times per test, so reuse the one category.
+        $category = \App\Models\ProductCategory::firstOrCreate(['name' => 'Kue Kering'], ['slug' => 'kue-kering-'.Str::random(6)]);
 
         return \App\Models\Product::create([
             'sku' => 'WS-'.Str::random(6), 'name' => 'Nastael', 'slug' => 'nastael-'.Str::random(6),

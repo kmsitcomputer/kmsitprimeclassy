@@ -25,6 +25,13 @@ class EnsureAgentLinked
             return ApiResponse::error(__('messages.system.agent_not_linked'), null, 403);
         }
 
+        // Group 1 / ODR-01: a link to a deleted, suspended or non-Agent account is a stale link —
+        // fail closed instead of letting the user act for a branch that no longer exists.
+        if ($user && ! $user->isRole('super_admin') && ! $user->isRole('agen')
+            && ! app(\App\Services\Hierarchy\ValidAgentResolver::class)->isValid((int) $user->agent_id)) {
+            return ApiResponse::error(__('messages.system.agent_not_linked'), null, 403);
+        }
+
         return $next($request);
     }
 }

@@ -27,6 +27,7 @@ export default {
     apply: '应用',
     back: '返回',
     next: '下一步',
+    previous: '上一页',
     copyright: '© {year} Prime Classy Cake & Cookies.',
   },
   roles: {
@@ -92,6 +93,15 @@ export default {
     applyFilter: '应用筛选',
     noResults: '没有符合搜索/筛选条件的产品。',
     filterAndSort: '筛选与排序',
+    home: '首页',
+    breadcrumb: '页面导航',
+    activeFilters: '已选筛选：',
+    resetFilters: '重置筛选',
+    removeFilter: '移除筛选 {name}',
+    chipMin: '最低 {value}',
+    chipMax: '最高 {value}',
+    expandCategory: '展开 {name} 的子分类',
+    collapseCategory: '收起 {name} 的子分类',
   },
   categories: {
     title: '全部分类',
