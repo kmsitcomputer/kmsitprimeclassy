@@ -40,6 +40,7 @@ IMPLEMENTED = {
     ("GET", "/api/v1/homepage"): "\"bestseller\" block returns [] for anonymous visitors (identical to the reference); authenticated ranking not ported",
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
+    ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
     # --- checkpoint G: inventory read surface (contract-compared in tools/parity/compare_inventory.py)
     ("GET", "/api/v1/stock/products"): "",
     ("GET", "/api/v1/stock/variations"): "",

@@ -89,6 +89,10 @@ type Error struct {
 	Message string
 	// Fields is the 422 `errors` payload: field -> []message.
 	Fields map[string][]string
+	// FieldStrings is the OTHER 422 shape the reference produces: an ApiException with a single sentence per
+	// field serialises as `{"field": "text"}` (a string, not an array), while a ValidationException serialises
+	// as `{"field": ["text"]}`. The two are not interchangeable for the frontend, so they are kept apart.
+	FieldStrings map[string]string
 	// Code is an optional machine-readable code inside errors["code"], used by a few endpoints
 	// (e.g. registration_unavailable) exactly as the Laravel implementation does.
 	Code string
@@ -108,6 +112,13 @@ func (e *Error) Unwrap() error { return e.Err }
 // ErrorsPayload renders the `errors` member exactly like Laravel: field errors, or {"code": [...]} when a
 // machine-readable code was attached, or null.
 func (e *Error) ErrorsPayload() any {
+	if len(e.FieldStrings) > 0 {
+		out := make(map[string]any, len(e.FieldStrings))
+		for k, v := range e.FieldStrings {
+			out[k] = v
+		}
+		return out
+	}
 	if len(e.Fields) > 0 {
 		out := make(map[string]any, len(e.Fields)+1)
 		for k, v := range e.Fields {

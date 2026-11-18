@@ -53,6 +53,27 @@ KEYS = {
         "updated",
         "deleted",
     ],
+    # Checkout / order preview (Checkpoint O). Rendering the reference's own sentences here is mandatory: the
+    # stock warning and voucher rejection are shown to the customer verbatim.
+    "order": [
+        "no_agent_branch",
+        "empty_items",
+        "agent_profile_incomplete",
+        "invalid_quantity",
+        "insufficient_stock",
+        "invalid_village",
+        "invalid_region_hierarchy",
+        "created",
+        "status_updated",
+        "cancelled",
+    ],
+    "shipping": [
+        "method_not_available",
+    ],
+    "product": [
+        "variation_required",
+        "variation_not_allowed",
+    ],
     "profile": [
         "current_password_incorrect",
         "password_updated",
@@ -66,12 +87,21 @@ KEYS = {
 
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
-VALIDATION_KEYS = ["in", "exists", "required", "integer", "date", "array", "unique"]
+VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
+                   "array", "unique"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric")]
 
 LOCALES = ["id", "en", "ar", "zh"]
+
+# Keys the reference ASKS FOR but has no translation for. Laravel's __() returns the key itself in that case, so
+# the observable API response really is "messages.voucher.invalid" — this is not a Go guess, it is the verified
+# output of the running reference (see docs/21c §4-2). Emitting a nicer sentence here would BREAK parity.
+RAW_KEY_FALLBACKS = {
+    "voucher.invalid": "messages.voucher.invalid",
+    "voucher.not_applicable": "messages.voucher.not_applicable",
+}
 
 
 def unescape(v: str) -> str:
@@ -114,10 +144,18 @@ def main() -> int:
             pairs = dict(PAIR.findall(body))
             for key in keys:
                 if key not in pairs:
+                    # Laravel falls back to the default locale for a missing translation, and internal/i18n does
+                    # the same, so a gap in a secondary locale is not drift — only a gap in the DEFAULT locale
+                    # would make the Go output diverge.
+                    if loc != "id":
+                        continue
                     raise SystemExit(f"{loc}: missing key {group}.{key}")
                 # PHP single-quoted strings only escape \\ and \' — normalise to plain text.
                 value = pairs[key].replace("\\'", "'").replace("\\\\", "\\")
                 out[loc][f"{group}.{key}"] = value
+
+    for loc in LOCALES:
+        out[loc].update(RAW_KEY_FALLBACKS)
 
     # Validation sentences (separate file in Laravel, but the same catalogue for Go).
     for loc in LOCALES:

@@ -168,13 +168,13 @@ Status legend:
 | DELETE | `/api/v1/categories/{category}` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/categories/{category}` | session | super_admin | LARAVEL |  |
 
-## Checkout — `checkout` (1/4 in Go)
+## Checkout — `checkout` (2/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | POST | `/api/v1/checkout/courier-options` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/checkout/geocode` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/checkout/quote` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/checkout/quote` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher |
 | GET | `/api/v1/checkout/steps` | public | — | **GO** | public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter |
 
 ## CMS — admin — `cms` (0/14 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 75 (20.0%) |
-|   of which fully GO | 69 |
+| Served by Go now | 76 (20.3%) |
+|   of which fully GO | 70 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 300 |
+| Still Laravel-only | 299 |
 | Areas fully ported | 11 / 45 |

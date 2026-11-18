@@ -62,11 +62,13 @@ INSERT INTO users (id, role_id, parent_id, agent_id, korsal_id, sales_id, name, 
  (13,11,10,10,NULL,NULL,'Konsumen Satu','konsumen@imp010.test','081100000013',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (14,6,10,10,13,14,'Sales Satu','sales@imp010.test','081100000014','SL-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (15,10,10,10,NULL,NULL,'Gudang Satu','gudang@imp010.test','081100000015',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
- (16,7,10,10,13,16,'Sub Seller','sub@imp010.test','081100000016','SS-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW());
+ (16,7,10,10,13,16,'Sub Seller','sub@imp010.test','081100000016','SS-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
+ (17,11,10,10,13,14,'Konsumen Sales','konsumen2@imp010.test','081100000017',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW());
 
 INSERT INTO user_closures (ancestor_id, descendant_id, depth) VALUES
  (1,1,0),(10,10,0),(11,11,0),(12,12,0),(13,13,0),(14,14,0),(15,15,0),(16,16,0),
- (10,11,1),(10,12,1),(10,13,1),(10,14,1),(10,15,1),(10,16,1),(1,10,1),(1,11,2),(1,12,2),(1,13,2),(1,14,2),(1,15,2),(1,16,2);
+ (10,11,1),(10,12,1),(10,13,1),(10,14,1),(10,15,1),(10,16,1),(10,17,1),
+ (1,10,1),(1,11,2),(1,12,2),(1,13,2),(1,14,2),(1,15,2),(1,16,2),(1,17,2);
 
 INSERT INTO agent_profiles (id, user_id, store_name, address, latitude, longitude, phone, created_at, updated_at) VALUES
  (1,10,'Toko Prime Classy Imp010','Jl. Uji 1, Bandung',-6.9000000,107.6000000,'081100000010',NOW(),NOW());
@@ -94,6 +96,32 @@ INSERT INTO payment_methods (id, code, name, type, is_active, created_at, update
  (2,'cod','Bayar di Tempat (COD)','cod',1,NOW(),NOW()),
  (3,'down_payment','DP / Down Payment','manual',1,NOW(),NOW()),
  (4,'gateway','Payment Gateway','gateway',1,NOW(),NOW());
+
+-- Courier master list (Super Admin). RajaOngkir quoting intersects this list with the agent's own enabled
+-- couriers, so both halves need a fixture.
+DELETE FROM shipping_couriers;
+INSERT INTO shipping_couriers (id, code, name, is_active, created_at, updated_at) VALUES
+ (1,'jne','JNE',1,NOW(),NOW()),
+ (2,'tiki','TIKI',1,NOW(),NOW()),
+ (3,'pos','POS Indonesia',0,NOW(),NOW());
+
+-- Checkout/order fixtures: a per-order admin fee, the voucher shapes the preview must price, and one address
+-- book row so the address_id path is exercised (the inline path is exercised by the harness).
+DELETE FROM konsumen_addresses;
+INSERT INTO konsumen_addresses (id, user_id, label, recipient_name, phone, address_line,
+  province_id, regency_id, district_id, village_id, latitude, longitude, is_default, created_at, updated_at) VALUES
+ (1,13,'Rumah','Konsumen Satu','081100000013','Jl. Alamat Buku 1','32','3273','327301','32730101',-6.9000000,107.6000000,1,NOW(),NOW());
+
+DELETE FROM vouchers;
+INSERT INTO vouchers (id, agent_id, code, name, type, value, is_active, valid_from, valid_until,
+  product_id, product_variation_id, max_uses, used_count, created_at, updated_at) VALUES
+ (1,10,'HEMAT10K','Potongan 10 ribu','fixed',10000.00,1,NULL,NULL,NULL,NULL,100,0,NOW(),NOW()),
+ (2,10,'PERSEN10','Diskon 10 persen','percentage',10.00,1,NULL,NULL,NULL,NULL,100,0,NOW(),NOW()),
+ (3,10,'HANYA-LUMPUR','Khusus Kue Lumpur','fixed',5000.00,1,NULL,NULL,1,NULL,100,0,NOW(),NOW());
+UPDATE settings SET `value` = '2500' WHERE `key` = 'checkout.admin_fee_amount';
+INSERT INTO settings (id, `key`, value, `group`, is_public, created_at, updated_at)
+ SELECT 5,'checkout.admin_fee_amount','2500','checkout',0,NOW(),NOW()
+ WHERE NOT EXISTS (SELECT 1 FROM settings WHERE `key` = 'checkout.admin_fee_amount');
 
 INSERT INTO languages (id, code, name, is_default, is_active, sort_order, created_at, updated_at) VALUES
  (1,'id','Indonesia',1,1,1,NOW(),NOW()),

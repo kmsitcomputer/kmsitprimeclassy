@@ -107,6 +107,12 @@ func (s *Server) routes() {
 	// Checkout wizard contract. Public (a guest starting checkout still needs the step list); the session, when
 	// present, makes the same response role-aware.
 	s.mux.HandleFunc("GET /api/v1/checkout/steps", s.handleCheckoutSteps)
+	// Order preview: konsumen for themselves, or staff on behalf of a konsumen in their own network. The
+	// policy check inside the handler is the authority; the route gate only excludes roles that never order.
+	s.mux.Handle("POST /api/v1/checkout/quote", chain(http.HandlerFunc(s.handleCheckoutQuote),
+		RequireAuth, s.RequireAgentLinked,
+		RequireRole("konsumen,agen,korsal,sales,sales-kurir-sub"),
+		s.Throttle(30, time.Minute)))
 	s.mux.HandleFunc("GET /api/v1/products", s.handleProducts)
 	s.mux.HandleFunc("GET /api/v1/products/{slug}", s.handleProductDetail)
 	s.mux.HandleFunc("GET /api/v1/homepage", s.handleHomepage)

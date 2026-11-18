@@ -11,12 +11,12 @@ Do not read this as a completion report.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **75 (20.0%)** |
-| Fully GO | 69 |
+| Served by Go | **76 (20.3%)** |
+| Fully GO | 70 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **301** |
-| Go tests | **98 green**, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **250 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout) |
+| Laravel-only (Go answers 501) | **299** |
+| Go tests | **113 green**, `go vet` clean, gofmt clean |
+| Cross-runtime comparison checks | **275 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -34,6 +34,7 @@ Do not read this as a completion report.
 | Konsumen address book | 4 | `compare_address.py` (17) — incl. the resolved province/regency/district columns and the ownership 404 |
 | Promotions (vouchers + discounts) | 8 | `compare_promo.py` (21) — incl. both resulting row sets and the RBAC refusal |
 | Checkout wizard contract | 1 | `compare_checkout.py` (38) — 11 scenarios: guest, konsumen, sales, agen, super_admin, branch provider switches, the KMSIT fallback, "nothing to offer", and payment-method switches |
+| Checkout quote (Review preview) | 1 | `compare_order_quote.py` (25) — pickup/address-book/inline destinations, fixed/percentage/targeted vouchers, inapplicable + unknown vouchers, provider-failure 422s, validation shapes, policy vs role 403, guest 401. Provider clients additionally pinned by 4 Go test groups incl. a stub ORS/RajaOngkir/KMSIT and the SSRF guard |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
 ## 3. What remains (327 routes) — ordered, with the real obstacle for each
@@ -160,24 +161,69 @@ Also fixed in this checkpoint: `implementsRoute` did not recognise `POST .../ass
 `POST .../deactivate`, which skipped CSRF validation on two state-changing endpoints and undercounted the
 parity report by 2. `TestEveryRegisteredRouteIsImplemented` now enforces "registered ⇒ implemented".
 
+## 4-2. Checkout quote — DONE (do not re-derive)
+
+`POST /api/v1/checkout/quote` is served. Packages: `internal/checkout/quote.go` (destination + lines + voucher +
+admin fee), `internal/shipping/quote.go` (provider engine + RajaOngkir/ORS/KMSIT clients), `internal/shipping/guard.go`
+(SSRF policy), `internal/cryptox` (reads Laravel-encrypted credentials).
+
+Traps recorded — each one produced a real mismatch until fixed:
+- **Two different 422 shapes.** A validation failure serialises `{"field": ["msg"]}`; an `ApiException` with a
+  field map serialises `{"field": "msg"}` (a STRING). `httpx.Error` now carries both (`Fields` and
+  `FieldStrings`) — see the unknown-village and region-hierarchy cases.
+- **`__()` returns the key when the translation is missing.** `messages.voucher.invalid` is emitted VERBATIM by
+  the reference because `lang/id/messages.php` has no `voucher` group. The Go catalogue stores that literal
+  (`RAW_KEY_FALLBACKS` in `gen_i18n.py`); "improving" it would break parity.
+- **Policy denial is not the role-middleware denial.** `OrderPolicy::create` throws Laravel's
+  `AuthorizationException`, whose message is the raw English `"This action is unauthorized."`; the route role gate
+  returns the localised `system.unauthorized_action`. Both are 403 and they are different bodies.
+- **Existence rules fire before service logic.** An unknown `village_id` is a `validation.exists` error, not the
+  service's `order.invalid_village` ApiException.
+- **`required_without` / `required_with` sentences** carry the OTHER field's display name
+  (`"... apabila address id tidak ada."`), not the plain `required` sentence.
+- **Provider failures are never surfaced raw**: every `QuoteError` becomes the generic
+  `shipping.method_not_available` 422 with a `shipping_method` field sentence, exactly like the reference after it
+  logs `ShippingQuoteException`.
+- **RajaOngkir regency matching strips `Kota/Kabupaten` from the INTERNAL name only** — a stub that returns
+  "Kota Bandung" would make the reference fail too. Retested with a realistic payload.
+
+Verification split (honest): the reference-observable paths are compared live (25/25). The three outbound clients
+are pinned by Go tests against a **local stub server** (tariff arithmetic incl. minimum charge/free-shipping/
+below-minimum, KMSIT fallback + SSRF refusal, RajaOngkir courier intersection + cheapest-first + explicit
+courier/service, unmapped destination fails closed) because no real provider credentials exist here. RajaOngkir's
+base URL is hardcoded in the reference, so its successful round-trip cannot be compared differentially; Go keeps
+the same default and allows an override purely as a test seam.
+
+`APP_KEY` must be present in the Go process environment for real agent credentials to decrypt (deviation D-12).
+
 ## 4a. Next action (resume here)
 
-**`POST /api/v1/checkout/quote`** — the server-computed Review-step preview. Read
-`CheckoutController::quote` + `QuoteCheckoutRequest` + `OrderService::quote` (line 528) +
-`OrderService::resolveLine` (662) + `ShippingQuoteService::quote`. It must go through `internal/pricing`
-already built, and it must NOT create anything (no reservation, no order row). Capture the exact validation
-messages first: the request rejects an empty `items`, a missing destination, and an unresolvable product.
+**A. Stock reservation primitives** (`StockService::reserveForProduct|reserveForVariation|provisionProductCommitment`,
+`canonicalReservationTargets`, `lockReservationTargets`). `internal/inventory/transfers.go` already contains the
+canonical `targetKey`/`sortTargets` ordering and the two-connection tests — REUSE it, never introduce a second
+ordering. Required evidence: a two-connection test proving two concurrent reservations of the same target cannot
+both succeed past `available`, plus the deadlock-freedom case for multi-target lines.
 
-Then:
+**B. `POST /api/v1/orders`** (`OrderService::createOrder`, 1,181 lines). Order of work inside it:
+   1. `resolveLine` + `quoteLine` (already ported in `internal/checkout`) and the money boundary
+      (`internal/money` + `internal/pricing`, verified).
+   2. `StockSourceResolver` + the `sub_location_id` ownership re-lock (`lockSubLocationForCheckout`: SHARED lock on
+      the Sub Location row BEFORE any Sub stock row — the reverse order deadlocks against
+      `SubStockRequestService::execute`).
+   3. `priceAndReserveLine`: price → reserve (Agent) or reserve-in-Sub (after the item row exists) → snapshot fees
+      (`FeeService::resolveForLine`) → commission row.
+   4. Idempotency: `UNIQUE(konsumen_id, idempotency_key)` / `UNIQUE(crm_customer_id, idempotency_key)` — a replay
+      must return the SAME order, never create a second one. Test replay AFTER the order has advanced status.
+   5. Invoice + notification side effects: invoice number needs the row-locked sequence; notification is a queue
+      concern (not yet ported) — record it as an explicit gap, do not silently skip it.
 
-1. **The stock-request/proposal/handover chain** (~20 routes):
-   `StockRequestProposalService` (propose/approve/receive/settle/resolveDiscrepancy) — the §16/§31 two-party
-   gate. It reuses the transfer infrastructure already built.
-2. Sub stock-request workflow (6 routes) — `SubStockRequestService`; execution goes through the transfer
-   approve path that already exists.
-3. ~~`PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`~~ **DONE** (checkpoint K).
-3a. ~~`/addresses` (4)~~ **DONE** (checkpoint L).
-3b. ~~`/promo/vouchers`, `/promo/discounts` (8)~~ **DONE** (checkpoint M).
+**C. The stock-request/proposal/handover chain** (~20 routes): `StockRequestProposalService`
+(propose/approve/receive/settle/resolveDiscrepancy) — the §16/§31 two-party gate, reusing the transfer
+infrastructure already built.
+   1. Sub stock-request workflow (6 routes): `SubStockRequestService`; execution goes through the transfer approve
+      path that already exists.
+   2. ~~`PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`~~ **DONE**.
+   3. ~~`/addresses` (4)~~ **DONE**. ~~`/promo/vouchers`, `/promo/discounts` (8)~~ **DONE**.
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

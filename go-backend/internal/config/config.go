@@ -36,10 +36,15 @@ type Config struct {
 	// PublicURL is the browser-facing origin (Laravel: APP_URL). Used to build absolute asset URLs.
 	PublicURL string
 
-	DB      DBConfig
-	Session SessionConfig
-	HTTP    HTTPConfig
-	Log     LogConfig
+	// AppKey is Laravel's APP_KEY. The Go service needs it ONLY to READ values Laravel encrypted (the
+	// agent shipping-provider credentials). It is never used to encrypt anything Go owns.
+	AppKey string
+
+	DB       DBConfig
+	Session  SessionConfig
+	HTTP     HTTPConfig
+	Log      LogConfig
+	Shipping ShippingConfig
 }
 
 // DBConfig describes the MySQL/MariaDB connection.
@@ -62,6 +67,21 @@ func (d DBConfig) DSN() string {
 	// The parameter string is a constant (no format verbs) so the URL-escaped time zone cannot be mangled.
 	const params = "parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&charset=utf8mb4&collation=utf8mb4_unicode_ci"
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?%s", d.User, d.Password, d.Host, d.Port, d.Database, params)
+}
+
+// ShippingConfig carries the outbound shipping-provider settings that were env-driven in Laravel
+// (config/services.php). The per-Agent credentials themselves live encrypted in the database.
+type ShippingConfig struct {
+	// OpenRouteBaseURL/Profile mirror services.openroute. The API key comes from the per-Agent config row.
+	OpenRouteBaseURL string
+	OpenRouteProfile string
+	// OpenRouteKey is the optional deployment-wide ORS key (services.openroute.key); per-Agent config wins.
+	OpenRouteKey string
+	// KmsitTrustedHosts is the operator allow-list for private/plain-http routing endpoints (SSRF policy).
+	KmsitTrustedHosts []string
+	// RajaOngkirBaseURL mirrors the provider's hard-coded base URL. It is configurable purely so tests can
+	// point it at a stub; the default is byte-identical to the reference.
+	RajaOngkirBaseURL string
 }
 
 // SessionConfig describes the cookie/session behaviour the SPA depends on.
@@ -185,6 +205,14 @@ func Load(getenv func(string) string) (Config, error) {
 		TrustProxyHeaders: defaultBool(getenv("TRUST_PROXY_HEADERS"), true),
 	}
 
+	shippingCfg := ShippingConfig{
+		OpenRouteBaseURL:  strings.TrimRight(defaultStr(getenv("OPENROUTE_BASE_URL"), "https://api.openrouteservice.org"), "/"),
+		OpenRouteProfile:  defaultStr(getenv("OPENROUTE_PROFILE"), "driving-car"),
+		OpenRouteKey:      strings.TrimSpace(getenv("OPENROUTE_API_KEY")),
+		KmsitTrustedHosts: splitList(getenv("KMSIT_TRUSTED_HOSTS")),
+		RajaOngkirBaseURL: strings.TrimRight(defaultStr(getenv("RAJAONGKIR_BASE_URL"), "https://rajaongkir.komerce.id/api/v1"), "/"),
+	}
+
 	logCfg := LogConfig{
 		Level:  strings.ToLower(defaultStr(getenv("LOG_LEVEL"), "info")),
 		Format: strings.ToLower(defaultStr(getenv("LOG_FORMAT"), "json")),
@@ -202,12 +230,14 @@ func Load(getenv func(string) string) (Config, error) {
 
 	cfg := Config{
 		Env:       env,
+		AppKey:    getenv("APP_KEY"),
 		HTTPAddr:  defaultStr(getenv("HTTP_ADDR"), ":8081"),
 		PublicURL: strings.TrimRight(strings.TrimSpace(getenv("APP_URL")), "/"),
 		DB:        db,
 		Session:   sess,
 		HTTP:      httpCfg,
 		Log:       logCfg,
+		Shipping:  shippingCfg,
 	}
 
 	if len(errs) > 0 {

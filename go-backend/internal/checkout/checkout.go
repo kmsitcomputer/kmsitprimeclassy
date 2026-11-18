@@ -68,13 +68,13 @@ type Viewer struct {
 
 // Response is the exact payload of GET /checkout/steps.
 type Response struct {
-	Steps              []Step            `json:"steps"`
-	OnBehalfOfKonsumen bool              `json:"on_behalf_of_konsumen"`
-	ShippingEnabled    bool              `json:"shipping_enabled"`
-	MapPickerEnabled   bool              `json:"map_picker_enabled"`
-	ShippingMethods    []shipping.Method `json:"shipping_methods"`
+	Steps              []Step             `json:"steps"`
+	OnBehalfOfKonsumen bool               `json:"on_behalf_of_konsumen"`
+	ShippingEnabled    bool               `json:"shipping_enabled"`
+	MapPickerEnabled   bool               `json:"map_picker_enabled"`
+	ShippingMethods    []shipping.Method  `json:"shipping_methods"`
 	PickupLocation     *shipping.Location `json:"pickup_location"`
-	PaymentMethods     []payment.Method  `json:"payment_methods"`
+	PaymentMethods     []payment.Method   `json:"payment_methods"`
 }
 
 // Resolve is CheckoutStepResolver::resolve.

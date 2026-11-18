@@ -220,9 +220,9 @@ func PickupLocation(ctx context.Context, d *db.DB, agentID *int64) (*Location, e
 		return nil, nil
 	}
 	var (
-		loc                     Location
-		lat, lng                sql.NullString
-		phone                   sql.NullString
+		loc      Location
+		lat, lng sql.NullString
+		phone    sql.NullString
 	)
 	err := d.QueryRowContext(ctx, `SELECT store_name, address, CAST(latitude AS CHAR), CAST(longitude AS CHAR), phone
 		FROM agent_profiles WHERE user_id = ? LIMIT 1`, *agentID).
