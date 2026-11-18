@@ -439,18 +439,27 @@ func TestLiteralSiblingRouteIsNotSwallowed(t *testing.T) {
 	h := newHarness(t)
 	h.loginAs("agen@imp010.test", "Secret123!")
 
+	// `eligible-owners` is a literal sibling of {subLocation} and is now SERVED by its own route. The guard
+	// being tested is that the {subLocation} pattern never swallows it: the answer must be the eligible-owners
+	// envelope (a paginated list), never the show handler's single-object model.
 	res := h.do(http.MethodGet, "/api/v1/warehouse/sub-locations/eligible-owners", nil)
-	if res.status != http.StatusNotImplemented {
-		t.Fatalf("eligible-owners = %d, want 501 (real route, not ported)", res.status)
+	if res.status != http.StatusOK {
+		t.Fatalf("eligible-owners = %d, want 200 (literal route, agen is allowed) body=%s", res.status, string(res.body))
 	}
-	_, _, _, errs := h.decode(res)
-	payload, ok := errs.(map[string]any)
-	if !ok {
-		t.Fatalf("errors = %#v", errs)
+	var env struct {
+		Data any            `json:"data"`
+		Meta map[string]any `json:"meta"`
 	}
-	codes, ok := payload["code"].([]any)
-	if !ok || len(codes) != 1 || codes[0] != "not_implemented" {
-		t.Errorf("errors.code = %#v", payload["code"])
+	if err := json.Unmarshal(res.body, &env); err != nil {
+		t.Fatal(err)
+	}
+	if _, isList := env.Data.([]any); !isList {
+		t.Errorf("eligible-owners must return a LIST, got %T (the {subLocation} show handler answered)", env.Data)
+	}
+	for _, key := range []string{"current_page", "last_page", "total"} {
+		if _, ok := env.Meta[key]; !ok {
+			t.Errorf("eligible-owners meta missing %q", key)
+		}
 	}
 
 	// A genuinely unknown suffix stays a 404.

@@ -1,7 +1,7 @@
 # 21c — IMP-010 execution state and resumable continuation record
 
-**Written at commit `0469508` + checkpoint I (admin configuration).** This file exists because the 100% target is
-**not reached**: 327 of 375 routes are still Laravel-only. It records exactly where the work stands, what was
+**Written at commit `0469508` + checkpoints I (admin config) and J (opname/plan/eligible-owners).** This file exists because the 100% target is
+**not reached**: 317 of 375 routes are still Laravel-only. It records exactly where the work stands, what was
 verified, and what remains — so the next run continues rather than re-deriving.
 
 Do not read this as a completion report.
@@ -11,12 +11,12 @@ Do not read this as a completion report.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **48 (12.8%)** |
-| Fully GO | 42 |
+| Served by Go | **58 (15.5%)** |
+| Fully GO | 52 |
 | PARTIAL (documented gap) | 6 |
-| Laravel-only (Go answers 501) | **327** |
-| Go tests | 82+ green, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | 133 passing (26 public + 24 auth + 29 inventory read + 37 inventory mutations + 17 admin config) |
+| Laravel-only (Go answers 501) | **317** |
+| Go tests | **87 green**, `go vet` clean, gofmt clean |
+| Cross-runtime comparison checks | **161 passing** (26 public + 24 auth + 29 inventory read + 65 inventory mutations + 17 admin config) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -29,6 +29,7 @@ Do not read this as a completion report.
 | Inventory reads (canonical sellable + grids) | 13 | `compare_inventory.py` (29) |
 | Inventory mutations (transfers, adjustment gate) | 8 | `compare_inventory_mutations.py` (37) + 7 two-connection concurrency tests |
 | Admin system configuration (languages, settings) | 7 | `compare_admin_config.py` (17) |
+| Inventory opname, plan transfer, eligible owners | 10 | `compare_inventory_mutations.py` (65, incl. the opname 409 stale-snapshot path) + 5 opname state-machine/concurrency tests |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
 ## 3. What remains (327 routes) — ordered, with the real obstacle for each
@@ -39,11 +40,11 @@ The order below is dependency-correct. **Start at the top of §3.1.**
 
 | Area | Routes | Obstacle / notes |
 |---|---|---|
-| Stock opnames | 8 | `StockOpnameService::approve` is the hardest single function ported so far: per-item `system_quantity` stale-check with **409** ("Stock changed after this opname was counted"), `PhysicalStockRevision::current()` comparison, Sub physical-decrease floor via `SubStockService::assertPhysicalDecreaseAllowed`, plan-reconciliation bounds, **and** publishing `pending_catalog_change` through `CatalogImportService::applyChange` inside the same transaction. Cannot be done correctly without `PhysicalStockRevision` + `CatalogImportService` first. |
+| Stock opnames | **DONE** (8 routes) — the remaining gap is `pending_catalog_change` publication (import-driven), which needs `CatalogImportService`. Documented as an explicit partial in the matrix. |
 | Stock requests / proposals / handovers | ~20 | `StockRequestProposalService` (propose/approve/receive/settle/resolveDiscrepancy) — the §16/§31 two-party gate. Requires the `stock_requests*` chain plus `StockTransfer` handover linkage (already built). |
 | Sub stock-request workflow | 6 | `SubStockRequestService` (create/approve/execute/receive/cancel/reject) — needs `stock_transfers` execution (built) + `SubStockService` reservation lifecycle. |
-| `POST /warehouse/transfers/plan-to-transit` | 1 | `StockTransferService::createPlanTransfer` — small, blocked only on nothing; do it first. |
-| `GET /warehouse/sub-locations/eligible-owners` | 1 | Simple query (`Manager-of` filter + `whereDoesntHave ownedSubLocation`). |
+| `POST /warehouse/transfers/plan-to-transit` | **DONE** |
+| `GET /warehouse/sub-locations/eligible-owners` | **DONE** |
 | `PATCH /warehouse/sub-locations/{id}` + `/assign-owner` + `/deactivate` | 3 | `SubLocationOwnershipService` — locks the owner user row then the location; `previous_owner_user_id` history. |
 
 ### 3.2 Phase B — orders & fulfilment (43 routes)
@@ -107,9 +108,20 @@ sequence in `settings`, 409 on namespace exhaustion), `CommissionFinalizer` (ide
 | # | Question | Why it cannot be derived |
 |---|---|---|
 | B-1 | **Money type for Phase C** — `decimal` + exact decimal arithmetic (current), or integer minor units | Changes every financial query and the rounding boundary; the reference is internally inconsistent |
-| B-2 | **`HtmlSanitizerService` parity** — accept a Go sanitizer with a registered output deviation, or port the allowlist | Output differs byte-for-byte; affects 4 CMS/description write paths |
+| B-2 | **`HtmlSanitizerService` parity** — Owner resolved: reproduce the HTMLPurifier POLICY in Go with golden fixtures incl. malicious HTML, never weakening it. Work not started (needs bluemonday + fixtures). | Affects 4 CMS/description write paths |
 | B-3 | **Installer** — port to Go, or replace with env-driven provisioning | Product decision about first-run UX |
 | B-4 | **Session continuity at cutover** — accept one forced re-login (documented as D-4), or implement Laravel cookie decryption | Affects every logged-in user at cutover |
+
+## 4a. Next action (resume here)
+
+1. **The stock-request/proposal/handover chain** and the stock-request/proposal/handover chain (~20 routes):
+   `StockRequestProposalService` (propose/approve/receive/settle/resolveDiscrepancy) — the §16/§31 two-party
+   gate. It reuses the transfer infrastructure already built.
+2. Sub stock-request workflow (6 routes) — `SubStockRequestService`; execution goes through the transfer
+   approve path that already exists.
+3. `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate` (3) — `SubLocationOwnershipService`
+   (lock the owner user row, then the location; `previous_owner_user_id` history).
+4. Then Phase B (orders) exactly as ordered in §3.2.
 
 ## 5. How to resume (exact steps)
 

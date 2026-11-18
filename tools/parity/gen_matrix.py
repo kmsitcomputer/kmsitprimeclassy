@@ -69,6 +69,17 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/admin/languages/{language}/toggle-active"): "the default language can never be deactivated",
     ("GET", "/api/v1/admin/settings"): "identical to the public read (single service in the reference)",
     ("PUT", "/api/v1/admin/settings"): "unknown keys ignored, JSON keys encoded, returns the resolved settings",
+    # --- checkpoint J: opname + plan transfer + eligible owners (compare_inventory_mutations.py, 65 checks)
+    ("POST", "/api/v1/warehouse/transfers/plan-to-transit"): "requires the factory plan to be enabled",
+    ("GET", "/api/v1/warehouse/sub-locations/eligible-owners"): "active Sales-Kurir-Sub without a sub-location",
+    ("GET", "/api/v1/warehouse/opnames"): "",
+    ("POST", "/api/v1/warehouse/opnames"): "snapshots system_quantity + stock id + physical revision per target",
+    ("GET", "/api/v1/warehouse/opnames/{opname}"): "",
+    ("PATCH", "/api/v1/warehouse/opnames/{opname}/count"): "",
+    ("POST", "/api/v1/warehouse/opnames/{opname}/submit"): "refuses while any item is uncounted",
+    ("POST", "/api/v1/warehouse/opnames/{opname}/approve"): "writes the correction; 409 when the stock changed after counting (quantity OR revision); idempotent",
+    ("POST", "/api/v1/warehouse/opnames/{opname}/cancel"): "",
+    ("POST", "/api/v1/warehouse/opnames/{opname}/reject"): "",
 }
 
 AREA_TITLES = OrderedDict([

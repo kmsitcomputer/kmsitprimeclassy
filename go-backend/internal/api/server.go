@@ -147,6 +147,19 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/cancel", chain(http.HandlerFunc(s.handleTransferCancel), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
 	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/reject", chain(http.HandlerFunc(s.handleTransferReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
 
+	s.mux.Handle("POST /api/v1/warehouse/transfers/plan-to-transit", chain(http.HandlerFunc(s.handlePlanTransferStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/sub-locations/eligible-owners", chain(http.HandlerFunc(s.handleEligibleOwners), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin")))
+
+	// Stock opname (Gudang drafts/counts/submits, Admin approves).
+	s.mux.Handle("GET /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameIndex), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("POST /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/opnames/{opname}", chain(http.HandlerFunc(s.handleOpnameShow), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("PATCH /api/v1/warehouse/opnames/{opname}/count", chain(http.HandlerFunc(s.handleOpnameCount), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/opnames/{opname}/submit", chain(http.HandlerFunc(s.handleOpnameSubmit), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/opnames/{opname}/approve", chain(http.HandlerFunc(s.handleOpnameApprove), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/warehouse/opnames/{opname}/cancel", chain(http.HandlerFunc(s.handleOpnameCancel), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/opnames/{opname}/reject", chain(http.HandlerFunc(s.handleOpnameReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+
 	// Administration — system configuration (Gate::authorize('manage-system-config') == super_admin).
 	cfgRole := RequireRole("super_admin")
 	s.mux.Handle("GET /api/v1/admin/languages", chain(http.HandlerFunc(s.handleAdminLanguages), RequireAuth, s.RequireAgentLinked, cfgRole))

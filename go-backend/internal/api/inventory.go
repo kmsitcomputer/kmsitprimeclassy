@@ -119,8 +119,27 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/admin/languages",
 		"POST /api/v1/admin/languages",
 		"GET /api/v1/admin/settings",
-		"PUT /api/v1/admin/settings":
+		"PUT /api/v1/admin/settings",
+		"POST /api/v1/warehouse/transfers/plan-to-transit",
+		"GET /api/v1/warehouse/sub-locations/eligible-owners",
+		"GET /api/v1/warehouse/opnames",
+		"POST /api/v1/warehouse/opnames":
 		return true
+	}
+	// /api/v1/warehouse/opnames/<id> and /<id>/(count|submit|approve|cancel|reject).
+	if strings.HasPrefix(path, "/api/v1/warehouse/opnames/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/warehouse/opnames/"), "/")
+		if len(parts) == 1 && parts[0] != "" && method == http.MethodGet {
+			return true
+		}
+		if len(parts) == 2 && method == http.MethodPost &&
+			(parts[1] == "submit" || parts[1] == "approve" || parts[1] == "cancel" || parts[1] == "reject") {
+			return true
+		}
+		if len(parts) == 2 && method == http.MethodPatch && parts[1] == "count" {
+			return true
+		}
+		return false
 	}
 	// /api/v1/admin/languages/<id> and /<id>/(set-default|toggle-active).
 	if method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/admin/languages/") {
@@ -156,7 +175,7 @@ func implementsRoute(method, path string) bool {
 		if len(parts) == 1 && parts[0] != "" {
 			// `eligible-owners` is a REAL sibling route (a literal, not an id) that is NOT ported, so it must
 			// not be swallowed by the {subLocation} pattern here.
-			return parts[0] != "eligible-owners"
+			return parts[0] != "eligible-owners" // literal sibling, served by its own route
 		}
 		if len(parts) == 2 && parts[0] != "" && (parts[1] == "stocks" || parts[1] == "stock-cards") {
 			return true

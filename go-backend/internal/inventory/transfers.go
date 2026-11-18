@@ -489,6 +489,155 @@ func CreateTransfer(ctx context.Context, d *db.DB, actor Actor, in CreateTransfe
 	return rows[0], nil
 }
 
+// CreatePlanTransfer is StockTransferService::createPlanTransfer: a factory_plan → transit transfer, which is
+// the only way plan stock may move. It requires the plan to be ENABLED for the agent.
+func CreatePlanTransfer(ctx context.Context, d *db.DB, actor Actor, items []TransferItemInput, reference, note *string) (map[string]any, error) {
+	if !actor.IsRole("gudang") || actor.AgentID == 0 {
+		return nil, ErrGudangOnly()
+	}
+	planEnabled, err := factoryPlanEnabled(ctx, d, actor.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if !planEnabled {
+		return nil, transferInvalid("Plan Pabrik sedang nonaktif. Aktifkan Plan Pabrik sebelum membuat Stock Transfer.")
+	}
+	if len(items) == 0 {
+		return nil, transferInvalid("Transfer harus memiliki item.")
+	}
+
+	var createdID int64
+	err = d.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		seen := map[string]bool{}
+		for _, item := range items {
+			if (item.ProductID == nil) == (item.VariationID == nil) || item.Quantity <= 0 {
+				return transferInvalid("Setiap item harus memiliki tepat satu target dan jumlah positif.")
+			}
+			key := targetKey(item.ProductID, item.VariationID)
+			if seen[key] {
+				return transferInvalid("Target transfer tidak boleh duplikat.")
+			}
+			seen[key] = true
+			if err := assertTarget(ctx, tx, item.ProductID, item.VariationID); err != nil {
+				return err
+			}
+		}
+
+		number, err := uniqueTransferNumber(ctx, tx, "TRF")
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO stock_transfers
+			(agent_id, transfer_number, source_stock_type, source_sub_location_id, destination_stock_type,
+			 destination_sub_location_id, status, reference, note, created_by, created_at, updated_at)
+			VALUES (?, ?, 'factory_plan', NULL, 'transit', NULL, 'pending', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+			actor.AgentID, number, nullableStrPtr(reference), nullableStrPtr(note), actor.ID)
+		if err != nil {
+			return err
+		}
+		createdID, _ = res.LastInsertId()
+		for _, item := range items {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO stock_transfer_items
+				(stock_transfer_id, product_id, product_variation_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+				createdID, nullableInt(item.ProductID), nullableInt(item.VariationID), item.Quantity); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	t, err := loadTransfer(ctx, d, actor, createdID, false)
+	if err != nil {
+		return nil, err
+	}
+	// This endpoint's created response loads `items.variation.compositions.option` (unlike create()).
+	rows, err := hydrateTransfers(ctx, d, []Transfer{*t}, false)
+	if err != nil {
+		return nil, err
+	}
+	return rows[0], nil
+}
+
+// EligibleOwners is WarehouseSubLocationController::eligibleOwners: every active Sales-Kurir-Sub in the agent's
+// network that does not already own a sub-location.
+func EligibleOwners(ctx context.Context, d *db.DB, actor Actor, search string, page, perPage int) ([]map[string]any, Page, error) {
+	if !actor.IsRole("agen", "admin") || actor.AgentID == 0 {
+		return nil, Page{}, &DomainError{Status: 403, Message: "Hanya Agen/Admin yang dapat melihat calon pemilik Sub Location."}
+	}
+	if perPage < 1 {
+		perPage = 15
+	}
+	if perPage > 50 {
+		perPage = 50
+	}
+	where := []string{
+		"u.agent_id = ?",
+		"u.status = 'active'",
+		"u.deleted_at IS NULL",
+		"r.slug IN ('sales-kurir-sub','sales-kurir')",
+		"NOT EXISTS(SELECT 1 FROM warehouse_sub_locations s WHERE s.owner_user_id = u.id)",
+	}
+	args := []any{actor.AgentID}
+	if search != "" {
+		where = append(where, "(u.name LIKE ? OR u.phone LIKE ?)")
+		term := "%" + search + "%"
+		args = append(args, term, term)
+	}
+	whereSQL := strings.Join(where, " AND ")
+
+	var total int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, Page{}, err
+	}
+	lastPage := (total + perPage - 1) / perPage
+	if lastPage < 1 {
+		lastPage = 1
+	}
+	offset := (page - 1) * perPage
+	rows, err := d.QueryContext(ctx, `SELECT u.id, u.name, u.email, u.phone, u.referral_code, u.status,
+			CAST(u.created_at AS CHAR)
+		FROM users u JOIN roles r ON r.id = u.role_id
+		WHERE `+whereSQL+` ORDER BY u.name ASC LIMIT ? OFFSET ?`,
+		append(append([]any{}, args...), perPage, offset)...)
+	if err != nil {
+		return nil, Page{}, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var (
+			id                          int64
+			name                        string
+			email, phone, referral, cre sql.NullString
+			status                      string
+		)
+		if err := rows.Scan(&id, &name, &email, &phone, &referral, &status, &cre); err != nil {
+			return nil, Page{}, err
+		}
+		// UserResource shape for a LIST: the own-record-only fields (google_linked / korsal_name) are absent,
+		// and avatar/role/korsal/sales ids are present with their nullability preserved.
+		out = append(out, map[string]any{
+			"id":            id,
+			"name":          name,
+			"email":         nullStr(email),
+			"phone":         nullStr(phone),
+			"avatar_url":    nil,
+			"role":          "sales-kurir-sub",
+			"referral_code": nullStr(referral),
+			"agent_id":      actor.AgentID,
+			"parent_id":     nil,
+			"korsal_id":     nil,
+			"sales_id":      nil,
+			"status":        status,
+			"created_at":    formatMySQLString(cre),
+		})
+	}
+	return out, Page{CurrentPage: page, LastPage: lastPage, Total: total}, rows.Err()
+}
+
 // CancelTransfer is StockTransferService::cancel.
 func CancelTransfer(ctx context.Context, d *db.DB, actor Actor, id int64) (map[string]any, error) {
 	if !actor.IsRole("gudang") || actor.AgentID == 0 {

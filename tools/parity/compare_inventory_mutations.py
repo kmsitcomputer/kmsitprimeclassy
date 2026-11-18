@@ -140,6 +140,15 @@ class DB:
         if out.returncode != 0:
             raise RuntimeError(out.stderr.strip()[:400])
 
+    def exec_sql(self, sql):
+        cmd = f'mariadb -uprimeclassy_app -p"$(cat $MARIADB_PASSWORD_FILE)" {self.database} -e "{sql}"'
+        out = subprocess.run(
+            ["docker", "exec", self.container, "sh", "-lc", cmd],
+            capture_output=True, text=True, timeout=60,
+        )
+        if out.returncode != 0:
+            raise RuntimeError(out.stderr.strip()[:300])
+
     def snapshot(self):
         """The state a transfer scenario can change."""
         return {
@@ -278,6 +287,93 @@ def scenario_guards(base, db):
                                             {"factory_plan_enabled": True})
     # unknown transfer status filter.
     steps["bad_status"] = admin.call("GET", "/api/v1/warehouse/transfers?status=bogus")
+    # plan-to-transit: allowed for gudang when the plan is enabled.
+    steps["plan_transfer"] = gudang.call("POST", "/api/v1/warehouse/transfers/plan-to-transit", {
+        "items": [{"product_id": 2, "quantity": 1}],
+    })
+    steps["plan_transfer_dup"] = gudang.call("POST", "/api/v1/warehouse/transfers/plan-to-transit", {
+        "items": [{"product_id": 2, "quantity": 1}, {"product_id": 2, "quantity": 2}],
+    })
+    # eligible-owners: agen/admin only, and only Sales-Kurir-Sub without a location.
+    steps["eligible_agen"] = agen.call("GET", "/api/v1/warehouse/sub-locations/eligible-owners")
+    steps["eligible_admin"] = admin.call("GET", "/api/v1/warehouse/sub-locations/eligible-owners")
+    steps["eligible_search"] = admin.call("GET", "/api/v1/warehouse/sub-locations/eligible-owners?search=Sub")
+    steps["eligible_gudang"] = gudang.call("GET", "/api/v1/warehouse/sub-locations/eligible-owners")
+    return steps
+
+
+_DB = None
+
+
+def db_exec(sql):
+    if _DB is None:
+        raise RuntimeError("db not initialised")
+    _DB.exec_sql(sql)
+
+
+def scenario_opname(base):
+    """Draft -> count -> submit -> approve, plus the stale-snapshot 409 and the guards."""
+    gudang = auth(base, "gudang@imp010.test")
+    admin = auth(base, "admin@imp010.test")
+    steps = {}
+
+    created = gudang.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "physical_opname",
+        "stock_type": "transit",
+        "notes": "compare",
+        "items": [{"product_id": 2}],
+    })
+    steps["create"] = created
+    opname_id = created[1].get("data", {}).get("id") if created[0] == 201 else None
+    if not opname_id:
+        return steps, None
+    body = created[1]["data"]
+    item_id = body["items"][0]["id"]
+
+    # Snapshot values (system_quantity for product 2 transit = 12 in the fixtures)
+    steps["show"] = gudang.call("GET", f"/api/v1/warehouse/opnames/{opname_id}")
+    # Submit before counting must fail (uncounted item).
+    steps["submit_early"] = gudang.call("POST", f"/api/v1/warehouse/opnames/{opname_id}/submit")
+    steps["count"] = gudang.call("PATCH", f"/api/v1/warehouse/opnames/{opname_id}/count", {
+        "counts": [{"item_id": item_id, "counted_quantity": 10}],
+    })
+    # Approve while still draft must fail.
+    steps["approve_draft"] = admin.call("POST", f"/api/v1/warehouse/opnames/{opname_id}/approve")
+    steps["submit"] = gudang.call("POST", f"/api/v1/warehouse/opnames/{opname_id}/submit")
+    steps["list"] = gudang.call("GET", "/api/v1/warehouse/opnames")
+    # Mutate the stock AFTER counting, so approval must answer 409.
+    db_exec("UPDATE warehouse_stocks SET quantity = quantity - 1 WHERE agent_id = 10 AND stock_type = 'transit' AND product_id = 2")
+    steps["approve_stale"] = admin.call("POST", f"/api/v1/warehouse/opnames/{opname_id}/approve")
+    # Put it back to the snapshotted value and approve for real.
+    db_exec("UPDATE warehouse_stocks SET quantity = 12 WHERE agent_id = 10 AND stock_type = 'transit' AND product_id = 2")
+    steps["approve"] = admin.call("POST", f"/api/v1/warehouse/opnames/{opname_id}/approve")
+    steps["approve_again"] = admin.call("POST", f"/api/v1/warehouse/opnames/{opname_id}/approve")
+    return steps, opname_id
+
+
+def scenario_opname_guards(base):
+    gudang = auth(base, "gudang@imp010.test")
+    agen = auth(base, "agen@imp010.test")
+    steps = {}
+    # sellable_reconciliation is read-only.
+    steps["sellable"] = gudang.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "sellable_reconciliation", "stock_type": "transit", "items": [{"product_id": 2}]})
+    # sub stock type requires a sub location.
+    steps["sub_no_loc"] = gudang.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "physical_opname", "stock_type": "sub", "items": [{"product_id": 2}]})
+    # plan reconciliation needs factory_plan.
+    steps["plan_wrong_type"] = gudang.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "plan_reconciliation", "stock_type": "transit", "items": [{"product_id": 2}]})
+    # invalid stock type.
+    steps["bad_type"] = gudang.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "physical_opname", "stock_type": "shippingx", "items": [{"product_id": 2}]})
+    # duplicate targets.
+    steps["dup"] = gudang.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "physical_opname", "stock_type": "transit",
+        "items": [{"product_id": 2}, {"product_id": 2}]})
+    # a non-gudang role cannot create.
+    steps["agen_create"] = agen.call("POST", "/api/v1/warehouse/opnames", {
+        "opname_type": "physical_opname", "stock_type": "transit", "items": [{"product_id": 2}]})
     return steps
 
 
@@ -320,7 +416,9 @@ def main():
     ap.add_argument("--root", default=".")
     args = ap.parse_args()
 
+    global _DB
     db = DB(args.db_container, args.db)
+    _DB = db
 
     # ---- inventory lifecycle -------------------------------------------------
     reseed(db, args.root)
@@ -346,6 +444,23 @@ def main():
     g2state = db.snapshot()
     compare_steps("cancel-reject", l2, g2)
     compare_state("cancel-reject", l2state, g2state)
+
+    # ---- stock opname --------------------------------------------------------
+    reseed(db, args.root)
+    l4, lopid = scenario_opname(args.laravel)
+    l4state = db.snapshot()
+    reseed(db, args.root)
+    g4, gopid = scenario_opname(args.go)
+    g4state = db.snapshot()
+    compare_steps("opname", l4, g4)
+    compare_state("opname", l4state, g4state)
+    check("opname: both runs created an opname", lopid is not None and gopid is not None, f"{lopid} vs {gopid}")
+
+    reseed(db, args.root)
+    l5 = scenario_opname_guards(args.laravel)
+    reseed(db, args.root)
+    g5 = scenario_opname_guards(args.go)
+    compare_steps("opname-guards", l5, g5)
 
     # ---- guards --------------------------------------------------------------
     reseed(db, args.root)

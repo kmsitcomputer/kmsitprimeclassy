@@ -174,6 +174,26 @@ func reservedFor(ctx context.Context, d *db.DB, agentID int64, target Target) (i
 	return reserved, nil
 }
 
+// reservedForTx is reservedFor inside a transaction (the opname plan check runs under the opname lock).
+func reservedForTx(ctx context.Context, tx *sql.Tx, agentID int64, target Target) (int, error) {
+	var reserved int
+	var err error
+	if target.ProductID != nil {
+		err = tx.QueryRowContext(ctx, `SELECT quantity_reserved FROM product_stocks WHERE agent_id = ? AND product_id = ? LIMIT 1`,
+			agentID, *target.ProductID).Scan(&reserved)
+	} else {
+		err = tx.QueryRowContext(ctx, `SELECT quantity_reserved FROM product_variation_stocks WHERE agent_id = ? AND product_variation_id = ? LIMIT 1`,
+			agentID, *target.VariationID).Scan(&reserved)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return reserved, nil
+}
+
 // legacyOnHand reads the legacy quantity_on_hand.
 func legacyOnHand(ctx context.Context, d *db.DB, agentID int64, target Target) (int, error) {
 	var onHand int

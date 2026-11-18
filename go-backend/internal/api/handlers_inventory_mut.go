@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
+	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/inventory"
 )
@@ -330,3 +332,271 @@ func (s *Server) handleFactoryPlanUpdate(w http.ResponseWriter, r *http.Request)
 // unusedSQL keeps the database/sql import honest if a helper is temporarily unused.
 var _ = sql.ErrNoRows
 var _ = strconv.Itoa
+
+// handlePlanTransferStore is POST /warehouse/transfers/plan-to-transit.
+func (s *Server) handlePlanTransferStore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	var body transferCreateRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	if len(body.Items) == 0 {
+		fields["items"] = requiredField(ctx, "items")
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	items := make([]inventory.TransferItemInput, 0, len(body.Items))
+	for _, it := range body.Items {
+		items = append(items, inventory.TransferItemInput{
+			ProductID:   it.ProductID,
+			VariationID: it.VariationID,
+			Quantity:    it.Quantity,
+		})
+	}
+	row, err := inventory.CreatePlanTransfer(ctx, s.database, inventoryActor(u), items, body.Reference, body.Note)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.Created(w, row, "Created")
+}
+
+// handleEligibleOwners is GET /warehouse/sub-locations/eligible-owners.
+func (s *Server) handleEligibleOwners(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	rows, page, err := inventory.EligibleOwners(ctx, s.database, inventoryActor(u),
+		httpx.QueryString(r, "search"),
+		httpx.QueryInt(r, "page", 1, 1),
+		httpx.QueryInt(r, "per_page", 15, 1))
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, rows, "OK", page)
+}
+
+// ---- stock opname ---------------------------------------------------------------------------------
+
+// handleOpnameIndex is GET /warehouse/opnames.
+func (s *Server) handleOpnameIndex(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	rows, page, perPage, err := inventory.ListOpnames(ctx, s.database, inventoryActor(u),
+		httpx.QueryInt(r, "page", 1, 1), httpx.QueryInt(r, "per_page", 15, 1))
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, rows, "OK", map[string]any{
+		"current_page": page.CurrentPage,
+		"last_page":    page.LastPage,
+		"per_page":     perPage,
+		"total":        page.Total,
+	})
+}
+
+type opnameItemPayload struct {
+	ProductID   *int64 `json:"product_id"`
+	VariationID *int64 `json:"product_variation_id"`
+}
+
+// handleOpnameStore is POST /warehouse/opnames.
+func (s *Server) handleOpnameStore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	var body struct {
+		OpnameType    string              `json:"opname_type"`
+		StockType     *string             `json:"stock_type"`
+		SubLocationID *int64              `json:"sub_location_id"`
+		Notes         *string             `json:"notes"`
+		Items         []opnameItemPayload `json:"items"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	if body.OpnameType == "" {
+		fields["opname_type"] = requiredField(ctx, "opname_type")
+	}
+	if len(body.Items) == 0 {
+		fields["items"] = requiredField(ctx, "items")
+	}
+	if body.Notes != nil && len(*body.Notes) > 255 {
+		fields["notes"] = maxString(ctx, "notes", 255)
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	items := make([]inventory.OpnameItemInput, 0, len(body.Items))
+	for _, it := range body.Items {
+		items = append(items, inventory.OpnameItemInput{ProductID: it.ProductID, VariationID: it.VariationID})
+	}
+	row, err := inventory.CreateOpname(ctx, s.database, inventoryActor(u), body.OpnameType,
+		body.StockType, body.SubLocationID, items, body.Notes)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.Created(w, row, "Created")
+}
+
+// handleOpnameShow is GET /warehouse/opnames/{opname}.
+func (s *Server) handleOpnameShow(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "opname")
+	if !ok {
+		return
+	}
+	row, err := inventory.LoadOpname(ctx, s.database, inventoryActor(u), id)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}
+
+// handleOpnameCount is PATCH /warehouse/opnames/{opname}/count.
+func (s *Server) handleOpnameCount(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "opname")
+	if !ok {
+		return
+	}
+	var body struct {
+		Counts []struct {
+			ItemID          *int64 `json:"item_id"`
+			CountedQuantity *int64 `json:"counted_quantity"`
+		} `json:"counts"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if len(body.Counts) == 0 {
+		writeError(w, r, httpx.Validation(map[string][]string{"counts": requiredField(ctx, "counts")}))
+		return
+	}
+	counts := make([]inventory.CountInput, 0, len(body.Counts))
+	for _, c := range body.Counts {
+		if c.ItemID == nil || c.CountedQuantity == nil {
+			writeError(w, r, httpx.Validation(map[string][]string{"counts": requiredField(ctx, "counts")}))
+			return
+		}
+		if *c.CountedQuantity < 0 {
+			writeError(w, r, httpx.Validation(map[string][]string{"counts": minNumeric(ctx, "counted quantity", 0)}))
+			return
+		}
+		counts = append(counts, inventory.CountInput{ItemID: *c.ItemID, CountedQuantity: *c.CountedQuantity})
+	}
+	row, err := inventory.CountOpname(ctx, s.database, inventoryActor(u), id, counts)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}
+
+// handleOpnameSubmit is POST /warehouse/opnames/{opname}/submit.
+func (s *Server) handleOpnameSubmit(w http.ResponseWriter, r *http.Request) {
+	s.opnameAction(w, r, inventory.SubmitOpname)
+}
+
+// handleOpnameApprove is POST /warehouse/opnames/{opname}/approve.
+func (s *Server) handleOpnameApprove(w http.ResponseWriter, r *http.Request) {
+	s.opnameAction(w, r, inventory.ApproveOpname)
+}
+
+// handleOpnameCancel is POST /warehouse/opnames/{opname}/cancel.
+func (s *Server) handleOpnameCancel(w http.ResponseWriter, r *http.Request) {
+	s.opnameAction(w, r, inventory.CancelOpname)
+}
+
+// opnameAction runs one of the "no payload" opname transitions.
+func (s *Server) opnameAction(w http.ResponseWriter, r *http.Request,
+	fn func(context.Context, *db.DB, inventory.Actor, int64) (map[string]any, error)) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "opname")
+	if !ok {
+		return
+	}
+	row, err := fn(ctx, s.database, inventoryActor(u), id)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}
+
+// handleOpnameReject is POST /warehouse/opnames/{opname}/reject.
+func (s *Server) handleOpnameReject(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "opname")
+	if !ok {
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if body.Reason == "" {
+		writeError(w, r, httpx.Validation(map[string][]string{"reason": requiredField(ctx, "reason")}))
+		return
+	}
+	if len(body.Reason) > 255 {
+		writeError(w, r, httpx.Validation(map[string][]string{"reason": maxString(ctx, "reason", 255)}))
+		return
+	}
+	row, err := inventory.RejectOpname(ctx, s.database, inventoryActor(u), id, body.Reason)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}

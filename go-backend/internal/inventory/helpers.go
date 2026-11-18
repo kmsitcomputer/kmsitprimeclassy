@@ -167,3 +167,6 @@ func userBrief(ctx context.Context, d *db.DB, id *int64) (map[string]any, error)
 
 // strPtrVal returns a pointer to a plain string (for SQL columns that take *string).
 func strPtrVal(v string) *string { return &v }
+
+// nowStamp is the `YmdHis` form used by every generated document number.
+func nowStamp() string { return time.Now().UTC().Format("20060102150405") }
