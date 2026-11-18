@@ -520,20 +520,20 @@ Status legend:
 | GET | `/api/v1/stock/products` | session | admin, agen, gudang, super_admin | **GO** |  |
 | GET | `/api/v1/stock/variations` | session | admin, agen, gudang, super_admin | **GO** |  |
 
-## Inventory — sub stock — `sub-stock` (3/10 in Go)
+## Inventory — sub stock — `sub-stock` (10/10 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/sub-stock/my` | session | sales-kurir-sub | **PARTIAL** | reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint) |
 | GET | `/api/v1/sub-stock/replenishment-targets` | session | sales-kurir-sub | **GO** |  |
 | GET | `/api/v1/sub-stock/requests` | session | admin, agen, gudang, sales-kurir-sub | **GO** | list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported |
-| POST | `/api/v1/sub-stock/requests` | session | sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/sub-stock/requests/{subStockRequest}` | session | admin, agen, gudang, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/sub-stock/requests/{subStockRequest}/approve` | session | admin | LARAVEL |  |
-| POST | `/api/v1/sub-stock/requests/{subStockRequest}/cancel` | session | sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/sub-stock/requests/{subStockRequest}/execute` | session | gudang | LARAVEL |  |
-| POST | `/api/v1/sub-stock/requests/{subStockRequest}/receive` | session | sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/sub-stock/requests/{subStockRequest}/reject` | session | admin | LARAVEL |  |
+| POST | `/api/v1/sub-stock/requests` | session | sales-kurir-sub | **GO** | sales-kurir-sub; direction replenish/return; the create response serialises ONLY the insert-time attributes (Eloquent fresh-create shape), an idempotent replay serialises fully |
+| GET | `/api/v1/sub-stock/requests/{subStockRequest}` | session | admin, agen, gudang, sales-kurir-sub | **GO** | policy view: super_admin all, requester own, branch roles same agent; denial is a 404 |
+| POST | `/api/v1/sub-stock/requests/{subStockRequest}/approve` | session | admin | **GO** | admin; requested→approved only |
+| POST | `/api/v1/sub-stock/requests/{subStockRequest}/cancel` | session | sales-kurir-sub | **GO** | the requester only, while still requested |
+| POST | `/api/v1/sub-stock/requests/{subStockRequest}/execute` | session | gudang | **GO** | gudang — the ONLY stock-moving step, idempotent; Sub Location EXCLUSIVE lock then buckets; replenish passes the Transit-reservation guard, return refuses below active Sub reservations |
+| POST | `/api/v1/sub-stock/requests/{subStockRequest}/receive` | session | sales-kurir-sub | **GO** | the requester, replenish only; closes the handover |
+| POST | `/api/v1/sub-stock/requests/{subStockRequest}/reject` | session | admin | **GO** | admin; reason required |
 
 ## User management — `users` (0/8 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 93 (24.8%) |
-|   of which fully GO | 87 |
+| Served by Go now | 100 (26.7%) |
+|   of which fully GO | 94 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 282 |
-| Areas fully ported | 11 / 45 |
+| Still Laravel-only | 275 |
+| Areas fully ported | 12 / 45 |

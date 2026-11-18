@@ -149,6 +149,13 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/sub-stock/my", chain(http.HandlerFunc(s.handleSubStockMy), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
 	s.mux.Handle("GET /api/v1/sub-stock/replenishment-targets", chain(http.HandlerFunc(s.handleSubStockReplenishment), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
 	s.mux.Handle("GET /api/v1/sub-stock/requests", chain(http.HandlerFunc(s.handleSubStockRequests), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub,agen,admin,gudang")))
+	s.mux.Handle("POST /api/v1/sub-stock/requests", chain(http.HandlerFunc(s.handleSubRequestStore), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
+	s.mux.Handle("GET /api/v1/sub-stock/requests/{subStockRequest}", chain(http.HandlerFunc(s.handleSubRequestShow), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub,agen,admin,gudang")))
+	s.mux.Handle("POST /api/v1/sub-stock/requests/{subStockRequest}/approve", chain(http.HandlerFunc(s.handleSubRequestApprove), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/sub-stock/requests/{subStockRequest}/reject", chain(http.HandlerFunc(s.handleSubRequestReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/sub-stock/requests/{subStockRequest}/cancel", chain(http.HandlerFunc(s.handleSubRequestCancel), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
+	s.mux.Handle("POST /api/v1/sub-stock/requests/{subStockRequest}/execute", chain(http.HandlerFunc(s.handleSubRequestExecute), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/sub-stock/requests/{subStockRequest}/receive", chain(http.HandlerFunc(s.handleSubRequestReceive), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
 
 	// Inventory mutations (checkpoint H). Role gates mirror the Laravel route groups; the SERVICE re-checks
 	// the finer rule (gudang-only create/cancel, admin-only approve/reject) because the route group alone is

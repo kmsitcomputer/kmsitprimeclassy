@@ -112,6 +112,7 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/sub-stock/my",
 		"GET /api/v1/sub-stock/replenishment-targets",
 		"GET /api/v1/sub-stock/requests",
+		"POST /api/v1/sub-stock/requests",
 		"POST /api/v1/stock/adjust",
 		"PATCH /api/v1/warehouse/settings/factory-plan",
 		"GET /api/v1/warehouse/transfers",
@@ -163,6 +164,22 @@ func implementsRoute(method, path string) bool {
 		}
 		if len(parts) == 2 && parts[0] != "" && method == http.MethodPost &&
 			(parts[1] == "approve" || parts[1] == "reject") {
+			return true
+		}
+		return false
+	}
+	// /api/v1/sub-stock/requests/<id> and /<id>/(approve|reject|cancel|execute|receive).
+	if strings.HasPrefix(path, "/api/v1/sub-stock/requests/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/sub-stock/requests/"), "/")
+		if parts[0] == "" {
+			return false
+		}
+		if len(parts) == 1 && method == http.MethodGet {
+			return true
+		}
+		if len(parts) == 2 && parts[0] != "" && method == http.MethodPost &&
+			(parts[1] == "approve" || parts[1] == "reject" || parts[1] == "cancel" ||
+				parts[1] == "execute" || parts[1] == "receive") {
 			return true
 		}
 		return false

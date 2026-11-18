@@ -41,6 +41,14 @@ IMPLEMENTED = {
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
+    # --- checkpoint U: Sub stock-request workflow (compare_subrequests.py, 16 checks)
+    ("POST", "/api/v1/sub-stock/requests"): "sales-kurir-sub; direction replenish/return; the create response serialises ONLY the insert-time attributes (Eloquent fresh-create shape), an idempotent replay serialises fully",
+    ("GET", "/api/v1/sub-stock/requests/{subStockRequest}"): "policy view: super_admin all, requester own, branch roles same agent; denial is a 404",
+    ("POST", "/api/v1/sub-stock/requests/{subStockRequest}/approve"): "admin; requested→approved only",
+    ("POST", "/api/v1/sub-stock/requests/{subStockRequest}/reject"): "admin; reason required",
+    ("POST", "/api/v1/sub-stock/requests/{subStockRequest}/cancel"): "the requester only, while still requested",
+    ("POST", "/api/v1/sub-stock/requests/{subStockRequest}/execute"): "gudang — the ONLY stock-moving step, idempotent; Sub Location EXCLUSIVE lock then buckets; replenish passes the Transit-reservation guard, return refuses below active Sub reservations",
+    ("POST", "/api/v1/sub-stock/requests/{subStockRequest}/receive"): "the requester, replenish only; closes the handover",
     # --- checkpoint T: handover read/print (compare_handovers.py)
     ("GET", "/api/v1/warehouse/handovers/{handover}"): "the full model with transfer.items.product/variation and both actors (users serialize with NO hidden fields here)",
     ("GET", "/api/v1/warehouse/handovers/{handover}/print"): "the A4 print page, HTML; the Blade template is ported 1:1 including its escaping",

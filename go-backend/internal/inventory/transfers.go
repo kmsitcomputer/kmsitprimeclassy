@@ -809,8 +809,21 @@ func ApproveTransfer(ctx context.Context, d *db.DB, actor Actor, id int64) (map[
 			}
 
 			if !planPath && t.SourceStockType == "transit" && t.DestinationStockType == "sub" {
-				// The ONLY direction that can starve an agent checkout: take its commitment row first.
-				if err := lockAgentCapacity(ctx, tx, t.AgentID, target); err != nil {
+				// The ONLY direction that can starve an agent checkout: take its commitment row first, then
+				// verify the move keeps Transit + Plan at or above the reserved quantity
+				// (StockTransferService::assertTransitReservationSafety).
+				capacity, cerr := lockAgentCapacityForTransitToSub(ctx, tx, t.AgentID, target)
+				if cerr != nil {
+					return cerr
+				}
+				source, serr := lockWarehouseRow(ctx, tx, t.AgentID, target, t.SourceStockType, t.SourceSubLocationID)
+				if serr != nil {
+					return serr
+				}
+				if source == nil || source.Quantity < item.Quantity {
+					return transferInvalid("Stok sumber tidak mencukupi.")
+				}
+				if err := assertTransitReservationSafety(int(item.Quantity), int(source.Quantity), capacity); err != nil {
 					return err
 				}
 			}
@@ -1216,4 +1229,226 @@ func SetFactoryPlan(ctx context.Context, d *db.DB, actor Actor, enabled bool) (m
 		"created_at":           formatMySQLString(createdRaw),
 		"updated_at":           formatMySQLString(updatedRaw),
 	}, nil
+}
+
+// transitCapacity is what lockAgentCapacityForTransitToSub reads under lock: the commitment row's reserved
+// quantity plus the Plan bucket and the plan-enabled flag.
+type transitCapacity struct {
+	Reserved    int
+	Plan        int
+	PlanEnabled bool
+}
+
+// lockAgentCapacityForTransitToSub is StockTransferService::lockAgentCapacityForTransitToSub — the Agent
+// commitment row FIRST (the canonical first lock of a capacity decision), then the Plan row.
+func lockAgentCapacityForTransitToSub(ctx context.Context, tx *sql.Tx, agentID int64, target Target) (*transitCapacity, error) {
+	if err := lockAgentCapacity(ctx, tx, agentID, target); err != nil {
+		return nil, err
+	}
+	reserved, err := reservedForQuery(ctx, tx, agentID, target)
+	if err != nil {
+		return nil, err
+	}
+	clause, args := target.clause()
+	var plan int
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(quantity),0) FROM warehouse_stocks
+		WHERE agent_id = ? AND stock_type = 'factory_plan' AND sub_location_id IS NULL AND `+clause+` FOR UPDATE`,
+		append([]any{agentID}, args...)...).Scan(&plan)
+	if err != nil {
+		return nil, err
+	}
+	planEnabled, err := factoryPlanEnabledLocked(ctx, tx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return &transitCapacity{Reserved: reserved, Plan: plan, PlanEnabled: planEnabled}, nil
+}
+
+// assertTransitReservationSafety is StockTransferService::assertTransitReservationSafety: a Transit -> Sub move
+// may never leave Transit + enabled Plan below the reserved quantity — that would strand a checkout that already
+// committed its reservation.
+func assertTransitReservationSafety(quantity int, currentTransit int, capacity *transitCapacity) error {
+	base := currentTransit - quantity
+	if capacity.PlanEnabled {
+		base += capacity.Plan
+	}
+	if base < capacity.Reserved {
+		return transferInvalid("Transfer akan mengurangi stok Transit di bawah komitmen reservasi.")
+	}
+	return nil
+}
+
+// executeApprovedTransferTx is StockTransferService::executeApprovedTransfer for a transfer created INSIDE the
+// caller's transaction (the Sub stock-request path). Same canonical lock order, movements and handover as the
+// warehouse approve path; no controller-level bucket validations (the caller already derived the buckets).
+func executeApprovedTransferTx(ctx context.Context, tx *sql.Tx, transferID, approverID int64) error {
+	t, err := lockTransferByID(ctx, tx, transferID)
+	if err != nil {
+		return err
+	}
+	if t.SourceStockType == "shipping" || t.DestinationStockType == "shipping" {
+		return transferInvalid(shippingClosedMessage)
+	}
+
+	items, err := transferItemsTx(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return transferInvalid("Transfer harus memiliki item.")
+	}
+
+	keys := map[string]Target{}
+	for _, item := range items {
+		keys[targetKey(item.ProductID, item.VariationID)] = Target{ProductID: item.ProductID, VariationID: item.VariationID}
+	}
+
+	type lockedPair struct {
+		item        TransferItem
+		source      *stockRow
+		destination *stockRow
+	}
+	var pairs []lockedPair
+	for _, key := range sortTargets(keys) {
+		target := keys[key]
+		var item TransferItem
+		for _, it := range items {
+			if targetKey(it.ProductID, it.VariationID) == key {
+				item = it
+				break
+			}
+		}
+
+		if t.SourceStockType == "transit" && t.DestinationStockType == "sub" {
+			capacity, cerr := lockAgentCapacityForTransitToSub(ctx, tx, t.AgentID, target)
+			if cerr != nil {
+				return cerr
+			}
+			source, serr := lockWarehouseRow(ctx, tx, t.AgentID, target, t.SourceStockType, t.SourceSubLocationID)
+			if serr != nil {
+				return serr
+			}
+			if source == nil || source.Quantity < item.Quantity {
+				return transferInvalid("Stok sumber tidak mencukupi.")
+			}
+			if aerr := assertTransitReservationSafety(int(item.Quantity), int(source.Quantity), capacity); aerr != nil {
+				return aerr
+			}
+		}
+		source, err := lockWarehouseRow(ctx, tx, t.AgentID, target, t.SourceStockType, t.SourceSubLocationID)
+		if err != nil {
+			return err
+		}
+		if source == nil || source.Quantity < item.Quantity {
+			return transferInvalid("Stok sumber tidak mencukupi.")
+		}
+		if t.SourceStockType == "sub" {
+			// R-02: stock leaving a Sub Location may never cut physical below its active Sub reservations.
+			reserved, rerr := ReservedSubStock(ctx, tx, *t.SourceSubLocationID, target)
+			if rerr != nil {
+				return rerr
+			}
+			if int(source.Quantity)-int(item.Quantity) < reserved {
+				return transferInvalid("Pengurangan stok Sub akan berada di bawah reservasi aktif.")
+			}
+		}
+		destination, err := lockWarehouseRow(ctx, tx, t.AgentID, target, t.DestinationStockType, t.DestinationSubLocationID)
+		if err != nil {
+			return err
+		}
+		pairs = append(pairs, lockedPair{item: item, source: source, destination: destination})
+	}
+
+	number, err := uniqueTransferNumber(ctx, tx, "HOV")
+	if err != nil {
+		return err
+	}
+	handedOverBy := t.CreatedBy
+	if handedOverBy == nil {
+		handedOverBy = &approverID
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO stock_handovers
+		(agent_id, stock_transfer_id, handover_number, handed_over_by, status, handed_over_at, note,
+		 created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'handed_over', UTC_TIMESTAMP(), ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+		t.AgentID, t.ID, number, *handedOverBy, nullableStrPtr(t.Note))
+	if err != nil {
+		return err
+	}
+	handoverID, _ := res.LastInsertId()
+
+	for _, pair := range pairs {
+		sourceBefore := pair.source.Quantity
+		if _, err := tx.ExecContext(ctx, `UPDATE warehouse_stocks SET quantity = quantity - ?, updated_at = UTC_TIMESTAMP()
+			WHERE id = ?`, pair.item.Quantity, pair.source.ID); err != nil {
+			return err
+		}
+		destID, destBefore := int64(0), int64(0)
+		if pair.destination != nil {
+			destID, destBefore = pair.destination.ID, pair.destination.Quantity
+			if _, err := tx.ExecContext(ctx, `UPDATE warehouse_stocks SET quantity = quantity + ?, updated_at = UTC_TIMESTAMP()
+				WHERE id = ?`, pair.item.Quantity, destID); err != nil {
+				return err
+			}
+		} else {
+			dres, derr := tx.ExecContext(ctx, `INSERT INTO warehouse_stocks
+				(agent_id, product_id, product_variation_id, stock_type, sub_location_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+				t.AgentID, nullableInt(pair.item.ProductID), nullableInt(pair.item.VariationID),
+				t.DestinationStockType, nullableInt(t.DestinationSubLocationID), pair.item.Quantity)
+			if derr != nil {
+				return derr
+			}
+			destID, _ = dres.LastInsertId()
+		}
+		if err := writeMovement(ctx, tx, movement{
+			AgentID: t.AgentID, ProductID: pair.item.ProductID, VariationID: pair.item.VariationID,
+			Type: "transfer_out", Quantity: -pair.item.Quantity, StockType: t.SourceStockType,
+			SubLocationID: t.SourceSubLocationID, CounterpartStockType: strPtrVal(t.DestinationStockType),
+			TransferID: &t.ID, HandoverID: &handoverID, CreatedBy: approverID,
+			Note: fmt.Sprintf("before=%d;after=%d", sourceBefore, sourceBefore-pair.item.Quantity),
+		}); err != nil {
+			return err
+		}
+		if err := writeMovement(ctx, tx, movement{
+			AgentID: t.AgentID, ProductID: pair.item.ProductID, VariationID: pair.item.VariationID,
+			Type: "transfer_in", Quantity: pair.item.Quantity, StockType: t.DestinationStockType,
+			SubLocationID: t.DestinationSubLocationID, CounterpartStockType: strPtrVal(t.SourceStockType),
+			TransferID: &t.ID, HandoverID: &handoverID, CreatedBy: approverID,
+			Note: fmt.Sprintf("before=%d;after=%d", destBefore, destBefore+pair.item.Quantity),
+		}); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE stock_transfers
+		SET status = 'completed', completed_by = ?, completed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
+		WHERE id = ?`, approverID, t.ID); err != nil {
+		return err
+	}
+	handoverValue := strconv.FormatInt(handoverID, 10)
+	_, err = tx.ExecContext(ctx, `INSERT INTO activity_logs
+		(causer_id, subject_type, subject_id, event, description, properties, created_at)
+		VALUES (?, 'App\\Models\\StockTransfer', ?, 'stock_transfer.approved', NULL, ?, UTC_TIMESTAMP())`,
+		approverID, t.ID, fmt.Sprintf(`{"agent_id":%d,"handover_id":%s}`, t.AgentID, handoverValue))
+	return err
+}
+
+// lockTransferByID locks a transfer row without the actor scoping the controller path applies (the Sub
+// stock-request path already holds the request lock and derived the branch).
+func lockTransferByID(ctx context.Context, tx *sql.Tx, id int64) (*Transfer, error) {
+	rows, err := tx.QueryContext(ctx, transferColumns+` WHERE t.id = ? FOR UPDATE`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list, err := scanTransfers(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, ErrNotFound
+	}
+	t := list[0]
+	return &t, nil
 }

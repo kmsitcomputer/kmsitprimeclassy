@@ -38,6 +38,10 @@ import (
 type RequestProblem struct {
 	Status  int
 	Message string
+	// Fields is the `errors` payload an ApiException with a field map serialises ("Melebihi stok Sub tersedia.").
+	Fields map[string]string
+	// Errors carries a typed values map when the payload is not a plain string map.
+	Errors map[string]any
 }
 
 func (p *RequestProblem) Error() string { return p.Message }
