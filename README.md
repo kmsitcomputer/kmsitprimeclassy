@@ -19,6 +19,7 @@ README ini hanya pintu masuk. Sistem dijelaskan dalam **dokumentasi kanonis**:
 | [docs/11-INTEGRATIONS.md](docs/11-INTEGRATIONS.md) | GOWA, SMTP, ORS/KMSIT, RajaOngkir, Sheets, Google |
 | [docs/12-SECURITY.md](docs/12-SECURITY.md) | Autentikasi, otorisasi, proteksi data, audit |
 | [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) | Runbook DEV/TEST/PRODUCTION + invarian `laravel.php` |
+| [docs/19-IMP008-BASELINE-ISOLATION.md](docs/19-IMP008-BASELINE-ISOLATION.md) | Baseline IMP-008: REM-11 dikecualikan, inventaris, digest manifest, risiko |
 | [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md) | Harness uji + kebijakan (Full Test = Owner) |
 | [docs/15-KNOWN-LIMITATIONS.md](docs/15-KNOWN-LIMITATIONS.md) | Gap ledger + keterbatasan |
 | [docs/16-TRACEABILITY.md](docs/16-TRACEABILITY.md) | Register keputusan Owner |

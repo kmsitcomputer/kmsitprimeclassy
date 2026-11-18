@@ -1,0 +1,11 @@
+# Engineering evidence gaps — not new Owner business decisions
+- Verify exact last approved Invoice and maroon Modern Dark POS mockup images; available candidates are not final certified.
+- Validate actual checkout/List Order field/interaction parity in browser; source only inspected.
+- Verify source schema, proposed additive nullable columns/indexes, uniqueness with legacy duplicates, and DB date ranges.
+- Validate reconciliation transaction/lock boundaries and historical evidence chain; source static review is not runtime PASS.
+- Check Admin→inactive/soft-deleted Agent case fails closed, no automatic repair.
+- Check legacy image dataset needed to reproduce REM-03 (source reports local images=0).
+- Verify per-item receipt evidence, late payment/refund across closed periods under D-04 and D-06 without inventing timestamps.
+- Verify import row approval handoff preserving Gudang/Admin roles, durable row idempotency, and publish gate.
+- Preserve Owner decisions; do not turn evidence gaps into re-asking D-01…07.
+- All execution, coding, tests, migration, deployment require separate Owner authorization.

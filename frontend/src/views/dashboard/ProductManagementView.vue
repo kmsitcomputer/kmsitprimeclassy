@@ -8,8 +8,14 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
-  listProducts,
+  listManagedProducts,
   deleteProduct,
+  hardDeleteProduct,
+  downloadCatalogExport,
+  previewCatalogImport,
+  applyCatalogImport,
+  type CatalogImportResult,
+  type ManagedStatusFilter,
   getProductFees,
   setProductFees,
 } from '@/api/catalog'
@@ -26,6 +32,14 @@ const loading = ref(false)
 const errorMessage = ref('')
 const categories = ref<Category[]>([])
 const products = ref<Product[]>([])
+// REM-05: four fixed choices; default "Semua". "all" is a filter value, not a DB status.
+const statusFilter = ref<ManagedStatusFilter>('all')
+const statusOptions: { value: ManagedStatusFilter; label: string }[] = [
+  { value: 'all', label: 'Semua' },
+  { value: 'active', label: 'Aktif' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'inactive', label: 'Nonaktif' },
+]
 
 function primaryImageUrl(product: Product): string | null {
   return product.images.find((i) => i.is_primary)?.url ?? product.images[0]?.url ?? null
@@ -42,7 +56,7 @@ async function load() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [cats, prods] = await Promise.all([listCategories(), listProducts({ per_page: 100 })])
+    const [cats, prods] = await Promise.all([listCategories(), listManagedProducts({ status: statusFilter.value, per_page: 100 })])
     categories.value = cats
     products.value = prods.products
   } catch {
@@ -52,16 +66,113 @@ async function load() {
   }
 }
 
-// Category quick-add
+// Category quick-add + REM-06 hierarchy editor
 const newCategoryName = ref('')
+const newCategoryParentId = ref<number | null>(null)
+const categoryError = ref('')
+
+/** REM-06: tree-ordered rows (parents first, children indented) for display and selects. */
+interface CategoryRow {
+  category: Category
+  depth: number
+}
+const categoryRows = computed<CategoryRow[]>(() => {
+  const byParent = new Map<number | null, Category[]>()
+  for (const c of categories.value) {
+    const list = byParent.get(c.parent_id) ?? []
+    list.push(c)
+    byParent.set(c.parent_id, list)
+  }
+  const rows: CategoryRow[] = []
+  const walk = (parent: number | null, depth: number) => {
+    for (const c of (byParent.get(parent) ?? []).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))) {
+      rows.push({ category: c, depth })
+      walk(c.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  // Cycle safety for legacy data: append any row stranded by an existing loop.
+  const seen = new Set(rows.map((r) => r.category.id))
+  for (const c of categories.value) if (!seen.has(c.id)) rows.push({ category: c, depth: 0 })
+  return rows
+})
+
+/** REM-06: ids below a category — used to keep its own subtree out of parent options. */
+function descendantIds(categoryId: number): Set<number> {
+  const byParent = new Map<number | null, Category[]>()
+  for (const c of categories.value) {
+    const list = byParent.get(c.parent_id) ?? []
+    list.push(c)
+    byParent.set(c.parent_id, list)
+  }
+  const out = new Set<number>()
+  const queue = [categoryId]
+  while (queue.length) {
+    const current = queue.shift()!
+    for (const child of byParent.get(current) ?? []) {
+      if (!out.has(child.id)) {
+        out.add(child.id)
+        queue.push(child.id)
+      }
+    }
+  }
+  return out
+}
+
+function indentLabel(depth: number): string {
+  return depth ? `${'— '.repeat(depth)}` : ''
+}
+
+/**
+ * Valid parents for a category: everything except itself and its own subtree
+ * (client-side anti-cycle). The server remains authoritative for concurrent edits.
+ */
+function parentOptions(category: Category): { value: number | ''; label: string }[] {
+  const forbidden = descendantIds(category.id)
+  const options: { value: number | ''; label: string }[] = [{ value: '', label: 'Tanpa induk (utama)' }]
+  for (const row of categoryRows.value) {
+    if (row.category.id === category.id || forbidden.has(row.category.id)) continue
+    options.push({ value: row.category.id, label: `${indentLabel(row.depth)}${row.category.name}` })
+  }
+  return options
+}
+
 async function submitNewCategory() {
-  if (!newCategoryName.value.trim()) return
+  // double-click / Enter-spam guard: one create in flight at a time
+  if (categorySaving.value || !newCategoryName.value.trim()) return
+  categorySaving.value = true
+  categoryError.value = ''
   try {
-    await createCategory({ name: newCategoryName.value.trim() })
+    await createCategory({ name: newCategoryName.value.trim(), parent_id: newCategoryParentId.value })
     newCategoryName.value = ''
+    newCategoryParentId.value = null
     categories.value = await listCategories()
   } catch (e) {
-    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menambah kategori.'
+    // duplicate / validation / authorization messages come from the server (nothing is hidden)
+    // Field messages are already Indonesian and specific (e.g. duplicate name); drop the generic English envelope text.
+    const details = e instanceof ApiError ? Object.values(e.errors ?? {}).flat().filter(Boolean) : []
+    categoryError.value = e instanceof ApiError ? (details.length ? details.join(' ') : formatApiError(e)) : 'Gagal menambah kategori.'
+    try {
+      categories.value = await listCategories() // show what actually exists now (e.g. the twin created by another user)
+    } catch {
+      /* keep the current list */
+    }
+  } finally {
+    categorySaving.value = false
+  }
+}
+
+async function changeParent(category: Category, parentId: string) {
+  const next = parentId === '' ? null : Number(parentId)
+  if (next === category.parent_id) return
+  try {
+    await updateCategory(category.id, { parent_id: next })
+    categoryError.value = ''
+    categories.value = await listCategories()
+  } catch (e) {
+    // Server-side validation (cycle under concurrency, missing parent) is authoritative.
+    categoryError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memindahkan kategori.'
+    categories.value = await listCategories()
   }
 }
 
@@ -70,9 +181,10 @@ async function renameCategory(category: Category) {
   if (!newName || !newName.trim() || newName.trim() === category.name) return
   try {
     await updateCategory(category.id, { name: newName.trim() })
+    categoryError.value = ''
     categories.value = await listCategories()
   } catch (e) {
-    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengubah kategori.'
+    categoryError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengubah kategori.'
   }
 }
 
@@ -80,9 +192,93 @@ async function removeCategory(category: Category) {
   if (!confirm(`Hapus kategori "${category.name}"?`)) return
   try {
     await deleteCategory(category.id)
+    categoryError.value = ''
     categories.value = await listCategories()
   } catch (e) {
-    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menghapus kategori.'
+    categoryError.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menghapus kategori.'
+  }
+}
+
+// REM-01: import / export. Stock cells are final physical counts and only become stock after
+// Gudang counts and Admin approves the generated opname; catalogue changes on those rows wait too.
+const importFile = ref<File | null>(null)
+const importResult = ref<CatalogImportResult | null>(null)
+const importBusy = ref(false)
+const importKey = ref('')
+// One explicit stock context per import (never summed). Empty = the file carries no stock cells.
+const importStockType = ref<'' | 'transit' | 'shipping'>('')
+const importAgentId = ref<number | null>(null)
+const isSuperAdmin = computed(() => auth.user?.role === 'super_admin')
+/** Category writes are super_admin-only (ProductCategoryPolicy; categories are a GLOBAL taxonomy). Admin/Agen see the hierarchy read-only until the Owner decides the ownership model. */
+const canManageCategories = isSuperAdmin
+/** REM-06 (Owner 13 Nov 2026): Admin Agen and Agen may CREATE categories (parent or child) in the global taxonomy; edit/delete/reparent stay super_admin-only (enforced by the backend too). */
+const canCreateCategory = computed(() => ['super_admin', 'admin', 'agen'].includes(auth.user?.role ?? ''))
+const categorySaving = ref(false)
+function importContext() {
+  return {
+    ...(importStockType.value ? { stock_type: importStockType.value } : {}),
+    ...(isSuperAdmin.value && importAgentId.value ? { agent_id: importAgentId.value } : {}),
+  }
+}
+const outcomeLabel: Record<string, string> = {
+  catalog_created: 'Produk dibuat',
+  catalog_updated: 'Katalog diperbarui',
+  catalog_withheld_stock_pending: 'Menunggu hitung Gudang & persetujuan Admin (perubahan katalog ditahan)',
+  stock_pending: 'Menunggu hitung Gudang & persetujuan Admin',
+  stock_pending_replay: 'Sudah pernah diajukan (idempoten)',
+  rejected: 'Ditolak',
+}
+const errorLabel: Record<string, string> = {
+  idempotency_conflict: 'Kunci impor sama dengan data berbeda (409) — buat impor baru',
+  stock_context_invalid: 'Konteks stok tidak valid (pilih jenis stok / Agen)',
+  duplicate_sku_in_file: 'SKU ganda di dalam file',
+  sku_owner_type_mismatch: 'SKU milik tipe lain (produk/varian)',
+}
+function pickImportFile(e: Event) {
+  importFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
+  importResult.value = null
+  importKey.value = ''
+}
+async function exportCatalog(format: 'csv' | 'xlsx') {
+  try {
+    const blob = await downloadCatalogExport(format, importContext())
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `katalog.${format}`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal mengekspor katalog.'
+  }
+}
+async function runImport(apply: boolean) {
+  if (!importFile.value) return
+  importBusy.value = true
+  errorMessage.value = ''
+  try {
+    if (apply) {
+      // Same key for retries of the same file ⇒ no duplicate documents.
+      importKey.value ||= `imp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      importResult.value = await applyCatalogImport(importFile.value, importKey.value, importContext())
+      await load()
+    } else {
+      importResult.value = await previewCatalogImport(importFile.value, importContext())
+    }
+  } catch (e) {
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal memproses file impor.'
+  } finally {
+    importBusy.value = false
+  }
+}
+
+async function removePermanently(product: Product) {
+  if (!confirm(`HAPUS PERMANEN produk "${product.name}"? Tindakan ini tidak dapat dibatalkan.`)) return
+  try {
+    await hardDeleteProduct(product.id)
+    await load()
+  } catch (e) {
+    errorMessage.value = e instanceof ApiError ? formatApiError(e) : 'Gagal menghapus permanen produk.'
   }
 }
 
@@ -123,7 +319,7 @@ async function submitFees() {
   }
 }
 
-const statusLabel: Record<string, string> = { draft: 'Draf', active: 'Aktif', inactive: 'Nonaktif' }
+const statusLabel: Record<string, string> = { draft: 'Draft', active: 'Aktif', inactive: 'Nonaktif' }
 
 onMounted(load)
 </script>
@@ -149,33 +345,114 @@ onMounted(load)
 
     <div class="mb-6 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <h2 class="mb-3 text-sm font-semibold text-stone-700 dark:text-stone-200">Kategori</h2>
-      <div class="mb-3 flex flex-wrap gap-2">
-        <span
-          v-for="cat in categories"
-          :key="cat.id"
-          class="flex items-center gap-1.5 rounded-full bg-stone-100 py-1 pl-3 pr-1.5 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300"
+      <p v-if="categoryError" class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        {{ categoryError }}
+      </p>
+      <div class="mb-3 space-y-1.5">
+        <div
+          v-for="row in categoryRows"
+          :key="row.category.id"
+          class="flex flex-wrap items-center gap-2"
+          :style="{ marginLeft: `${row.depth * 1.5}rem` }"
         >
-          {{ cat.name }}
-          <button type="button" class="text-stone-400 hover:text-brand-600" title="Ubah nama" @click="renameCategory(cat)">
-            <AppIcon name="menu" :size="11" />
-          </button>
-          <button type="button" class="text-stone-400 hover:text-red-600" title="Hapus" @click="removeCategory(cat)">
-            <AppIcon name="trash" :size="11" />
-          </button>
-        </span>
+          <span
+            class="flex items-center gap-1.5 rounded-full bg-stone-100 py-1 pl-3 pr-1.5 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300"
+          >
+            {{ row.category.name }}
+            <template v-if="canManageCategories">
+              <button type="button" class="text-stone-400 hover:text-brand-600" title="Ubah nama" @click="renameCategory(row.category)">
+                <AppIcon name="menu" :size="11" />
+              </button>
+              <button type="button" class="text-stone-400 hover:text-red-600" title="Hapus" @click="removeCategory(row.category)">
+                <AppIcon name="trash" :size="11" />
+              </button>
+            </template>
+            <span v-else class="pr-1.5"></span>
+          </span>
+          <select
+            v-if="canManageCategories"
+            :value="row.category.parent_id ?? ''"
+            class="rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-[11px] text-stone-500 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-400"
+            :aria-label="`Induk kategori ${row.category.name}`"
+            @change="changeParent(row.category, ($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="opt in parentOptions(row.category)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </div>
         <span v-if="categories.length === 0" class="text-xs text-stone-400 dark:text-stone-500">Belum ada kategori.</span>
       </div>
-      <div class="flex gap-2">
+      <p v-if="!canManageCategories && canCreateCategory" class="mb-2 rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300" data-testid="category-createonly-note">
+        Kategori bersifat global dan dipakai seluruh jaringan. Anda dapat menambah kategori utama atau subkategori; mengubah, memindahkan, atau menghapus kategori hanya dapat dilakukan Super Admin.
+      </p>
+      <p v-else-if="!canCreateCategory" class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200" data-testid="category-readonly-note">
+        Hierarki kategori hanya dapat dilihat.
+      </p>
+      <form v-if="canCreateCategory" class="flex flex-wrap gap-2" data-testid="category-create-form" @submit.prevent="submitNewCategory">
         <input
           v-model="newCategoryName"
           type="text"
           placeholder="Nama kategori baru"
           class="w-64 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
+          maxlength="100"
+          aria-label="Nama kategori baru"
         />
-        <button type="button" class="rounded-lg bg-stone-200 px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200" @click="submitNewCategory">
-          Tambah
+        <select
+          v-model="newCategoryParentId"
+          class="rounded-lg border border-stone-200 bg-white px-2 py-2 text-xs dark:border-stone-700 dark:bg-stone-950"
+          aria-label="Induk kategori baru"
+        >
+          <option :value="null">Tanpa induk (utama)</option>
+          <option v-for="row in categoryRows" :key="row.category.id" :value="row.category.id">{{ indentLabel(row.depth) }}{{ row.category.name }}</option>
+        </select>
+        <button type="submit" class="rounded-lg bg-stone-200 px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300 disabled:opacity-60 dark:bg-stone-700 dark:text-stone-200" :disabled="categorySaving || !newCategoryName.trim()" data-testid="category-create-submit">
+          {{ categorySaving ? 'Menyimpan…' : 'Tambah' }}
         </button>
+      </form>
+      <p v-if="canCreateCategory" class="mt-2 text-[11px] text-stone-400 dark:text-stone-500">
+        Anak tampil menjorok di bawah induknya. Induk tidak boleh kategori itu sendiri atau turunannya (siklus ditolak server).
+      </p>
+    </div>
+
+    <div class="mb-6 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+      <h2 class="mb-3 text-sm font-semibold text-stone-700 dark:text-stone-200">Impor / Ekspor Katalog</h2>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <button type="button" class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200" @click="exportCatalog('csv')">Ekspor CSV</button>
+        <button type="button" class="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200" @click="exportCatalog('xlsx')">Ekspor XLSX</button>
+        <select v-model="importStockType" class="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs dark:border-stone-700 dark:bg-stone-950" aria-label="Konteks stok">
+          <option value="">Tanpa stok</option>
+          <option value="transit">Stok Transit</option>
+          <option value="shipping">Stok Shipping</option>
+        </select>
+        <input v-if="isSuperAdmin" v-model.number="importAgentId" type="number" min="1" placeholder="ID Agen" class="w-24 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs dark:border-stone-700 dark:bg-stone-950" />
+        <input type="file" accept=".csv,.xlsx" class="text-xs" @change="pickImportFile" />
+        <button type="button" :disabled="!importFile || importBusy" class="rounded-lg bg-stone-200 px-3 py-1.5 text-xs font-medium disabled:opacity-50 dark:bg-stone-700" @click="runImport(false)">Pratinjau</button>
+        <button type="button" :disabled="!importFile || importBusy" class="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50" @click="runImport(true)">Terapkan</button>
       </div>
+      <div v-if="importResult" class="mt-3 text-xs text-stone-600 dark:text-stone-300">
+        <p class="mb-2">Valid {{ importResult.summary.valid }} · Tidak valid {{ importResult.summary.invalid }} · Dengan stok {{ importResult.summary.with_stock }}</p>
+        <ul class="max-h-48 overflow-y-auto">
+          <li v-for="r in importResult.rows" :key="r.line" :class="r.valid ? '' : 'text-red-600 dark:text-red-300'">
+            Baris {{ r.line }} · {{ r.sku }} ·
+            {{ r.valid ? (r.outcome ? (outcomeLabel[r.outcome] ?? r.outcome) : r.action) : r.errors.map((c) => errorLabel[c] ?? c).join(', ') }}
+          </li>
+        </ul>
+        <p v-if="importResult.summary.with_stock" class="mt-2">
+          Angka stok adalah target hitung fisik, bukan saldo. Gudang menghitung &amp; submit, Admin menyetujui di
+          <RouterLink :to="{ name: 'warehouse-opnames' }" class="underline">Stock Opname</RouterLink>; perubahan katalog baris tersebut terbit saat disetujui.
+        </p>
+      </div>
+    </div>
+
+    <div class="mb-3 flex items-center gap-2 text-sm">
+      <label for="product-status-filter" class="text-stone-500 dark:text-stone-400">Status</label>
+      <select
+        id="product-status-filter"
+        v-model="statusFilter"
+        class="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
+        @change="load"
+      >
+        <option v-for="o in statusOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
     </div>
 
     <p v-if="loading" class="text-sm text-stone-500 dark:text-stone-400">Memuat...</p>
@@ -235,6 +512,15 @@ onMounted(load)
                   @click="remove(product)"
                 >
                   Hapus
+                </button>
+                <button
+                  v-if="canDeleteProduct"
+                  type="button"
+                  class="rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-200"
+                  title="Hapus permanen (hanya jika tidak direferensikan)"
+                  @click="removePermanently(product)"
+                >
+                  Hapus Permanen
                 </button>
               </div>
             </td>

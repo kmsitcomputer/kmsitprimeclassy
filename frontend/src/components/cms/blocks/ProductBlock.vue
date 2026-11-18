@@ -1,10 +1,5 @@
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
-import { formatRupiah } from '@/utils/format'
-import AppIcon from '@/components/ui/AppIcon.vue'
-import '@/assets/product-card.css'
-
-const { t } = useI18n()
+import ProductCardBase from '@/components/shop/ProductCardBase.vue'
 import type { HomepageContentProduct } from '@/api/cms'
 
 defineProps<{ content: { heading?: string; products?: HomepageContentProduct[] } }>()
@@ -23,24 +18,17 @@ function priceOf(product: HomepageContentProduct): string | number | null {
       {{ content.heading }}
     </h2>
     <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3.5 lg:grid-cols-4 lg:gap-4">
-      <RouterLink
+      <ProductCardBase
         v-for="product in content.products"
+        :id="product.id"
         :key="product.id"
-        :to="{ name: 'product-detail', params: { slug: product.slug } }"
-        class="pc-card group"
-      >
-        <div class="pc-card__image aspect-square">
-          <img v-if="product.image_url" :src="product.image_url" :alt="product.name" class="h-full w-full object-cover" />
-          <div v-else class="pc-card__placeholder grid h-full w-full place-items-center"><AppIcon name="box" :size="32" /></div>
-        </div>
-        <div class="pc-card__footer p-2.5 sm:p-3 lg:p-4">
-          <h3 class="pc-card__name line-clamp-2 min-h-10 text-[13px] font-medium leading-5 sm:text-sm lg:text-[15px]">{{ product.name }}</h3>
-          <div class="pc-card__divider my-1.5 sm:my-2" data-testid="product-divider" aria-hidden="true" />
-          <p class="pc-card__price font-display text-sm font-semibold sm:text-[15px] lg:text-base" data-testid="product-price">
-            <template v-if="priceOf(product) !== null"><template v-if="product.has_variations">{{ t('cms.startingFrom') }}</template>{{ formatRupiah(priceOf(product)!) }}</template><template v-else>—</template>
-          </p>
-        </div>
-      </RouterLink>
+        :slug="product.slug"
+        :name="product.name"
+        :image-url="product.image_url"
+        :price="priceOf(product)"
+        :has-variations="!!product.has_variations"
+        :show-stock="false"
+      />
     </div>
   </section>
 </template>

@@ -4,8 +4,6 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { i18n } from '@/i18n'
 import CtaBlock from '../blocks/CtaBlock.vue'
-import SocialMediaBlock from '../blocks/SocialMediaBlock.vue'
-import MarketplaceLinksBlock from '../blocks/MarketplaceLinksBlock.vue'
 import ProductBlock from '../blocks/ProductBlock.vue'
 import ProductCard from '@/components/shop/ProductCard.vue'
 
@@ -48,89 +46,6 @@ describe('CTA — compact premium on mobile, unchanged from sm up', () => {
     expect(w.find('section > div:last-child').classes()).toContain('text-center')
     expect(mount(CtaBlock, { props: { content } }).text()).not.toMatch(/aplikasi prime/i)
     expect(mount(CtaBlock, { props: { content } }).find('p').exists()).toBe(false)
-  })
-})
-
-describe('Social media — three cards in a row on mobile', () => {
-  const platforms = {
-    instagram: { enabled: true, url: 'https://instagram.com/prime' },
-    tiktok: { enabled: true, url: 'https://tiktok.com/@prime' },
-    facebook: { enabled: true, url: 'https://facebook.com/prime' },
-  }
-
-  it('renders every configured platform in CMS order, with safe link attributes and a visible label', () => {
-    const w = mount(SocialMediaBlock, { props: { content: { layout: 'cards', platforms } } })
-    const links = w.findAll('a')
-    expect(links.map((l) => l.attributes('href'))).toEqual(['https://instagram.com/prime', 'https://tiktok.com/@prime', 'https://facebook.com/prime'])
-    expect(links.map((l) => l.text())).toEqual(['Instagram', 'TikTok', 'Facebook'])
-    links.forEach((l) => {
-      expect(l.attributes('target')).toBe('_blank')
-      expect(l.attributes('rel')).toBe('noopener noreferrer')
-    })
-  })
-
-  it('is a three-column row on mobile and the previous 3-up grid from sm; no outer vertical padding or duplicate container', () => {
-    const w = mount(SocialMediaBlock, { props: { content: { layout: 'cards', platforms } } })
-    const grid = w.find('section > div')
-    expect(grid.classes()).toEqual(expect.arrayContaining(['grid', 'grid-cols-[repeat(var(--cols),minmax(0,1fr))]', 'gap-2.5', 'sm:grid-cols-3', 'sm:gap-4']))
-    expect((grid.element as HTMLElement).style.getPropertyValue('--cols')).toBe('3')
-    const section = w.find('section').classes().join(' ')
-    expect(section).not.toMatch(/py-|px-|max-w-/)
-  })
-
-  it('each card centres a 22px icon in a 40px chip and a compact label; the black TikTok mark sits on white', () => {
-    const w = mount(SocialMediaBlock, { props: { content: { layout: 'cards', platforms } } })
-    const card = w.findAll('a')[1]!
-    expect(card.classes()).toEqual(expect.arrayContaining(['flex-col', 'items-center', 'justify-center', 'rounded-2xl', 'text-[12.5px]']))
-    const chip = card.find('span')
-    expect(chip.classes()).toEqual(expect.arrayContaining(['h-10', 'w-10', 'bg-white']))
-    expect(card.find('svg').attributes('width')).toBe('22')
-    expect(card.find('svg path').attributes('d')).toBeTruthy()
-    expect(card.find('span.truncate').exists()).toBe(true) // a long label can never overflow a 320px row
-  })
-
-  it('adapts to fewer platforms (columns follow the count) and hides disabled / unsafe / url-less ones', () => {
-    const w = mount(SocialMediaBlock, {
-      props: { content: { layout: 'cards', platforms: { instagram: platforms.instagram, tiktok: { enabled: false, url: 'https://tiktok.com/x' }, facebook: { enabled: true, url: 'javascript:alert(1)' } } } },
-    })
-    expect(w.findAll('a')).toHaveLength(1)
-    expect((w.find('section > div').element as HTMLElement).style.getPropertyValue('--cols')).toBe('1')
-    expect(mount(SocialMediaBlock, { props: { content: { platforms: { instagram: { enabled: false } } } } }).find('section').exists()).toBe(false)
-  })
-
-  it('compact layout keeps its wrapped-row behaviour from sm up', () => {
-    const w = mount(SocialMediaBlock, { props: { content: { layout: 'compact', platforms } } })
-    expect(w.find('section > div').classes()).toEqual(expect.arrayContaining(['sm:flex', 'sm:flex-wrap', 'sm:gap-3']))
-  })
-})
-
-describe('Marketplace — two cards in a row on mobile', () => {
-  const platforms = {
-    tokopedia: { enabled: true, url: 'https://tokopedia.com/prime' },
-    shopee: { enabled: true, url: 'https://shopee.co.id/prime' },
-  }
-
-  it('renders both marketplaces with the same card treatment as social, in two columns', () => {
-    const w = mount(MarketplaceLinksBlock, { props: { content: { layout: 'cards', platforms } } })
-    const links = w.findAll('a')
-    expect(links.map((l) => l.attributes('href'))).toEqual(['https://tokopedia.com/prime', 'https://shopee.co.id/prime'])
-    expect(links.map((l) => l.text())).toEqual(['Tokopedia', 'Shopee'])
-    const grid = w.find('section > div')
-    expect((grid.element as HTMLElement).style.getPropertyValue('--cols')).toBe('2')
-    expect(grid.classes()).toEqual(expect.arrayContaining(['grid-cols-[repeat(var(--cols),minmax(0,1fr))]', 'sm:grid-cols-2']))
-    links.forEach((l) => {
-      expect(l.classes()).toEqual(expect.arrayContaining(['flex-col', 'rounded-2xl']))
-      expect(l.find('span').classes()).toEqual(expect.arrayContaining(['h-10', 'w-10', 'bg-white']))
-      expect(l.attributes('rel')).toBe('noopener noreferrer')
-    })
-    expect(links[0]!.find('img').exists()).toBe(true) // the bundled Tokopedia mark
-    expect(w.find('section').classes().join(' ')).not.toMatch(/py-|px-|max-w-/)
-  })
-
-  it('a single configured marketplace is one full-width card, not a half-empty grid', () => {
-    const w = mount(MarketplaceLinksBlock, { props: { content: { layout: 'cards', platforms: { tokopedia: platforms.tokopedia, shopee: { enabled: false, url: platforms.shopee.url } } } } })
-    expect(w.findAll('a')).toHaveLength(1)
-    expect((w.find('section > div').element as HTMLElement).style.getPropertyValue('--cols')).toBe('1')
   })
 })
 

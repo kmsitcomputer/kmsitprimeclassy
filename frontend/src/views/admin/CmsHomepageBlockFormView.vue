@@ -15,6 +15,7 @@ const BLOCK_TYPES = [
   { value: 'banner', label: 'Banner' },
   { value: 'category', label: 'Kategori' },
   { value: 'product', label: 'Produk' },
+  { value: 'bestseller', label: 'Produk terlaris' },
   { value: 'promotional', label: 'Promosi' },
   { value: 'text', label: 'Teks' },
   { value: 'image', label: 'Gambar' },
@@ -57,6 +58,7 @@ const form = reactive<Record<string, any>>({
   category_id: '',
   article_ids: '',
   limit: '',
+  period: '30',
   layout: 'cards',
   mode: 'card',
   phone: '',
@@ -187,6 +189,7 @@ async function load() {
     form.product_ids = (c.product_ids ?? []).join(',')
     form.category_id = c.category_id != null ? String(c.category_id) : ''
     form.article_ids = (c.article_ids ?? []).join(',')
+    form.period = c.period ?? '30'
     form.limit = c.limit != null ? String(c.limit) : ''
     form.layout = c.layout ?? 'cards'
     form.mode = c.mode ?? 'card'
@@ -277,6 +280,8 @@ function buildContent(): Record<string, unknown> {
       return { url: form.url || undefined, alt: form.alt || undefined }
     case 'category':
       return { heading: form.heading || undefined, category_ids: toIntArray(form.category_ids) }
+    case 'bestseller':
+      return { heading: form.heading || undefined, period: form.period, limit: form.limit ? Number(form.limit) : 8 }
     case 'product':
       return {
         heading: form.heading || undefined,
@@ -444,7 +449,7 @@ async function submit() {
             </select>
           </div>
 
-          <template v-if="['hero', 'promotional', 'text', 'category', 'product', 'article', 'cta', 'social_media', 'whatsapp_chat', 'marketplace_links'].includes(form.type)">
+          <template v-if="['hero', 'promotional', 'text', 'category', 'product', 'bestseller', 'article', 'cta', 'social_media', 'whatsapp_chat', 'marketplace_links'].includes(form.type)">
             <div>
               <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">Judul</label>
               <input v-model="form.heading" type="text" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950" />
@@ -535,6 +540,18 @@ async function submit() {
             <p v-if="errors['content.category_ids']" class="mt-1 text-xs text-red-600">{{ errors['content.category_ids'][0] }}</p>
           </div>
 
+          <div v-if="form.type === 'bestseller'" class="space-y-2">
+            <label class="block text-sm">Periode
+              <select v-model="form.period" class="w-full rounded-lg border p-2">
+                <option value="7">7 hari</option><option value="30">30 hari</option><option value="90">90 hari</option><option value="all">Sepanjang waktu</option>
+              </select>
+            </label>
+            <label class="block text-sm">Jumlah produk
+              <select v-model="form.limit" class="w-full rounded-lg border p-2">
+                <option value="4">4</option><option value="">8</option><option value="12">12</option>
+              </select>
+            </label>
+          </div>
           <div v-if="form.type === 'product'" class="space-y-2">
             <div>
               <label class="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-200">ID Kategori (opsional — ambil produk dari kategori ini)</label>

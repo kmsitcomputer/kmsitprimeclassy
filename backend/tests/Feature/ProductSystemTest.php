@@ -55,15 +55,20 @@ class ProductSystemTest extends TestCase
      * Category / Product / Variation / Image CRUD
      * ------------------------------------------------------------- */
 
-    public function test_only_super_admin_manages_categories_but_agen_can_also_manage_products(): void
+    public function test_categories_are_create_only_for_agen_and_super_admin_manages_them_while_agen_can_also_manage_products(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $agen = User::factory()->agen()->create();
         $agen->update(['agent_id' => $agen->id]);
         $sales = User::factory()->sales()->create(['agent_id' => $agen->id]);
 
-        // Category taxonomy stays super_admin-only.
-        $this->actingAs($agen)->postJson('/api/v1/categories', ['name' => 'Kue'])->assertStatus(403);
+        // REM-06 (Owner 13 Nov 2026): the global taxonomy is CREATE-ONLY for agen/admin; edit/delete stay super_admin-only
+        // (full matrix: CategoryCreateOnlyTest). Other roles still cannot create.
+        $this->actingAs($sales)->postJson('/api/v1/categories', ['name' => 'Ditolak'])->assertStatus(403);
+        $agenCategory = $this->actingAs($agen)->postJson('/api/v1/categories', ['name' => 'Dibuat Agen']);
+        $agenCategory->assertCreated();
+        $this->actingAs($agen)->patchJson('/api/v1/categories/'.$agenCategory->json('data.id'), ['name' => 'Ubah'])->assertStatus(403);
+        $this->actingAs($agen)->deleteJson('/api/v1/categories/'.$agenCategory->json('data.id'))->assertStatus(403);
 
         $categoryResponse = $this->actingAs($superAdmin)->postJson('/api/v1/categories', ['name' => 'Kue']);
         $categoryResponse->assertCreated();

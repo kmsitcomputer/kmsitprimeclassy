@@ -1,0 +1,208 @@
+{
+  "checks": [
+    {
+      "name": "A1 editor shows one gallery per variation + parent with seeded images",
+      "ok": true,
+      "extra": "{\"1\":[1,2],\"2\":[3,4],\"3\":[5,6],\"parent\":[7]}"
+    },
+    {
+      "name": "A2 upload to Biru adds 2 images to Biru only; Merah/Hijau/parent untouched",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "A3 reorder (Merah) swaps its two images",
+      "ok": true,
+      "extra": "[2,1]"
+    },
+    {
+      "name": "A4 persisted after reload: Merah reordered, Biru has 3 (one removed), Hijau+parent unchanged",
+      "ok": true,
+      "extra": "{\"1\":[2,1],\"2\":[3,10,11],\"3\":[5,6],\"parent\":[7]}"
+    },
+    {
+      "name": "A5 the chosen Biru image is the (single) primary, other galleries keep their own primary",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "A6 storefront API returns exactly the saved galleries in saved order",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "A7 saving the product (title changed) leaves every image identical (ids, files, primary, order, owner)",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "A8 create flow: variant images land in THEIR OWN variation (Coklat=2, Keju=1, parent=0)",
+      "ok": true,
+      "extra": "{\"BR-COK\":2,\"BR-KEJ\":1}"
+    },
+    {
+      "name": "B1 d: first variation (Merah) selected, its primary image shown",
+      "ok": true,
+      "extra": "Merah http://127.0.0.1:5198/storage/products/uat-merah1.png"
+    },
+    {
+      "name": "B2 d: variation Biru → Biru gallery + price Rp25.000",
+      "ok": true,
+      "extra": "http://127.0.0.1:5198/storage/products/9vAuoloDwD0JL0nljhMnn3M1RzW8eUlFVrSJpgwA.png"
+    },
+    {
+      "name": "B3 d: Merah thumbnail click selects Merah (selected state, image, price Rp15.000)",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "B4 d: third variation (Hijau, out of stock) selectable from gallery; add-to-cart unavailable",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "B5 d: out-of-stock variation cannot be added to cart",
+      "ok": true,
+      "extra": "disabled=true"
+    },
+    {
+      "name": "B6 d: after rapid switching the final state is consistent (Biru, Biru image, Rp25.000)",
+      "ok": true,
+      "extra": "Biru http://127.0.0.1:5198/storage/products/9vAuoloDwD0JL0nljhMnn3M1RzW8eUlFVrSJpgwA.png"
+    },
+    {
+      "name": "B7 d: add-to-cart payload uses the gallery-selected variation (id 2, Biru, price 25000)",
+      "ok": true,
+      "extra": "{\"key\":\"1:2\",\"productId\":1,\"variationId\":2,\"productSlug\":\"kue-warna-warni\",\"name\":\"Kue Warna-Warni\",\"variationLabel\":\"Biru\",\"unitPrice\":25000,\"image\":\"http://127.0.0.1:5198/storage/products/9vAuoloDwD0JL0nljhMnn3M1RzW8eUlFVrSJpgwA.png\",\"stockLimit\":7,\"quantity\":1}"
+    },
+    {
+      "name": "B8 product without variations: plain gallery, no variant thumbnails",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "B1 m: first variation (Merah) selected, its primary image shown",
+      "ok": true,
+      "extra": "Merah http://127.0.0.1:5198/storage/products/uat-merah1.png"
+    },
+    {
+      "name": "B2 m: variation Biru → Biru gallery + price Rp25.000",
+      "ok": true,
+      "extra": "http://127.0.0.1:5198/storage/products/9vAuoloDwD0JL0nljhMnn3M1RzW8eUlFVrSJpgwA.png"
+    },
+    {
+      "name": "B3 m: Merah thumbnail click selects Merah (selected state, image, price Rp15.000)",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "B4 m: third variation (Hijau, out of stock) selectable from gallery; add-to-cart unavailable",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "B5 m: out-of-stock variation cannot be added to cart",
+      "ok": true,
+      "extra": "disabled=true"
+    },
+    {
+      "name": "B6 m: after rapid switching the final state is consistent (Biru, Biru image, Rp25.000)",
+      "ok": true,
+      "extra": "Biru http://127.0.0.1:5198/storage/products/9vAuoloDwD0JL0nljhMnn3M1RzW8eUlFVrSJpgwA.png"
+    },
+    {
+      "name": "B7 m: add-to-cart payload uses the gallery-selected variation (id 2, Biru, price 25000)",
+      "ok": true,
+      "extra": "{\"key\":\"1:2\",\"productId\":1,\"variationId\":2,\"productSlug\":\"kue-warna-warni\",\"name\":\"Kue Warna-Warni\",\"variationLabel\":\"Biru\",\"unitPrice\":25000,\"image\":\"http://127.0.0.1:5198/storage/products/9vAuoloDwD0JL0nljhMnn3M1RzW8eUlFVrSJpgwA.png\",\"stockLimit\":7,\"quantity\":1}"
+    },
+    {
+      "name": "C1 storefront: parents on top, subcategories nested beneath their own parent (3 levels), no flat mix",
+      "ok": true,
+      "extra": "[{\"name\":\"Kue\",\"kids\":[\"0:Kue\",\"1:Kue Basah\",\"1:Kue Kering\",\"2:Nastar\"]},{\"name\":\"Roti\",\"kids\":[\"0:Roti\",\"1:Roti Tawar\"]}]"
+    },
+    {
+      "name": "C2 product listing filter shows hierarchy in order",
+      "ok": true,
+      "extra": "0:Kue|1:Kue Basah|1:Kue Kering|2:Nastar|0:Roti|1:Roti Tawar"
+    },
+    {
+      "name": "C3 Agen: hierarchy visible read-only; create controls absent; API write denied (403)",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "C4 super_admin created Minuman → Kopi → Kopi Susu; storefront nests them correctly",
+      "ok": true,
+      "extra": "[\"0:Kue|1:Kue Basah|1:Kue Kering|2:Nastar\",\"0:Minuman|1:Kopi|2:Kopi Susu\",\"0:Roti|1:Roti Tawar\"]"
+    },
+    {
+      "name": "C5 editor never offers a descendant as parent (cycle prevention in UI)",
+      "ok": true,
+      "extra": "[]"
+    },
+    {
+      "name": "D1 d: ONE card, ONE title, five icons in approved order, one row, white, centered",
+      "ok": true,
+      "extra": "{\"cards\":1,\"titles\":1,\"order\":[\"instagram\",\"tiktok\",\"facebook\",\"tokopedia\",\"shopee\"],\"hrefs\":[\"https://instagram.com/primeclassy\",\"https://tiktok.com/@primeclassy\",\"https://facebook.com/primeclassy\",\"https://tokopedia.com/primeclassy\",\"https://shopee.co.id/primeclassy\"],\"sizes\":[48,48,48,48,48],\"oneRow\":true,\"bg\":\"rgb(255, 255, 255)\",\"rel\":true,\"centered\":\"center\",\"bodyOverflow\":false,\"hasOld\":false}"
+    },
+    {
+      "name": "D2 d: links come from CMS and open safely; icon size 48px; no overflow; no old brown tiles",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "D1 t: ONE card, ONE title, five icons in approved order, one row, white, centered",
+      "ok": true,
+      "extra": "{\"cards\":1,\"titles\":1,\"order\":[\"instagram\",\"tiktok\",\"facebook\",\"tokopedia\",\"shopee\"],\"hrefs\":[\"https://instagram.com/primeclassy\",\"https://tiktok.com/@primeclassy\",\"https://facebook.com/primeclassy\",\"https://tokopedia.com/primeclassy\",\"https://shopee.co.id/primeclassy\"],\"sizes\":[48,48,48,48,48],\"oneRow\":true,\"bg\":\"rgb(255, 255, 255)\",\"rel\":true,\"centered\":\"center\",\"bodyOverflow\":false,\"hasOld\":false}"
+    },
+    {
+      "name": "D2 t: links come from CMS and open safely; icon size 48px; no overflow; no old brown tiles",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "D1 m: ONE card, ONE title, five icons in approved order, one row, white, centered",
+      "ok": true,
+      "extra": "{\"cards\":1,\"titles\":1,\"order\":[\"instagram\",\"tiktok\",\"facebook\",\"tokopedia\",\"shopee\"],\"hrefs\":[\"https://instagram.com/primeclassy\",\"https://tiktok.com/@primeclassy\",\"https://facebook.com/primeclassy\",\"https://tokopedia.com/primeclassy\",\"https://shopee.co.id/primeclassy\"],\"sizes\":[40,40,40,40,40],\"oneRow\":true,\"bg\":\"rgb(255, 255, 255)\",\"rel\":true,\"centered\":\"center\",\"bodyOverflow\":false,\"hasOld\":false}"
+    },
+    {
+      "name": "D2 m: links come from CMS and open safely; icon size 40px; no overflow; no old brown tiles",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "D1 xs: ONE card, ONE title, five icons in approved order, one row, white, centered",
+      "ok": true,
+      "extra": "{\"cards\":1,\"titles\":1,\"order\":[\"instagram\",\"tiktok\",\"facebook\",\"tokopedia\",\"shopee\"],\"hrefs\":[\"https://instagram.com/primeclassy\",\"https://tiktok.com/@primeclassy\",\"https://facebook.com/primeclassy\",\"https://tokopedia.com/primeclassy\",\"https://shopee.co.id/primeclassy\"],\"sizes\":[40,40,40,40,40],\"oneRow\":true,\"bg\":\"rgb(255, 255, 255)\",\"rel\":true,\"centered\":\"center\",\"bodyOverflow\":false,\"hasOld\":false}"
+    },
+    {
+      "name": "D2 xs: links come from CMS and open safely; icon size 40px; no overflow; no old brown tiles",
+      "ok": true,
+      "extra": ""
+    }
+  ],
+  "console": [
+    "[A] The script has an unsupported MIME type ('text/html').",
+    "[A] The script has an unsupported MIME type ('text/html').",
+    "[A] The script has an unsupported MIME type ('text/html').",
+    "[A] The script has an unsupported MIME type ('text/html').",
+    "[A-m] The script has an unsupported MIME type ('text/html').",
+    "[A2] The script has an unsupported MIME type ('text/html').",
+    "[B-d] The script has an unsupported MIME type ('text/html').",
+    "[B-d] The script has an unsupported MIME type ('text/html').",
+    "[B-d] The script has an unsupported MIME type ('text/html').",
+    "[B-m] The script has an unsupported MIME type ('text/html').",
+    "[C] The script has an unsupported MIME type ('text/html').",
+    "[C-m] The script has an unsupported MIME type ('text/html').",
+    "[C-l] The script has an unsupported MIME type ('text/html').",
+    "[C-a] The script has an unsupported MIME type ('text/html').",
+    "[C-s] The script has an unsupported MIME type ('text/html').",
+    "[C-s] The script has an unsupported MIME type ('text/html').",
+    "[C-s] The script has an unsupported MIME type ('text/html').",
+    "[D-d] The script has an unsupported MIME type ('text/html').",
+    "[D-t] The script has an unsupported MIME type ('text/html').",
+    "[D-m] The script has an unsupported MIME type ('text/html').",
+    "[D-xs] The script has an unsupported MIME type ('text/html')."
+  ],
+  "notes": []
+}

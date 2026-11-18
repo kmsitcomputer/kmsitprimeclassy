@@ -37,17 +37,17 @@ primeclassy/
 ├── backend/                        # Laravel 11 JSON API (prefix /api/v1)
 │   ├── app/
 │   │   ├── Http/{Controllers/Api/V1/*, Middleware, Requests, Resources}
-│   │   ├── Models/                 # ±110 model Eloquent
-│   │   ├── Policies/               # 17 policy (otorisasi halus)
+│   │   ├── Models/                 # ±114 model Eloquent
+│   │   ├── Policies/               # 19 policy (otorisasi halus)
 │   │   ├── Services/               # business logic per domain
 │   │   ├── Support/                # helper kanonis (HierarchyRules, PermissionMap, dst.)
 │   │   ├── Enums, Observers, Jobs, Mail, Console/Commands
-│   ├── routes/api_v1.php           # seluruh permukaan API (±914 baris)
-│   ├── database/{migrations (162), seeders, data/regions}
+│   ├── routes/api_v1.php           # seluruh permukaan API (±956 baris)
+│   ├── database/{migrations (172), seeders, data/regions}
 │   ├── lang/{id,en,ar,zh}          # katalog pesan backend
-│   └── tests/{Feature (191), Unit (6), Support (9)}
+│   └── tests/{Feature (219), Unit (6), Support (8)}
 ├── frontend/                       # Vue 3 SPA
-│   └── src/{api (44 modul), views (69 halaman), components, layouts (3),
+│   └── src/{api (46 modul), views (84 halaman), components, layouts (3),
 │            stores (7), router, i18n, pwa, utils}
 └── deploy/                         # build.sh, konfigurasi nginx/php-fpm DEV,
                                     # systemd queue worker, template public_html

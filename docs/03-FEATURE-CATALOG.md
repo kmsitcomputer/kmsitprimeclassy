@@ -146,7 +146,7 @@ Detail lengkap: [10-NOTIFICATIONS](10-NOTIFICATIONS.md).
 
 ## 9. Dashboard internal (per role ringkas)
 
-Halaman `frontend/src/views/dashboard/` (69 view). Ringkasan navigasi per role: [07-FRONTEND-GUIDE](07-FRONTEND-GUIDE.md) §5; otorisasi backend: [04-ROLES-PERMISSIONS](04-ROLES-PERMISSIONS.md).
+Halaman `frontend/src/views/dashboard/` (47 view). Ringkasan navigasi per role: [07-FRONTEND-GUIDE](07-FRONTEND-GUIDE.md) §5; otorisasi backend: [04-ROLES-PERMISSIONS](04-ROLES-PERMISSIONS.md).
 
 ## 10. Item PLANNED / belum ada di kode
 

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ApiError } from '@/api/client'
+import StockSourceSelector from '@/components/shop/StockSourceSelector.vue'
+import { createLatestRequestGuard } from '@/utils/latestRequest'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -8,7 +11,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import StockBadge from '@/components/ui/StockBadge.vue'
 import ProductCard from '@/components/shop/ProductCard.vue'
 import { getProduct, listRelatedProducts } from '@/api/catalog'
-import type { Product, ProductVariation } from '@/api/types'
+import type { Product, ProductImage, ProductVariation } from '@/api/types'
 import { formatRupiah } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
@@ -21,9 +24,12 @@ const auth = useAuthStore()
 const cart = useCartStore()
 const wishlist = useWishlistStore()
 
+const stockSource = computed(() => auth.user?.role === 'sales-kurir-sub' ? cart.stockSourceFor(auth.user.id) : undefined)
+const loadGuard = createLatestRequestGuard()
 const product = ref<Product | null>(null)
 const loading = ref(true)
 const notFound = ref(false)
+const loadError = ref<string | null>(null)
 const activeImageIndex = ref(0)
 const selectedVariation = ref<ProductVariation | null>(null)
 const quantity = ref(1)
@@ -31,42 +37,107 @@ const addedMessage = ref(false)
 
 const relatedProducts = ref<Product[]>([])
 const relatedLoading = ref(false)
+const relatedGuard = createLatestRequestGuard()
 
 async function load() {
+  const token = loadGuard.begin()
   loading.value = true
   notFound.value = false
+  loadError.value = null
+  relatedGuard.invalidate()
   relatedProducts.value = []
   try {
-    const loaded = await getProduct(props.slug)
+    const loaded = await getProduct(props.slug, stockSource.value)
+    if (!loadGuard.isCurrent(token)) return
     product.value = loaded
     selectedVariation.value = loaded.has_variations ? (loaded.variations.find((v) => v.is_active) ?? null) : null
     activeImageIndex.value = 0
     quantity.value = 1
     loadRelatedProducts(loaded.id)
-  } catch {
-    notFound.value = true
+  } catch (e) {
+    if (loadGuard.isCurrent(token)) {
+      notFound.value = e instanceof ApiError && e.status === 404
+      loadError.value = e instanceof ApiError ? e.message : 'Gagal memuat produk dan ketersediaan stok.'
+      product.value = null
+    }
   } finally {
-    loading.value = false
+    if (loadGuard.isCurrent(token)) loading.value = false
   }
 }
 
 // Secondary content: a failure here must never take down the product detail
 // page itself, so it's isolated in its own try/catch and its own loading flag.
 async function loadRelatedProducts(productId: number) {
+  const token = relatedGuard.begin()
   relatedLoading.value = true
   try {
-    relatedProducts.value = await listRelatedProducts(productId)
+    const result = await listRelatedProducts(productId, 8, stockSource.value)
+    if (relatedGuard.isCurrent(token)) relatedProducts.value = result
   } catch {
-    relatedProducts.value = []
+    if (relatedGuard.isCurrent(token)) relatedProducts.value = []
   } finally {
-    relatedLoading.value = false
+    if (relatedGuard.isCurrent(token)) relatedLoading.value = false
   }
 }
 
 onMounted(load)
-watch(() => props.slug, load)
+watch(() => [props.slug, stockSource.value], load)
 
-const activeImage = computed(() => product.value?.images?.[activeImageIndex.value] ?? null)
+const activeImage = computed(() => galleryImages.value[activeImageIndex.value] ?? null)
+
+/**
+ * REM-02: the gallery follows the selected variation. A variation owns its own
+ * images (product_variation_id === variation.id); the parent gallery
+ * (product_variation_id === null) is the fallback when the selected variation has
+ * no images of its own. Before any selection the full list is shown, matching the
+ * previous behaviour. No image row is ever mutated — only the visible subset.
+ */
+const galleryImages = computed<ProductImage[]>(() => {
+  const p = product.value
+  if (!p?.images?.length) return []
+  const variation = selectedVariation.value
+  if (!variation) return p.images
+  const own = p.images.filter((i) => i.product_variation_id === variation.id)
+  if (own.length) return own
+  return p.images.filter((i) => i.product_variation_id === null)
+})
+
+/**
+ * REM-02 gallery → variation: one representative thumbnail (primary, else first) for every OTHER
+ * active variation that owns images. Clicking it selects THAT variation — an image belongs to exactly
+ * one variation (product_variation_id), so the mapping is unambiguous and never fabricates a
+ * variation. Variations without their own images are not represented (nothing to click).
+ */
+const variantThumbs = computed(() => {
+  const p = product.value
+  if (!p?.has_variations || !p.images?.length) return []
+  const out: { variation: ProductVariation; image: ProductImage }[] = []
+  for (const variation of p.variations ?? []) {
+    if (!variation.is_active || variation.id === selectedVariation.value?.id) continue
+    const own = p.images.filter((i) => i.product_variation_id === variation.id)
+    const image = own.find((i) => i.is_primary) ?? own[0]
+    if (image) out.push({ variation, image })
+  }
+  return out
+})
+
+function selectVariation(variation: ProductVariation) {
+  if (!variation.is_active) return
+  selectedVariation.value = variation
+  quantity.value = 1
+}
+
+const primaryIndex = (images: ProductImage[]) => Math.max(0, images.findIndex((i) => i.is_primary))
+
+// Reset the viewer whenever the visible set changes (variation picked/replaced or
+// product reloaded) so a stale index can never point into another gallery; the
+// primary image of the new gallery is shown first.
+watch(
+  () => galleryImages.value.map((i) => i.id).join(','),
+  () => {
+    activeImageIndex.value = primaryIndex(galleryImages.value)
+  },
+)
 
 const unitPrice = computed(() => {
   if (!product.value) return 0
@@ -97,7 +168,7 @@ const stockQuantity = computed<number | undefined>(() => {
 
 const canAddToCart = computed(() => {
   if (!auth.isLoggedIn) return false
-  if (!product.value) return false
+  if (loading.value || !product.value) return false
   if (product.value.has_variations && !selectedVariation.value) return false
   return (stockQuantity.value ?? 0) > 0
 })
@@ -110,7 +181,9 @@ function changeQuantity(delta: number) {
 
 function addToCart() {
   if (!product.value || !canAddToCart.value) return
-  const image = product.value.images?.find((i) => i.is_primary) ?? product.value.images?.[0]
+  // REM-02: the cart line thumbnail follows the same variation gallery contract
+  // as the detail viewer (variation images first, parent gallery fallback).
+  const image = galleryImages.value.find((i) => i.is_primary) ?? galleryImages.value[0]
 
   cart.add(
     {
@@ -138,6 +211,7 @@ function goToLoginToBuy() {
 
 <template>
   <ShopLayout>
+    <StockSourceSelector />
     <div v-if="loading" class="grid grid-cols-1 gap-6 md:grid-cols-2">
       <div class="aspect-square animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-800" />
       <div class="space-y-3">
@@ -146,6 +220,7 @@ function goToLoginToBuy() {
       </div>
     </div>
 
+    <p v-else-if="loadError && !notFound" class="rounded-lg bg-red-50 p-4 text-sm text-red-700">{{ loadError }}</p>
     <div v-else-if="notFound" class="py-16 text-center">
       <p class="text-stone-500 dark:text-stone-400">{{ t('product.notFound') }}</p>
       <RouterLink :to="{ name: 'products' }" class="mt-2 inline-block text-sm font-medium text-brand-600 dark:text-brand-400">
@@ -166,17 +241,35 @@ function goToLoginToBuy() {
             <AppIcon name="box" :size="56" />
           </div>
         </div>
-        <div v-if="product.images && product.images.length > 1" class="mt-3 flex gap-2 overflow-x-auto">
-          <button
-            v-for="(img, idx) in product.images"
-            :key="img.id"
-            type="button"
-            class="h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2"
-            :class="idx === activeImageIndex ? 'border-brand-500' : 'border-transparent'"
-            @click="activeImageIndex = idx"
-          >
-            <img :src="img.url" :alt="product.name" class="h-full w-full object-cover" />
-          </button>
+        <div v-if="galleryImages.length > 1 || variantThumbs.length" class="mt-3 flex gap-2 overflow-x-auto" data-testid="gallery-strip">
+          <template v-if="galleryImages.length > 1">
+            <button
+              v-for="(img, idx) in galleryImages"
+              :key="img.id"
+              type="button"
+              class="h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2"
+              :class="idx === activeImageIndex ? 'border-brand-500' : 'border-transparent'"
+              data-testid="gallery-thumb"
+              @click="activeImageIndex = idx"
+            >
+              <img :src="img.url" :alt="product.name" class="h-full w-full object-cover" />
+            </button>
+          </template>
+          <template v-if="variantThumbs.length">
+            <span class="mx-1 w-px shrink-0 self-stretch bg-stone-200 dark:bg-stone-700" aria-hidden="true"></span>
+            <button
+              v-for="thumb in variantThumbs"
+              :key="`variant-${thumb.variation.id}`"
+              type="button"
+              class="h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 border-transparent hover:border-brand-300"
+              :aria-label="`Pilih varian ${thumb.variation.label}`"
+              :title="thumb.variation.label"
+              :data-testid="`variant-thumb-${thumb.variation.id}`"
+              @click="selectVariation(thumb.variation)"
+            >
+              <img :src="thumb.image.url" :alt="thumb.variation.label" class="h-full w-full object-cover" />
+            </button>
+          </template>
         </div>
       </div>
 
@@ -199,13 +292,15 @@ function goToLoginToBuy() {
               :key="variation.id"
               type="button"
               :disabled="!variation.is_active"
+              :data-testid="`variation-${variation.id}`"
+              :aria-pressed="selectedVariation?.id === variation.id"
               class="rounded-xl border px-3.5 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40"
               :class="
                 selectedVariation?.id === variation.id
                   ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
                   : 'border-stone-200 text-stone-600 hover:border-brand-300 dark:border-stone-700 dark:text-stone-300'
               "
-              @click="selectedVariation = variation; quantity = 1"
+              @click="selectVariation(variation)"
             >
               {{ variation.label }}
             </button>

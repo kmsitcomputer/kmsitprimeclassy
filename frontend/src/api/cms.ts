@@ -1,3 +1,4 @@
+import { getPersistedReferralCode } from '@/utils/referral'
 import { http } from './client'
 import type { ApiEnvelope } from './client'
 import type { Article, Page } from './cmsContent'
@@ -57,6 +58,7 @@ export interface HomepageBlockContent {
   category_ids?: number[]
   product_ids?: number[]
   article_ids?: number[]
+  period?: '7' | '30' | '90' | 'all'
   limit?: number
   articles?: HomepageContentArticle[]
   categories?: HomepageContentCategory[]
@@ -97,7 +99,7 @@ export interface HomepageBlock {
 }
 
 export async function getHomepage(): Promise<HomepageBlock[]> {
-  const { data } = await http.get<ApiEnvelope<HomepageBlock[]>>('/homepage')
+  const { data } = await http.get<ApiEnvelope<HomepageBlock[]>>('/homepage', { params: { ref: getPersistedReferralCode() || undefined } })
   return data.data
 }
 

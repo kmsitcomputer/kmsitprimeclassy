@@ -27,12 +27,14 @@ class HomepageController extends Controller
      * this degrades to an empty feed instead of a raw QueryException (see
      * SafeSchema's docblock).
      */
-    public function index()
+    public function index(\Illuminate\Http\Request $request)
     {
         if (! SafeSchema::hasTable('cms_homepage_blocks')) {
             return $this->ok([]);
         }
 
+        $scope = $request->validate(['ref' => ['nullable', 'string', 'max:40'], 'agent_id' => ['nullable', 'integer']]);
+        $agentId = app(\App\Services\Catalog\BestsellerAgentResolver::class)->resolve($request, $scope);
         $blocks = CmsHomepageBlock::query()
             ->where('is_active', true)
             ->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', now()))
@@ -43,13 +45,13 @@ class HomepageController extends Controller
         $rendered = $blocks->map(fn (CmsHomepageBlock $block) => [
             'id' => $block->id,
             'type' => $block->type,
-            'content' => $this->resolveContent($block),
+            'content' => $this->resolveContent($block, $agentId),
         ]);
 
         return $this->ok($rendered->all());
     }
 
-    private function resolveContent(CmsHomepageBlock $block): array
+    private function resolveContent(CmsHomepageBlock $block, ?int $agentId): array
     {
         $content = $block->content ?? [];
 
@@ -71,6 +73,14 @@ class HomepageController extends Controller
                     ->get(['id', 'name', 'slug'])
                     ->sortBy(fn (ProductCategory $category) => array_search($category->id, $content['category_ids'] ?? [], true))
                     ->values(),
+            ],
+            'bestseller' => [
+                'heading' => $content['heading'] ?? null,
+                'period' => $content['period'] ?? '30',
+                'limit' => $content['limit'] ?? 8,
+                'products' => $agentId === null ? [] : app(\App\Services\Catalog\BestsellerService::class)
+                    ->rank($agentId, (string) ($content['period'] ?? '30'), (int) ($content['limit'] ?? 8))
+                    ->map(fn (Product $product) => $this->productCard($product))->values(),
             ],
             HomepageBlockTypes::PRODUCT => [
                 ...$content,
@@ -113,7 +123,12 @@ class HomepageController extends Controller
             $query->where('category_id', $content['category_id']);
         }
 
-        return $query->limit($content['limit'] ?? 8)->get()->map(fn (Product $product) => [
+        return $query->limit($content['limit'] ?? 8)->get()->map(fn (Product $product) => $this->productCard($product));
+    }
+
+    private function productCard(Product $product): array
+    {
+        return [
             'id' => $product->id,
             'name' => $product->name,
             'slug' => $product->slug,
@@ -125,6 +140,6 @@ class HomepageController extends Controller
             'image_url' => $product->images->first()
                 ? Storage::disk('public')->url($product->images->first()->path)
                 : null,
-        ]);
+        ];
     }
 }

@@ -1,0 +1,15 @@
+<?php
+// TEMPORARY UAT seed — primeclassy_testing only. Synthetic data.
+use App\Models\{User, Product, ProductCategory};
+use Illuminate\Support\Facades\{DB, Hash};
+if (DB::connection()->getDatabaseName() !== 'primeclassy_testing') { throw new RuntimeException('refusing: not the test DB'); }
+(new Database\Seeders\RoleSeeder)->run();
+$mk = fn ($f) => $f->create(['password' => Hash::make('password')]);
+$agen = $mk(User::factory()->agen()->state(['name' => 'Agen Satu', 'email' => 'agen1@uat.test'])); $agen->update(['agent_id' => $agen->id]);
+$agen2 = $mk(User::factory()->agen()->state(['name' => 'Agen Dua', 'email' => 'agen2@uat.test'])); $agen2->update(['agent_id' => $agen2->id]);
+$admin = $mk(User::factory()->admin()->state(['name' => 'Admin Satu', 'email' => 'admin1@uat.test', 'agent_id' => $agen->id]));
+$sa = $mk(User::factory()->superAdmin()->state(['name' => 'Super UAT', 'email' => 'sa@uat.test']));
+$kue = ProductCategory::create(['name' => 'Kue', 'slug' => 'kue', 'sort_order' => 0]);
+ProductCategory::create(['name' => 'Kue Kering', 'slug' => 'kue-kering', 'parent_id' => $kue->id]);
+Product::create(['name' => 'Roti Uji', 'slug' => 'roti-uji', 'sku' => 'RU-1', 'has_variations' => false, 'base_price' => 9000, 'weight_grams' => 300, 'status' => 'active']);
+echo "seeded\n";

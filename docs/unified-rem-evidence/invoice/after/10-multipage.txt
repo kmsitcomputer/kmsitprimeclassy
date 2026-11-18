@@ -1,0 +1,154 @@
+                                                                                                              INVOICE
+                                                                                                                 D-112600010
+
+                                                                                                Tanggal         13-11-2026 04:52
+PrimeClassy                                                                                       Status     Dibayar Sebagian
+
+
+
+
+ Konsumen                                                       Alamat Pengiriman
+
+ Ahmad Fadli                                                    Jl. Cisaranten Kulon No. 45, Rancasari
+ +62 812-3456-7890                                              Kelurahan Uji Coba, Kecamatan Uji Coba, Kota Uji Coba, Provinsi
+                                                                Uji Coba
+
+
+Metode Pembayaran: COD / Cash on Delivery (bayar di tempat)
+Status Pembayaran: Dibayar Sebagian
+
+
+ No    Produk                                   Variasi                        Harga Satuan        Qty                  Subtotal
+
+ 1     Produk Contoh Nomor 1                                                       Rp 11.500             2             Rp 23.000
+
+ 2     Produk Contoh Nomor 2                                                       Rp 13.000             3             Rp 39.000
+
+ 3     Produk Contoh Nomor 3                    Ukuran: 3 gr                       Rp 14.500             4             Rp 58.000
+
+ 4     Produk Contoh Nomor 4                                                       Rp 16.000             1             Rp 16.000
+
+ 5     Produk Contoh Nomor 5                                                       Rp 17.500             2             Rp 35.000
+
+ 6     Produk Contoh Nomor 6                    Ukuran: 6 gr                       Rp 19.000             3             Rp 57.000
+
+ 7     Produk Contoh Nomor 7 dengan nama                                           Rp 20.500             4             Rp 82.000
+       yang cukup panjang agar membungkus
+       ke baris kedua
+
+ 8     Produk Contoh Nomor 8                                                       Rp 22.000             1             Rp 22.000
+
+ 9     Produk Contoh Nomor 9                    Ukuran: 9 gr                       Rp 23.500             2             Rp 47.000
+
+ 10    Produk Contoh Nomor 10                                                      Rp 25.000             3             Rp 75.000
+
+ 11    Produk Contoh Nomor 11                                                      Rp 26.500             4            Rp 106.000
+
+ 12    Produk Contoh Nomor 12                   Ukuran: 12 gr                      Rp 28.000             1             Rp 28.000
+
+ 13    Produk Contoh Nomor 13                                                      Rp 29.500             2             Rp 59.000
+
+ 14    Produk Contoh Nomor 14 dengan nama                                          Rp 31.000             3             Rp 93.000
+       yang cukup panjang agar membungkus
+       ke baris kedua
+
+ 15    Produk Contoh Nomor 15                   Ukuran: 15 gr                      Rp 32.500             4            Rp 130.000
+
+ 16    Produk Contoh Nomor 16                                                      Rp 34.000             1             Rp 34.000
+
+ 17    Produk Contoh Nomor 17                                                      Rp 35.500             2             Rp 71.000
+
+ 18    Produk Contoh Nomor 18                   Ukuran: 18 gr                      Rp 37.000             3            Rp 111.000
+
+ 19    Produk Contoh Nomor 19                                                      Rp 38.500             4            Rp 154.000
+
+
+
+
+PrimeClassy                                                                                     Terima kasih atas kepercayaan Anda.
+No    Produk                               Variasi         Harga Satuan      Qty                  Subtotal
+
+20    Produk Contoh Nomor 20                                  Rp 40.000        1                 Rp 40.000
+
+21    Produk Contoh Nomor 21 dengan nama   Ukuran: 21 gr      Rp 41.500        2                 Rp 83.000
+      yang cukup panjang agar membungkus
+      ke baris kedua
+
+22    Produk Contoh Nomor 22                                  Rp 43.000        3                Rp 129.000
+
+23    Produk Contoh Nomor 23                                  Rp 44.500        4                Rp 178.000
+
+24    Produk Contoh Nomor 24               Ukuran: 24 gr      Rp 46.000        1                 Rp 46.000
+
+25    Produk Contoh Nomor 25                                  Rp 47.500        2                 Rp 95.000
+
+26    Produk Contoh Nomor 26                                  Rp 49.000        3                Rp 147.000
+
+27    Produk Contoh Nomor 27               Ukuran: 27 gr      Rp 50.500        4                Rp 202.000
+
+28    Produk Contoh Nomor 28 dengan nama                      Rp 52.000        1                 Rp 52.000
+      yang cukup panjang agar membungkus
+      ke baris kedua
+
+29    Produk Contoh Nomor 29                                  Rp 53.500        2                Rp 107.000
+
+30    Produk Contoh Nomor 30               Ukuran: 30 gr      Rp 55.000        3                Rp 165.000
+
+31    Produk Contoh Nomor 31                                  Rp 56.500        4                Rp 226.000
+
+32    Produk Contoh Nomor 32                                  Rp 58.000        1                 Rp 58.000
+
+33    Produk Contoh Nomor 33               Ukuran: 33 gr      Rp 59.500        2                Rp 119.000
+
+34    Produk Contoh Nomor 34                                  Rp 61.000        3                Rp 183.000
+
+35    Produk Contoh Nomor 35 dengan nama                      Rp 62.500        4                Rp 250.000
+      yang cukup panjang agar membungkus
+      ke baris kedua
+
+36    Produk Contoh Nomor 36               Ukuran: 36 gr      Rp 64.000        1                 Rp 64.000
+
+37    Produk Contoh Nomor 37                                  Rp 65.500        2                Rp 131.000
+
+38    Produk Contoh Nomor 38                                  Rp 67.000        3                Rp 201.000
+
+39    Produk Contoh Nomor 39               Ukuran: 39 gr      Rp 68.500        4                Rp 274.000
+
+40    Produk Contoh Nomor 40                                  Rp 70.000        1                 Rp 70.000
+
+41    Produk Contoh Nomor 41                                  Rp 71.500        2                Rp 143.000
+
+42    Produk Contoh Nomor 42 dengan nama   Ukuran: 42 gr      Rp 73.000        3                Rp 219.000
+      yang cukup panjang agar membungkus
+      ke baris kedua
+
+43    Produk Contoh Nomor 43                                  Rp 74.500        4                Rp 298.000
+
+44    Produk Contoh Nomor 44                                  Rp 76.000        1                 Rp 76.000
+
+45    Produk Contoh Nomor 45               Ukuran: 45 gr      Rp 77.500        2                Rp 155.000
+
+46    Produk Contoh Nomor 46                                  Rp 79.000        3                Rp 237.000
+
+
+
+
+PrimeClassy                                                               Terima kasih atas kepercayaan Anda.
+              Subtotal                            Rp 5.188.000
+
+              Diskon/Voucher                        - Rp 25.000
+
+              Ongkir                                 Rp 12.000
+
+              Biaya Admin                                  Rp 0
+
+              Total                           Rp 5.175.000
+              Dibayar                               Rp 100.000
+
+              Sisa Tagihan                       Rp 5.075.000
+
+
+
+
+PrimeClassy                    Terima kasih atas kepercayaan Anda.
+

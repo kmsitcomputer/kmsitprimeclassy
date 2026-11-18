@@ -44,7 +44,7 @@ Baca baris akhir `RUN <uuid> exit=… failures: environment/migration/concurrenc
 
 ## 5. Skala suite (saat reset ini)
 
-- `backend/tests/Feature`: 191 file; `tests/Unit`: 6; `tests/Support`: 9 (harness).
+- `backend/tests/Feature`: 219 file; `tests/Unit`: 6; `tests/Support`: 8 (harness) — baseline IMP-008 (setelah REM-11 dikeluarkan). Manifest paralel: 225 file PHP (190 paralel / 35 serial) + 49 Vitest, digest `86afb591a75425f2b82aa4369ec2c2c91b84df1eb8f23ea1e5929b550d93af53` — **belum disetujui Owner dan belum pernah dijalankan** (lihat [19-IMP008-BASELINE-ISOLATION](19-IMP008-BASELINE-ISOLATION.md)).
 - Frontend: tidak ada test runner sebagai gerbang; `npm run type-check` (vue-tsc) + `npm run build-only`. (Ada `__tests__` Vitest bersebar di komponen/views — dijalankan ad-hoc saat mengubah area terkait, contoh REL005: `views/dashboard` 79/79.)
 - Run penuh terakhir yang tercatat (runner serial `run-tests-serialized.php`, 2026-11-01, PHP 8.3.33, HEAD `1f510e6` dirty): **1721 tests / 12.702 assertions / 0 failures / 0 errors** (klasifikasi environment/migration/concurrency/test = 0; exit 0; durasi 7.507,8 s ≈ 2j05m). Bukti mesin: `backend/storage/framework/testing/runs/5ca38852-…` (git-ignored). Angka "855 passed / 6075 assertions" dari dokumentasi lama berasal dari era suite yang lebih kecil; salinan log Tee di root dihapus saat cleanup 2026-11-02 ([18-LOCAL-REPOSITORY-CLEANUP](18-LOCAL-REPOSITORY-CLEANUP.md)) — bukti kanonik tetap di `runs/`. **Selalu jalankan ulang untuk angka terkini.**
 - Bukti rilis REL005: scoped backend 283 passed / 2485 assertions (33 kelas, `primeclassy_testing`) + frontend type-check/build + Vitest dashboard 79/79.

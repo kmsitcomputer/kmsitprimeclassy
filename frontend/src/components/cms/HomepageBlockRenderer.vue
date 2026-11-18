@@ -15,6 +15,7 @@ import SocialMediaBlock from './blocks/SocialMediaBlock.vue'
 import WhatsappChatBlock from './blocks/WhatsappChatBlock.vue'
 import MarketplaceLinksBlock from './blocks/MarketplaceLinksBlock.vue'
 import BannerSliderBlock from './blocks/BannerSliderBlock.vue'
+import SocialMarketplaceBlock from './blocks/SocialMarketplaceBlock.vue'
 
 const props = defineProps<{
   block: HomepageBlock
@@ -32,6 +33,7 @@ const COMPONENTS: Record<string, unknown> = {
   banner: BannerBlock,
   category: CategoryBlock,
   product: ProductBlock,
+  bestseller: ProductBlock,
   promotional: PromotionalBlock,
   text: TextBlock,
   image: ImageBlock,
@@ -42,6 +44,7 @@ const COMPONENTS: Record<string, unknown> = {
   whatsapp_chat: WhatsappChatBlock,
   marketplace_links: MarketplaceLinksBlock,
   banner_slider: BannerSliderBlock,
+  social_marketplace: SocialMarketplaceBlock,
 }
 
 const component = computed(() => COMPONENTS[props.block.type] ?? null)

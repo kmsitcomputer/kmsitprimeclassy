@@ -90,6 +90,14 @@ class HomepageBlockTypes
                     'content.limit' => ['nullable', 'integer', 'min:1', 'max:24'],
                 ],
             ],
+            'bestseller' => [
+                'image' => false,
+                'content_rules' => [
+                    'content.heading' => ['nullable', 'string', 'max:150'],
+                    'content.period' => ['required', 'in:7,30,90,all'],
+                    'content.limit' => ['required', 'integer', 'in:4,8,12'],
+                ],
+            ],
             self::PROMOTIONAL => [
                 'image' => true,
                 'content_rules' => [

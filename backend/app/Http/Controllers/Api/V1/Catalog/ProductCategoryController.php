@@ -7,11 +7,14 @@ use App\Http\Requests\Catalog\StoreProductCategoryRequest;
 use App\Http\Requests\Catalog\UpdateProductCategoryRequest;
 use App\Http\Resources\ProductCategoryResource;
 use App\Models\ProductCategory;
+use App\Services\Product\CategoryHierarchyService;
 use App\Support\SafeSchema;
 use Illuminate\Support\Str;
 
 class ProductCategoryController extends Controller
 {
+    public function __construct(private readonly CategoryHierarchyService $hierarchy) {}
+
     /**
      * Public — needed to build catalog navigation/filters. Reachable on a
      * completely fresh, unmigrated deployment (installer wizard page, bots,
@@ -25,7 +28,7 @@ class ProductCategoryController extends Controller
             return $this->ok([]);
         }
 
-        $categories = ProductCategory::query()->where('is_active', true)->orderBy('sort_order')->get();
+        $categories = ProductCategory::query()->where('is_active', true)->orderBy('sort_order')->orderBy('name')->orderBy('id')->get();
 
         return $this->ok(ProductCategoryResource::collection($categories)->resolve());
     }
@@ -34,11 +37,23 @@ class ProductCategoryController extends Controller
     {
         $this->authorize('create', ProductCategory::class);
 
-        $category = ProductCategory::create([
-            ...$request->only('parent_id', 'is_active', 'sort_order'),
-            'name' => $request->string('name'),
-            'slug' => $request->filled('slug') ? $request->string('slug') : Str::slug($request->string('name')).'-'.uniqid(),
-        ]);
+        $actor = $request->user();
+        $attributes = [
+            'parent_id' => $request->input('parent_id'),
+            'name' => (string) $request->input('name'),
+            // Always server-generated for create-only roles (no slug squatting).
+            'slug' => Str::slug((string) $request->input('name')).'-'.uniqid(),
+        ];
+        // Presentation/ordering controls of the GLOBAL taxonomy stay with super_admin; create-only roles
+        // cannot influence ordering or visibility, whatever their payload says.
+        if ($actor->isRole('super_admin')) {
+            $attributes += $request->only('is_active', 'sort_order');
+            if ($request->filled('slug')) {
+                $attributes['slug'] = (string) $request->input('slug');
+            }
+        }
+
+        $category = $this->hierarchy->create($attributes, $actor);
 
         return $this->created(new ProductCategoryResource($category));
     }
@@ -47,7 +62,7 @@ class ProductCategoryController extends Controller
     {
         $this->authorize('update', ProductCategory::class);
 
-        $category->update($request->only('parent_id', 'name', 'slug', 'is_active', 'sort_order'));
+        $category = $this->hierarchy->update($category, $request->only('parent_id', 'name', 'slug', 'is_active', 'sort_order'));
 
         return $this->ok(new ProductCategoryResource($category));
     }
@@ -56,7 +71,7 @@ class ProductCategoryController extends Controller
     {
         $this->authorize('delete', ProductCategory::class);
 
-        $category->delete();
+        $this->hierarchy->delete($category);
 
         return $this->ok(null, __('messages.product.category_deleted'));
     }

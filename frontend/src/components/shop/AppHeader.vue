@@ -31,9 +31,10 @@ function submitSearch() {
 <template>
   <header class="sticky top-0 z-30 border-b border-stone-200 bg-white/95 backdrop-blur dark:border-stone-800 dark:bg-stone-950/95">
     <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
-      <RouterLink :to="{ name: 'home' }" class="flex shrink-0 items-center gap-2">
-        <img v-if="site.logoUrl" :src="site.logoUrl" :alt="site.siteTitle" class="h-8 w-auto object-contain" />
-        <span v-else class="font-display text-lg font-semibold text-brand-700 dark:text-brand-300">{{ site.siteTitle }}</span>
+      <!-- min-w-0 + truncation: a long site title / wide logo must shrink instead of pushing the action icons past a 390px viewport (horizontal scroll). -->
+      <RouterLink :to="{ name: 'home' }" class="flex min-w-0 shrink items-center gap-2" data-testid="header-brand">
+        <img v-if="site.logoUrl" :src="site.logoUrl" :alt="site.siteTitle" class="h-8 w-auto max-w-[45vw] object-contain" />
+        <span v-else class="truncate font-display text-lg font-semibold text-brand-700 dark:text-brand-300">{{ site.siteTitle }}</span>
       </RouterLink>
 
       <form class="hidden flex-1 items-center sm:flex" @submit.prevent="submitSearch">

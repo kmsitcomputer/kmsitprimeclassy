@@ -1,0 +1,367 @@
+[
+ {
+  "n": "real DEV data: mobile catalog has no horizontal overflow",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "DEV hierarchy: Cake(1)… roots Cake/Cookies; Yummy Class under Cookies, expanded by active ancestor",
+  "ok": true,
+  "x": "[\"2@0\",\"1@0\",\"4@1\",\"3@0\"]"
+ },
+ {
+  "n": "Yummy Class is a child (depth 1) of Cookies, not a root and not under Cake",
+  "ok": true,
+  "x": "{\"depth\":\"1\",\"parent\":\"CookiesYummy\"}"
+ },
+ {
+  "n": "breadcrumb Beranda › Semua Produk › Cookies › Yummy Class",
+  "ok": true,
+  "x": "[\"Beranda\",\"Semua Produk\",\"Cookies\",\"Yummy Class\"]"
+ },
+ {
+  "n": "count is the API total",
+  "ok": true,
+  "x": "1 produk ditemukan"
+ },
+ {
+  "n": "keyboard: Enter on the focused toggle collapses the branch (aria-expanded=false)",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "keyboard: Space re-opens it",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "keyboard focus is visible on the toggle",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light] 8 cards, one height per row",
+  "ok": true,
+  "x": "[349,349,349,349,349,349,349,349]"
+ },
+ {
+  "n": "[light] name slot constant, price aligned across cards",
+  "ok": true,
+  "x": "names 40 price@270"
+ },
+ {
+  "n": "[light] images keep square box with object-fit: cover (no distortion)",
+  "ok": true,
+  "x": "{\"fit\":\"cover\",\"w\":196,\"h\":195,\"nat\":true}"
+ },
+ {
+  "n": "[light] broken + missing images fall back to placeholder (6 real img of 8)",
+  "ok": true,
+  "x": "imgs=6"
+ },
+ {
+  "n": "[light] contrast name/price ≥ 4.5, CTA ≥ 4.5, wishlist ≥ 3",
+  "ok": true,
+  "x": "name 11.6 price 6.1 cta 8.7 wish 7.5"
+ },
+ {
+  "n": "[light] dark never has dark-on-dark text",
+  "ok": true,
+  "x": "rgb(74, 26, 38)"
+ },
+ {
+  "n": "[light] stock states from data: 72 (sum of 3 variants)/3/Habis",
+  "ok": true,
+  "x": "[\"Stok: 72\",\"Stok: 3\",\"Stok habis\",\"Stok: 40\"]"
+ },
+ {
+  "n": "[light] no page errors",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light] hover lift on real pointer",
+  "ok": true,
+  "x": "matrix(1, 0, 0, 1, 0, -2)"
+ },
+ {
+  "n": "[light] a focus indicator is shown on keyboard focus",
+  "ok": true,
+  "x": "solid"
+ },
+ {
+  "n": "[light] wishlist toggles in place (no navigation, aria-pressed)",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark] 8 cards, one height per row",
+  "ok": true,
+  "x": "[349,349,349,349,349,349,349,349]"
+ },
+ {
+  "n": "[dark] name slot constant, price aligned across cards",
+  "ok": true,
+  "x": "names 40 price@270"
+ },
+ {
+  "n": "[dark] images keep square box with object-fit: cover (no distortion)",
+  "ok": true,
+  "x": "{\"fit\":\"cover\",\"w\":196,\"h\":195,\"nat\":true}"
+ },
+ {
+  "n": "[dark] broken + missing images fall back to placeholder (6 real img of 8)",
+  "ok": true,
+  "x": "imgs=6"
+ },
+ {
+  "n": "[dark] contrast name/price ≥ 4.5, CTA ≥ 4.5, wishlist ≥ 3",
+  "ok": true,
+  "x": "name 15.1 price 8.9 cta 9.9 wish 13.3"
+ },
+ {
+  "n": "[dark] dark never has dark-on-dark text",
+  "ok": true,
+  "x": "rgb(251, 243, 238)"
+ },
+ {
+  "n": "[dark] stock states from data: 72 (sum of 3 variants)/3/Habis",
+  "ok": true,
+  "x": "[\"Stok: 72\",\"Stok: 3\",\"Stok habis\",\"Stok: 40\"]"
+ },
+ {
+  "n": "[dark] no page errors",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark] hover lift on real pointer",
+  "ok": true,
+  "x": "matrix(1, 0, 0, 1, 0, -2)"
+ },
+ {
+  "n": "[dark] a focus indicator is shown on keyboard focus",
+  "ok": true,
+  "x": "solid"
+ },
+ {
+  "n": "[dark] wishlist toggles in place (no navigation, aria-pressed)",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light] homepage uses the shared card (wishlist + action on every card, no invented stock)",
+  "ok": true,
+  "x": "{\"cards\":4,\"wish\":4,\"cta\":4,\"hero\":true,\"stock\":0}"
+ },
+ {
+  "n": "[dark] homepage uses the shared card (wishlist + action on every card, no invented stock)",
+  "ok": true,
+  "x": "{\"cards\":4,\"wish\":4,\"cta\":4,\"hero\":true,\"stock\":0}"
+ },
+ {
+  "n": "single product keeps normal card width (not stretched)",
+  "ok": true,
+  "x": "198px"
+ },
+ {
+  "n": "[light 320px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 320px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 320px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 390px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 390px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 390px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 768px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 768px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 768px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1024px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1024px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1024px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1440px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1440px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1440px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1920px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1920px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[light 1920px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 320px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 320px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 320px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 390px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 390px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 390px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 768px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 768px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 768px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1024px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1024px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1024px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1440px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1440px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1440px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1920px /] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1920px /products] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "[dark 1920px /products?category=yum] no overflow, no clipped cards",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "mobile drawer opens with the category tree",
+  "ok": true,
+  "x": "{\"tree\":4,\"h\":557}"
+ },
+ {
+  "n": "drawer buttons are ≥ 36px touch targets",
+  "ok": true,
+  "x": "min 36"
+ },
+ {
+  "n": "drawer closes",
+  "ok": true,
+  "x": ""
+ },
+ {
+  "n": "switching theme keeps the card layout identical",
+  "ok": true,
+  "x": "dark=true"
+ }
+]

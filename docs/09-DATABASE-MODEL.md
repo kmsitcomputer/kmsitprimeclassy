@@ -1,6 +1,6 @@
 # 09 — Database Model
 
-Model data berdasarkan migrasi (`backend/database/migrations/`, 162 file) dan model Eloquent (`backend/app/Models/`, ±110 model). Total ±100 tabel bisnis + tabel framework (cache, jobs, sessions, personal_access_tokens, password_reset_tokens). Evidence = nama file migrasi.
+Model data berdasarkan migrasi (`backend/database/migrations/`, 172 file) dan model Eloquent (`backend/app/Models/`, ±114 model). Total ±100 tabel bisnis + tabel framework (cache, jobs, sessions, personal_access_tokens, password_reset_tokens). Evidence = nama file migrasi.
 
 ---
 

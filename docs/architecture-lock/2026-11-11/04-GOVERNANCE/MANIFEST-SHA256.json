@@ -1,0 +1,77 @@
+[
+  {
+    "file": "01-ARCHITECTURE/01-OWNER-DECISION-REGISTER-LOCKED.md",
+    "bytes": 3469,
+    "sha256": "5e7e585f3f6db78939689692e6411300588189a908ebe4af079fcd8f37653a96"
+  },
+  {
+    "file": "01-ARCHITECTURE/02-DOMAIN-ARCHITECTURE-AND-ACCEPTANCE.md",
+    "bytes": 6201,
+    "sha256": "79494121522967f2c9c7fdfb59f9ad3a0d97cf4736605198bcfc6aae9a5c4e6d"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/RECON-CLOSURE-ARCHITECTURE-READINESS.md",
+    "bytes": 16935,
+    "sha256": "40f0fc55a2df4bb82614f1fb043294be7acacc88c92698194d0570a6e9f595bc"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/RECON-CLOSURE-HISTORICAL-POS.md",
+    "bytes": 41174,
+    "sha256": "6245019716d0a7f4f82ea321ee13e87c725ee46773eaf1b07eb4f1bb4d6a3683"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/RECON-CLOSURE-IMPORT-BESTSELLER.md",
+    "bytes": 15106,
+    "sha256": "9672c22dc586efd1099dc60747daa597c6726669e588e927b6749111d0c18b6b"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/RECON-CLOSURE-OWNER-DECISIONS.md",
+    "bytes": 17713,
+    "sha256": "cfe623c1f31e21796778aa252e2ac9bde187a50baa5955b5d20cd77b7b9ce7ba"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/RECON-CLOSURE-OWNER-REVIEW.md",
+    "bytes": 21171,
+    "sha256": "31dfbc31021a59942a1dd1a0baf8d45a766e43fcc67d5084d12ef5f05bee3a92"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/RECON-CLOSURE-TRACEABILITY-MATRIX.md",
+    "bytes": 21659,
+    "sha256": "085ca612ee9425796796a95a622f0215feae852321313dc75f03dcea08232d65"
+  },
+  {
+    "file": "02-RECON-CLOSURE-SOURCE/REM-001-006-TECHNICAL-SPEC-PRIOR.md",
+    "bytes": 24429,
+    "sha256": "84e56a33c5586d4335fdebafbb58418dc5ad84d92d9cce0351880153e05dec60"
+  },
+  {
+    "file": "03-DESIGN-REFERENCES/INVOICE/invoice-original-chat-candidate.png",
+    "bytes": 1381619,
+    "sha256": "218a0e522ba8f35f683fcd8f89704a03f23d0d7619d2511ff58f1797dd449916"
+  },
+  {
+    "file": "03-DESIGN-REFERENCES/POS/pos-original-chat-dark-purple-NOT-VERIFIED-FINAL.png",
+    "bytes": 1654457,
+    "sha256": "2ec3481f88acec69256174e642bd51f35dc27fbd106894de6c5560a58adff1bd"
+  },
+  {
+    "file": "03-DESIGN-REFERENCES/POS/pos-original-chat-light-purple-PREVIOUS.png",
+    "bytes": 1440179,
+    "sha256": "7fc25c4a880522d2fcdfee593938cb5dc10e4ac81cd9a8e88292c371893d4ef7"
+  },
+  {
+    "file": "04-GOVERNANCE/DESIGN-ASSET-PROVENANCE.md",
+    "bytes": 1153,
+    "sha256": "9bf70c607912a8b5efb7ea0977cab13879db4f56490258178691c4aafc5c81cc"
+  },
+  {
+    "file": "04-GOVERNANCE/VERIFICATION-GAPS-NOT-OWNER-DECISIONS.md",
+    "bytes": 1122,
+    "sha256": "18f9ecafc8bfc5049fc33adf6c01f10acd84ff0bac95b9c230d5adb92c6df717"
+  },
+  {
+    "file": "README.md",
+    "bytes": 2020,
+    "sha256": "d29b7b37f7d9a79f3a46aa2f96decef48cdca46e8030910d28ae82bfa460a654"
+  }
+]

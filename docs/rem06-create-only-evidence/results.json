@@ -1,0 +1,105 @@
+{
+  "checks": [
+    {
+      "name": "U1 Admin Agen sees create-only note + create form; NO rename/delete/reparent controls",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "U2 Admin Agen created root \"Minuman\" and child \"Kopi\" under it (persisted in global taxonomy)",
+      "ok": true,
+      "extra": "[\"3>Kopi\",\"->Kue\",\"1>Kue Kering\",\"->Minuman\"]"
+    },
+    {
+      "name": "U3 storefront hierarchy shows Minuman → Kopi → Kopi Susu nested",
+      "ok": true,
+      "extra": "[\"0:Kue|1:Kue Kering\",\"0:Minuman|1:Kopi|2:Kopi Susu\"]"
+    },
+    {
+      "name": "U4 new categories are selectable in the product form",
+      "ok": true,
+      "extra": "[\"— Tanpa kategori —\",\"Kue\",\"— Kue Kering\",\"Minuman\",\"— Kopi\",\"— — Kopi Susu\",\"Draft\",\"Aktif\",\"Nonaktif\"]"
+    },
+    {
+      "name": "U5 Agen created root \"Camilan\" + child \"Keripik\"",
+      "ok": true,
+      "extra": "[\"->Camilan\",\"6>Keripik\",\"3>Kopi\",\"4>Kopi Susu\",\"->Kue\",\"1>Kue Kering\",\"->Minuman\"]"
+    },
+    {
+      "name": "U6 a DIFFERENT network (Agen Dua) sees categories created by Admin Agen and Agen (global taxonomy)",
+      "ok": true,
+      "extra": "[\"Camilan\",\"Keripik\",\"Kue\",\"Kue Kering\",\"Minuman\",\"Kopi\",\"Kopi Susu\"]"
+    },
+    {
+      "name": "U7 admin: rename/reparent/detach/delete/forged-role edit all DENIED (403)",
+      "ok": true,
+      "extra": "[403,403,403,403,403]"
+    },
+    {
+      "name": "U7 agen: rename/reparent/detach/delete/forged-role edit all DENIED (403)",
+      "ok": true,
+      "extra": "[403,403,403,403,403]"
+    },
+    {
+      "name": "U8 nothing changed by the denied calls",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "U8b second Agen (other network) may create too (global create-only)",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "U9 duplicate (different case/spacing, same parent) is rejected with a clear Indonesian message (no English envelope); typed name kept; form usable",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "U10 the same name under a DIFFERENT parent is allowed",
+      "ok": true,
+      "extra": "201"
+    },
+    {
+      "name": "U11 root-level duplicate rejected (422)",
+      "ok": true,
+      "extra": ""
+    },
+    {
+      "name": "U12 12 concurrent creates of the same root from two users → exactly ONE row (1×201, 11×422, no 5xx)",
+      "ok": true,
+      "extra": "{\"count\":1,\"all\":[422,422,422,422,422,422,201,422,422,422,422,422]}"
+    },
+    {
+      "name": "U13 concurrent child creates under the same parent → exactly ONE row, no 5xx",
+      "ok": true,
+      "extra": "{\"cc\":1,\"rc\":[201,422,422,422,422],\"rd\":[422,422,422,422,422]}"
+    },
+    {
+      "name": "U14 UI double-click creates exactly ONE category",
+      "ok": true,
+      "extra": "1"
+    },
+    {
+      "name": "U15 everything persisted after reload; no duplicate (parent,name) pairs in the whole taxonomy",
+      "ok": true,
+      "extra": "12 rows"
+    },
+    {
+      "name": "U16 d: no horizontal overflow on the category panel",
+      "ok": true,
+      "extra": "1280,1280"
+    },
+    {
+      "name": "U16 m: no horizontal overflow on the category panel",
+      "ok": true,
+      "extra": "390,390"
+    },
+    {
+      "name": "U17 super_admin still creates with full control (sort_order/is_active honoured)",
+      "ok": true,
+      "extra": ""
+    }
+  ],
+  "console": []
+}

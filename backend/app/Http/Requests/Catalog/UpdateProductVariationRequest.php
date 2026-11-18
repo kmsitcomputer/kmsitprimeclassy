@@ -6,7 +6,7 @@ use App\Http\Requests\BaseFormRequest;
 use App\Rules\GlobalSku;
 use Illuminate\Validation\Rule;
 
-/** Attribute composition is immutable after creation — only commercial fields change. */
+/** REM-08: commercial fields and (optionally) the attribute composition of this one variation. */
 class UpdateProductVariationRequest extends BaseFormRequest
 {
     public function authorize(): bool
@@ -21,6 +21,8 @@ class UpdateProductVariationRequest extends BaseFormRequest
             'price' => ['sometimes', 'numeric', 'min:0'],
             'weight_grams' => ['sometimes', 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
+            'attributes' => ['sometimes', 'array', 'min:1'],
+            'attributes.*' => ['required', 'string', 'max:100'],
         ];
     }
 }

@@ -1,5 +1,6 @@
 /*
- * Product card: Owner design lock "Two-Tone Luxury + Footer Divider".
+ * Product card: Owner design lock "Two-Tone Luxury + Footer Divider", palette per the 13 Nov 2026 Product Card lock
+ * (light = cream / maroon / burgundy price; dark = deep maroon / warm white / soft pink price / blush action).
  *
  * ONE definition for every product card (catalog, wishlist, related products, homepage product block).
  * Light and dark share the same anatomy; only the tokens change. Anatomy:
@@ -10,6 +11,8 @@
  *       .pc-card__name     max two lines, fixed two-line slot so the rest never shifts
  *       .pc-card__divider  1px rule between name and price
  *       .pc-card__price
+ *       .pc-card__bottom   stock status (left) + the link affordance .pc-card__cta (right)
+ *   .pc-card__wish     wishlist toggle, floating on the image
  *
  * The page background is NOT touched here; the card carries its own surfaces so it stays distinct from it.
  */
@@ -20,9 +23,14 @@
   --pc-footer: #f2e5d7;
   --pc-border: #c5a48b;
   --pc-divider: #d9c4b1;
-  --pc-name: #392729;
+  --pc-name: #4a1a26;
   --pc-price: #8e354d;
   --pc-placeholder: #b79b86;
+  --pc-cta: #8f1d3c;
+  --pc-cta-fg: #ffffff;
+  --pc-wish-bg: rgb(255 252 248 / 0.94);
+  --pc-wish-fg: #6b4a52;
+  --pc-wish-on: #b0264a;
   --pc-shadow: 0 1px 2px rgb(92 61 46 / 0.1), 0 6px 16px -8px rgb(92 61 46 / 0.3);
   --pc-shadow-hover: 0 2px 4px rgb(92 61 46 / 0.12), 0 14px 26px -10px rgb(92 61 46 / 0.38);
 
@@ -39,16 +47,21 @@
     box-shadow 0.2s ease;
 }
 
-/* Dark: charcoal / plum / soft rose. Same structure, only tokens differ. */
+/* Dark: deep maroon surfaces, warm white name, soft pink price, blush action. Same structure, only tokens differ. */
 .dark .pc-card {
-  --pc-card: #241d20;
-  --pc-image: #34292d;
-  --pc-footer: #2d2327;
-  --pc-border: #5c424b;
-  --pc-divider: #5c424b;
-  --pc-name: #ffffff;
-  --pc-price: #f49ab2;
-  --pc-placeholder: #6d5860;
+  --pc-card: #2a1018;
+  --pc-image: #3d1b26;
+  --pc-footer: #34151e;
+  --pc-border: #6b2c3c;
+  --pc-divider: #5a2433;
+  --pc-name: #fbf3ee;
+  --pc-price: #f7a8be;
+  --pc-placeholder: #8a5a68;
+  --pc-cta: #f9c5d3;
+  --pc-cta-fg: #4a1424;
+  --pc-wish-bg: rgb(42 16 24 / 0.9);
+  --pc-wish-fg: #f3d9e0;
+  --pc-wish-on: #f7a8be;
   --pc-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 20px -10px rgb(0 0 0 / 0.7);
   --pc-shadow-hover: 0 2px 4px rgb(0 0 0 / 0.55), 0 14px 26px -10px rgb(0 0 0 / 0.8);
 }
@@ -85,6 +98,70 @@
   color: var(--pc-price);
 }
 
+.pc-card__wish {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9999px;
+  color: var(--pc-wish-fg);
+  background: var(--pc-wish-bg);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+  backdrop-filter: blur(4px);
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.pc-card__wish:hover,
+.pc-card__wish--on {
+  color: var(--pc-wish-on);
+}
+
+.pc-card__wish:focus-visible {
+  outline: 2px solid var(--pc-price);
+  outline-offset: 2px;
+}
+
+/* Stock status left, link affordance right; the row keeps its height whether or not a stock badge is shown. */
+.pc-card__bottom {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pc-card__cta {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  margin-left: auto;
+  border-radius: 9999px;
+  color: var(--pc-cta-fg);
+  background: var(--pc-cta);
+  transition: transform 0.15s ease;
+}
+
+/*
+ * The out-of-stock label stays the loudest status (solid red, bold, uppercase) but is held to ONE line inside a card, so a
+ * sold-out product never makes its row taller than its neighbours. The detail page keeps the large label.
+ */
+.pc-card__stock[data-testid='stock-out-label'] {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 /*
  * The neutral "log in to see stock" pill (StockBadge's only stone-coloured state) takes the footer's palette so it does
  * not read as a cool grey blob on the warm footer, or vanish on the dark one. The real stock states (low / in / out)
@@ -101,6 +178,9 @@
     transform: translateY(-2px);
     box-shadow: var(--pc-shadow-hover);
   }
+  .pc-card:hover .pc-card__cta {
+    transform: scale(1.08);
+  }
 }
 
 .pc-card:focus-visible {
@@ -113,6 +193,9 @@
     transition: none;
   }
   .pc-card:hover {
+    transform: none;
+  }
+  .pc-card:hover .pc-card__cta {
     transform: none;
   }
 }

@@ -1,0 +1,5 @@
+# Design provenance — NO CLAIM OF FINAL MOCKUP MATCH
+**Invoice** `03-DESIGN-REFERENCES/INVOICE/invoice-original-chat-candidate.png`: actual earlier ChatGPT conversation image, white/maroon, PrimeClassy invoice. **Candidate; last Owner-approved final version not independently verified.**
+**POS dark** `03-DESIGN-REFERENCES/POS/pos-original-chat-dark-purple-NOT-VERIFIED-FINAL.png`: actual earlier conversation image, two-column/no-sidebar but **purple**, and depicts a regular 'save transaction' workflow. **NOT the certified Owner-approved maroon historical-only final. Do not implement it literally.**
+**POS light** `03-DESIGN-REFERENCES/POS/pos-original-chat-light-purple-PREVIOUS.png`: earlier light-purple candidate; historical reference only.
+The retrieved archive lacks an independently verified exact final mockup asset. The design decisions are locked; the original matching visual asset remains an evidence dependency. No new mockup was generated or substituted. Logo in candidate images may not match canonical official brand; verify against repository `backend/resources/branding/prime-logo.png` / approved original before implementation.

@@ -1,0 +1,39 @@
+                                                                                                                INVOICE
+                                                                                                                     D-112600007
+
+                                                                                                        Tanggal 13-11-2026 04:52
+PrimeClassy                                                                                                 Status        LUNAS
+
+
+
+
+ Konsumen                                                      Alamat Pengiriman
+
+ Ahmad Fadli                                                   Jl. Cisaranten Kulon No. 45, Rancasari
+ +62 812-3456-7890                                             Kelurahan Uji Coba, Kecamatan Uji Coba, Kota Uji Coba, Provinsi
+                                                               Uji Coba
+
+
+Metode Pembayaran: COD / Cash on Delivery (bayar di tempat)
+Status Pembayaran: LUNAS
+
+
+ No    Produk                                   Variasi                        Harga Satuan       Qty                     Subtotal
+
+ 1     Nastar Premium                           Ukuran: 1 kg                      Rp 72.000             2               Rp 144.000
+
+
+                                                                 Subtotal                                               Rp 144.000
+
+                                                                 Ongkir                                                  Rp 12.000
+
+                                                                 Biaya Admin                                                  Rp 0
+
+                                                                 Total                                               Rp 156.000
+                                                                 Dibayar                                                Rp 156.000
+
+
+
+
+PrimeClassy                                                                                    Terima kasih atas kepercayaan Anda.
+

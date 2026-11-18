@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\WarehouseSetting;
 use App\Models\WarehouseStock;
 use App\Models\WarehouseSubLocation;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -33,14 +34,19 @@ class StockOpnameService
             foreach ($items as $input) {
                 $productId = isset($input['product_id']) ? (int) $input['product_id'] : null;
                 $variationId = isset($input['product_variation_id']) ? (int) $input['product_variation_id'] : null;
-                $this->assertItem($productId, $variationId, $subLocationId);
+                $this->assertItem($productId, $variationId, $subLocationId, $actor->agent_id);
                 $key = $variationId ? 'v:'.$variationId : 'p:'.$productId;
                 if (isset($seen[$key])) {
                     throw new ApiException('Target opname tidak boleh duplikat.', 422);
                 }
                 $seen[$key] = true;
-                $system = $this->currentQuantity($actor->agent_id, $productId, $variationId, $stockType, $subLocationId);
-                $opname->items()->create(['product_id' => $productId, 'product_variation_id' => $variationId, 'sub_location_id' => $subLocationId, 'system_quantity' => $system]);
+            }
+            // Use the existing target order; snapshot locks must agree with multi-target writers.
+            foreach (StockService::canonicalReservationTargets($items) as $target) {
+                $productId = $target['product_id'];
+                $variationId = $target['product_variation_id'];
+                $snapshot = $this->snapshot($actor->agent_id, $stockType, $subLocationId, $productId, $variationId);
+                $opname->items()->create(['product_id' => $productId, 'product_variation_id' => $variationId, 'sub_location_id' => $subLocationId] + $snapshot);
             }
 
             return $opname->load('items');
@@ -109,10 +115,15 @@ class StockOpnameService
             if (! $physical && ! $plan) {
                 throw new ApiException('Tipe opname ini tidak dapat disetujui.', 422);
             }
-            foreach ($lockedOpname->items as $item) {
+            if ($lockedOpname->stock_type === 'sub') {
+                WarehouseSubLocation::query()->whereKey($lockedOpname->sub_location_id)->lockForUpdate()->firstOrFail();
+            }
+            foreach ($lockedOpname->items->sortBy(fn ($i) => StockService::canonicalTargetKey($i->product_id, $i->product_variation_id)) as $item) {
                 $stock = $this->lockedStock($lockedOpname->agent_id, $item);
                 $current = $stock?->quantity ?? 0;
-                if ($current !== $item->system_quantity) {
+                if ($current !== $item->system_quantity
+                    || (($item->import_row_key !== null || $item->system_stock_revision !== null) && ($item->system_stock_revision === null
+                        || $stock?->id !== $item->system_stock_id || app(PhysicalStockRevision::class)->current($lockedOpname->agent_id, $lockedOpname->stock_type, $item->sub_location_id, $item->product_id, $item->product_variation_id) !== $item->system_stock_revision))) {
                     throw new ApiException('Stock changed after this opname was counted. Recount is required.', 409);
                 }
                 $delta = $item->counted_quantity - $current;
@@ -139,10 +150,56 @@ class StockOpnameService
                 StockMovement::create(['agent_id' => $lockedOpname->agent_id, 'product_id' => $item->product_id, 'product_variation_id' => $item->product_variation_id, 'type' => $physical ? 'opname_adjustment' : ($delta > 0 ? 'factory_plan_in' : 'factory_plan_out'), 'quantity' => $delta, 'stock_type' => $lockedOpname->stock_type, 'sub_location_id' => $item->sub_location_id, 'reference_type' => StockOpname::class, 'reference_id' => $lockedOpname->id, 'opname_id' => $lockedOpname->id, 'created_by' => $actor->id]);
                 $item->update(['difference' => $delta, 'adjusted_quantity' => $item->counted_quantity]);
             }
+            // REM-01 / D-07: a withheld catalogue change is published by THIS commit, never earlier,
+            // and never if anything above threw (stale 409, Sub floor …) — the transaction rolls both back.
+            foreach ($lockedOpname->items as $item) {
+                if ($item->pending_catalog_change !== null && $item->catalog_published_at === null) {
+                    $change = $item->pending_catalog_change;
+                    app(\App\Services\Catalog\CatalogImportService::class)
+                        ->applyChange($change['kind'], (int) $change['id'], $change['changes'] ?? [], $change['attributes'] ?? null);
+                    $item->update(['catalog_published_at' => now()]);
+                }
+            }
             $lockedOpname->update(['status' => 'approved', 'approved_by' => $actor->id, 'approved_at' => now()]);
 
             return $lockedOpname->fresh()->load('items');
         });
+    }
+
+    public function findImportRow(string $rowKey): ?StockOpnameItem
+    {
+        return StockOpnameItem::query()->where('import_row_key', $rowKey)->first();
+    }
+
+    /**
+     * REM-01: one single-target physical opname (draft) per import row so approval is independent
+     * per row. The file's number is only the PROPOSED target; the Gudang still counts and submits and
+     * the Admin still approves through the unchanged flow. The row key is a UNIQUE column: a concurrent
+     * duplicate loses at the database, not at an application check.
+     *
+     * @param  ?array<string,mixed>  $pendingCatalogChange
+     */
+    public function stageImportRow(User $importer, int $agentId, string $stockType, ?int $subLocationId, ?int $productId, ?int $variationId, string $rowKey, string $fingerprint, int $target, ?array $pendingCatalogChange): StockOpnameItem
+    {
+        $this->assertTypeTarget('physical_opname', $stockType, $subLocationId, $agentId);
+        $this->assertItem($productId, $variationId, $subLocationId, $agentId);
+
+        try {
+            $opname = StockOpname::create(['agent_id' => $agentId, 'opname_number' => $this->uniqueNumber(), 'opname_type' => 'physical_opname', 'stock_type' => $stockType, 'sub_location_id' => $subLocationId, 'notes' => 'Import katalog (target fisik diusulkan, wajib dihitung Gudang)', 'created_by' => $importer->id]);
+
+            $snapshot = $this->snapshot($agentId, $stockType, $subLocationId, $productId, $variationId);
+
+            return $opname->items()->create([
+                'product_id' => $productId, 'product_variation_id' => $variationId, 'sub_location_id' => $subLocationId,
+                'import_row_key' => $rowKey, 'import_fingerprint' => $fingerprint, 'import_target_quantity' => $target,
+                'pending_catalog_change' => $pendingCatalogChange,
+            ] + $snapshot);
+        } catch (QueryException $e) {
+            if (($e->errorInfo[1] ?? null) === 1062) {
+                throw new ApiException('Baris import yang sama sedang diproses.', 409);
+            }
+            throw $e;
+        }
     }
 
     public function reject(User $actor, StockOpname $opname, string $reason): StockOpname
@@ -181,6 +238,21 @@ class StockOpnameService
         });
     }
 
+    /** Quantity and token captured under the same canonical target lock. */
+    private function snapshot(int $agentId, string $type, ?int $locationId, ?int $productId, ?int $variationId): array
+    {
+        if ($locationId !== null) {
+            WarehouseSubLocation::query()->whereKey($locationId)->lockForUpdate()->firstOrFail();
+        }
+        // Absence must stay absent: a zero placeholder would break legacy sellable fallback.
+        $stock = WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)
+            ->where('stock_type', $type)->where('sub_location_id', $locationId)
+            ->where('product_id', $productId)->where('product_variation_id', $variationId)->lockForUpdate()->first();
+
+        return ['system_quantity' => $stock?->quantity ?? 0, 'system_stock_id' => $stock?->id,
+            'system_stock_revision' => app(PhysicalStockRevision::class)->current($agentId, $type, $locationId, $productId, $variationId)];
+    }
+
     private function currentQuantity(int $agentId, ?int $productId, ?int $variationId, ?string $stockType, ?int $subLocationId): int
     {
         return (int) (WarehouseStock::withoutGlobalScopes()->where('agent_id', $agentId)->where('stock_type', $stockType)->where('sub_location_id', $subLocationId)->when($productId, fn ($q) => $q->where('product_id', $productId)->whereNull('product_variation_id'))->when($variationId, fn ($q) => $q->where('product_variation_id', $variationId)->whereNull('product_id'))->value('quantity') ?? 0);
@@ -210,9 +282,10 @@ class StockOpnameService
         }
     }
 
-    private function assertItem(?int $productId, ?int $variationId, ?int $subLocationId): void
+    private function assertItem(?int $productId, ?int $variationId, ?int $subLocationId, int $agentId): void
     {
-        if (($productId === null) === ($variationId === null) || ($subLocationId !== null && ! WarehouseSubLocation::query()->whereKey($subLocationId)->where('is_active', true)->exists())) {
+        // Domain-boundary guard: the Sub Location must be an ACTIVE location of THIS Agent (never trust the caller).
+        if (($productId === null) === ($variationId === null) || ($subLocationId !== null && ! WarehouseSubLocation::query()->whereKey($subLocationId)->where('agent_id', $agentId)->where('is_active', true)->exists())) {
             throw new ApiException('Target item opname tidak valid.', 422);
         }
     }

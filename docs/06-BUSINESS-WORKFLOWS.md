@@ -12,7 +12,7 @@ Status legenda: **IMPLEMENTED** (terverifikasi dari kode+tes), **NOT VERIFIED** 
 - **Langkah:** validasi (nama/email/telepon unik & dinormalisasi `PhoneNormalizer`) → resolve referral (opsional untuk email/password; **wajib** untuk Google `register` mode) → buat `users` (role `konsumen`, `agent_id` = Agen dari rantai referral, snapshot hierarki `korsal_id`/`sales_id`/`parent_id`) → audit.
 - **Login:** `POST /auth/login` (throttle 10/menit) → session Sanctum SPA (cookie). `GET /auth/me` mengembalikan user + `PermissionMap` capability hints.
 - **Efek DB:** `users` + `user_closures`; Google: `user_social_identities`.
-- **Failure:** registrasi tanpa Agen aktif → error `registration_unavailable` (catatan AU-01/G-07: masih `RuntimeException` 500 di jalur email/password; jalur Google sudah 503 benar).
+- **Failure:** registrasi tanpa Agen aktif → error `registration_unavailable` → HTTP 503 `registration_unavailable` (`ApiException`, REM-004/AU-01; `AuthController`) di jalur email/password maupun Google — bukan lagi 500.
 - **Otorisasi:** publik; ownership chain dihitung server-side, referral klien hanya di-revalidasi. Google: aturan §23 [05-BUSINESS-RULES](05-BUSINESS-RULES.md) (tanpa auto-link akun unverified; tanpa pembuatan akun saat login).
 
 ## 2. Verifikasi Email & WhatsApp — IMPLEMENTED

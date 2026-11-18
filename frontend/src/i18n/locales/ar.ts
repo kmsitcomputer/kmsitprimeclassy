@@ -27,6 +27,7 @@ export default {
     apply: 'تطبيق',
     back: 'رجوع',
     next: 'التالي',
+    previous: 'السابق',
     copyright: '© {year} Prime Classy Cake & Cookies.',
   },
   roles: {
@@ -92,6 +93,15 @@ export default {
     applyFilter: 'تطبيق التصفية',
     noResults: 'لا توجد منتجات مطابقة لبحثك/تصفيتك.',
     filterAndSort: 'تصفية وترتيب',
+    home: 'الرئيسية',
+    breadcrumb: 'التنقل في الصفحة',
+    activeFilters: 'عوامل التصفية النشطة:',
+    resetFilters: 'إعادة ضبط التصفية',
+    removeFilter: 'إزالة التصفية {name}',
+    chipMin: 'الحد الأدنى {value}',
+    chipMax: 'الحد الأقصى {value}',
+    expandCategory: 'عرض الفئات الفرعية لـ {name}',
+    collapseCategory: 'إخفاء الفئات الفرعية لـ {name}',
   },
   categories: {
     title: 'جميع الفئات',

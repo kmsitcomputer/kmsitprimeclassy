@@ -548,6 +548,12 @@ watch(currentStep, (step) => {
 /* ---------- Order creation ---------- */
 const idempotencyKey = secureUuid()
 const submitting = ref(false)
+// REM-09: a Sales-Kurir-Sub picks ONE stock source for the whole order (own Sub, or the parent Agent).
+const isSalesKurirSub = computed(() => auth.user?.role === 'sales-kurir-sub')
+const stockSource = computed<'agent' | 'sub'>({
+  get: () => isSalesKurirSub.value && auth.user ? cart.stockSourceFor(auth.user.id) : 'agent',
+  set: (source) => { if (isSalesKurirSub.value && auth.user) cart.setStockSource(auth.user.id, source) },
+})
 const submitError = ref<string | null>(null)
 const createdOrder = ref<Order | null>(null)
 
@@ -584,6 +590,7 @@ async function placeOrder() {
       shippingMethod: selectedShippingMethod.value,
       courier: selectedCourierOption.value,
       konsumenId: selectedKonsumen.value?.id,
+      stockSource: isSalesKurirSub.value ? stockSource.value : null,
       dpAmount: isDpSelected.value ? Number(dpAmount.value) : null,
       voucherCode: voucherCode.value.trim() || null,
       idempotencyKey,
@@ -1125,6 +1132,13 @@ async function refreshOrderStatus() {
             </p>
             <p>{{ t('checkout.review.paymentMethod', { method: selectedPaymentMethod?.name }) }}</p>
           </div>
+
+          <fieldset v-if="isSalesKurirSub" class="rounded-lg border border-stone-200 p-3 text-sm dark:border-stone-700" data-testid="stock-source">
+            <legend class="px-1 text-xs font-medium text-stone-500 dark:text-stone-400">Sumber stok (satu sumber per pesanan)</legend>
+            <label class="mr-4 inline-flex items-center gap-1.5"><input v-model="stockSource" type="radio" value="agent" /> Stok Agen induk</label>
+            <label class="inline-flex items-center gap-1.5"><input v-model="stockSource" type="radio" value="sub" /> Stok Sub saya</label>
+            <p v-if="stockSource === 'sub'" class="mt-1 text-xs text-stone-500 dark:text-stone-400">Stok Sub hanya untuk pembelian sendiri atau konsumen referral Anda; lokasi ditentukan server.</p>
+          </fieldset>
 
           <p v-if="submitError" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">{{ submitError }}</p>
 

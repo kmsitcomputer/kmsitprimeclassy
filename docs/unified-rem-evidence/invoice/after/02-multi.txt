@@ -1,0 +1,45 @@
+                                                                                                                INVOICE
+                                                                                                                   D-112600002
+
+                                                                                                      Tanggal     13-11-2026 04:52
+PrimeClassy                                                                                            Status    Belum Dibayar
+
+
+
+
+ Konsumen                                                         Alamat Pengiriman
+
+ Ahmad Fadli                                                      Jl. Cisaranten Kulon No. 45, Rancasari
+ +62 812-3456-7890                                                Kelurahan Uji Coba, Kecamatan Uji Coba, Kota Uji Coba, Provinsi
+                                                                  Uji Coba
+
+
+Metode Pembayaran: COD / Cash on Delivery (bayar di tempat)
+Status Pembayaran: Belum Dibayar (dibayar saat barang diterima)
+
+
+ No    Produk                                    Variasi                          Harga Satuan       Qty                  Subtotal
+
+ 1     Nastar Premium                            Ukuran: 1 kg                        Rp 72.000             2            Rp 144.000
+
+ 2     Kastangel Keju                            Ukuran: 500 gr                      Rp 48.000             1             Rp 48.000
+
+ 3     Putri Salju                               Rasa: Original                      Rp 35.000             3            Rp 105.000
+
+
+                                                                    Subtotal                                           Rp 297.000
+
+                                                                    Ongkir                                              Rp 12.000
+
+                                                                    Biaya Admin                                               Rp 0
+
+                                                                    Total                                          Rp 309.000
+                                                                    Dibayar                                                   Rp 0
+
+                                                                    Sisa Tagihan                                      Rp 309.000
+
+
+
+
+PrimeClassy                                                                                       Terima kasih atas kepercayaan Anda.
+

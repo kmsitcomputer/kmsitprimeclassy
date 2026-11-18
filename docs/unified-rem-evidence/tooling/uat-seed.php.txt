@@ -1,0 +1,45 @@
+<?php
+// TEMPORARY UAT seed — runs ONLY against primeclassy_testing (disposable). Synthetic, non-personal data.
+use App\Models\{User, Product, ProductCategory, ProductVariation, ProductImage, ProductVariationStock, CmsHomepageBlock};
+use Illuminate\Support\Facades\{DB, Storage, Hash};
+if (DB::connection()->getDatabaseName() !== 'primeclassy_testing') { throw new RuntimeException('refusing: not the test DB'); }
+(new Database\Seeders\RoleSeeder)->run();
+$mk = fn ($factory) => $factory->create(['password' => Hash::make('password')]);
+$agen = $mk(User::factory()->agen()->state(['name' => 'Agen UAT', 'email' => 'agen@uat.test'])); $agen->update(['agent_id' => $agen->id]);
+$admin = $mk(User::factory()->admin()->state(['name' => 'Admin UAT', 'email' => 'admin@uat.test', 'agent_id' => $agen->id]));
+$sa = $mk(User::factory()->superAdmin()->state(['name' => 'Super UAT', 'email' => 'sa@uat.test']));
+$kon = $mk(User::factory()->konsumen()->state(['name' => 'Konsumen UAT', 'email' => 'konsumen@uat.test', 'agent_id' => $agen->id]));
+$png = function (string $name, array $rgb, string $label) {
+    $im = imagecreatetruecolor(600, 600); $c = imagecolorallocate($im, ...$rgb); imagefill($im, 0, 0, $c);
+    $w = imagecolorallocate($im, 255, 255, 255); imagestring($im, 5, 20, 20, $label, $w); imagefilledellipse($im, 300, 330, 260, 260, $w);
+    ob_start(); imagepng($im); $b = ob_get_clean(); Storage::disk('public')->put("products/uat-$name.png", $b); return "products/uat-$name.png";
+};
+// categories (3 levels + a second root)
+$kue = ProductCategory::create(['name' => 'Kue', 'slug' => 'kue', 'sort_order' => 0]);
+$kering = ProductCategory::create(['name' => 'Kue Kering', 'slug' => 'kue-kering', 'parent_id' => $kue->id]);
+$nastar = ProductCategory::create(['name' => 'Nastar', 'slug' => 'nastar', 'parent_id' => $kering->id]);
+$basah = ProductCategory::create(['name' => 'Kue Basah', 'slug' => 'kue-basah', 'parent_id' => $kue->id]);
+$roti = ProductCategory::create(['name' => 'Roti', 'slug' => 'roti', 'sort_order' => 1]);
+ProductCategory::create(['name' => 'Roti Tawar', 'slug' => 'roti-tawar', 'parent_id' => $roti->id]);
+// product with 3 variations, distinct images, stock for two
+$p = Product::create(['name' => 'Kue Warna-Warni', 'slug' => 'kue-warna-warni', 'sku' => null, 'has_variations' => true, 'status' => 'active', 'category_id' => $nastar->id, 'description' => 'Produk uji variasi.']);
+$svc = app(App\Services\Product\ProductVariationService::class);
+$vars = [];
+foreach ([['Merah', 'KW-M', 15000, [200, 40, 50], 10], ['Biru', 'KW-B', 25000, [40, 90, 200], 7], ['Hijau', 'KW-H', 35000, [40, 160, 70], 0]] as $i => [$label, $sku, $price, $rgb, $stock]) {
+    $v = $svc->create($p, ['Warna' => $label], ['sku' => $sku, 'price' => $price, 'weight_grams' => 200]);
+    $vars[$label] = $v;
+    ProductVariationStock::create(['agent_id' => $agen->id, 'product_variation_id' => $v->id, 'quantity_on_hand' => $stock, 'quantity_reserved' => 0]);
+    foreach ([1, 2] as $n) {
+        ProductImage::create(['product_id' => $p->id, 'product_variation_id' => $v->id, 'path' => $png(strtolower($label).$n, $rgb, "$label $n"), 'is_primary' => $n === 1, 'sort_order' => $n - 1]);
+    }
+}
+ProductImage::create(['product_id' => $p->id, 'product_variation_id' => null, 'path' => $png('parent', [120, 120, 120], 'Parent'), 'is_primary' => true, 'sort_order' => 0]);
+// simple product
+$s = Product::create(['name' => 'Roti Sederhana', 'slug' => 'roti-sederhana', 'sku' => 'RS-1', 'has_variations' => false, 'base_price' => 9000, 'weight_grams' => 300, 'status' => 'active', 'category_id' => $roti->id]);
+ProductImage::create(['product_id' => $s->id, 'product_variation_id' => null, 'path' => $png('s1', [150, 100, 40], 'Simple 1'), 'is_primary' => true, 'sort_order' => 0]);
+ProductImage::create(['product_id' => $s->id, 'product_variation_id' => null, 'path' => $png('s2', [100, 70, 30], 'Simple 2'), 'is_primary' => false, 'sort_order' => 1]);
+\App\Models\ProductStock::create(['agent_id' => $agen->id, 'product_id' => $s->id, 'quantity_on_hand' => 20, 'quantity_reserved' => 0]);
+// CMS: social + marketplace blocks
+CmsHomepageBlock::create(['type' => 'social_media', 'sort_order' => 1, 'is_active' => true, 'content' => ['heading' => 'Ikuti Kami & Belanja Online', 'description' => 'Temukan PrimeClassy di media sosial dan marketplace favorit Anda.', 'layout' => 'cards', 'platforms' => ['instagram' => ['enabled' => true, 'url' => 'https://instagram.com/primeclassy'], 'tiktok' => ['enabled' => true, 'url' => 'https://tiktok.com/@primeclassy'], 'facebook' => ['enabled' => true, 'url' => 'https://facebook.com/primeclassy']]]]);
+CmsHomepageBlock::create(['type' => 'marketplace_links', 'sort_order' => 2, 'is_active' => true, 'content' => ['heading' => 'Belanja di Marketplace', 'description' => 'duplikat', 'layout' => 'cards', 'platforms' => ['tokopedia' => ['enabled' => true, 'url' => 'https://tokopedia.com/primeclassy'], 'shopee' => ['enabled' => true, 'url' => 'https://shopee.co.id/primeclassy']]]]);
+echo json_encode(['product' => $p->id, 'simple' => $s->id, 'vars' => collect($vars)->map->id, 'agen' => $agen->id]), "\n";
