@@ -119,6 +119,11 @@ type Order struct {
 	Shipments     []Shipment
 	Payment       *PaymentTransaction
 	PaymentMethod *PaymentMethod
+	// LoadActors mirrors create vs show/cancel relation loading: create() loads ONLY
+	// items + shipments.courier.user + paymentMethod + paymentTransactions, so konsumen/sales/korsal are ABSENT
+	// there. show()/cancel() load them. LoadItemShipment gates the item's delivery_mode/self_delivered_by_user_id.
+	LoadActors       bool
+	LoadItemShipment bool
 }
 
 // Item is one persisted order line.
@@ -145,6 +150,8 @@ type Item struct {
 	Status             string
 	RequestedDate      *string
 	ShipmentID         *int64
+	DeliveryMode       *string
+	SelfDeliveredBy    *int64
 }
 
 // Shipment is one canonical delivery unit.

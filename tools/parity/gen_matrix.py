@@ -41,6 +41,9 @@ IMPLEMENTED = {
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
+    # --- checkpoint V: order lifecycle (compare_order_lifecycle.py, 10 checks)
+    ("PATCH", "/api/v1/orders/{order}/status"): "super_admin/agen/admin bulk diproses→dikirim→terkirim; payment eligibility under the Order lock; Sub items never advance here; first handover stamps the basis",
+    ("POST", "/api/v1/orders/{order}/cancel"): "konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction",
     # --- checkpoint U: Sub stock-request workflow (compare_subrequests.py, 16 checks)
     ("POST", "/api/v1/sub-stock/requests"): "sales-kurir-sub; direction replenish/return; the create response serialises ONLY the insert-time attributes (Eloquent fresh-create shape), an idempotent replay serialises fully",
     ("GET", "/api/v1/sub-stock/requests/{subStockRequest}"): "policy view: super_admin all, requester own, branch roles same agent; denial is a 404",

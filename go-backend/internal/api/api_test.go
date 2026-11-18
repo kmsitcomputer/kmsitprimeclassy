@@ -218,7 +218,7 @@ func TestKnownUnimplementedRouteReturns501(t *testing.T) {
 	//
 	// (POST /orders itself USED to be the example here; it is implemented now, so the guard moved to a route that
 	// is still outstanding — the assertion is about the fallback behaviour, not about that one endpoint.)
-	res := h.do(http.MethodPost, "/api/v1/orders/1/cancel", map[string]any{})
+	res := h.do(http.MethodPost, "/api/v1/orders/1/assisted-returns", map[string]any{})
 	if res.status != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501", res.status)
 	}

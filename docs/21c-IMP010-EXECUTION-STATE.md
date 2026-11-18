@@ -17,7 +17,7 @@ before touching code. Do not re-derive a completed checkpoint.
 | PARTIAL (incomplete behaviour) | 6 |
 | Laravel-only (Go answers 501) | **282** |
 | Go tests | **133 green** (incl. 6 media oracles), `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **365 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers) |
+| Cross-runtime comparison checks | **375 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -346,13 +346,47 @@ Traps here:
   to match. html/template reproduces Blade's `{{ }}` escaping.
 - A NULL users.korsal_id cannot be scanned into int64 — the obvious column-list bug; found by the harness.
 
+## 4-8. Order lifecycle — DONE (do not re-derive)
+
+2 routes: `PATCH /orders/{order}/status` + `POST /orders/{order}/cancel` (`internal/orders/lifecycle.go`).
+
+**Cancellation is one transaction under the Order lock** that does everything the reference does in order:
+policy (konsumen/branch-agen/super_admin; korsal if the order is theirs; sales if the order is their sale) →
+reverse the inventory (idempotent per item via inventory_cancellation_reversals, canonical Agent capacity
+prelock, release outstanding reservation, return ACCEPTED Shipping→Transit with cancellation_release movements,
+cancel the Stock Request) → mirror item statuses + cancelled_quantity → book the OrderSalesReduction → freeze the
+OrderFinancialSnapshot (integer-cent largest-remainder voucher allocation, sha256 checksum) → create the
+RefundObligation for what was actually PAID → mark finalized.
+
+**Status transition** (office bulk override) re-reads payment eligibility UNDER the Order lock, refuses an unpaid
+non-COD order at diproses, refuses to advance a Sub-sourced item, stamps the first handover (B-01 basis event),
+and creates the Stock Request on the manual move to diproses.
+
+Serialisation asymmetries reproduced: the fresh-create payload omits konsumen/sales/korsal and the item's
+shipment context (delivery_mode/self_delivered_by_user_id), while show/cancel load and render them. konsumen
+carries phone; sales/korsal carry only {id, name}.
+
+REAL DEFECTS FIXED along the way: a DECIMAL SUM scanned into int64 (the reference renders money as text); the
+cancel policy initially only allowed agen/konsumen (missing admin/korsal/sales branches); an InvalidStateTransition
+message that hand-rolled the sentence instead of rendering the catalogue + the {from,to} errors map.
+
+Known gap (recorded, not silent): the Kurir Toko acceptance rule inside assertExpeditionDispatchReady needs the
+courier dispatch service (later checkpoint); the `dikirim` scenarios here use PICKUP orders, so the boundary is
+honest.
+
 ## 4a. Next action (resume here)
 
-**A. The Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/
-reject + index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact
-counterpart of `lockSubLocationForCheckout` (SHARED first). Required evidence: a two-connection test proving
-checkout and execute cannot deadlock against each other. The `GET /sub-stock/requests` PARTIAL note in the matrix
-clears when the mutations land (index is already served).
+**A. Order read surface** (`GET /orders`, `GET /orders/{order}`, `GET /orders/regions`) — the list/detail with
+role-scoped visibility (R-04: gudang/kurir see the operational projection only; the financial fields, payment
+summary and ledger stay gated). Then the item lifecycle: `GET /orders/{order}/items/{item}/cancel-eligibility`,
+`POST /orders/{order}/items/{item}/cancel-undelivered`, `PATCH /orders/{order}/items/{item}/fulfillment`,
+`PATCH /orders/{order}/items/{item}/reschedule` — OrderFulfillmentService.
+
+**B. Payments** (`internal/payments` not started): proofs, verification, COD, DP settlement, the
+latest-manual-transaction rule. These gate the `diproses` transition the lifecycle now enforces.
+
+**C. The remaining order routes**: due-date, consent-context/events, refund-recipient, returns, assisted-returns,
+payment/cod-proof + installment + settle + verify, invoice PDF.
 
 **B. Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/reject
 + index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart
@@ -373,7 +407,8 @@ beyond the number allocation.
 **DONE, do not redo:** `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`; `/addresses` (4);
 `/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`;
 warehouse stock-addition-requests + sub-adjustment-requests (6); stock-request proposals (8) + the media
-pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal); handover show + print (2).
+pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal); handover show + print (2); the Sub stock-request
+workflow (7); order lifecycle status + cancel (2).
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

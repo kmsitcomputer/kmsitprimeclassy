@@ -138,13 +138,16 @@ func (s *Service) loadOrder(ctx context.Context, orderID, paymentTxnID int64) (*
 }
 
 func (s *Service) loadItems(ctx context.Context, orderID int64) ([]Item, error) {
-	rows, err := s.Database.QueryContext(ctx, `SELECT id, product_id, product_variation_id, stock_source, sub_location_id,
-			product_name_snapshot, variation_label_snapshot, sku_snapshot,
-			CAST(unit_price_snapshot AS CHAR), CAST(agent_fee_amount AS CHAR), CAST(sales_fee_amount AS CHAR),
-			CAST(courier_fee_amount AS CHAR), CAST(subtotal_snapshot AS CHAR),
-			original_quantity, fulfilled_quantity, cancelled_quantity, returned_quantity, refund_quantity,
-			additional_quantity, status, CAST(requested_delivery_date AS CHAR), shipment_id
-		FROM order_items WHERE order_id = ? ORDER BY id`, orderID)
+	rows, err := s.Database.QueryContext(ctx, `SELECT i.id, i.product_id, i.product_variation_id, i.stock_source, i.sub_location_id,
+			i.product_name_snapshot, i.variation_label_snapshot, i.sku_snapshot,
+			CAST(i.unit_price_snapshot AS CHAR), CAST(i.agent_fee_amount AS CHAR), CAST(i.sales_fee_amount AS CHAR),
+			CAST(i.courier_fee_amount AS CHAR), CAST(i.subtotal_snapshot AS CHAR),
+			i.original_quantity, i.fulfilled_quantity, i.cancelled_quantity, i.returned_quantity, i.refund_quantity,
+			i.additional_quantity, i.status, CAST(i.requested_delivery_date AS CHAR), i.shipment_id,
+			sh.delivery_mode, sh.self_delivered_by_user_id
+		FROM order_items i
+		LEFT JOIN shipments sh ON sh.id = i.shipment_id
+		WHERE i.order_id = ? ORDER BY i.id`, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,13 +162,18 @@ func (s *Service) loadItems(ctx context.Context, orderID int64) ([]Item, error) 
 			unit, agentFee, salesFee  sql.NullString
 			courierFee, subtotal      sql.NullString
 			shipmentID                sql.NullInt64
+			deliveryMode              sql.NullString
+			selfDeliveredBy           sql.NullInt64
 		)
 		if err := rows.Scan(&it.ID, &it.ProductID, &variation, &it.StockSource, &subLocation,
 			&it.ProductName, &label, &sku, &unit, &agentFee, &salesFee, &courierFee, &subtotal,
 			&it.OriginalQuantity, &it.FulfilledQuantity, &it.CancelledQuantity, &it.ReturnedQuantity, &it.RefundQuantity,
-			&it.AdditionalQuantity, &it.Status, &requestedDate, &shipmentID); err != nil {
+			&it.AdditionalQuantity, &it.Status, &requestedDate, &shipmentID,
+			&deliveryMode, &selfDeliveredBy); err != nil {
 			return nil, err
 		}
+		it.DeliveryMode = nullStringPtr(deliveryMode)
+		it.SelfDeliveredBy = nullIntPtr(selfDeliveredBy)
 		it.ProductVariationID = nullIntPtr(variation)
 		it.SubLocationID = nullIntPtr(subLocation)
 		it.VariationLabel = nullStringPtr(label)
@@ -214,6 +222,41 @@ func (s *Service) loadShipments(ctx context.Context, orderID int64) ([]Shipment,
 		out = append(out, sh)
 	}
 	return out, rows.Err()
+}
+
+// loadTinyUser renders the {id, name} projection the sales/korsal keys carry (the konsumen key adds phone).
+func (s *Service) loadTinyUser(userID *int64) (*map[string]any, error) {
+	if userID == nil {
+		return nil, nil
+	}
+	var name sql.NullString
+	if err := s.Database.QueryRowContext(context.Background(),
+		`SELECT name FROM users WHERE id = ?`, *userID).Scan(&name); err != nil {
+		return nil, err
+	}
+	out := map[string]any{"id": *userID, "name": nullableStringRow(name)}
+	return &out, nil
+}
+
+// loadKonsumenUser renders the konsumen projection with phone.
+func (s *Service) loadKonsumenUser(userID *int64) (*map[string]any, error) {
+	if userID == nil {
+		return nil, nil
+	}
+	var name, phone sql.NullString
+	if err := s.Database.QueryRowContext(context.Background(),
+		`SELECT name, phone FROM users WHERE id = ?`, *userID).Scan(&name, &phone); err != nil {
+		return nil, err
+	}
+	out := map[string]any{"id": *userID, "name": nullableStringRow(name), "phone": nullableStringRow(phone)}
+	return &out, nil
+}
+
+func nullableStringRow(v sql.NullString) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.String
 }
 
 func nullFloatPtr(v sql.NullString) *float64 {

@@ -66,6 +66,10 @@ KEYS = {
         "created",
         "status_updated",
         "cancelled",
+        "invalid_status_transition",
+        "status_endpoint_required",
+        "payment_not_verified",
+        "sub_item_requires_owner_shipment",
     ],
     "shipping": [
         "method_not_available",

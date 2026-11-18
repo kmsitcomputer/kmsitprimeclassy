@@ -427,6 +427,26 @@ func reservedForQuery(ctx context.Context, q queryExecer, agentID int64, target 
 	return reserved, nil
 }
 
+// LockAgentReservationTargets adapts the canonical target lock to a caller-supplied target slice (the order
+// cancellation path builds its targets from order_items; the vocabulary stays the ONE canonical ordering).
+func LockAgentReservationTargets(ctx context.Context, tx *sql.Tx, agentID int64, targets []AgentTarget) error {
+	converted := make([]Target, 0, len(targets))
+	for _, t := range targets {
+		if t.VariationID != nil {
+			converted = append(converted, VariationTarget(*t.VariationID))
+		} else if t.ProductID != nil {
+			converted = append(converted, ProductTarget(*t.ProductID))
+		}
+	}
+	return LockReservationTargets(ctx, tx, agentID, converted)
+}
+
+// AgentTarget mirrors the {product_id, product_variation_id} pair the reference passes around.
+type AgentTarget struct {
+	ProductID   *int64
+	VariationID *int64
+}
+
 // sortTargetsInPlace is exported for callers that already hold a []Target and want the canonical order without
 // allocating a key map (the order creation path lists targets once).
 func sortTargetsInPlace(targets []Target) {

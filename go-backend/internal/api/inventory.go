@@ -135,6 +135,7 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/checkout/steps",
 		"POST /api/v1/checkout/quote",
 		"POST /api/v1/orders",
+		"POST /api/v1/orders/{order}/cancel",
 		"GET /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/sub-adjustment-requests",
@@ -167,6 +168,18 @@ func implementsRoute(method, path string) bool {
 			return true
 		}
 		return false
+	}
+	// /api/v1/orders/<id>/cancel (POST literal) and /<id>/status (PATCH).
+	if strings.HasPrefix(path, "/api/v1/orders/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/orders/"), "/")
+		if len(parts) == 2 && parts[0] != "" {
+			if method == http.MethodPost && parts[1] == "cancel" {
+				return true
+			}
+			if method == http.MethodPatch && parts[1] == "status" {
+				return true
+			}
+		}
 	}
 	// /api/v1/sub-stock/requests/<id> and /<id>/(approve|reject|cancel|execute|receive).
 	if strings.HasPrefix(path, "/api/v1/sub-stock/requests/") {

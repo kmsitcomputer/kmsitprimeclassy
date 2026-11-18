@@ -139,7 +139,7 @@ func TestKnownAndUnknownRouteDiscrimination(t *testing.T) {
 		{http.MethodPost, "/api/v1/warehouse/sub-locations/1/nonsense", false, false},
 		{http.MethodGet, "/api/v1/orders", true, false},
 		{http.MethodPost, "/api/v1/orders", true, true},
-		{http.MethodPost, "/api/v1/orders/1/cancel", true, false},
+		{http.MethodPost, "/api/v1/orders/1/assisted-returns", true, false},
 		{http.MethodPost, "/api/v1/admin/refund-attempts/{attempt}/initiate", true, false},
 		{http.MethodGet, "/api/v1/reports/finance-summary", true, false},
 		{http.MethodGet, "/api/v1/nope", false, false},

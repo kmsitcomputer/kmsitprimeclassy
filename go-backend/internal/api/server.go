@@ -115,6 +115,8 @@ func (s *Server) routes() {
 		s.Throttle(30, time.Minute)))
 	// Order creation. Same role gate as the preview; the policy check inside the handler is the authority on
 	// WHICH konsumen may be ordered for.
+	s.mux.Handle("PATCH /api/v1/orders/{order}/status", chain(http.HandlerFunc(s.handleOrderUpdateStatus), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("POST /api/v1/orders/{order}/cancel", chain(http.HandlerFunc(s.handleOrderCancel), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen,agen,korsal,sales,sales-kurir-sub,super_admin")))
 	s.mux.Handle("POST /api/v1/orders", chain(http.HandlerFunc(s.handleOrderStore),
 		RequireAuth, s.RequireAgentLinked,
 		RequireRole("konsumen,agen,korsal,sales,sales-kurir-sub"),

@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 
-## Orders — `orders` (1/25 in Go)
+## Orders — `orders` (3/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -364,7 +364,7 @@ Status legend:
 | GET | `/api/v1/orders/regions` | session | — | LARAVEL |  |
 | GET | `/api/v1/orders/{order}` | session | — | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/cancel` | session | — | LARAVEL |  |
+| POST | `/api/v1/orders/{order}/cancel` | session | — | **GO** | konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction |
 | GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | GET | `/api/v1/orders/{order}/consent-events` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | PUT | `/api/v1/orders/{order}/due-date` | session | admin, keuangan, super_admin | LARAVEL |  |
@@ -383,7 +383,7 @@ Status legend:
 | GET | `/api/v1/orders/{order}/refund-recipient` | session | admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/refund-recipient` | session | admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/returns` | session | konsumen | LARAVEL |  |
-| PATCH | `/api/v1/orders/{order}/status` | session | admin, agen, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/orders/{order}/status` | session | admin, agen, super_admin | **GO** | super_admin/agen/admin bulk diproses→dikirim→terkirim; payment eligibility under the Order lock; Sub items never advance here; first handover stamps the basis |
 
 ## CMS — pages — `pages` (1/1 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 100 (26.7%) |
-|   of which fully GO | 94 |
+| Served by Go now | 102 (27.2%) |
+|   of which fully GO | 96 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 275 |
+| Still Laravel-only | 273 |
 | Areas fully ported | 12 / 45 |

@@ -111,7 +111,7 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		"buyer_origin": "account",
 		// `couriers` is ONE entry per DISTINCT courier actually assigned; a fresh order has none.
 		"couriers":                []any{},
-		"items":                   renderItems(order.Items, viewer),
+		"items":                   renderItems(order.Items, viewer, order.LoadItemShipment),
 		"shipment_delivery_dates": shipmentDates,
 		"delivery_groups":         deliveryGroups(order.Items),
 		"created_at":              renderTime(order.CreatedAt),
@@ -135,6 +135,28 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		out["placed_by_user_id"] = nullableInt(order.PlacedByUserID)
 	}
 
+	// The cancel/show controllers load konsumen, sales and korsal (create does not). konsumen renders for
+	// every viewer; sales/korsal are internal referral-chain identity, hidden from the konsumen's own view.
+	if order.LoadActors {
+		if order.KonsumenID != nil {
+			if konsumen, err := s.loadKonsumenUser(order.KonsumenID); err == nil && konsumen != nil {
+				out["konsumen"] = konsumen
+			}
+		}
+		if !viewer.hasRole("konsumen") {
+			if order.SalesID != nil {
+				if sales, err := s.loadTinyUser(order.SalesID); err == nil && sales != nil {
+					out["sales"] = sales
+				}
+			}
+			if order.KorsalID != nil {
+				if korsal, err := s.loadTinyUser(order.KorsalID); err == nil && korsal != nil {
+					out["korsal"] = korsal
+				}
+			}
+		}
+	}
+
 	if seesFinancials && order.PaymentMethod != nil {
 		out["payment_method"] = map[string]any{
 			"code": order.PaymentMethod.Code,
@@ -148,7 +170,7 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 	return out, nil
 }
 
-func renderItems(items []Item, viewer Viewer) []any {
+func renderItems(items []Item, viewer Viewer, withShipment bool) []any {
 	financials := viewer.seesFinancials()
 	out := make([]any, 0, len(items))
 	for _, item := range items {
@@ -170,6 +192,12 @@ func renderItems(items []Item, viewer Viewer) []any {
 			"status":                  item.Status,
 			"requested_delivery_date": renderDate(item.RequestedDate),
 			"shipment_id":             nullableInt(item.ShipmentID),
+		}
+		// Loaded shipment context (R-03): only when the calling controller loaded items.shipment
+		// (show/cancel), never on the fresh-create payload.
+		if withShipment {
+			rendered["delivery_mode"] = nullableString(item.DeliveryMode)
+			rendered["self_delivered_by_user_id"] = nullableInt(item.SelfDeliveredBy)
 		}
 		if financials {
 			rendered["unit_price"] = money.String(item.UnitPrice)
