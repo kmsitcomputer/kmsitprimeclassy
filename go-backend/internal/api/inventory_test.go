@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -82,6 +84,44 @@ func TestImplementedRoutesAreRealRoutes(t *testing.T) {
 	}
 }
 
+// TestEveryRegisteredRouteIsImplemented is the FORWARD anti-drift rule and the one that would have caught a
+// real defect: `POST /warehouse/sub-locations/{id}/assign-owner` was registered in routes() and handled, but
+// implementsRoute said "not implemented". That combination is never acceptable — it undercounts the parity
+// report and (because ValidateCSRF consults the same predicate) skips CSRF validation on a state-changing
+// request. So every route the mux actually serves must be reported as implemented.
+func TestEveryRegisteredRouteIsImplemented(t *testing.T) {
+	source, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// s.mux.Handle("METHOD /path", …) and s.mux.HandleFunc("METHOD /path", …)
+	re := regexp.MustCompile(`s\.mux\.Handle(?:Func)?\("([A-Z]+) ([^"]+)"`)
+	matches := re.FindAllStringSubmatch(string(source), -1)
+	if len(matches) < 60 {
+		t.Fatalf("only %d registrations found in server.go — the scan pattern is stale", len(matches))
+	}
+	checked := 0
+	for _, m := range matches {
+		method, pattern := m[1], m[2]
+		if !strings.HasPrefix(pattern, "/api/v1/") {
+			continue // /up, /healthz, /sanctum/csrf-cookie are Go-native, not Laravel parity routes
+		}
+		if pattern == "/api/v1/_parity" {
+			continue // machine-readable report, additive by design
+		}
+		// A concrete path with a representative id for each placeholder.
+		concrete := regexp.MustCompile(`\{[^}]+\}`).ReplaceAllString(pattern, "1")
+		checked++
+		if !implementsRoute(method, concrete) {
+			t.Errorf("routes() serves %s %s but implementsRoute(%s, %q) is false — "+
+				"the parity report and CSRF validation would both be wrong", method, pattern, method, concrete)
+		}
+	}
+	if checked < 60 {
+		t.Fatalf("only %d /api/v1 routes checked — expected the full migrated surface", checked)
+	}
+}
+
 // TestKnownAndUnknownRouteDiscrimination proves the 501-vs-404 split.
 func TestKnownAndUnknownRouteDiscrimination(t *testing.T) {
 	cases := []struct {
@@ -91,6 +131,12 @@ func TestKnownAndUnknownRouteDiscrimination(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/products", true, true},
 		{http.MethodGet, "/api/v1/products/kue-lumpur", true, true},
+		// The POST literals that sit under the {subLocation} prefix must be implemented — and only as POST.
+		{http.MethodPost, "/api/v1/warehouse/sub-locations/1/assign-owner", true, true},
+		{http.MethodPost, "/api/v1/warehouse/sub-locations/1/deactivate", true, true},
+		{http.MethodGet, "/api/v1/warehouse/sub-locations/1/stocks", true, true},
+		{http.MethodPost, "/api/v1/warehouse/sub-locations/1/stocks", false, false},
+		{http.MethodPost, "/api/v1/warehouse/sub-locations/1/nonsense", false, false},
 		{http.MethodGet, "/api/v1/orders", true, false},
 		{http.MethodPost, "/api/v1/orders", true, false},
 		{http.MethodPost, "/api/v1/admin/refund-attempts/{attempt}/initiate", true, false},

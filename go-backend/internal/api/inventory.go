@@ -187,19 +187,31 @@ func implementsRoute(method, path string) bool {
 		return false
 	}
 	// Deeper parameterised inventory routes: `/api/v1/warehouse/sub-locations/<id>[/<tail>]`.
-	if (method == http.MethodGet || method == http.MethodPatch) && strings.HasPrefix(path, "/api/v1/warehouse/sub-locations/") {
+	//
+	// The method is part of the match: `assign-owner`/`deactivate` are POST-only literals while
+	// `{subLocation}`/`stocks`/`stock-cards` are GET (and PATCH for the id itself). An outer
+	// `method is GET or PATCH` gate used to make the two POST literals unreachable here, which silently
+	// admitted them through the router while this predicate said "not implemented" — that skipped CSRF
+	// validation on two state-changing endpoints and undercounted the parity report. Keep the verb check
+	// inside each branch, never around the whole block.
+	if strings.HasPrefix(path, "/api/v1/warehouse/sub-locations/") {
 		rest := strings.TrimPrefix(path, "/api/v1/warehouse/sub-locations/")
 		parts := strings.Split(rest, "/")
 		if len(parts) == 1 && parts[0] != "" {
+			if method != http.MethodGet && method != http.MethodPatch {
+				return false
+			}
 			// `eligible-owners` is a literal sibling with its own route; it must not be swallowed by the
 			// {subLocation} pattern here.
 			return parts[0] != "eligible-owners"
 		}
-		if len(parts) == 2 && parts[0] != "" && (parts[1] == "stocks" || parts[1] == "stock-cards") {
-			return true
-		}
-		if len(parts) == 2 && (parts[1] == "assign-owner" || parts[1] == "deactivate") { // POST literals
-			return true
+		if len(parts) == 2 && parts[0] != "" {
+			switch {
+			case method == http.MethodGet && (parts[1] == "stocks" || parts[1] == "stock-cards"):
+				return true
+			case method == http.MethodPost && (parts[1] == "assign-owner" || parts[1] == "deactivate"):
+				return true
+			}
 		}
 		return false
 	}
