@@ -59,6 +59,11 @@ func maxString(ctx context.Context, field string, max int) []string {
 	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "max.string", field, "max", strconv.Itoa(max))}
 }
 
+// maxNumeric renders the `max` sentence for a numeric field.
+func maxNumeric(ctx context.Context, field string, max int) []string {
+	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "max.numeric", field, "max", strconv.Itoa(max))}
+}
+
 // minNumeric renders the `min` sentence for a numeric field.
 func minNumeric(ctx context.Context, field string, min int) []string {
 	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "min.numeric", field, "min", strconv.Itoa(min))}

@@ -172,6 +172,16 @@ func (s *Server) routes() {
 	s.mux.Handle("PATCH /api/v1/addresses/{address}", chain(http.HandlerFunc(s.handleAddressUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
 	s.mux.Handle("DELETE /api/v1/addresses/{address}", chain(http.HandlerFunc(s.handleAddressDestroy), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
 
+	// Promotions (agent-scoped vouchers + product discounts).
+	s.mux.Handle("GET /api/v1/promo/vouchers", chain(http.HandlerFunc(s.handleVoucherIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("POST /api/v1/promo/vouchers", chain(http.HandlerFunc(s.handleVoucherStore), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("PATCH /api/v1/promo/vouchers/{voucher}", chain(http.HandlerFunc(s.handleVoucherUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("DELETE /api/v1/promo/vouchers/{voucher}", chain(http.HandlerFunc(s.handleVoucherDestroy), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("GET /api/v1/promo/discounts", chain(http.HandlerFunc(s.handleDiscountIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("POST /api/v1/promo/discounts", chain(http.HandlerFunc(s.handleDiscountStore), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("PATCH /api/v1/promo/discounts/{discount}", chain(http.HandlerFunc(s.handleDiscountUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("DELETE /api/v1/promo/discounts/{discount}", chain(http.HandlerFunc(s.handleDiscountDestroy), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+
 	// Administration — system configuration (Gate::authorize('manage-system-config') == super_admin).
 	cfgRole := RequireRole("super_admin")
 	s.mux.Handle("GET /api/v1/admin/languages", chain(http.HandlerFunc(s.handleAdminLanguages), RequireAuth, s.RequireAgentLinked, cfgRole))

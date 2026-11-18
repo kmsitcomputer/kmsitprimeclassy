@@ -435,18 +435,18 @@ Status legend:
 | POST | `/api/v1/profile/whatsapp/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/whatsapp/verification/{challenge}/confirm` | session | — | LARAVEL |  |
 
-## Promotions — `promo` (0/8 in Go)
+## Promotions — `promo` (8/8 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/promo/discounts` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/promo/discounts` | session | admin, agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/promo/discounts/{discount}` | session | admin, agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/promo/discounts/{discount}` | session | admin, agen, super_admin | LARAVEL |  |
-| GET | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | LARAVEL |  |
+| GET | `/api/v1/promo/discounts` | session | admin, agen, super_admin | **GO** |  |
+| POST | `/api/v1/promo/discounts` | session | admin, agen, super_admin | **PARTIAL** | a discount MUST name a product; a variation must belong to it (audit A1-17) |
+| DELETE | `/api/v1/promo/discounts/{discount}` | session | admin, agen, super_admin | **GO** |  |
+| PATCH | `/api/v1/promo/discounts/{discount}` | session | admin, agen, super_admin | **GO** |  |
+| GET | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | **GO** |  |
+| POST | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | **PARTIAL** | code upper-cased/trimmed; super_admin must name the branch |
+| DELETE | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | **GO** |  |
+| PATCH | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | **GO** |  |
 
 ## Referral — `referral` (0/1 in Go)
 
@@ -613,6 +613,6 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now (incl. partial) | 66 (17.6%) |
-| Still Laravel-only | 309 |
+| Served by Go now (incl. partial) | 74 (19.7%) |
+| Still Laravel-only | 301 |
 | Areas fully ported | 6 / 45 |

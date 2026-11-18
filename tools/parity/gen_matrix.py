@@ -84,6 +84,15 @@ IMPLEMENTED = {
     ("POST", "/api/v1/warehouse/sub-locations"): "owner must be an active Sales-Kurir-Sub of the network that owns no other location",
     ("PATCH", "/api/v1/warehouse/sub-locations/{subLocation}"): "",
     ("POST", "/api/v1/warehouse/sub-locations/{subLocation}/assign-owner"): "unowned + active only; owner row locked before the location on create",
+    # --- checkpoint M: promotions (vouchers + discounts)
+    ("GET", "/api/v1/promo/vouchers"): "",
+    ("POST", "/api/v1/promo/vouchers"): "code upper-cased/trimmed; super_admin must name the branch",
+    ("PATCH", "/api/v1/promo/vouchers/{voucher}"): "",
+    ("DELETE", "/api/v1/promo/vouchers/{voucher}"): "",
+    ("GET", "/api/v1/promo/discounts"): "",
+    ("POST", "/api/v1/promo/discounts"): "a discount MUST name a product; a variation must belong to it (audit A1-17)",
+    ("PATCH", "/api/v1/promo/discounts/{discount}"): "",
+    ("DELETE", "/api/v1/promo/discounts/{discount}"): "",
     # --- checkpoint L: konsumen address book
     ("GET", "/api/v1/addresses"): "own rows only; list ordering differs (deviation D-10)",
     ("POST", "/api/v1/addresses"): "",

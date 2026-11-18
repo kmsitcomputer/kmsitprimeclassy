@@ -126,8 +126,19 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/warehouse/opnames",
 		"POST /api/v1/warehouse/sub-locations",
 		"GET /api/v1/addresses",
-		"POST /api/v1/addresses":
+		"POST /api/v1/addresses",
+		"GET /api/v1/promo/vouchers",
+		"POST /api/v1/promo/vouchers",
+		"GET /api/v1/promo/discounts",
+		"POST /api/v1/promo/discounts":
 		return true
+	}
+	for _, collection := range []string{"vouchers", "discounts"} {
+		prefix := "/api/v1/promo/" + collection + "/"
+		if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, prefix) {
+			rest := strings.TrimPrefix(path, prefix)
+			return rest != "" && !strings.Contains(rest, "/")
+		}
 	}
 	if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, "/api/v1/addresses/") {
 		rest := strings.TrimPrefix(path, "/api/v1/addresses/")
