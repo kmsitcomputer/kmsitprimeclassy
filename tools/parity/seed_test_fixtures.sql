@@ -71,6 +71,30 @@ INSERT INTO user_closures (ancestor_id, descendant_id, depth) VALUES
 INSERT INTO agent_profiles (id, user_id, store_name, address, latitude, longitude, phone, created_at, updated_at) VALUES
  (1,10,'Toko Prime Classy Imp010','Jl. Uji 1, Bandung',-6.9000000,107.6000000,'081100000010',NOW(),NOW());
 
+-- Checkout eligibility fixtures (GET /checkout/steps, and later order creation).
+--
+-- Invented configuration covering every branch of ShippingQuoteService::activeProviders and
+-- AvailablePaymentMethodService::availableMethods:
+--   * rajaongkir and openroute globally active (an agent switch-off is applied per scenario by the harness),
+--   * kmsit present but INACTIVE, so Kurir Toko is offered through ORS, never through the fallback here,
+--   * bank_transfer/cod/down_payment selectable, plus an ACTIVE gateway row that must never appear.
+DELETE FROM agent_shipping_provider_settings;
+DELETE FROM agent_shipping_provider_configs;
+DELETE FROM agent_payment_method_settings;
+DELETE FROM shipping_providers;
+DELETE FROM payment_methods;
+
+INSERT INTO shipping_providers (id, code, name, is_active, created_at, updated_at) VALUES
+ (1,'rajaongkir','RajaOngkir',1,NOW(),NOW()),
+ (2,'openroute','OpenRoute',1,NOW(),NOW()),
+ (3,'kmsit','KMSIT Routing Server',0,NOW(),NOW());
+
+INSERT INTO payment_methods (id, code, name, type, is_active, created_at, updated_at) VALUES
+ (1,'bank_transfer','Transfer Bank','manual',1,NOW(),NOW()),
+ (2,'cod','Bayar di Tempat (COD)','cod',1,NOW(),NOW()),
+ (3,'down_payment','DP / Down Payment','manual',1,NOW(),NOW()),
+ (4,'gateway','Payment Gateway','gateway',1,NOW(),NOW());
+
 INSERT INTO languages (id, code, name, is_default, is_active, sort_order, created_at, updated_at) VALUES
  (1,'id','Indonesia',1,1,1,NOW(),NOW()),
  (2,'en','English',0,1,2,NOW(),NOW());

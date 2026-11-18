@@ -130,7 +130,8 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/promo/vouchers",
 		"POST /api/v1/promo/vouchers",
 		"GET /api/v1/promo/discounts",
-		"POST /api/v1/promo/discounts":
+		"POST /api/v1/promo/discounts",
+		"GET /api/v1/checkout/steps":
 		return true
 	}
 	for _, collection := range []string{"vouchers", "discounts"} {

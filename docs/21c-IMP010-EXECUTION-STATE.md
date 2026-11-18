@@ -11,12 +11,12 @@ Do not read this as a completion report.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **74 (19.7%)** |
-| Fully GO | 68 |
-| PARTIAL (documented gap) | 6 |
+| Served by Go | **75 (20.0%)** |
+| Fully GO | 69 |
+| PARTIAL (incomplete behaviour) | 6 |
 | Laravel-only (Go answers 501) | **301** |
 | Go tests | **98 green**, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **212 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address) |
+| Cross-runtime comparison checks | **250 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -33,6 +33,7 @@ Do not read this as a completion report.
 | Sub-location ownership (create/update/assign/deactivate) | 4 | `compare_inventory_mutations.py` sublocation scenario + owner/previous_owner/is_active state diff |
 | Konsumen address book | 4 | `compare_address.py` (17) — incl. the resolved province/regency/district columns and the ownership 404 |
 | Promotions (vouchers + discounts) | 8 | `compare_promo.py` (21) — incl. both resulting row sets and the RBAC refusal |
+| Checkout wizard contract | 1 | `compare_checkout.py` (38) — 11 scenarios: guest, konsumen, sales, agen, super_admin, branch provider switches, the KMSIT fallback, "nothing to offer", and payment-method switches |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
 ## 3. What remains (327 routes) — ordered, with the real obstacle for each
@@ -130,16 +131,42 @@ written against it instead of inventing a second arithmetic:
 expressible there — 12.5 belongs to a VOUCHER `value` (`decimal(12,2)`). Mixing them silently produces a wrong
 line price.
 
-## 4a. Next action (resume here — start at the top)
+## 4-1. Checkout entrance — DONE (do not re-derive)
 
-**0. `GET /api/v1/checkout/steps`** (self-contained, entrance to the checkout chain). Read
-`CheckoutStepResolver` + `CheckoutSteps` + `ShippingQuoteService::{activeProviders,isPickupAvailable,
-isShippingSelectionAvailable,availableShippingMethods}` + `AvailablePaymentMethodService::availableMethods`.
-The only non-obvious dependency is `ShippingQuoteService::activeProviders`, which also consults
-`OpenRoute::isAvailable` (the Agen's KMSIT fallback); port that predicate before the endpoint. Exact contract:
-`{steps[{key,label_key,active}], on_behalf_of_konsumen, shipping_enabled, map_picker_enabled,
-shipping_methods[{code,label}], pickup_location|null, payment_methods[{id,code,name,type}]}`, with
-`steps.account` active only for an anonymous caller and `steps.referral` always false.
+`GET /api/v1/checkout/steps` is served (`internal/{checkout,shipping,payment}`), verified by
+`tools/parity/compare_checkout.py`: **38 checks, 0 failed**, across 11 scenarios.
+
+Ported semantics worth remembering:
+- `openroute` ("Kurir Toko") is offered when the ORS row is eligible **OR the agent's KMSIT fallback is**;
+  KMSIT itself never appears as a method. Only the second half covers a branch whose openroute row is inactive
+  yet whose kmsit config exists — the branch a naive `activeProviders` port gets wrong.
+- Pickup needs no provider row: it exists iff the agent has an `agent_profiles` row, and its coordinates are
+  that row's (the same source OpenRoute uses as an origin).
+- `availableShippingMethods` sorts by CODE then appends pickup last; `payment_methods` orders by id.
+- `steps.account` is active only for a guest; `steps.referral` is always false.
+- A konsumen sees only `bank_transfer`; `?shipping_method=rajaongkir` narrows staff to `bank_transfer`;
+  an unrecognised `shipping_method` means "not chosen yet" (unrestricted), not "nothing allowed".
+- A guest still gets globally active delivery providers (no branch, so no pickup and no agent overrides).
+
+Fixtures: `tools/parity/seed_test_fixtures.sql` now seeds rajaongkir+openroute active, kmsit inactive, and
+bank_transfer/cod/down_payment plus an ACTIVE gateway row that must never be listed.
+
+**Parity taxonomy fixed.** `gen_matrix.py` used to mark every annotated route PARTIAL, so the matrix published
+31 PARTIAL while this file published 6 — two different counts for the same codebase. Status is now driven by an
+explicit `GAPS` set (routes whose own behaviour is incomplete); a note alone leaves a route **GO**. The matrix
+now reports 75 served / 69 GO / 6 PARTIAL / 300 Laravel-only, which is the same 6 this file always claimed.
+
+Also fixed in this checkpoint: `implementsRoute` did not recognise `POST .../assign-owner` and
+`POST .../deactivate`, which skipped CSRF validation on two state-changing endpoints and undercounted the
+parity report by 2. `TestEveryRegisteredRouteIsImplemented` now enforces "registered ⇒ implemented".
+
+## 4a. Next action (resume here)
+
+**`POST /api/v1/checkout/quote`** — the server-computed Review-step preview. Read
+`CheckoutController::quote` + `QuoteCheckoutRequest` + `OrderService::quote` (line 528) +
+`OrderService::resolveLine` (662) + `ShippingQuoteService::quote`. It must go through `internal/pricing`
+already built, and it must NOT create anything (no reservation, no order row). Capture the exact validation
+messages first: the request rejects an empty `items`, a missing destination, and an unresolvable product.
 
 Then:
 

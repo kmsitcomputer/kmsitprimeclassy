@@ -5,17 +5,17 @@ Generated from `go-backend/internal/api/parity_routes.json` (375 `/api/v1` route
 Status legend:
 
 - **GO** — served by the Go service, contract-compared against Laravel (`tools/parity/compare_*.py`).
-- **PARTIAL** — served, with a documented behavioural gap in the Notes column.
+- **PARTIAL** — served, but the route's own behaviour is still incomplete (see the note). A note alone does NOT make a route partial: informational notes and documented deviations stay **GO**.
 - **LARAVEL** — still served by Laravel only; the Go service answers `501 not_implemented`.
 
 ## addresses — `addresses` (4/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/addresses` | session | konsumen | **PARTIAL** | own rows only; list ordering differs (deviation D-10) |
+| GET | `/api/v1/addresses` | session | konsumen | **GO** | own rows only; list ordering differs (deviation D-10) |
 | POST | `/api/v1/addresses` | session | konsumen | **GO** |  |
-| DELETE | `/api/v1/addresses/{address}` | session | konsumen | **PARTIAL** | a foreign id is a 404 |
-| PATCH | `/api/v1/addresses/{address}` | session | konsumen | **PARTIAL** | promotes the default correctly where the reference leaves none (deviation D-9) |
+| DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
+| PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
 ## Admin operations — `admin` (7/59 in Go)
 
@@ -45,11 +45,11 @@ Status legend:
 | POST | `/api/v1/admin/integrations/whatsapp/templates/{event}/preview` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/test-connection` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/test-message` | session | super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/languages` | session | super_admin | **PARTIAL** | admin listing: every language, active or not |
+| GET | `/api/v1/admin/languages` | session | super_admin | **GO** | admin listing: every language, active or not |
 | POST | `/api/v1/admin/languages` | session | super_admin | **GO** |  |
 | PATCH | `/api/v1/admin/languages/{language}` | session | super_admin | **GO** |  |
-| PATCH | `/api/v1/admin/languages/{language}/set-default` | session | super_admin | **PARTIAL** | exactly one default; the target must be active |
-| PATCH | `/api/v1/admin/languages/{language}/toggle-active` | session | super_admin | **PARTIAL** | the default language can never be deactivated |
+| PATCH | `/api/v1/admin/languages/{language}/set-default` | session | super_admin | **GO** | exactly one default; the target must be active |
+| PATCH | `/api/v1/admin/languages/{language}/toggle-active` | session | super_admin | **GO** | the default language can never be deactivated |
 | GET | `/api/v1/admin/order-refunds` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/order-refunds/{adjustment}/status` | session | keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/order-sales-reductions/{reduction}/reinstate` | session | agen, keuangan, super_admin | LARAVEL |  |
@@ -73,8 +73,8 @@ Status legend:
 | GET | `/api/v1/admin/returns/{return}` | session | admin, agen, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/returns/{return}/pickup-schedule` | session | admin, agen, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/returns/{return}/review` | session | admin, agen, super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/settings` | session | super_admin | **PARTIAL** | identical to the public read (single service in the reference) |
-| PUT | `/api/v1/admin/settings` | session | super_admin | **PARTIAL** | unknown keys ignored, JSON keys encoded, returns the resolved settings |
+| GET | `/api/v1/admin/settings` | session | super_admin | **GO** | identical to the public read (single service in the reference) |
+| PUT | `/api/v1/admin/settings` | session | super_admin | **GO** | unknown keys ignored, JSON keys encoded, returns the resolved settings |
 | GET | `/api/v1/admin/shipping-couriers` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/shipping-couriers` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/shipping-couriers/{shippingCourier}/toggle` | session | super_admin | LARAVEL |  |
@@ -168,14 +168,14 @@ Status legend:
 | DELETE | `/api/v1/categories/{category}` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/categories/{category}` | session | super_admin | LARAVEL |  |
 
-## Checkout — `checkout` (0/4 in Go)
+## Checkout — `checkout` (1/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | POST | `/api/v1/checkout/courier-options` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/checkout/geocode` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/checkout/quote` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/checkout/steps` | public | — | LARAVEL |  |
+| GET | `/api/v1/checkout/steps` | public | — | **GO** | public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter |
 
 ## CMS — admin — `cms` (0/14 in Go)
 
@@ -440,11 +440,11 @@ Status legend:
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/promo/discounts` | session | admin, agen, super_admin | **GO** |  |
-| POST | `/api/v1/promo/discounts` | session | admin, agen, super_admin | **PARTIAL** | a discount MUST name a product; a variation must belong to it (audit A1-17) |
+| POST | `/api/v1/promo/discounts` | session | admin, agen, super_admin | **GO** | a discount MUST name a product; a variation must belong to it (audit A1-17) |
 | DELETE | `/api/v1/promo/discounts/{discount}` | session | admin, agen, super_admin | **GO** |  |
 | PATCH | `/api/v1/promo/discounts/{discount}` | session | admin, agen, super_admin | **GO** |  |
 | GET | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | **GO** |  |
-| POST | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | **PARTIAL** | code upper-cased/trimmed; super_admin must name the branch |
+| POST | `/api/v1/promo/vouchers` | session | admin, agen, super_admin | **GO** | code upper-cased/trimmed; super_admin must name the branch |
 | DELETE | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | **GO** |  |
 | PATCH | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | **GO** |  |
 
@@ -516,7 +516,7 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/stock/adjust` | session | admin, agen | **PARTIAL** | 403 for every caller in warehouse-authoritative mode (the default) — identical to the reference; deviation register D-3 |
+| POST | `/api/v1/stock/adjust` | session | admin, agen | **GO** | 403 for every caller in warehouse-authoritative mode (the default) — identical to the reference; deviation register D-3 |
 | GET | `/api/v1/stock/products` | session | admin, agen, gudang, super_admin | **GO** |  |
 | GET | `/api/v1/stock/variations` | session | admin, agen, gudang, super_admin | **GO** |  |
 
@@ -526,7 +526,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/sub-stock/my` | session | sales-kurir-sub | **PARTIAL** | reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint) |
 | GET | `/api/v1/sub-stock/replenishment-targets` | session | sales-kurir-sub | **GO** |  |
-| GET | `/api/v1/sub-stock/requests` | session | admin, agen, gudang, sales-kurir-sub | **PARTIAL** | list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported |
+| GET | `/api/v1/sub-stock/requests` | session | admin, agen, gudang, sales-kurir-sub | **GO** | list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported |
 | POST | `/api/v1/sub-stock/requests` | session | sales-kurir-sub | LARAVEL |  |
 | GET | `/api/v1/sub-stock/requests/{subStockRequest}` | session | admin, agen, gudang, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/sub-stock/requests/{subStockRequest}/approve` | session | admin | LARAVEL |  |
@@ -552,7 +552,7 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **PARTIAL** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
+| GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **GO** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
 ## Inventory — warehouse — `warehouse` (28/49 in Go)
 
@@ -568,43 +568,43 @@ Status legend:
 | GET | `/api/v1/warehouse/opnames` | session | admin, agen, gudang, super_admin | **GO** |  |
 | POST | `/api/v1/warehouse/opnames` | session | gudang | **PARTIAL** | snapshots system_quantity + stock id + physical revision per target |
 | GET | `/api/v1/warehouse/opnames/{opname}` | session | admin, agen, gudang, super_admin | **GO** |  |
-| POST | `/api/v1/warehouse/opnames/{opname}/approve` | session | admin | **PARTIAL** | writes the correction; 409 when the stock changed after counting (quantity OR revision); idempotent |
+| POST | `/api/v1/warehouse/opnames/{opname}/approve` | session | admin | **GO** | writes the correction; 409 when the stock changed after counting (quantity OR revision); idempotent |
 | POST | `/api/v1/warehouse/opnames/{opname}/cancel` | session | gudang | **GO** |  |
 | PATCH | `/api/v1/warehouse/opnames/{opname}/count` | session | gudang | **GO** |  |
 | POST | `/api/v1/warehouse/opnames/{opname}/reject` | session | admin | **GO** |  |
-| POST | `/api/v1/warehouse/opnames/{opname}/submit` | session | gudang | **PARTIAL** | refuses while any item is uncounted |
+| POST | `/api/v1/warehouse/opnames/{opname}/submit` | session | gudang | **GO** | refuses while any item is uncounted |
 | GET | `/api/v1/warehouse/orders/diproses` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/orders/{order}/stock-request` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/returns` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/returns/{item}/finalize` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/returns/{item}/inspect` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | **PARTIAL** | Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence) |
-| GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | **PARTIAL** | reproduces Laravel's firstOrCreate side effect (a GET may create the row) |
+| GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | **GO** | Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence) |
+| GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | **GO** | reproduces Laravel's firstOrCreate side effect (a GET may create the row) |
 | PATCH | `/api/v1/warehouse/settings/factory-plan` | session | admin | **GO** |  |
 | GET | `/api/v1/warehouse/stock-addition-requests` | session | admin, gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}` | session | admin, gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject` | session | admin | LARAVEL |  |
-| GET | `/api/v1/warehouse/stock-cards` | session | admin, gudang | **PARTIAL** | reads warehouse buckets only (no legacy fallback) — same asymmetry as the reference |
+| GET | `/api/v1/warehouse/stock-cards` | session | admin, gudang | **GO** | reads warehouse buckets only (no legacy fallback) — same asymmetry as the reference |
 | POST | `/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/fulfill` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/proposals` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/sub-adjustment-requests` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/sub-locations` | session | admin, agen, gudang, super_admin | **GO** |  |
-| POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | **PARTIAL** | owner must be an active Sales-Kurir-Sub of the network that owns no other location |
-| GET | `/api/v1/warehouse/sub-locations/eligible-owners` | session | admin, agen | **PARTIAL** | active Sales-Kurir-Sub without a sub-location |
+| POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | **GO** | owner must be an active Sales-Kurir-Sub of the network that owns no other location |
+| GET | `/api/v1/warehouse/sub-locations/eligible-owners` | session | admin, agen | **GO** | active Sales-Kurir-Sub without a sub-location |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang, super_admin | **GO** |  |
 | PATCH | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang | **GO** |  |
-| POST | `/api/v1/warehouse/sub-locations/{subLocation}/assign-owner` | session | admin, agen | **PARTIAL** | unowned + active only; owner row locked before the location on create |
-| POST | `/api/v1/warehouse/sub-locations/{subLocation}/deactivate` | session | admin, agen, gudang | **PARTIAL** | refused while physical stock remains; releases the owner and remembers them in previous_owner_user_id |
+| POST | `/api/v1/warehouse/sub-locations/{subLocation}/assign-owner` | session | admin, agen | **GO** | unowned + active only; owner row locked before the location on create |
+| POST | `/api/v1/warehouse/sub-locations/{subLocation}/deactivate` | session | admin, agen, gudang | **GO** | refused while physical stock remains; releases the owner and remembers them in previous_owner_user_id |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}/stock-cards` | session | admin, gudang | **GO** |  |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}/stocks` | session | admin, agen, gudang, super_admin | **GO** |  |
 | GET | `/api/v1/warehouse/transfers` | session | admin, agen, gudang, super_admin | **GO** |  |
-| POST | `/api/v1/warehouse/transfers` | session | gudang | **PARTIAL** | physical buckets only; factory_plan needs /transfers/plan-to-transit (not ported) |
-| POST | `/api/v1/warehouse/transfers/plan-to-transit` | session | gudang | **PARTIAL** | requires the factory plan to be enabled |
+| POST | `/api/v1/warehouse/transfers` | session | gudang | **GO** | physical buckets only; factory_plan needs /transfers/plan-to-transit (not ported) |
+| POST | `/api/v1/warehouse/transfers/plan-to-transit` | session | gudang | **GO** | requires the factory plan to be enabled |
 | GET | `/api/v1/warehouse/transfers/{transfer}` | session | admin, agen, gudang, super_admin | **GO** |  |
-| POST | `/api/v1/warehouse/transfers/{transfer}/approve` | session | admin | **PARTIAL** | executes + writes the handover; canonical lock order preserved, verified by two-connection tests |
+| POST | `/api/v1/warehouse/transfers/{transfer}/approve` | session | admin | **GO** | executes + writes the handover; canonical lock order preserved, verified by two-connection tests |
 | POST | `/api/v1/warehouse/transfers/{transfer}/cancel` | session | gudang | **GO** |  |
 | POST | `/api/v1/warehouse/transfers/{transfer}/reject` | session | admin | **GO** |  |
 
@@ -613,6 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now (incl. partial) | 74 (19.7%) |
-| Still Laravel-only | 301 |
-| Areas fully ported | 6 / 45 |
+| Served by Go now | 75 (20.0%) |
+|   of which fully GO | 69 |
+|   of which PARTIAL (incomplete behaviour) | 6 |
+| Still Laravel-only | 300 |
+| Areas fully ported | 11 / 45 |

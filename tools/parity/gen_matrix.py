@@ -38,6 +38,8 @@ IMPLEMENTED = {
     ("GET", "/api/v1/articles/{slug}"): "",
     ("GET", "/api/v1/pages/{slug}"): "",
     ("GET", "/api/v1/homepage"): "\"bestseller\" block returns [] for anonymous visitors (identical to the reference); authenticated ranking not ported",
+    # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
+    ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     # --- checkpoint G: inventory read surface (contract-compared in tools/parity/compare_inventory.py)
     ("GET", "/api/v1/stock/products"): "",
     ("GET", "/api/v1/stock/variations"): "",
@@ -99,6 +101,21 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/addresses/{address}"): "promotes the default correctly where the reference leaves none (deviation D-9)",
     ("DELETE", "/api/v1/addresses/{address}"): "a foreign id is a 404",
     ("POST", "/api/v1/warehouse/sub-locations/{subLocation}/deactivate"): "refused while physical stock remains; releases the owner and remembers them in previous_owner_user_id",
+}
+
+
+# Routes whose OWN behaviour is incomplete. This is deliberately a separate, explicit set: a Notes entry alone
+# (e.g. "admin listing: every language, active or not") documents a COST or a deviation, not a gap — marking
+# every annotated route PARTIAL made the status column meaningless and produced two different published counts
+# (the matrix said 31 PARTIAL while the execution state said 6). Anything here must name the missing behaviour
+# in its note.
+GAPS = {
+    ("POST", "/api/v1/auth/register"),        # welcome e-mail / WA notification (queue bridge) not emitted
+    ("GET", "/api/v1/homepage"),              # authenticated bestseller ranking not ported
+    ("GET", "/api/v1/products"),              # authenticated agent/Sub stock availability not ported
+    ("GET", "/api/v1/products/{slug}"),       # same
+    ("GET", "/api/v1/sub-stock/my"),          # `reserved` not yet derived from order_items
+    ("POST", "/api/v1/warehouse/opnames"),    # pending_catalog_change publication not triggered
 }
 
 AREA_TITLES = OrderedDict([
@@ -168,7 +185,8 @@ def main():
           "`tools/parity/gen_matrix.py`. **Do not edit by hand.**\n")
     print("Status legend:\n")
     print("- **GO** — served by the Go service, contract-compared against Laravel (`tools/parity/compare_*.py`).")
-    print("- **PARTIAL** — served, with a documented behavioural gap in the Notes column.")
+    print("- **PARTIAL** — served, but the route's own behaviour is still incomplete (see the note). A note "
+          "alone does NOT make a route partial: informational notes and documented deviations stay **GO**.")
     print("- **LARAVEL** — still served by Laravel only; the Go service answers `501 not_implemented`.\n")
 
     for area, items in by_area.items():
@@ -183,7 +201,7 @@ def main():
             key = (r["method"], r["uri"])
             if key in IMPLEMENTED:
                 note = IMPLEMENTED[key]
-                status = "**PARTIAL**" if note else "**GO**"
+                status = "**PARTIAL**" if key in GAPS else "**GO**"
             else:
                 note = ""
                 status = "LARAVEL"
@@ -196,10 +214,13 @@ def main():
     print("## Totals\n")
     print(f"| Metric | Value |\n|---|---|")
     print(f"| Laravel `/api/v1` routes on this baseline | {total} |")
-    print(f"| Served by Go now (incl. partial) | {implemented} ({pct:.1f}%) |")
+    partially = sum(1 for k in GAPS if k in IMPLEMENTED)
+    print(f"| Served by Go now | {implemented} ({pct:.1f}%) |")
+    print(f"|   of which fully GO | {implemented - partially} |")
+    print(f"|   of which PARTIAL (incomplete behaviour) | {partially} |")
     print(f"| Still Laravel-only | {total - implemented} |")
     print(f"| Areas fully ported | "
-          f"{sum(1 for a, i in by_area.items() if all((r['method'], r['uri']) in IMPLEMENTED and not IMPLEMENTED[(r['method'], r['uri'])] for r in i))}"
+          f"{sum(1 for a, i in by_area.items() if all((r['method'], r['uri']) in IMPLEMENTED for r in i))}"
           f" / {len(by_area)} |")
 
 

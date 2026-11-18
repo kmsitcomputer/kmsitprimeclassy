@@ -104,6 +104,9 @@ func (s *Server) routes() {
 
 	// Public catalog and content.
 	s.mux.HandleFunc("GET /api/v1/categories", s.handleCategories)
+	// Checkout wizard contract. Public (a guest starting checkout still needs the step list); the session, when
+	// present, makes the same response role-aware.
+	s.mux.HandleFunc("GET /api/v1/checkout/steps", s.handleCheckoutSteps)
 	s.mux.HandleFunc("GET /api/v1/products", s.handleProducts)
 	s.mux.HandleFunc("GET /api/v1/products/{slug}", s.handleProductDetail)
 	s.mux.HandleFunc("GET /api/v1/homepage", s.handleHomepage)
