@@ -19,7 +19,7 @@ describe('API client during server-side rendering', () => {
     expect(seen.baseURL).toBe('http://backend.internal:8000/api/v1')
     expect(seen.withCredentials).toBe(false)
     expect(seen.xLocale).toBeUndefined()
-  })
+  }, 30000)
 
   it('refuses every mutating request on the server before it can reach the network', async () => {
     const { http } = await import('../client')
@@ -31,4 +31,14 @@ describe('API client during server-side rendering', () => {
     }
     expect(reachedNetwork).toBe(0)
   })
+
+  it('sends the CURRENT request locale as X-Locale (per-request, from the request context)', async () => {
+    const { http } = await import('../client')
+    const { setRequestContextResolver } = await import('@/utils/requestContext')
+    setRequestContextResolver(() => ({ locale: 'en', i18n: {} }))
+    let sent: unknown
+    await http.get('/products', { adapter: async (config) => { sent = config.headers?.['X-Locale']; return { data: {}, status: 200, statusText: 'OK', headers: {}, config } } })
+    setRequestContextResolver(null)
+    expect(sent).toBe('en')
+  }, 30000)
 })

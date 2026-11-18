@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstallStore } from '@/stores/install'
 import { captureReferralFromQuery } from '@/utils/referral'
+import { useLocaleStore } from '@/stores/locale'
+import { isSupportedLocale } from '@/i18n'
 import { routes } from './routes'
 
 const router = createRouter({
@@ -17,6 +19,14 @@ router.beforeEach(async (to) => {
   // agent's storefront link, etc.) — not just /register?ref= — so it
   // survives browsing before the visitor actually registers.
   captureReferralFromQuery(to.query)
+
+  // IMP-009: language variants of public pages are addressed as `?lang=<code>` (hreflang/canonical URLs the Nuxt
+  // storefront publishes). The SPA honours the same parameter so those URLs keep working if Nuxt is rolled back.
+  const requestedLang = Array.isArray(to.query.lang) ? to.query.lang[0] : to.query.lang
+  if (isSupportedLocale(requestedLang)) {
+    const locale = useLocaleStore()
+    if (locale.locale !== requestedLang) locale.setLocale(requestedLang)
+  }
 
   const install = useInstallStore()
   if (!install.checked) {

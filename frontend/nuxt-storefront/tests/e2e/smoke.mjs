@@ -1,6 +1,9 @@
 const B = 'http://127.0.0.1:3000'
 const out = []
 const check = (name, ok, detail = '') => { out.push(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`) }
+// The mock log is cumulative: clear it so the SSR-only assertions below see ONLY this run's traffic
+// (browser runs legitimately send the pc-locale cookie and call /auth/me from the client).
+await fetch('http://127.0.0.1:8001/__clear').catch(() => {})
 async function get(path, headers = {}) { const r = await fetch(B + path, { headers, redirect: 'manual' }); return { r, t: await r.text() } }
 const pages = [
   ['/', 200], ['/products', 200], ['/products?category=kue', 200], ['/products/red-velvet', 200], ['/categories', 200],

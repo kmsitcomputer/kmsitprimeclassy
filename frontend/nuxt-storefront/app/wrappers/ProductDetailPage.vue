@@ -17,12 +17,11 @@ const prices = product
   : []
 const image = product?.images?.find((i) => i.is_primary)?.url ?? product?.images?.[0]?.url ?? null
 
-useSeo({
-  title: product ? `${product.name} — Prime Classy` : 'Produk tidak ditemukan — Prime Classy',
+useSeo(() => ({
+  title: product ? `${product.name} — Prime Classy` : 'Prime Classy',
   description: product ? product.short_description || stripHtml(product.description) : null,
   path: `/products/${props.slug}`,
   image,
-  ogType: 'product',
   notFound: !product,
   jsonLd: product
     ? {
@@ -46,7 +45,7 @@ useSeo({
           : {}),
       }
     : undefined,
-})
+}))
 </script>
 
 <template><ProductDetailView :slug="slug" /></template>

@@ -122,5 +122,8 @@ export default defineNuxtConfig({
     },
   },
 
+  // Lets request-scoped helpers (per-request locale/i18n) work across `await` on the server.
+  experimental: { asyncContext: true },
+
   typescript: { strict: true },
 })

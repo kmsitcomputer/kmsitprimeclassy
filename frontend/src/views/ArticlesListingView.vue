@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onServerPrefetch } from 'vue'
+import { ref, onMounted, onServerPrefetch, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import { listArticles } from '@/api/cms'
 import type { Article } from '@/api/cmsContent'
@@ -7,16 +8,22 @@ import { listLanguages, type Language } from '@/api/languages'
 import { useLocaleStore } from '@/stores/locale'
 import { pickTranslation } from '@/utils/i18nContent'
 import { useSsrData } from '@/utils/ssrData'
+import { articlesKey, fetchArticlesPageSeed, type ArticlesPageSeed } from '@/utils/ssrLoaders'
 
 const locale = useLocaleStore()
-// Nuxt storefront SSR seam (no-op in the SPA): only the first page is server-rendered.
+const route = useRoute()
+const router = useRouter()
+/** The page lives in the URL (`?page=N`) so every result page can be loaded, shared and crawled directly. */
+const pageFromRoute = () => Math.max(1, Number(Array.isArray(route.query.page) ? route.query.page[0] : route.query.page) || 1)
+const initialPage = pageFromRoute()
+
+// Nuxt storefront SSR seam (no-op in the SPA): the requested page is server-rendered.
 const ssr = useSsrData()
-type FirstPage = { items: Article[]; currentPage: number; lastPage: number; languages: Language[] }
-const seeded = ssr.get<FirstPage>('articles:1')
+const seeded = ssr.get<ArticlesPageSeed>(articlesKey(initialPage))
 const articles = ref<Article[]>(seeded?.items ?? [])
 const languages = ref<Language[]>(seeded?.languages ?? [])
 const loading = ref(!seeded)
-const currentPage = ref(seeded?.currentPage ?? 1)
+const currentPage = ref(seeded?.currentPage ?? initialPage)
 const lastPage = ref(seeded?.lastPage ?? 1)
 
 async function load(page = 1) {
@@ -31,10 +38,7 @@ async function load(page = 1) {
 
 onServerPrefetch(async () => {
   try {
-    const first = await ssr.load<FirstPage>('articles:1', async () => {
-      const [result, languageList] = await Promise.all([listArticles({ page: 1 }), listLanguages()])
-      return { items: result.items, currentPage: result.currentPage, lastPage: result.lastPage, languages: languageList }
-    })
+    const first = await ssr.load<ArticlesPageSeed>(articlesKey(initialPage), () => fetchArticlesPageSeed(initialPage))
     articles.value = first.items
     currentPage.value = first.currentPage
     lastPage.value = first.lastPage
@@ -45,8 +49,24 @@ onServerPrefetch(async () => {
 })
 
 onMounted(() => {
-  if (!seeded) load()
+  if (!seeded) load(pageFromRoute())
 })
+
+function pageLocation(page: number) {
+  const { page: _drop, ...rest } = route.query
+  return { query: { ...rest, ...(page > 1 ? { page: String(page) } : {}) } }
+}
+/** Real, crawlable URL of a result page; clicking still navigates in-app (the route change below drives the load). */
+function pageHref(page: number): string {
+  return router.resolve?.(pageLocation(page))?.href ?? '#'
+}
+function goTo(page: number) {
+  router.push(pageLocation(page))
+}
+watch(
+  () => route.query.page,
+  () => load(pageFromRoute()),
+)
 </script>
 
 <template>
@@ -83,23 +103,27 @@ onMounted(() => {
       </div>
 
       <div v-if="lastPage > 1" class="mt-6 flex items-center justify-center gap-2 text-sm">
-        <button
-          type="button"
-          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
-          :disabled="currentPage <= 1"
-          @click="load(currentPage - 1)"
+        <a
+          v-if="currentPage > 1"
+          :href="pageHref(currentPage - 1)"
+          rel="prev"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 dark:border-stone-700"
+          @click.prevent="goTo(currentPage - 1)"
         >
           Sebelumnya
-        </button>
+        </a>
+        <span v-else class="rounded-lg border border-stone-200 px-3 py-1.5 opacity-40 dark:border-stone-700">Sebelumnya</span>
         <span class="text-stone-500">{{ currentPage }} / {{ lastPage }}</span>
-        <button
-          type="button"
-          class="rounded-lg border border-stone-200 px-3 py-1.5 disabled:opacity-40 dark:border-stone-700"
-          :disabled="currentPage >= lastPage"
-          @click="load(currentPage + 1)"
+        <a
+          v-if="currentPage < lastPage"
+          :href="pageHref(currentPage + 1)"
+          rel="next"
+          class="rounded-lg border border-stone-200 px-3 py-1.5 dark:border-stone-700"
+          @click.prevent="goTo(currentPage + 1)"
         >
           Berikutnya
-        </button>
+        </a>
+        <span v-else class="rounded-lg border border-stone-200 px-3 py-1.5 opacity-40 dark:border-stone-700">Berikutnya</span>
       </div>
     </div>
   </ShopLayout>

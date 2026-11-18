@@ -8,6 +8,9 @@ import { useWishlistStore } from '@/stores/wishlist'
 import { setupPwaInstallListeners } from '@/pwa/installPrompt'
 import { registerServiceWorker } from '@/pwa/registerServiceWorker'
 import { deferStorageHydration } from '@/utils/storageHydration'
+import { setLocaleUrlSync } from '@/utils/localeUrlSync'
+import { withLang } from '@/utils/localeSeo'
+import type { LocaleCode } from '@/i18n'
 
 /**
  * Browser start-up, run AFTER hydration (first Suspense resolve) so the first client render equals the server HTML (no mismatch):
@@ -26,9 +29,17 @@ export default defineNuxtPlugin((nuxtApp) => {
     const ui = useUiStore(pinia)
     ui.loadStoredTheme()
     ui.initTheme()
-    useLocaleStore(pinia).initLocale()
+    // An explicit `?lang=` on the entry URL wins over (and is persisted to) browser storage; otherwise adopt storage.
+    const localeState = useState<{ locale: never; fromQuery: boolean } | undefined>('pc-locale-state').value
+    useLocaleStore(pinia).initLocale(localeState?.fromQuery ? localeState.locale : undefined)
     useCartStore(pinia).hydrateFromStorage()
     useWishlistStore(pinia).hydrateFromStorage()
+
+    // Address bar follows the language switcher on the public (Nuxt-owned) pages: `?lang=<code>`, none for the default.
+    setLocaleUrlSync((code) => {
+      const { pathname, search, hash } = window.location
+      window.history.replaceState(window.history.state, '', `${withLang(`${pathname}${search}`, code as LocaleCode)}${hash}`)
+    })
 
     setupPwaInstallListeners()
     registerServiceWorker()

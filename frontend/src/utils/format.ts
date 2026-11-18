@@ -1,4 +1,4 @@
-import { i18n } from '@/i18n'
+import { currentI18n } from '@/i18n'
 
 export function formatRupiah(value: string | number): string {
   const num = typeof value === 'string' ? parseFloat(value) : value
@@ -30,7 +30,7 @@ export function formatDate(value: string | null | undefined): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '-'
-  const locale = INTL_LOCALES[i18n.global.locale.value] ?? 'id-ID'
+  const locale = INTL_LOCALES[currentI18n().global.locale.value] ?? 'id-ID'
   return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(date)
 }
 
@@ -43,7 +43,7 @@ export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '-'
-  const locale = INTL_LOCALES[i18n.global.locale.value] ?? 'id-ID'
+  const locale = INTL_LOCALES[currentI18n().global.locale.value] ?? 'id-ID'
   return new Intl.DateTimeFormat(locale, {
     day: 'numeric',
     month: 'long',
@@ -60,13 +60,13 @@ export function skuLabel(sku: string | null | undefined): string {
 
 export function orderStatusLabel(status: string): string {
   const key = `orders.status.${status}`
-  const translated = i18n.global.t(key)
+  const translated = currentI18n().global.t(key)
   return translated === key ? status : translated
 }
 
 export function paymentStatusLabel(status: string): string {
   const key = `orders.paymentStatus.${status}`
-  const translated = i18n.global.t(key)
+  const translated = currentI18n().global.t(key)
   return translated === key ? status : translated
 }
 
@@ -96,5 +96,5 @@ export function paymentBadgeLabel(order: {
   payment_status?: string | null
   payment_summary?: { remaining_balance?: string | number | null } | null
 }): string {
-  return i18n.global.t(`orders.paymentBadge.${paymentBadgeState(order)}`)
+  return currentI18n().global.t(`orders.paymentBadge.${paymentBadgeState(order)}`)
 }

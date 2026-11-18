@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { ApiError } from '@/api/errors'
-import { i18n } from '@/i18n'
+import { currentI18n } from '@/i18n'
 
 /**
  * Centralized connectivity / mutation guard — the SINGLE authoritative
@@ -37,7 +37,7 @@ export class OfflineBlockedError extends ApiError {
 
 function resolveBlockedMessage(): string {
   try {
-    return i18n.global.t('pwa.mutationBlocked') as string
+    return currentI18n().global.t('pwa.mutationBlocked') as string
   } catch {
     return 'Tidak ada koneksi ke server. Operasi ini memerlukan koneksi — tidak ada perubahan yang dikirim.'
   }

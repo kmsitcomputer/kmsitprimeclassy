@@ -17,6 +17,7 @@ import { formatRupiah } from '@/utils/format'
 import { buildCategoryTree, categoryPath } from '@/utils/categoryTree'
 import type { Category, PaginationMeta, Product } from '@/api/types'
 import { useSsrData } from '@/utils/ssrData'
+import { fetchProductListingSeed, listingParamsFromQuery, productListingKey, type ProductListingSeed } from '@/utils/ssrLoaders'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -30,9 +31,8 @@ const loadGuard = createLatestRequestGuard()
 // Nuxt storefront SSR seam (no-op in the SPA): see utils/ssrData.ts. The server renders the ANONYMOUS
 // listing for the requested URL; a signed-in visitor re-fetches once their session is known.
 const ssr = useSsrData()
-type Seed = { products: Product[]; meta: PaginationMeta; categories: Category[] }
-const ssrKey = `products:${route.fullPath}`
-const seeded = ssr.get<Seed>(ssrKey)
+const ssrKey = productListingKey(route.query)
+const seeded = ssr.get<ProductListingSeed>(ssrKey)
 const products = ref<Product[]>(seeded?.products ?? [])
 const categories = ref<Category[]>(seeded?.categories ?? [])
 /** REM-06: the real parent→child hierarchy (any depth); nothing here ever re-parents or promotes a category. */
@@ -100,16 +100,11 @@ function pickCategory(slug: string) {
 }
 
 function listParams() {
-  return {
-    stock_source: stockSource.value,
-    search: filters.search || undefined,
-    category: filters.category || undefined,
-    sort: filters.sort as 'newest' | 'price_asc' | 'price_desc',
-    min_price: filters.minPrice ? Number(filters.minPrice) : undefined,
-    max_price: filters.maxPrice ? Number(filters.maxPrice) : undefined,
-    page: filters.page,
-    per_page: 12,
-  }
+  // One URL→API contract shared with the Nuxt SSR loader (utils/ssrLoaders.ts).
+  return listingParamsFromQuery(
+    { search: filters.search, category: filters.category, sort: filters.sort, min_price: filters.minPrice, max_price: filters.maxPrice, page: filters.page },
+    stockSource.value,
+  )
 }
 
 async function fetchProducts() {
@@ -132,17 +127,25 @@ async function fetchProducts() {
   }
 }
 
+function pageQuery(page: number) {
+  return {
+    ...(route.query.lang ? { lang: route.query.lang as string } : {}), // language variant of the URL survives filtering/paging
+    ...(filters.search ? { search: filters.search } : {}),
+    ...(filters.category ? { category: filters.category } : {}),
+    ...(filters.sort !== 'newest' ? { sort: filters.sort } : {}),
+    ...(filters.minPrice ? { min_price: filters.minPrice } : {}),
+    ...(filters.maxPrice ? { max_price: filters.maxPrice } : {}),
+    ...(page > 1 ? { page: String(page) } : {}),
+  }
+}
+
+/** Real, crawlable URL of a result page (the buttons below are anchors; clicking still navigates in-app). */
+function pageHref(page: number): string {
+  return router.resolve?.({ query: pageQuery(page) })?.href ?? '#'
+}
+
 function syncQuery() {
-  router.replace({
-    query: {
-      ...(filters.search ? { search: filters.search } : {}),
-      ...(filters.category ? { category: filters.category } : {}),
-      ...(filters.sort !== 'newest' ? { sort: filters.sort } : {}),
-      ...(filters.minPrice ? { min_price: filters.minPrice } : {}),
-      ...(filters.maxPrice ? { max_price: filters.maxPrice } : {}),
-      ...(filters.page > 1 ? { page: String(filters.page) } : {}),
-    },
-  })
+  router.replace({ query: pageQuery(filters.page) })
 }
 
 function applyFilters() {
@@ -174,10 +177,7 @@ watch(stockSource, () => { filters.page = 1; void fetchProducts() })
 
 onServerPrefetch(async () => {
   try {
-    const result = await ssr.load<Seed>(ssrKey, async () => {
-      const [cats, listed] = await Promise.all([listCategories(), listProducts(listParams())])
-      return { products: listed.products, meta: listed.meta, categories: cats }
-    })
+    const result = await ssr.load<ProductListingSeed>(ssrKey, () => fetchProductListingSeed(route.query))
     products.value = result.products
     meta.value = result.meta
     categories.value = result.categories
@@ -337,22 +337,42 @@ watch(
           </div>
 
           <div v-if="meta && meta.last_page > 1" class="mt-6 flex items-center justify-center gap-2">
-            <button
-              type="button"
-              class="grid h-10 w-10 place-items-center rounded-full border border-stone-300 disabled:opacity-40 dark:border-stone-600"
+            <a
+              v-if="meta.current_page > 1"
+              :href="pageHref(meta.current_page - 1)"
+              rel="prev"
+              class="grid h-10 w-10 place-items-center rounded-full border border-stone-300 dark:border-stone-600"
               :aria-label="t('common.previous')"
-              :disabled="meta.current_page <= 1"
-              @click="goToPage(meta.current_page - 1)"
+              @click.prevent="goToPage(meta.current_page - 1)"
+            >
+              <AppIcon name="chevron-left" :size="16" />
+            </a>
+            <button
+              v-else
+              type="button"
+              class="grid h-10 w-10 place-items-center rounded-full border border-stone-300 opacity-40 dark:border-stone-600"
+              :aria-label="t('common.previous')"
+              disabled
             >
               <AppIcon name="chevron-left" :size="16" />
             </button>
             <span class="text-sm text-stone-600 dark:text-stone-300">{{ meta.current_page }} / {{ meta.last_page }}</span>
-            <button
-              type="button"
-              class="grid h-10 w-10 place-items-center rounded-full border border-stone-300 disabled:opacity-40 dark:border-stone-600"
+            <a
+              v-if="meta.current_page < meta.last_page"
+              :href="pageHref(meta.current_page + 1)"
+              rel="next"
+              class="grid h-10 w-10 place-items-center rounded-full border border-stone-300 dark:border-stone-600"
               :aria-label="t('common.next')"
-              :disabled="meta.current_page >= meta.last_page"
-              @click="goToPage(meta.current_page + 1)"
+              @click.prevent="goToPage(meta.current_page + 1)"
+            >
+              <AppIcon name="chevron-right" :size="16" />
+            </a>
+            <button
+              v-else
+              type="button"
+              class="grid h-10 w-10 place-items-center rounded-full border border-stone-300 opacity-40 dark:border-stone-600"
+              :aria-label="t('common.next')"
+              disabled
             >
               <AppIcon name="chevron-right" :size="16" />
             </button>

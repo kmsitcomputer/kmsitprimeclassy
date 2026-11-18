@@ -30,7 +30,10 @@ await page.route('**/api/v1/**', async (route) => {
 await page.route('**/sanctum/**', (route) => route.fulfill({ status: 204, headers: { 'set-cookie': 'XSRF-TOKEN=t; Path=/' }, body: '' }))
 await page.goto(B + '/products/red-velvet', { waitUntil: 'networkidle' })
 await page.waitForTimeout(800)
-const hydrationWarn = consoleMsgs.filter((m) => /hydrat|mismatch/i.test(m))
+// Vue's hydration diagnostics always name hydration. Do NOT match a bare 'mismatch': Chromium emits an
+// unrelated, harmless preload warning ("cross-world service worker resource mismatch") when a service
+// worker controls the document in the production topology.
+const hydrationWarn = consoleMsgs.filter((m) => /hydrat/i.test(m))
 check('no hydration mismatch warnings (product page)', hydrationWarn.length === 0, hydrationWarn.slice(0, 2).join(' | '))
 check('no uncaught page errors', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '))
 check('product content visible', (await page.locator('body').innerText()).includes('Red Velvet'))
@@ -63,7 +66,7 @@ if (await spaLink.count()) {
   const handedOver = docRequests.slice(reqBefore).some((u) => u.endsWith(href))
   check(`link to SPA-owned ${href} triggers a full-page navigation (hand-off)`, handedOver, docRequests.slice(reqBefore).join(','))
 } else check('SPA-owned link present in header', false)
-check('no hydration warnings overall', consoleMsgs.filter((m) => /hydrat|mismatch/i.test(m)).length === 0)
+check('no hydration warnings overall', consoleMsgs.filter((m) => /hydrat/i.test(m)).length === 0)
 console.log(out.join('\n'))
 console.log(`\n${out.filter((l) => l.startsWith('PASS')).length} passed, ${out.filter((l) => l.startsWith('FAIL')).length} failed`)
 console.log('--- console (non-info), first 12:'); console.log(consoleMsgs.filter((m) => !m.startsWith('log') && !m.startsWith('info')).slice(0, 40).join('\n'))

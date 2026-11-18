@@ -1,15 +1,32 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onServerPrefetch } from 'vue'
 import { useRouter } from 'vue-router'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { listPublicAgents, type PublicAgentContact } from '@/api/agents'
+import { useSsrData } from '@/utils/ssrData'
+import { agentsKey, fetchAgentsSeed } from '@/utils/ssrLoaders'
 
 const router = useRouter()
 
 /** Public storefront "Cari Agen/Toko" directory — GET /agents, no auth required. */
-const agents = ref<PublicAgentContact[]>([])
-const loading = ref(true)
+// Nuxt storefront SSR seam (no-op in the SPA). The server renders ONLY name + address + map link of the first agents —
+// phone numbers and referral codes are never part of server-rendered/cached/indexed HTML (see ssrLoaders.fetchAgentsSeed);
+// the browser loads the complete directory right after hydration, exactly as the SPA always did.
+const ssr = useSsrData()
+const seeded = ssr.get<PublicAgentContact[]>(agentsKey)
+const agents = ref<PublicAgentContact[]>(seeded ?? [])
+const loading = ref(!seeded)
+
+onServerPrefetch(async () => {
+  try {
+    agents.value = await ssr.load(agentsKey, () => fetchAgentsSeed())
+  } catch {
+    agents.value = []
+  } finally {
+    loading.value = false
+  }
+})
 
 onMounted(async () => {
   agents.value = await listPublicAgents()

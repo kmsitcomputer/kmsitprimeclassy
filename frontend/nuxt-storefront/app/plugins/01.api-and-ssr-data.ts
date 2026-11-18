@@ -1,19 +1,9 @@
-import { configureServerApi } from '@/api/client'
 import { SSR_DATA, type SsrDataProvider, type SsrFailure } from '@/utils/ssrData'
-import { deferStorageHydration } from '@/utils/storageHydration'
 
 /**
- * 1. Server only: point the shared axios client at the internal Laravel origin (private runtime config).
- * 2. Provide the SSR data seam (see src/utils/ssrData.ts) backed by the Nuxt payload.
+ * Provide the SSR data seam (see src/utils/ssrData.ts) backed by the Nuxt payload.
  */
 export default defineNuxtPlugin((nuxtApp) => {
-  // Stores must start from server-identical defaults on BOTH sides; the client adopts browser storage after
-  // hydration (plugins/90.client-init.client.ts).
-  deferStorageHydration(true)
-  if (import.meta.server) {
-    configureServerApi(String(useRuntimeConfig().apiInternalBase))
-  }
-
   // Per-request (plugin runs once per request on the server) — nothing here is shared between visitors.
   const inflight = new Map<string, Promise<unknown>>()
   const failures = new Map<string, unknown>() // original error objects (server only, never serialized)
@@ -34,7 +24,11 @@ export default defineNuxtPlugin((nuxtApp) => {
       if (data[key] !== undefined) return Promise.resolve(data[key] as T)
       let pending = inflight.get(key) as Promise<T> | undefined
       if (!pending) {
-        pending = fetcher()
+        // On the server the fetcher may be started from Vue's `onServerPrefetch`, which runs OUTSIDE Nuxt's
+        // request context. Enter it explicitly, so an API call made here still resolves the request locale
+        // (X-Locale, per-request i18n) instead of silently falling back to process-wide defaults.
+        const scopedFetcher = import.meta.server ? () => nuxtApp.runWithContext(fetcher) : fetcher
+        pending = scopedFetcher()
           .then((value) => {
             data[key] = value
             return value

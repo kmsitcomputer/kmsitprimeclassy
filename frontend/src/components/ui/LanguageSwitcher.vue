@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useLocaleStore } from '@/stores/locale'
 import { SUPPORTED_LOCALES, type LocaleCode } from '@/i18n'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import { syncLocaleUrl } from '@/utils/localeUrlSync'
 
 const { t } = useI18n()
 const locale = useLocaleStore()
@@ -12,6 +13,7 @@ const rootEl = ref<HTMLDivElement | null>(null)
 
 function choose(code: LocaleCode) {
   locale.setLocale(code)
+  syncLocaleUrl(code)
   open.value = false
 }
 

@@ -5,6 +5,7 @@ import {
   reportNetworkSuccess,
 } from '@/pwa/connectivity'
 import { ApiError } from './errors'
+import { currentRequestContext } from '@/utils/requestContext'
 
 // Backward compatibility: ApiError historically lived in this module and is
 // imported from '@/api/client' across views and api modules. It now lives in
@@ -93,6 +94,9 @@ http.interceptors.request.use((config) => {
     }
     config.baseURL = `${resolveApiUrl()}/api/v1`
     config.withCredentials = false
+    // Language of THIS request (resolved per request in the Nuxt plugin), so backend-localised strings match the page.
+    const requestLocale = currentRequestContext()?.locale
+    if (requestLocale) config.headers['X-Locale'] = requestLocale
     return config
   }
   let locale: string | null = null
