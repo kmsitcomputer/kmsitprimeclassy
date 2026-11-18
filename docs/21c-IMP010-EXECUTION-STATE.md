@@ -281,6 +281,19 @@ Other traps confirmed here:
 - A `sub_adjustment` delta may be negative but is refused when it would drop physical below the ACTIVE Sub
   reservations; a `factory_plan` change is refused when `transit + plan` would fall below reserved.
 
+## 4b. Security invariants — re-verified after every checkpoint
+
+Check these after adding routes; each is cheap and each has caught a real defect:
+
+| Invariant | How to check |
+|---|---|
+| Registered ⇒ implemented | `go test ./internal/api/ -run TestEveryRegisteredRouteIsImplemented`. A route the mux serves but `implementsRoute` denies skips CSRF and undercounts the matrix. |
+| CSRF on every state-changing route | `curl -s -o /dev/null -w "%{http_code}" -X POST <url> -H 'Content-Type: application/json' -d '{}'` must answer **419**. Verified for all `/checkout/*`, `/orders` and the six stock-request routes. |
+| Tenant isolation | every query is `agent_id`-scoped from the SESSION, never from a query parameter (except super_admin reads that require an explicit `agent_id`). A foreign id must answer 404, not 403. |
+| SSRF | `KMSIT_TRUSTED_HOSTS` is the only allow-list; the vetted IP is pinned through a custom dialer. `internal/shipping/quote_test.go` proves a loopback endpoint is refused. |
+| Secrets | provider/bank credentials are READ from Laravel's `encrypted:array` payloads with `APP_KEY`; Go never writes a new encrypted format. `activity_logs.properties` are redacted. |
+| No weakening for parity | a divergence is recorded in `docs/21b` as a deviation; the check is never removed to make a comparison pass. |
+
 ## 4a. Next action (resume here)
 
 **A. Stock-request proposals / handovers** (the remaining ~14 routes of this family):
