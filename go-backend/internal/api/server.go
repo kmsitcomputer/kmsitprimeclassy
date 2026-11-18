@@ -150,6 +150,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/warehouse/transfers/plan-to-transit", chain(http.HandlerFunc(s.handlePlanTransferStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
 	s.mux.Handle("GET /api/v1/warehouse/sub-locations/eligible-owners", chain(http.HandlerFunc(s.handleEligibleOwners), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin")))
 
+	// Sub-location ownership (create/assign/deactivate are agen/admin; update also allows gudang).
+	s.mux.Handle("POST /api/v1/warehouse/sub-locations", chain(http.HandlerFunc(s.handleSubLocationStore), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin")))
+	s.mux.Handle("PATCH /api/v1/warehouse/sub-locations/{subLocation}", chain(http.HandlerFunc(s.handleSubLocationUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin,gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/sub-locations/{subLocation}/assign-owner", chain(http.HandlerFunc(s.handleSubLocationAssignOwner), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin")))
+	s.mux.Handle("POST /api/v1/warehouse/sub-locations/{subLocation}/deactivate", chain(http.HandlerFunc(s.handleSubLocationDeactivate), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin,gudang")))
+
 	// Stock opname (Gudang drafts/counts/submits, Admin approves).
 	s.mux.Handle("GET /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameIndex), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
 	s.mux.Handle("POST /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))

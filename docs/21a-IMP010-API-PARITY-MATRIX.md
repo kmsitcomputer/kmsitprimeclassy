@@ -554,7 +554,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **PARTIAL** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (24/49 in Go)
+## Inventory — warehouse — `warehouse` (28/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -592,12 +592,12 @@ Status legend:
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/proposals` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/sub-adjustment-requests` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/sub-locations` | session | admin, agen, gudang, super_admin | **GO** |  |
-| POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | LARAVEL |  |
+| POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | **PARTIAL** | owner must be an active Sales-Kurir-Sub of the network that owns no other location |
 | GET | `/api/v1/warehouse/sub-locations/eligible-owners` | session | admin, agen | **PARTIAL** | active Sales-Kurir-Sub without a sub-location |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang, super_admin | **GO** |  |
-| PATCH | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/sub-locations/{subLocation}/assign-owner` | session | admin, agen | LARAVEL |  |
-| POST | `/api/v1/warehouse/sub-locations/{subLocation}/deactivate` | session | admin, agen, gudang | LARAVEL |  |
+| PATCH | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang | **GO** |  |
+| POST | `/api/v1/warehouse/sub-locations/{subLocation}/assign-owner` | session | admin, agen | **PARTIAL** | unowned + active only; owner row locked before the location on create |
+| POST | `/api/v1/warehouse/sub-locations/{subLocation}/deactivate` | session | admin, agen, gudang | **PARTIAL** | refused while physical stock remains; releases the owner and remembers them in previous_owner_user_id |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}/stock-cards` | session | admin, gudang | **GO** |  |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}/stocks` | session | admin, agen, gudang, super_admin | **GO** |  |
 | GET | `/api/v1/warehouse/transfers` | session | admin, agen, gudang, super_admin | **GO** |  |
@@ -613,6 +613,6 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now (incl. partial) | 58 (15.5%) |
-| Still Laravel-only | 317 |
+| Served by Go now (incl. partial) | 62 (16.5%) |
+| Still Laravel-only | 313 |
 | Areas fully ported | 6 / 45 |

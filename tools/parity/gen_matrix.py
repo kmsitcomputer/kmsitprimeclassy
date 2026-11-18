@@ -80,6 +80,11 @@ IMPLEMENTED = {
     ("POST", "/api/v1/warehouse/opnames/{opname}/approve"): "writes the correction; 409 when the stock changed after counting (quantity OR revision); idempotent",
     ("POST", "/api/v1/warehouse/opnames/{opname}/cancel"): "",
     ("POST", "/api/v1/warehouse/opnames/{opname}/reject"): "",
+    # --- checkpoint K: sub-location ownership
+    ("POST", "/api/v1/warehouse/sub-locations"): "owner must be an active Sales-Kurir-Sub of the network that owns no other location",
+    ("PATCH", "/api/v1/warehouse/sub-locations/{subLocation}"): "",
+    ("POST", "/api/v1/warehouse/sub-locations/{subLocation}/assign-owner"): "unowned + active only; owner row locked before the location on create",
+    ("POST", "/api/v1/warehouse/sub-locations/{subLocation}/deactivate"): "refused while physical stock remains; releases the owner and remembers them in previous_owner_user_id",
 }
 
 AREA_TITLES = OrderedDict([

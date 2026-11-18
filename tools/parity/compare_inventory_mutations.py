@@ -377,6 +377,36 @@ def scenario_opname_guards(base):
     return steps
 
 
+def scenario_sublocation(base):
+    """Create (with eligible owner) -> update -> assign-owner on another unowned -> deactivate."""
+    agen = auth(base, "agen@imp010.test")
+    gudang = auth(base, "gudang@imp010.test")
+    steps = {}
+
+    # Sub-location 4 is unowned+active in the fixtures; 1 and 2 are owned.
+    steps["assign_owned"] = agen.call("POST", "/api/v1/warehouse/sub-locations/1/assign-owner",
+                                      {"owner_user_id": 16})
+    steps["assign_ineligible"] = agen.call("POST", "/api/v1/warehouse/sub-locations/4/assign-owner",
+                                           {"owner_user_id": 13})  # a konsumen
+    steps["assign_taken"] = agen.call("POST", "/api/v1/warehouse/sub-locations/4/assign-owner",
+                                      {"owner_user_id": 14})  # already owns location 2
+    steps["assign_ok"] = agen.call("POST", "/api/v1/warehouse/sub-locations/4/assign-owner",
+                                   {"owner_user_id": 16})
+    steps["assign_again"] = agen.call("POST", "/api/v1/warehouse/sub-locations/4/assign-owner",
+                                      {"owner_user_id": 16})
+    steps["deactivate_stocked"] = gudang.call("POST", "/api/v1/warehouse/sub-locations/1/deactivate")
+    steps["create_dup_code"] = agen.call("POST", "/api/v1/warehouse/sub-locations", {
+        "owner_user_id": 16, "code": "SUB-BDG-01", "name": "Dup"})
+    steps["create_ineligible"] = agen.call("POST", "/api/v1/warehouse/sub-locations", {
+        "owner_user_id": 13, "code": "SUB-NEW-01", "name": "Bad owner"})
+    steps["create_ok"] = agen.call("POST", "/api/v1/warehouse/sub-locations", {
+        "owner_user_id": 16, "code": "SUB-NEW-01", "name": "Sub Baru", "address": "Jl. Baru 1"})
+    steps["update"] = agen.call("PATCH", "/api/v1/warehouse/sub-locations/3", {"name": "Sub Bandung Tiga (v2)"})
+    steps["update_gudang"] = gudang.call("PATCH", "/api/v1/warehouse/sub-locations/3", {"contact_number": "081200000099"})
+    steps["deactivate_ok"] = agen.call("POST", "/api/v1/warehouse/sub-locations/3/deactivate")
+    return steps
+
+
 def compare_steps(label, lsteps, gsteps):
     for key in lsteps:
         if key not in gsteps:
@@ -461,6 +491,21 @@ def main():
     reseed(db, args.root)
     g5 = scenario_opname_guards(args.go)
     compare_steps("opname-guards", l5, g5)
+
+    # ---- sub location ownership ----------------------------------------------
+    reseed(db, args.root)
+    l6 = scenario_sublocation(args.laravel)
+    l6state = db.snapshot()
+    reseed(db, args.root)
+    g6 = scenario_sublocation(args.go)
+    g6state = db.snapshot()
+    compare_steps("sublocation", l6, g6)
+    # The owner columns are the contract: compare them explicitly.
+    lowners = db.q("SELECT id, owner_user_id, previous_owner_user_id, is_active, name FROM warehouse_sub_locations ORDER BY id")
+    reseed(db, args.root)
+    scenario_sublocation(args.go)
+    gowners = db.q("SELECT id, owner_user_id, previous_owner_user_id, is_active, name FROM warehouse_sub_locations ORDER BY id")
+    check("sublocation: owner/previous_owner/is_active state identical", lowners == gowners, f"{lowners} vs {gowners}")
 
     # ---- guards --------------------------------------------------------------
     reseed(db, args.root)

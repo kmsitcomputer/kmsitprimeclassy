@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -170,3 +171,6 @@ func strPtrVal(v string) *string { return &v }
 
 // nowStamp is the `YmdHis` form used by every generated document number.
 func nowStamp() string { return time.Now().UTC().Format("20060102150405") }
+
+// jsonMarshalBytes wraps encoding/json so callers stay readable.
+func jsonMarshalBytes(v any) ([]byte, error) { return json.Marshal(v) }

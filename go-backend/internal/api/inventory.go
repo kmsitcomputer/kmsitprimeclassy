@@ -123,7 +123,8 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/warehouse/transfers/plan-to-transit",
 		"GET /api/v1/warehouse/sub-locations/eligible-owners",
 		"GET /api/v1/warehouse/opnames",
-		"POST /api/v1/warehouse/opnames":
+		"POST /api/v1/warehouse/opnames",
+		"POST /api/v1/warehouse/sub-locations":
 		return true
 	}
 	// /api/v1/warehouse/opnames/<id> and /<id>/(count|submit|approve|cancel|reject).
@@ -168,16 +169,19 @@ func implementsRoute(method, path string) bool {
 		}
 		return false
 	}
-	// Deeper parameterised inventory reads: exactly `/api/v1/warehouse/sub-locations/<id>/<tail>`.
-	if method == http.MethodGet && strings.HasPrefix(path, "/api/v1/warehouse/sub-locations/") {
+	// Deeper parameterised inventory routes: `/api/v1/warehouse/sub-locations/<id>[/<tail>]`.
+	if (method == http.MethodGet || method == http.MethodPatch) && strings.HasPrefix(path, "/api/v1/warehouse/sub-locations/") {
 		rest := strings.TrimPrefix(path, "/api/v1/warehouse/sub-locations/")
 		parts := strings.Split(rest, "/")
 		if len(parts) == 1 && parts[0] != "" {
-			// `eligible-owners` is a REAL sibling route (a literal, not an id) that is NOT ported, so it must
-			// not be swallowed by the {subLocation} pattern here.
-			return parts[0] != "eligible-owners" // literal sibling, served by its own route
+			// `eligible-owners` is a literal sibling with its own route; it must not be swallowed by the
+			// {subLocation} pattern here.
+			return parts[0] != "eligible-owners"
 		}
 		if len(parts) == 2 && parts[0] != "" && (parts[1] == "stocks" || parts[1] == "stock-cards") {
+			return true
+		}
+		if len(parts) == 2 && (parts[1] == "assign-owner" || parts[1] == "deactivate") { // POST literals
 			return true
 		}
 		return false

@@ -44,15 +44,31 @@ func inventoryActor(u *auth.User) inventory.Actor {
 func writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	var de *inventory.DomainError
 	if errors.As(err, &de) {
-		var fields any
+		ctx := r.Context()
+		// A DomainError with fields carries a CUSTOM message plus field errors — that is exactly how Laravel's
+		// ApiException renderer behaves (ApiResponse::error($e->getMessage(), $e->errors() ...)). Only a genuine
+		// ValidationException uses the generic "submitted data is invalid" sentence, which here is marked by the
+		// message being empty or the literal "validation".
+		message := de.Message
+		if message == "" || message == "validation" {
+			message = msg(ctx, "system.validation_failed")
+		}
 		if len(de.Fields) > 0 {
 			payload := make(map[string][]string, len(de.Fields))
 			for k, v := range de.Fields {
-				payload[k] = []string{v}
+				switch v {
+				case "required":
+					payload[k] = requiredField(ctx, k)
+				case "unique":
+					payload[k] = uniqueField(ctx, k)
+				default:
+					payload[k] = []string{v}
+				}
 			}
-			fields = payload
+			httpx.Failure(w, de.Status, message, payload)
+			return
 		}
-		httpx.Failure(w, de.Status, de.Message, fields)
+		httpx.Failure(w, de.Status, message, nil)
 		return
 	}
 	if errors.Is(err, inventory.ErrNotFound) {
@@ -594,6 +610,159 @@ func (s *Server) handleOpnameReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row, err := inventory.RejectOpname(ctx, s.database, inventoryActor(u), id, body.Reason)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}
+
+// ---- sub location ownership ------------------------------------------------------------------------
+
+type subLocationPayload struct {
+	OwnerUserID   *int64  `json:"owner_user_id"`
+	Code          *string `json:"code"`
+	Name          *string `json:"name"`
+	Address       *string `json:"address"`
+	ContactNumber *string `json:"contact_number"`
+	Description   *string `json:"description"`
+}
+
+// handleSubLocationStore is POST /warehouse/sub-locations.
+func (s *Server) handleSubLocationStore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	var body subLocationPayload
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	if body.OwnerUserID == nil {
+		fields["owner_user_id"] = requiredField(ctx, "owner_user_id")
+	}
+	if body.Code == nil || *body.Code == "" {
+		fields["code"] = requiredField(ctx, "code")
+	} else if len(*body.Code) > 40 {
+		fields["code"] = maxString(ctx, "code", 40)
+	}
+	if body.Name == nil || *body.Name == "" {
+		fields["name"] = requiredField(ctx, "name")
+	} else if len(*body.Name) > 150 {
+		fields["name"] = maxString(ctx, "name", 150)
+	}
+	if body.Address != nil && len(*body.Address) > 255 {
+		fields["address"] = maxString(ctx, "address", 255)
+	}
+	if body.ContactNumber != nil && len(*body.ContactNumber) > 30 {
+		fields["contact_number"] = maxString(ctx, "contact_number", 30)
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	row, err := inventory.CreateSubLocation(ctx, s.database, inventoryActor(u), inventory.SubLocationInput{
+		Code: body.Code, Name: body.Name, Address: body.Address,
+		ContactNumber: body.ContactNumber, Description: body.Description,
+	}, *body.OwnerUserID)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.Created(w, row, "Created")
+}
+
+// handleSubLocationUpdate is PATCH /warehouse/sub-locations/{subLocation}.
+func (s *Server) handleSubLocationUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "subLocation")
+	if !ok {
+		return
+	}
+	var body subLocationPayload
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	if body.Code != nil && (len(*body.Code) == 0 || len(*body.Code) > 40) {
+		fields["code"] = maxString(ctx, "code", 40)
+	}
+	if body.Name != nil && (len(*body.Name) == 0 || len(*body.Name) > 150) {
+		fields["name"] = maxString(ctx, "name", 150)
+	}
+	if body.Address != nil && len(*body.Address) > 255 {
+		fields["address"] = maxString(ctx, "address", 255)
+	}
+	if body.ContactNumber != nil && len(*body.ContactNumber) > 30 {
+		fields["contact_number"] = maxString(ctx, "contact_number", 30)
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	row, err := inventory.UpdateSubLocation(ctx, s.database, inventoryActor(u), id, inventory.SubLocationInput{
+		Code: body.Code, Name: body.Name, Address: body.Address,
+		ContactNumber: body.ContactNumber, Description: body.Description,
+	})
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}
+
+// handleSubLocationAssignOwner is POST /warehouse/sub-locations/{subLocation}/assign-owner.
+func (s *Server) handleSubLocationAssignOwner(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "subLocation")
+	if !ok {
+		return
+	}
+	var body subLocationPayload
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if body.OwnerUserID == nil {
+		writeError(w, r, httpx.Validation(map[string][]string{"owner_user_id": requiredField(ctx, "owner_user_id")}))
+		return
+	}
+	row, err := inventory.AssignSubLocationOwner(ctx, s.database, inventoryActor(u), id, *body.OwnerUserID)
+	if err != nil {
+		writeDomainError(w, r, err)
+		return
+	}
+	httpx.OK(w, row, "OK", nil)
+}
+
+// handleSubLocationDeactivate is POST /warehouse/sub-locations/{subLocation}/deactivate.
+func (s *Server) handleSubLocationDeactivate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	if u == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	id, ok := pathID(w, r, "subLocation")
+	if !ok {
+		return
+	}
+	row, err := inventory.DeactivateSubLocation(ctx, s.database, inventoryActor(u), id)
 	if err != nil {
 		writeDomainError(w, r, err)
 		return
