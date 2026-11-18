@@ -355,14 +355,14 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 
-## Orders — `orders` (3/25 in Go)
+## Orders — `orders` (6/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/orders` | session | — | LARAVEL |  |
+| GET | `/api/v1/orders` | session | — | **GO** | role-scoped list; a kurir is refused; operational roles see the minimized projection; status/payment_status/search/region/delivery_date/paid filters |
 | POST | `/api/v1/orders` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | full chain: canonical target locks, reservation, fee/commission snapshots, voucher redemption, invoice sequence, shipment grouping, payment transaction, Stock Request (COD), initial report snapshot; idempotent replay and total rollback verified |
-| GET | `/api/v1/orders/regions` | session | — | LARAVEL |  |
-| GET | `/api/v1/orders/{order}` | session | — | LARAVEL |  |
+| GET | `/api/v1/orders/regions` | session | — | **GO** | region facets derived only from the caller's own scoped orders; each level empty until its parent is supplied |
+| GET | `/api/v1/orders/{order}` | session | — | **GO** | policy-gated detail (own buyer, branch roles, korsal/sales team + the reassigned-owner leg, gudang queue-only); loads payment_transaction + returns, which the list omits |
 | POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/cancel` | session | — | **GO** | konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction |
 | GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 102 (27.2%) |
-|   of which fully GO | 96 |
+| Served by Go now | 105 (28.0%) |
+|   of which fully GO | 99 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 273 |
+| Still Laravel-only | 270 |
 | Areas fully ported | 12 / 45 |

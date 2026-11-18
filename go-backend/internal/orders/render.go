@@ -120,11 +120,11 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		out[key] = value
 	}
 
-	// `viewer_can_download_invoice`: the capability is derived server-side (the order's own konsumen or a
-	// same-branch financial role) AND the invoice must be issued or eligible.
-	if viewer.hasRole("konsumen") || viewer.seesFinancials() {
-		out["viewer_can_download_invoice"] = order.InvoiceIssuedAt != nil || viewer.seesFinancials()
-	}
+	// `viewer_can_download_invoice`: present for every authenticated viewer; the value is the viewInvoice
+	// capability (own konsumen, or super_admin/agen/admin/keuangan/sales/korsal) AND the invoice is issued or
+	// eligible. An operational viewer (gudang) has view() but NOT viewInvoice, so the key renders false here.
+	out["viewer_can_download_invoice"] = (viewer.hasRole("konsumen") || viewer.seesFinancials()) &&
+		(order.InvoiceIssuedAt != nil || viewer.seesFinancials())
 
 	// `agent_id` is branch ROUTING data, exposed only to the courier-assignment roles.
 	if viewer.hasRole("super_admin", "agen", "admin", "koordinator-kurir") {
@@ -164,8 +164,13 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 			"type": order.PaymentMethod.Type,
 		}
 	}
-	if seesFinancials && order.Payment != nil {
+	if seesFinancials && order.LoadFinancialRelations && order.Payment != nil {
 		out["payment_transaction"] = renderPaymentTransaction(order.Payment)
+	}
+	// `returns`: the loaded returnRequests relation — present only on the SHOW controller (which loads it);
+	// the list omits the key entirely.
+	if order.LoadFinancialRelations {
+		out["returns"] = []any{}
 	}
 	return out, nil
 }
@@ -219,13 +224,23 @@ func renderItems(items []Item, viewer Viewer, withShipment bool) []any {
 	return out
 }
 
+// renderPaymentTransaction is PaymentTransactionResource::toArray for the show path (the two verification
+// relations are loaded-but-null for a fresh order, so both keys render null).
 func renderPaymentTransaction(p *PaymentTransaction) map[string]any {
+	instructions := p.Instructions
+	if instructions == nil {
+		instructions = map[string]any{}
+	}
 	return map[string]any{
-		"id":                p.ID,
-		"type":              p.Type,
-		"amount":            p.Amount,
-		"status":            p.Status,
-		"gateway_reference": nullableString(p.GatewayReference),
+		"id":                         p.ID,
+		"type":                       p.Type,
+		"amount":                     money.String(p.Amount),
+		"status":                     p.Status,
+		"gateway_reference":          nullableString(p.GatewayReference),
+		"instructions":               instructions,
+		"paid_at":                    nil,
+		"bank_transfer_verification": nil,
+		"cod_payment_proof":          nil,
 	}
 }
 

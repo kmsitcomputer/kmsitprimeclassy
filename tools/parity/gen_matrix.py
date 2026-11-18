@@ -41,6 +41,10 @@ IMPLEMENTED = {
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
+    # --- checkpoint W: order read surface (compare_orders_read.py, 11 checks)
+    ("GET", "/api/v1/orders"): "role-scoped list; a kurir is refused; operational roles see the minimized projection; status/payment_status/search/region/delivery_date/paid filters",
+    ("GET", "/api/v1/orders/regions"): "region facets derived only from the caller's own scoped orders; each level empty until its parent is supplied",
+    ("GET", "/api/v1/orders/{order}"): "policy-gated detail (own buyer, branch roles, korsal/sales team + the reassigned-owner leg, gudang queue-only); loads payment_transaction + returns, which the list omits",
     # --- checkpoint V: order lifecycle (compare_order_lifecycle.py, 10 checks)
     ("PATCH", "/api/v1/orders/{order}/status"): "super_admin/agen/admin bulk diproses→dikirim→terkirim; payment eligibility under the Order lock; Sub items never advance here; first handover stamps the basis",
     ("POST", "/api/v1/orders/{order}/cancel"): "konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction",

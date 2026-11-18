@@ -17,7 +17,7 @@ before touching code. Do not re-derive a completed checkpoint.
 | PARTIAL (incomplete behaviour) | 6 |
 | Laravel-only (Go answers 501) | **282** |
 | Go tests | **133 green** (incl. 6 media oracles), `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **375 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle) |
+| Cross-runtime comparison checks | **386 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle + 11 order read) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -374,13 +374,30 @@ Known gap (recorded, not silent): the Kurir Toko acceptance rule inside assertEx
 courier dispatch service (later checkpoint); the `dikirim` scenarios here use PICKUP orders, so the boundary is
 honest.
 
+## 4-9. Order read surface — DONE (do not re-derive)
+
+3 routes: `GET /orders`, `GET /orders/{order}`, `GET /orders/regions` (`internal/orders/read.go`,
+`internal/api/handlers_orders_read.go`).
+
+Role scoping is ONE nested group so no filter can widen it (the reference's own comment): konsumen own only,
+sales/sales-kurir-sub own sales + self + the IMP-004 reassigned-owner leg, korsal own team + symmetric leg, gudang
+warehouse-queue only (diproses, no courier/self-delivery), agen/admin/keuangan/koordinator their branch,
+super_admin all + optional agent_id. A kurir is refused the generic surface outright (their minimized courier
+surface is a separate route).
+
+R-04 / §C projection split: the RESOURCE gates the financial fields per viewer; the list/detail re-derive it from
+the session. `viewer_can_download_invoice` renders for every authenticated viewer (false for gudang, which has
+view() but not viewInvoice). The SHOW controller loads payment_transaction (latest by id) and returns; the INDEX
+omits both keys.
+
+Filters reproduced: status (canonical), payment_status (financial audience only — the reference REMOVES the
+param for operational roles), search (order_no/recipient with LIKE escaping), delivery_date, region ids, paid.
+
 ## 4a. Next action (resume here)
 
-**A. Order read surface** (`GET /orders`, `GET /orders/{order}`, `GET /orders/regions`) — the list/detail with
-role-scoped visibility (R-04: gudang/kurir see the operational projection only; the financial fields, payment
-summary and ledger stay gated). Then the item lifecycle: `GET /orders/{order}/items/{item}/cancel-eligibility`,
+**A. Item lifecycle** — `GET /orders/{order}/items/{item}/cancel-eligibility`,
 `POST /orders/{order}/items/{item}/cancel-undelivered`, `PATCH /orders/{order}/items/{item}/fulfillment`,
-`PATCH /orders/{order}/items/{item}/reschedule` — OrderFulfillmentService.
+`PATCH /orders/{order}/items/{item}/reschedule` (OrderFulfillmentService + OrderLineAdditionService).
 
 **B. Payments** (`internal/payments` not started): proofs, verification, COD, DP settlement, the
 latest-manual-transaction rule. These gate the `diproses` transition the lifecycle now enforces.
@@ -408,7 +425,7 @@ beyond the number allocation.
 `/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`;
 warehouse stock-addition-requests + sub-adjustment-requests (6); stock-request proposals (8) + the media
 pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal); handover show + print (2); the Sub stock-request
-workflow (7); order lifecycle status + cancel (2).
+workflow (7); order lifecycle status + cancel (2); order read surface (3).
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

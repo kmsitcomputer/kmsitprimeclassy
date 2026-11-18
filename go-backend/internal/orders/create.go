@@ -124,6 +124,9 @@ type Order struct {
 	// there. show()/cancel() load them. LoadItemShipment gates the item's delivery_mode/self_delivered_by_user_id.
 	LoadActors       bool
 	LoadItemShipment bool
+	// LoadFinancialRelations gates the payment_transaction + returns keys: the SHOW controller loads
+	// paymentTransactions and returnRequests, the INDEX does NOT (so those keys are absent from the list).
+	LoadFinancialRelations bool
 }
 
 // Item is one persisted order line.
@@ -183,6 +186,8 @@ type PaymentTransaction struct {
 	Amount           float64
 	Status           string
 	GatewayReference *string
+	// Instructions is the decoded raw_payload (the reference's `instructions` key).
+	Instructions map[string]any
 }
 
 // Problem is a domain failure with an API status.
