@@ -137,6 +137,29 @@ sentences through `requiredField`/`maxString`/`invalidChoice`/`unknownChoice`/`b
 literal text — or the two runtimes will diverge on the message. `address` shows the pattern to copy.
 4. Then Phase B (orders) exactly as ordered in §3.2.
 
+## 4b. Harness run order (important)
+
+`compare_inventory.py` reads the stock fixtures as-is, while `compare_inventory_mutations.py`,
+`compare_promo.py` and `compare_address.py` MUTATE their domain's rows. Run them in this order, or re-seed
+between them, otherwise the read-only comparison fails on drift that has nothing to do with either
+implementation:
+
+```bash
+# re-seed first
+for f in tools/parity/seed_test_fixtures.sql tools/parity/seed_inventory_fixtures.sql; do
+  docker exec -i primeclassy-mariadb sh -lc \
+    'mariadb -uprimeclassy_app -p"$(cat $MARIADB_PASSWORD_FILE)" primeclassy_testing' < $f
+done
+
+python3 tools/parity/compare_public_api.py          # 26
+python3 tools/parity/compare_auth.py                # 24
+python3 tools/parity/compare_inventory.py           # 29   (read-only: needs fresh fixtures)
+python3 tools/parity/compare_admin_config.py        # 17   (self-resets its own tables)
+python3 tools/parity/compare_address.py             # 17   (self-resets its own table)
+python3 tools/parity/compare_promo.py               # 21   (self-resets its own tables)
+python3 tools/parity/compare_inventory_mutations.py # 78   (self-reseeds before every scenario)
+```
+
 ## 5. How to resume (exact steps)
 
 ```bash
