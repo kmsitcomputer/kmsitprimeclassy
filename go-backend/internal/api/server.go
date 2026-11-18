@@ -135,6 +135,18 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/sub-stock/replenishment-targets", chain(http.HandlerFunc(s.handleSubStockReplenishment), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
 	s.mux.Handle("GET /api/v1/sub-stock/requests", chain(http.HandlerFunc(s.handleSubStockRequests), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub,agen,admin,gudang")))
 
+	// Inventory mutations (checkpoint H). Role gates mirror the Laravel route groups; the SERVICE re-checks
+	// the finer rule (gudang-only create/cancel, admin-only approve/reject) because the route group alone is
+	// broader than the policy.
+	s.mux.Handle("POST /api/v1/stock/adjust", chain(http.HandlerFunc(s.handleStockAdjust), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen")))
+	s.mux.Handle("PATCH /api/v1/warehouse/settings/factory-plan", chain(http.HandlerFunc(s.handleFactoryPlanUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("GET /api/v1/warehouse/transfers", chain(http.HandlerFunc(s.handleTransferIndex), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("POST /api/v1/warehouse/transfers", chain(http.HandlerFunc(s.handleTransferStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/transfers/{transfer}", chain(http.HandlerFunc(s.handleTransferShow), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/approve", chain(http.HandlerFunc(s.handleTransferApprove), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/cancel", chain(http.HandlerFunc(s.handleTransferCancel), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/reject", chain(http.HandlerFunc(s.handleTransferReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+
 	// Machine-readable parity report (Go-only, additive, underscore-prefixed so it can never collide with a
 	// Laravel route).
 	s.mux.HandleFunc("GET /api/v1/_parity", s.handleParity)

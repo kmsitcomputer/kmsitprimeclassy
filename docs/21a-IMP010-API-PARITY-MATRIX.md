@@ -512,11 +512,11 @@ Status legend:
 | GET | `/api/v1/shipments/{shipment}/receipt` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/shipments/{shipment}/status` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 
-## Inventory — agent — `stock` (2/3 in Go)
+## Inventory — agent — `stock` (3/3 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/stock/adjust` | session | admin, agen | LARAVEL |  |
+| POST | `/api/v1/stock/adjust` | session | admin, agen | **PARTIAL** | 403 for every caller in warehouse-authoritative mode (the default) — identical to the reference; deviation register D-3 |
 | GET | `/api/v1/stock/products` | session | admin, agen, gudang, super_admin | **GO** |  |
 | GET | `/api/v1/stock/variations` | session | admin, agen, gudang, super_admin | **GO** |  |
 
@@ -554,7 +554,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **PARTIAL** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (7/49 in Go)
+## Inventory — warehouse — `warehouse` (14/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -580,7 +580,7 @@ Status legend:
 | POST | `/api/v1/warehouse/returns/{item}/inspect` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | **PARTIAL** | Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence) |
 | GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | **PARTIAL** | reproduces Laravel's firstOrCreate side effect (a GET may create the row) |
-| PATCH | `/api/v1/warehouse/settings/factory-plan` | session | admin | LARAVEL |  |
+| PATCH | `/api/v1/warehouse/settings/factory-plan` | session | admin | **GO** |  |
 | GET | `/api/v1/warehouse/stock-addition-requests` | session | admin, gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}` | session | admin, gudang | LARAVEL |  |
@@ -600,19 +600,19 @@ Status legend:
 | POST | `/api/v1/warehouse/sub-locations/{subLocation}/deactivate` | session | admin, agen, gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}/stock-cards` | session | admin, gudang | **GO** |  |
 | GET | `/api/v1/warehouse/sub-locations/{subLocation}/stocks` | session | admin, agen, gudang, super_admin | **GO** |  |
-| GET | `/api/v1/warehouse/transfers` | session | admin, agen, gudang, super_admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/transfers` | session | gudang | LARAVEL |  |
+| GET | `/api/v1/warehouse/transfers` | session | admin, agen, gudang, super_admin | **GO** |  |
+| POST | `/api/v1/warehouse/transfers` | session | gudang | **PARTIAL** | physical buckets only; factory_plan needs /transfers/plan-to-transit (not ported) |
 | POST | `/api/v1/warehouse/transfers/plan-to-transit` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/transfers/{transfer}` | session | admin, agen, gudang, super_admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/transfers/{transfer}/approve` | session | admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/transfers/{transfer}/cancel` | session | gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/transfers/{transfer}/reject` | session | admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/transfers/{transfer}` | session | admin, agen, gudang, super_admin | **GO** |  |
+| POST | `/api/v1/warehouse/transfers/{transfer}/approve` | session | admin | **PARTIAL** | executes + writes the handover; canonical lock order preserved, verified by two-connection tests |
+| POST | `/api/v1/warehouse/transfers/{transfer}/cancel` | session | gudang | **GO** |  |
+| POST | `/api/v1/warehouse/transfers/{transfer}/reject` | session | admin | **GO** |  |
 
 ## Totals
 
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now (incl. partial) | 33 (8.8%) |
-| Still Laravel-only | 342 |
+| Served by Go now (incl. partial) | 41 (10.9%) |
+| Still Laravel-only | 334 |
 | Areas fully ported | 6 / 45 |

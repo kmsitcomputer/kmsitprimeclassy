@@ -10,7 +10,8 @@ Not deployed, not cut over, no production access. Laravel remains the reference 
 | Database | the existing MySQL/MariaDB schema. No PostgreSQL, no production import, one additive Go-owned table |
 | Frontend | untouched — no Vue, Nuxt, routing, PWA or locale change was made |
 | Verdict | **PASS WITH LIMITATIONS** (§14) |
-| Checkpoints done | A, B, C, F (identity + public reads) · **G (inventory read surface)** |
+| Checkpoints done | A, B, C, F (identity + public reads) · G (inventory read surface) · **H (inventory mutations)** |
+| Deviation register | [21b — compatibility deviations](21b-IMP010-COMPATIBILITY-DEVIATIONS.md) (mandatory reading before any parity claim) |
 
 Companion documents:
 
@@ -183,7 +184,8 @@ ten-module sketch from the earlier audit — `inventory`, `ordering`, `payments`
 | Public content (homepage/articles/pages) | C | **ported & compared** |
 | Site configuration (settings/languages/agents/regions/install status) | C | **ported & compared** |
 | Inventory & warehouse — **read surface** | **G** | **ported & compared**: canonical sellable projection, agent stock lists, warehouse stock list, sub-locations, stock cards, sub-stock replenishment/requests (13 routes) |
-| Inventory & warehouse — **mutation surface** | D | **not ported**: adjust, transfers, opnames, stock requests/proposals/handovers (§9) |
+| Inventory & warehouse — **transfers + adjustment gate** | **H** | **ported & compared**: stock adjust (403 gate + legacy path), factory-plan setting, transfers list/show/create/approve/cancel/reject — behaviour **and resulting database state** compared, plus two-connection concurrency tests |
+| Inventory & warehouse — remaining mutations | D | **not ported**: opnames, stock requests/proposals/handovers, plan-to-transit, Sub request workflow (§9) |
 | Orders, checkout, shipping, courier, dispatch | D | **not ported** (§9) |
 | Payments, refunds, commissions, invoices | E | **not ported** (§9) |
 | Reporting, CRM, consent, notifications, integrations, media, promo, admin | E | **not ported** (§9) |
@@ -335,6 +337,70 @@ comparison:
 | G-3 | `WarehouseStockRequestController::cards`/`subCards` (Laravel) | These are the only paginated lists in the domain that DO include `per_page` in `meta`, while `stock/products`, `stock/variations` and `warehouse-stock` do not. Inconsistent contract. | Reproduced exactly (per endpoint), pinned by `TestStockListsMetaShape` / `TestStockCardsMetaIncludesPerPage`. |
 | G-4 | `implementsRoute` (this package) | A `{param}` pattern swallowed the literal sibling `/warehouse/sub-locations/eligible-owners`, advertising an endpoint that was not implemented and answering 404 instead of 501. Caught by the parity report disagreeing with the matrix generator. | Fixed: the literal is excluded from the prefix rule, and a non-numeric parameter that matches a real Laravel route now answers **501**. Regression test added. |
 | G-5 | shared renderer (this package) | Rows sharing one product consumed (deleted) the internal image key from a shared map, so every row after the first lost `product_image_url`. Caught by the comparison. | Fixed by rendering a shallow copy; `TestWarehouseStockResourceShape` guards it. |
+
+### 8.5 Checkpoint H — inventory mutations
+
+Scope: the transfer lifecycle plus the legacy adjustment gate. This is the first checkpoint where the
+comparison compares **database state**, not only HTTP responses — a mutation cannot be verified by replaying
+one request, because the second call sees a changed world.
+
+**Method.** `tools/parity/compare_inventory_mutations.py` re-seeds the isolated test database before each run
+(`seed_test_fixtures.sql` + `seed_inventory_fixtures.sql`), drives the same scenario against Laravel and then Go,
+and diffs both the step responses **and** a state snapshot:
+
+```
+warehouse buckets (product/variation/type/sub-location/quantity)
+transfer rows (id, status)          handover count
+stock_movements by type             agent commitment rows (on_hand, reserved)
+```
+
+**Scenarios compared (37 checks, all passing):**
+
+| Scenario | What it proves |
+|---|---|
+| Create → approve → approve again → list | quantities moved exactly once; replay is a no-op; the handover and the two movements exist; the list reflects the completed status |
+| Create → cancel → cancel again; create → reject | the non-completing paths never touch stock, and a cancelled transfer cannot later be approved |
+| Guards (9 negative cases) | agen cannot create (403); `shipping` bucket closed (422); `factory_plan` not a plain transfer (422); duplicate targets (422); `sub` bucket without a sub-location (422); `POST /stock/adjust` 403 for agen **and** admin; `factory-plan` toggle 403 for gudang / 200 for admin; unknown status filter (422) — **same status and same message text** in both runtimes |
+
+#### Transaction and locking invariants (extracted, then reproduced)
+
+The canonical lock order was read out of `StockTransferService` and `StockService`, not invented:
+
+| Step | Lock | Source of truth |
+|---|---|---|
+| 1 | `stock_transfers` row | `approve/reject/cancel` open with `lockForUpdate()` on the transfer |
+| 2 | targets sorted by `p:<id>` / `v:<id>` | `StockService::canonicalTargetKey` + `ksort` in `approve`/`executeApprovedTransfer` |
+| 3a | agent commitment row (`product_stocks`/`product_variation_stocks`) — **only** for `transit → sub` | that is the one direction that can starve a committed reservation; taking it first serialises against `reserveFor*()` |
+| 3b | source `warehouse_stocks` row | `lockForUpdate` in both paths |
+| 3c | destination `warehouse_stocks` row | `lockForUpdate` (created after the checks when absent) |
+| 4 | writes, movements, status | after every lock is held |
+
+A plain (non-locking) read instead of 3a–3c would reintroduce the REPEATABLE READ oversell the reference
+documents; taking them out of order would reintroduce the deadlock it was fixed to avoid. Neither is optional,
+and both are now pinned by tests.
+
+#### Concurrency and rollback evidence (two real connections)
+
+`internal/inventory/concurrency_test.go` — **7 tests, all passing**, each using independent transactions:
+
+| Test | Evidence |
+|---|---|
+| `TestTwoConnectionsSerialiseSameTarget` | two approvals competing for the same 12 units, released simultaneously: **exactly one** succeeds, stock ends at `before-8` (never negative), the loser stays `pending`. This is the anti-oversell proof. |
+| `TestOppositeOrderMultiTargetDoesNotDeadlock` | two transfers listing the same two targets in **opposite** order both complete; an explicit assertion fails the test if MySQL answers 1213. This is the canonical-order proof. |
+| `TestTransitSubTakesAgentCapacityRowFirst` | a second connection holds the agent commitment row: the approval **blocks** (observed for ~2 s) and only proceeds once the lock is released — proving it really takes that lock first. |
+| `TestApproveIsIdempotent` | replaying an approval moves no stock and writes no extra movements (exactly 2 for the transfer). |
+| `TestInsufficientStockRollsBackEverything` | a too-large request changes no quantity, writes no movement, creates no handover, and leaves the transfer `pending` — the full rollback. |
+| `TestCancelDoesNotTouchStock` | cancel is inert, and the cancelled transfer cannot then be approved. |
+| `TestPlanTransferRejectsPlainTransferRoute` | a `factory_plan` transfer is refused on the plain endpoint. |
+
+#### Defects found in this checkpoint
+
+| # | Finding | Action |
+|---|---|---|
+| H-1 | `randomSuffix` produced a **negative modulo** (signed shift on a negative seed) → index-out-of-range panic on every transfer creation. Caught by the mutation comparison on its first real create. | Seed kept in `uint64`; panic gone. |
+| H-2 | `activity_logs.properties` carries a `json_valid()` CHECK; rendering a nil handover id with `%v` produced invalid JSON and aborted every approval. | JSON is built explicitly (`null` vs the id). |
+| H-3 | `POST /stock/adjust` is a **403 for everyone** under the default `WAREHOUSE_STOCK_AUTHORITATIVE=true`. Implementing the legacy write path unconditionally would have let the dashboard edit warehouse-owned stock — a business-rule violation. | Captured from the running reference first, then reproduced (deviation register D-3). |
+| H-4 | The happy-path transfer fixture used a Sub Location **owned** by a Sales-Kurir-Sub, which the reference correctly refuses. | Added an unowned sub-location (id 4) to the fixtures; the refusal itself is now an asserted guard case. |
 
 ## 9. Why checkpoints D and E were not implemented
 

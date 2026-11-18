@@ -19,6 +19,7 @@ cannot drift):
 | Content | `GET /homepage`, `GET /articles`, `GET /articles/{slug}`, `GET /pages/{slug}` |
 | Site | `GET /settings`, `GET /languages`, `GET /agents`, `GET /regions/{provinces,regencies,districts,villages}`, `GET /install/status` |
 | Inventory (read) | `GET /stock/products`, `/stock/variations`, `/warehouse-stock`, `/warehouse/sellable`, `/warehouse/settings`, `/warehouse/sub-locations` (+ `/{id}`, `/{id}/stocks`, `/{id}/stock-cards`), `/warehouse/stock-cards`, `/sub-stock/my`, `/sub-stock/replenishment-targets`, `/sub-stock/requests` |
+| Inventory (mutations) | `POST /stock/adjust` (403 in warehouse-authoritative mode, as the reference), `PATCH /warehouse/settings/factory-plan`, `GET/POST /warehouse/transfers`, `GET /warehouse/transfers/{id}`, `POST /warehouse/transfers/{id}/approve|cancel|reject` |
 | Ops | `GET /up`, `GET /healthz` |
 
 Every other real Laravel route answers `501` with `errors.code = ["not_implemented"]`; an unknown path answers
@@ -44,6 +45,7 @@ tools/parity/run_go_tests.sh          # provisions the _testing database, then `
 tools/parity/compare_public_api.py    # Laravel ↔ Go contract comparison (both runtimes must be up)
 tools/parity/compare_auth.py          # Laravel ↔ Go authentication/CSRF/CSRF-419 comparison
 tools/parity/compare_inventory.py     # Laravel ↔ Go inventory read surface (3 roles, 29 checks)
+tools/parity/compare_inventory_mutations.py  # Laravel ↔ Go inventory mutations — compares DB state too (37 checks)
 ```
 
 Integration tests skip themselves when no `_testing` database is reachable, so `go test ./...` still works on a

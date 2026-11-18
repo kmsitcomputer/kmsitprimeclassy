@@ -52,6 +52,15 @@ IMPLEMENTED = {
     ("GET", "/api/v1/sub-stock/my"): "reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint)",
     ("GET", "/api/v1/sub-stock/replenishment-targets"): "",
     ("GET", "/api/v1/sub-stock/requests"): "list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported",
+    # --- checkpoint H: inventory mutations (behaviour + DB state compared in compare_inventory_mutations.py)
+    ("POST", "/api/v1/stock/adjust"): "403 for every caller in warehouse-authoritative mode (the default) — identical to the reference; deviation register D-3",
+    ("PATCH", "/api/v1/warehouse/settings/factory-plan"): "",
+    ("GET", "/api/v1/warehouse/transfers"): "",
+    ("POST", "/api/v1/warehouse/transfers"): "physical buckets only; factory_plan needs /transfers/plan-to-transit (not ported)",
+    ("GET", "/api/v1/warehouse/transfers/{transfer}"): "",
+    ("POST", "/api/v1/warehouse/transfers/{transfer}/approve"): "executes + writes the handover; canonical lock order preserved, verified by two-connection tests",
+    ("POST", "/api/v1/warehouse/transfers/{transfer}/cancel"): "",
+    ("POST", "/api/v1/warehouse/transfers/{transfer}/reject"): "",
 }
 
 AREA_TITLES = OrderedDict([

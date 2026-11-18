@@ -111,8 +111,28 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/warehouse/stock-cards",
 		"GET /api/v1/sub-stock/my",
 		"GET /api/v1/sub-stock/replenishment-targets",
-		"GET /api/v1/sub-stock/requests":
+		"GET /api/v1/sub-stock/requests",
+		"POST /api/v1/stock/adjust",
+		"PATCH /api/v1/warehouse/settings/factory-plan",
+		"GET /api/v1/warehouse/transfers",
+		"POST /api/v1/warehouse/transfers":
 		return true
+	}
+	// /api/v1/warehouse/transfers/<id> and /<id>/(approve|cancel|reject) — literal ids only.
+	if (method == http.MethodGet || method == http.MethodPost) && strings.HasPrefix(path, "/api/v1/warehouse/transfers/") {
+		rest := strings.TrimPrefix(path, "/api/v1/warehouse/transfers/")
+		parts := strings.Split(rest, "/")
+		if parts[0] == "" || parts[0] == "plan-to-transit" {
+			return false // plan-to-transit is a real route that is NOT ported
+		}
+		if len(parts) == 1 && method == http.MethodGet {
+			return true // show
+		}
+		if len(parts) == 2 && method == http.MethodPost &&
+			(parts[1] == "approve" || parts[1] == "cancel" || parts[1] == "reject") {
+			return true
+		}
+		return false
 	}
 	// Deeper parameterised inventory reads: exactly `/api/v1/warehouse/sub-locations/<id>/<tail>`.
 	if method == http.MethodGet && strings.HasPrefix(path, "/api/v1/warehouse/sub-locations/") {

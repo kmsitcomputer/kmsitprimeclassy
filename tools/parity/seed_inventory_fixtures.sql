@@ -4,6 +4,9 @@
 SET FOREIGN_KEY_CHECKS = 0;
 
 DELETE FROM stock_movements;
+DELETE FROM stock_handovers;
+DELETE FROM stock_transfer_items;
+DELETE FROM stock_transfers;
 DELETE FROM warehouse_stocks;
 DELETE FROM product_stocks;
 DELETE FROM product_variation_stocks;
@@ -16,7 +19,11 @@ DELETE FROM sub_stock_reservations;
 -- Product 3 is the ONLY target with a legacy commitment row and NO warehouse row anywhere: it is what keeps
 -- the "legacy fallback" branch of the canonical projection exercised (product 1 gained a `sub` row below).
 INSERT INTO product_stocks (id, agent_id, product_id, quantity_on_hand, quantity_reserved, created_at, updated_at) VALUES
- (2, 10, 3, 25, 3, '2026-11-09 09:00:00', '2026-11-09 09:00:00');
+ (2, 10, 3, 25, 3, '2026-11-09 09:00:00', '2026-11-09 09:00:00'),
+ -- Product 2 has a commitment row with ZERO reserved: it does not change the canonical projection (product 2
+ -- already has warehouse rows, so the warehouse stays authoritative), but it gives the transit->sub capacity
+ -- lock a real row to take — which is what the two-connection test needs to observe.
+ (3, 10, 2, 0, 0, '2026-11-09 09:00:00', '2026-11-09 09:00:00');
 
 -- Legacy (pre-warehouse) commitment rows for agent 10.
 --   product 1  : on_hand 40, reserved 5  → available 35 via warehouse (a `sub` row exists) → base 0
@@ -38,7 +45,10 @@ INSERT INTO product_variation_stocks (id, agent_id, product_variation_id, quanti
 INSERT INTO warehouse_sub_locations (id, agent_id, owner_user_id, previous_owner_user_id, code, name, address, contact_number, description, is_active, created_by, created_at, updated_at) VALUES
  (1, 10, 13, NULL, 'SUB-BDG-01', 'Sub Bandung', 'Jl. Sub 1', '081200000001', 'Sub outlet', 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00'),
  (2, 10, 14, 13, 'SUB-BDG-02', 'Sub Bandung Dua', 'Jl. Sub 2', '081200000002', NULL, 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00'),
- (3, 10, 16, NULL, 'SUB-BDG-03', 'Sub Bandung Tiga', 'Jl. Sub 3', '081200000003', NULL, 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00');
+ (3, 10, 16, NULL, 'SUB-BDG-03', 'Sub Bandung Tiga', 'Jl. Sub 3', '081200000003', NULL, 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00'),
+ -- Sub location 4 has NO owner: the only kind a plain warehouse transfer may target (an owned Sub moves
+ -- exclusively through the Sub stock-request workflow).
+ (4, 10, NULL, NULL, 'SUB-BDG-04', 'Sub Bandung Empat', 'Jl. Sub 4', '081200000004', NULL, 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00');
 
 INSERT INTO warehouse_settings (id, agent_id, factory_plan_enabled, created_at, updated_at) VALUES
  (1, 10, 1, '2026-11-10 09:00:00', '2026-11-10 09:00:00');
@@ -72,5 +82,12 @@ INSERT INTO sub_stock_request_items (id, sub_stock_request_id, product_id, produ
 INSERT INTO warehouse_stocks (id, agent_id, product_id, product_variation_id, stock_type, sub_location_id, quantity, created_at, updated_at) VALUES
  (6, 10, 1, NULL, 'sub', 3, 8, '2026-11-10 09:00:00', '2026-11-10 09:00:00'),
  (7, 10, NULL, 1, 'sub', 3, 3, '2026-11-10 09:00:00', '2026-11-10 09:00:00');
+
+-- Reset the transfer-scoped AUTO_INCREMENT counters so two comparison runs starting from this same fixture
+-- produce identical row ids. Only touches the isolated test database, and only tables this file empties.
+ALTER TABLE stock_transfers AUTO_INCREMENT = 1;
+ALTER TABLE stock_transfer_items AUTO_INCREMENT = 1;
+ALTER TABLE stock_handovers AUTO_INCREMENT = 1;
+ALTER TABLE stock_movements AUTO_INCREMENT = 1;
 
 SET FOREIGN_KEY_CHECKS = 1;

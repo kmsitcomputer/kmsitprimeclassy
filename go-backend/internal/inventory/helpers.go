@@ -1,10 +1,14 @@
 package inventory
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 )
 
 // nullStr renders a nullable string the way Eloquent's JSON serialisation does (null, never "").
@@ -70,3 +74,96 @@ func planIf(enabled bool, plan int) int {
 	}
 	return 0
 }
+
+// strPtr turns a nullable column into a *string.
+func strPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
+}
+
+// nullInt64Ptr converts a nullable column into *int64.
+func nullInt64Ptr(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	n := v.Int64
+	return &n
+}
+
+// nullableInt renders *int64 for SQL (NULL when absent).
+func nullableInt(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// nullableStrPtr renders *string for SQL (NULL when absent).
+func nullableStrPtr(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// nullableStrMember renders a plain string, using NULL for the empty value (stock_movements.stock_type).
+func nullableStrMember(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+// stringOrEmpty renders a scanned nullable timestamp column verbatim (Eloquent's JSON form).
+func stringOrEmpty(v sql.NullString) string {
+	if !v.Valid {
+		return ""
+	}
+	return v.String
+}
+
+// strOrNil returns the value or nil so an omitted relation column serialises as null.
+func strOrNil(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// subLocationBrief returns (name, code) for a sub-location id (nil-safe).
+func subLocationBrief(ctx context.Context, d *db.DB, id *int64) (*string, *string, error) {
+	if id == nil {
+		return nil, nil, nil
+	}
+	var code, name string
+	err := d.QueryRowContext(ctx, `SELECT code, name FROM warehouse_sub_locations WHERE id = ?`, *id).Scan(&code, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return &name, &code, nil
+}
+
+// userBrief renders `users:id,name` (nil-safe).
+func userBrief(ctx context.Context, d *db.DB, id *int64) (map[string]any, error) {
+	if id == nil {
+		return nil, nil
+	}
+	var name string
+	err := d.QueryRowContext(ctx, `SELECT name FROM users WHERE id = ?`, *id).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": *id, "name": name}, nil
+}
+
+// strPtrVal returns a pointer to a plain string (for SQL columns that take *string).
+func strPtrVal(v string) *string { return &v }

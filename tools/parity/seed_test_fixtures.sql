@@ -12,7 +12,6 @@
 SET FOREIGN_KEY_CHECKS = 0;
 
 DELETE FROM activity_logs;
-DELETE FROM pc_go_sessions;
 DELETE FROM user_closures;
 DELETE FROM users;
 DELETE FROM roles;
