@@ -4,17 +4,17 @@ import "strings"
 
 // Role slugs. These mirror App\Models\Role exactly — the 11 locked roles from docs/05.
 const (
-	RoleSuperAdmin      = "super_admin"
-	RoleAgen            = "agen"
-	RoleKorsal          = "korsal"
-	RoleSales           = "sales"
-	RoleSalesKurirSub   = "sales-kurir-sub"
-	RoleKonsumen        = "konsumen"
-	RoleAdmin           = "admin"
-	RoleKeuangan        = "keuangan"
-	RoleKurir           = "kurir"
+	RoleSuperAdmin       = "super_admin"
+	RoleAgen             = "agen"
+	RoleKorsal           = "korsal"
+	RoleSales            = "sales"
+	RoleSalesKurirSub    = "sales-kurir-sub"
+	RoleKonsumen         = "konsumen"
+	RoleAdmin            = "admin"
+	RoleKeuangan         = "keuangan"
+	RoleKurir            = "kurir"
 	RoleKoordinatorKurir = "koordinator-kurir"
-	RoleGudang          = "gudang"
+	RoleGudang           = "gudang"
 
 	// legacySalesKurir is the pre-rename spelling still present in old rows.
 	legacySalesKurir = "sales-kurir"

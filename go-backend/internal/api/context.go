@@ -20,10 +20,10 @@ const (
 // requestState is the per-request mutable holder placed in the context at the start of the chain. A
 // pointer is used because middleware fills it in progressively (session → user) and handlers read it later.
 type requestState struct {
-	Session    *auth.Session
-	User       *auth.User
-	Locale     string
-	RequestID  string
+	Session   *auth.Session
+	User      *auth.User
+	Locale    string
+	RequestID string
 	// IP / UserAgent are captured once from the (possibly proxied) request for audit rows.
 	IP        string
 	UserAgent string

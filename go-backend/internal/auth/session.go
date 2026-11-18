@@ -94,11 +94,11 @@ func (m *Manager) Load(ctx context.Context, r *http.Request) (*Session, error) {
 
 func (m *Manager) loadByID(ctx context.Context, id string) (*Session, error) {
 	var (
-		s        Session
-		userID   sql.NullInt64
-		ip, ua   sql.NullString
-		lastAct  int64
-		expires  int64
+		s       Session
+		userID  sql.NullInt64
+		ip, ua  sql.NullString
+		lastAct int64
+		expires int64
 	)
 	err := m.database.QueryRowContext(ctx, `SELECT id, user_id, csrf_token, ip_address, user_agent,
 			last_activity, expires_at FROM pc_go_sessions WHERE id = ?`, id).

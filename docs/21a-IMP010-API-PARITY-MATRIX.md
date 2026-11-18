@@ -512,21 +512,21 @@ Status legend:
 | GET | `/api/v1/shipments/{shipment}/receipt` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/shipments/{shipment}/status` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 
-## Inventory — agent — `stock` (0/3 in Go)
+## Inventory — agent — `stock` (2/3 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | POST | `/api/v1/stock/adjust` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/stock/products` | session | admin, agen, gudang, super_admin | LARAVEL |  |
-| GET | `/api/v1/stock/variations` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/stock/products` | session | admin, agen, gudang, super_admin | **GO** |  |
+| GET | `/api/v1/stock/variations` | session | admin, agen, gudang, super_admin | **GO** |  |
 
-## Inventory — sub — `sub-stock` (0/10 in Go)
+## Inventory — sub stock — `sub-stock` (3/10 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/sub-stock/my` | session | sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/sub-stock/replenishment-targets` | session | sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/sub-stock/requests` | session | admin, agen, gudang, sales-kurir-sub | LARAVEL |  |
+| GET | `/api/v1/sub-stock/my` | session | sales-kurir-sub | **PARTIAL** | reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint) |
+| GET | `/api/v1/sub-stock/replenishment-targets` | session | sales-kurir-sub | **GO** |  |
+| GET | `/api/v1/sub-stock/requests` | session | admin, agen, gudang, sales-kurir-sub | **PARTIAL** | list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported |
 | POST | `/api/v1/sub-stock/requests` | session | sales-kurir-sub | LARAVEL |  |
 | GET | `/api/v1/sub-stock/requests/{subStockRequest}` | session | admin, agen, gudang, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/sub-stock/requests/{subStockRequest}/approve` | session | admin | LARAVEL |  |
@@ -548,13 +548,13 @@ Status legend:
 | PATCH | `/api/v1/users/{user}/convert-to-sales-kurir-sub` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/users/{user}/reassign-referral` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 
-## Inventory — warehouse stock — `warehouse-stock` (0/1 in Go)
+## Inventory — warehouse stock — `warehouse-stock` (1/1 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **PARTIAL** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (0/49 in Go)
+## Inventory — warehouse — `warehouse` (7/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -578,28 +578,28 @@ Status legend:
 | GET | `/api/v1/warehouse/returns` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/returns/{item}/finalize` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/returns/{item}/inspect` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | LARAVEL |  |
-| GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | **PARTIAL** | Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence) |
+| GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | **PARTIAL** | reproduces Laravel's firstOrCreate side effect (a GET may create the row) |
 | PATCH | `/api/v1/warehouse/settings/factory-plan` | session | admin | LARAVEL |  |
 | GET | `/api/v1/warehouse/stock-addition-requests` | session | admin, gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests` | session | gudang | LARAVEL |  |
 | GET | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}` | session | admin, gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject` | session | admin | LARAVEL |  |
-| GET | `/api/v1/warehouse/stock-cards` | session | admin, gudang | LARAVEL |  |
+| GET | `/api/v1/warehouse/stock-cards` | session | admin, gudang | **PARTIAL** | reads warehouse buckets only (no legacy fallback) — same asymmetry as the reference |
 | POST | `/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/fulfill` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/proposals` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/sub-adjustment-requests` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/sub-locations` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/sub-locations` | session | admin, agen, gudang, super_admin | **GO** |  |
 | POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/warehouse/sub-locations/eligible-owners` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang, super_admin | **GO** |  |
 | PATCH | `/api/v1/warehouse/sub-locations/{subLocation}` | session | admin, agen, gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/sub-locations/{subLocation}/assign-owner` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/warehouse/sub-locations/{subLocation}/deactivate` | session | admin, agen, gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/sub-locations/{subLocation}/stock-cards` | session | admin, gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/sub-locations/{subLocation}/stocks` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/sub-locations/{subLocation}/stock-cards` | session | admin, gudang | **GO** |  |
+| GET | `/api/v1/warehouse/sub-locations/{subLocation}/stocks` | session | admin, agen, gudang, super_admin | **GO** |  |
 | GET | `/api/v1/warehouse/transfers` | session | admin, agen, gudang, super_admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/transfers` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/transfers/plan-to-transit` | session | gudang | LARAVEL |  |
@@ -613,6 +613,6 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now (incl. partial) | 20 (5.3%) |
-| Still Laravel-only | 355 |
+| Served by Go now (incl. partial) | 33 (8.8%) |
+| Still Laravel-only | 342 |
 | Areas fully ported | 6 / 45 |

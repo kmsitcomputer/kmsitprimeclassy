@@ -10,6 +10,7 @@ Not deployed, not cut over, no production access. Laravel remains the reference 
 | Database | the existing MySQL/MariaDB schema. No PostgreSQL, no production import, one additive Go-owned table |
 | Frontend | untouched — no Vue, Nuxt, routing, PWA or locale change was made |
 | Verdict | **PASS WITH LIMITATIONS** (§14) |
+| Checkpoints done | A, B, C, F (identity + public reads) · **G (inventory read surface)** |
 
 Companion documents:
 
@@ -181,7 +182,8 @@ ten-module sketch from the earlier audit — `inventory`, `ordering`, `payments`
 | Public catalog (anonymous) | C | **ported & compared** (list, filters, sort, pagination, detail, categories) |
 | Public content (homepage/articles/pages) | C | **ported & compared** |
 | Site configuration (settings/languages/agents/regions/install status) | C | **ported & compared** |
-| Inventory & warehouse | D | **not ported** (§9) |
+| Inventory & warehouse — **read surface** | **G** | **ported & compared**: canonical sellable projection, agent stock lists, warehouse stock list, sub-locations, stock cards, sub-stock replenishment/requests (13 routes) |
+| Inventory & warehouse — **mutation surface** | D | **not ported**: adjust, transfers, opnames, stock requests/proposals/handovers (§9) |
 | Orders, checkout, shipping, courier, dispatch | D | **not ported** (§9) |
 | Payments, refunds, commissions, invoices | E | **not ported** (§9) |
 | Reporting, CRM, consent, notifications, integrations, media, promo, admin | E | **not ported** (§9) |
@@ -289,6 +291,50 @@ payloads (including role-conditional `korsal_name` and own-record `google_linked
 | 7 | 422 body used a generic message instead of `validation_failed` + the rule sentence | `compare_public_api.py` |
 | 8 | `korsal_name` emitted for every role instead of only Sales/Sales-Kurir-Sub | `compare_auth.py` |
 | 9 | CSRF check ran before the routing decision, masking 501/404 behind 419 | integration test |
+
+### 8.4 Checkpoint G — inventory read surface
+
+Scope: the canonical availability projection plus the warehouse read grids. All 13 endpoints were captured
+from the **running Laravel** on the same fixtures first, then implemented, then compared.
+
+| Endpoint | Result |
+|---|---|
+| `GET /stock/products` | identical (incl. the quirk that `meta.total` counts TARGETS while rows are filtered to `has_variations=false`) |
+| `GET /stock/variations` | identical |
+| `GET /warehouse-stock` (+ `stock_type`, `search` filters) | identical; **row SET** compared across all pages (see defect G-1) |
+| `GET /warehouse/sellable` | identical for a product and a variation target, incl. the factory-plan switch |
+| `GET /warehouse/settings` | identical (incl. Laravel's `firstOrCreate` side effect) |
+| `GET /warehouse/sub-locations`, `/{id}`, `/{id}/stocks` | identical (incl. the generated `target_identity`/`location_identity` columns) |
+| `GET /warehouse/stock-cards`, `/{id}/stock-cards` | identical (incl. `meta.per_page`, which only these two send) |
+| `GET /sub-stock/my` | identical shape; `reserved` is 0 in the verified fixtures (a reservation needs an `order_item`, which belongs to the orders checkpoint) |
+| `GET /sub-stock/replenishment-targets` | identical |
+| `GET /sub-stock/requests` (+ status/direction filters) | identical, incl. the `requested_by` scope for Sales-Kurir-Sub and the branch scope for Admin |
+
+`tools/parity/compare_inventory.py` — **29/29** comparisons, executed for three different roles against the same
+database. The invariant tests in `internal/api/inventory_api_test.go` pin the behaviour independently of the
+comparison:
+
+| Invariant | Test |
+|---|---|
+| No warehouse row ⇒ legacy on-hand is the base, `source: legacy`, plan flag false | `TestSellableLegacyFallback` |
+| **Any** warehouse row makes the warehouse authoritative, but only `transit`/`factory_plan` feed the base — a target holding only a `sub` row has base 0 and is in deficit | `TestSellableWarehouseAuthorityWithSubOnlyRows` |
+| The factory-plan bucket counts only when the agent enabled it (and flipping it changes the base) | `TestSellableFactoryPlanSwitch` |
+| Card grids read warehouse buckets only (no legacy fallback) while still reading the legacy reserved quantity | `TestStockCardsDoNotFallBackToLegacy` |
+| Tenant scope: another agent's sub-location is a 404 and never appears in the list | `TestSubLocationTenantIsolation` |
+| A Sales-Kurir-Sub cannot widen its request list with query filters; an Admin sees the branch | `TestSubStockRequestsAreScopedToOwnRequests`, `TestSubStockRequestsAdminSeesBranch` |
+| Role gates for every ported inventory endpoint | `TestInventoryRoleGates` |
+| `super_admin` must name an Agent explicitly (422, no implicit branch) | `TestSuperAdminMustNameAgent` |
+| A literal sibling route is never swallowed by a `{param}` pattern | `TestLiteralSiblingRouteIsNotSwallowed` |
+
+#### Defects found in this checkpoint
+
+| # | Where | Finding | Action |
+|---|---|---|---|
+| G-1 | `StockController::warehouse` (Laravel) | The listing is **paginated without any `ORDER BY`**, so row order — and therefore page composition — depends on which index MySQL picks and changes when a `stock_type` filter is applied. Pages can overlap or skip rows between requests. | Go orders by `ws.id` (deterministic, strictly safer). The comparison asserts the **same row set** across all pages instead of page bytes. Reported, not silently "matched". |
+| G-2 | `WarehouseController::sellable` (Laravel) | With neither `product_id` nor `variation_id`, `$request->validate()` returns an array without the key and the next line indexes it → **HTTP 500 "Undefined array key"**. | Go answers **422**. This is the only place Go is intentionally stricter; it is asserted explicitly in the comparison so it cannot drift unnoticed. |
+| G-3 | `WarehouseStockRequestController::cards`/`subCards` (Laravel) | These are the only paginated lists in the domain that DO include `per_page` in `meta`, while `stock/products`, `stock/variations` and `warehouse-stock` do not. Inconsistent contract. | Reproduced exactly (per endpoint), pinned by `TestStockListsMetaShape` / `TestStockCardsMetaIncludesPerPage`. |
+| G-4 | `implementsRoute` (this package) | A `{param}` pattern swallowed the literal sibling `/warehouse/sub-locations/eligible-owners`, advertising an endpoint that was not implemented and answering 404 instead of 501. Caught by the parity report disagreeing with the matrix generator. | Fixed: the literal is excluded from the prefix rule, and a non-numeric parameter that matches a real Laravel route now answers **501**. Regression test added. |
+| G-5 | shared renderer (this package) | Rows sharing one product consumed (deleted) the internal image key from a shared map, so every row after the first lost `product_image_url`. Caught by the comparison. | Fixed by rendering a shallow copy; `TestWarehouseStockResourceShape` guards it. |
 
 ## 9. Why checkpoints D and E were not implemented
 

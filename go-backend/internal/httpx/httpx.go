@@ -20,11 +20,11 @@ import (
 
 // Envelope is the single response shape of the API.
 type Envelope struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
 	Message string `json:"message"`
-	Data    any  `json:"data"`
-	Errors  any  `json:"errors"`
-	Meta    any  `json:"meta"`
+	Data    any    `json:"data"`
+	Errors  any    `json:"errors"`
+	Meta    any    `json:"meta"`
 }
 
 // Meta is the pagination block.

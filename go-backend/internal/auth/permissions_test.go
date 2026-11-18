@@ -78,8 +78,8 @@ func TestPermissionMapMatchesLaravel(t *testing.T) {
 			"orders.view.network", "orders.manage.status", "orders.manage.payment",
 			"orders.manage.fulfillment", "orders.manage.shipment", "orders.cancel", "orders.create", "sheets.manage",
 		},
-		RoleKorsal:  {"users.view.network", "orders.view.network", "orders.create"},
-		RoleSales:   {"users.view.network", "orders.view.network", "orders.create"},
+		RoleKorsal:   {"users.view.network", "orders.view.network", "orders.create"},
+		RoleSales:    {"users.view.network", "orders.view.network", "orders.create"},
 		RoleKonsumen: {"orders.view.own", "orders.create"},
 		RoleAdmin: {
 			"users.view.network", "stock.view.own", "stock.manage",
@@ -92,11 +92,11 @@ func TestPermissionMapMatchesLaravel(t *testing.T) {
 			"finance.dp.verify", "finance.dp.settle",
 			"finance.refund.manage", "finance.additional.manage", "finance.report.view",
 		},
-		RoleKurir:             {"orders.view.assigned", "orders.manage.shipment"},
-		RoleKoordinatorKurir:  {"users.view.network", "orders.view.network", "orders.manage.shipment"},
-		RoleGudang:            {"stock.view.own", "orders.view.assigned"},
-		RoleSalesKurirSub:     {"users.view.network", "orders.create", "orders.view.assigned", "orders.manage.shipment"},
-		"unknown":             {},
+		RoleKurir:            {"orders.view.assigned", "orders.manage.shipment"},
+		RoleKoordinatorKurir: {"users.view.network", "orders.view.network", "orders.manage.shipment"},
+		RoleGudang:           {"stock.view.own", "orders.view.assigned"},
+		RoleSalesKurirSub:    {"users.view.network", "orders.create", "orders.view.assigned", "orders.manage.shipment"},
+		"unknown":            {},
 	}
 	for role, want := range cases {
 		got := Permissions(role)
@@ -137,14 +137,14 @@ func TestParseRoleList(t *testing.T) {
 // TestNormalizePhone mirrors App\Support\PhoneNormalizer.
 func TestNormalizePhone(t *testing.T) {
 	cases := map[string]string{
-		"081234567890":      "081234567890",
-		"+6281234567890":    "081234567890",
-		"6281234567890":     "081234567890",
-		"0812-3456.7890":    "081234567890",
-		" 0812 3456 7890 ":  "081234567890",
-		"(0812) 3456 7890":  "081234567890",
-		"12345":             "12345", // unknown shape is preserved verbatim
-		"":                  "",
+		"081234567890":     "081234567890",
+		"+6281234567890":   "081234567890",
+		"6281234567890":    "081234567890",
+		"0812-3456.7890":   "081234567890",
+		" 0812 3456 7890 ": "081234567890",
+		"(0812) 3456 7890": "081234567890",
+		"12345":            "12345", // unknown shape is preserved verbatim
+		"":                 "",
 	}
 	for in, want := range cases {
 		if got := NormalizePhone(in); got != want {

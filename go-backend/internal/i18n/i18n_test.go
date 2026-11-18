@@ -17,6 +17,7 @@ var expectedKeys = map[string][]string{
 	},
 	"auth":     {"login_failed", "register_success", "login_success", "logout_success", "registration_unavailable"},
 	"profile":  {"current_password_incorrect", "password_updated"},
+	"stock":    {"agent_id_required", "invalid_agent"},
 	"referral": {"not_linked_to_agent", "invalid_code", "code_not_found"},
 }
 

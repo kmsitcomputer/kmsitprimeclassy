@@ -231,12 +231,12 @@ func resolveProducts(ctx context.Context, d *db.DB, content map[string]any) ([]m
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id          int64
-			name, slug  string
-			hasVar      int
-			basePrice   sql.NullString
-			minPrice    sql.NullString
-			imagePath   sql.NullString
+			id         int64
+			name, slug string
+			hasVar     int
+			basePrice  sql.NullString
+			minPrice   sql.NullString
+			imagePath  sql.NullString
 		)
 		if err := rows.Scan(&id, &name, &slug, &hasVar, &basePrice, &minPrice, &imagePath); err != nil {
 			return nil, err

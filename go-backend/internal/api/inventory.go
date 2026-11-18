@@ -26,16 +26,16 @@ type routeRecord struct {
 var parityRoutesJSON []byte
 
 var (
-	inventoryOnce sync.Once
-	inventory     []routeRecord
-	inventoryErr  error
+	inventoryOnce  sync.Once
+	routeInventory []routeRecord
+	inventoryErr   error
 )
 
 func loadInventory() ([]routeRecord, error) {
 	inventoryOnce.Do(func() {
-		inventoryErr = json.Unmarshal(parityRoutesJSON, &inventory)
+		inventoryErr = json.Unmarshal(parityRoutesJSON, &routeInventory)
 	})
-	return inventory, inventoryErr
+	return routeInventory, inventoryErr
 }
 
 // Inventory returns the embedded Laravel route inventory.
@@ -101,8 +101,32 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/auth/register",
 		"POST /api/v1/auth/logout",
 		"GET /api/v1/auth/me",
-		"PATCH /api/v1/profile/password":
+		"PATCH /api/v1/profile/password",
+		"GET /api/v1/stock/products",
+		"GET /api/v1/stock/variations",
+		"GET /api/v1/warehouse-stock",
+		"GET /api/v1/warehouse/sellable",
+		"GET /api/v1/warehouse/settings",
+		"GET /api/v1/warehouse/sub-locations",
+		"GET /api/v1/warehouse/stock-cards",
+		"GET /api/v1/sub-stock/my",
+		"GET /api/v1/sub-stock/replenishment-targets",
+		"GET /api/v1/sub-stock/requests":
 		return true
+	}
+	// Deeper parameterised inventory reads: exactly `/api/v1/warehouse/sub-locations/<id>/<tail>`.
+	if method == http.MethodGet && strings.HasPrefix(path, "/api/v1/warehouse/sub-locations/") {
+		rest := strings.TrimPrefix(path, "/api/v1/warehouse/sub-locations/")
+		parts := strings.Split(rest, "/")
+		if len(parts) == 1 && parts[0] != "" {
+			// `eligible-owners` is a REAL sibling route (a literal, not an id) that is NOT ported, so it must
+			// not be swallowed by the {subLocation} pattern here.
+			return parts[0] != "eligible-owners"
+		}
+		if len(parts) == 2 && parts[0] != "" && (parts[1] == "stocks" || parts[1] == "stock-cards") {
+			return true
+		}
+		return false
 	}
 	// Parameterised public reads: exactly `/api/v1/<collection>/<one-segment>`. A plain prefix test would also
 	// swallow deeper real routes such as /api/v1/products/{product}/fees, advertising an endpoint this build

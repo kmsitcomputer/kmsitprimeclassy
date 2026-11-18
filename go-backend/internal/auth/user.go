@@ -17,23 +17,23 @@ var ErrUserNotFound = errors.New("user not found")
 // User is the identity aggregate the API exposes. Field names and nullability mirror the columns of
 // `users` plus the resolved role slug.
 type User struct {
-	ID             int64
-	RoleID         int64
-	Role           string // canonical role slug
-	Name           string
-	Email          *string
-	Phone          *string
-	AvatarMediaID  *int64
-	ReferralCode   *string
-	AgentID        *int64
-	ParentID       *int64
-	KorsalID       *int64
-	SalesID        *int64
-	Status         string
-	PasswordHash   string
-	CreatedAt      time.Time
-	GoogleLinked   bool
-	KorsalName     *string
+	ID            int64
+	RoleID        int64
+	Role          string // canonical role slug
+	Name          string
+	Email         *string
+	Phone         *string
+	AvatarMediaID *int64
+	ReferralCode  *string
+	AgentID       *int64
+	ParentID      *int64
+	KorsalID      *int64
+	SalesID       *int64
+	Status        string
+	PasswordHash  string
+	CreatedAt     time.Time
+	GoogleLinked  bool
+	KorsalName    *string
 }
 
 // publicBaseURL is injected once at boot so asset URLs match Laravel's `APP_URL` + `/storage`.

@@ -42,7 +42,6 @@ type List struct {
 	PerPage  int
 }
 
-
 // ListProducts returns one page of active products.
 //
 // The starting price is COALESCE(base_price, cheapest active variation) — the same expression the Laravel
@@ -129,18 +128,18 @@ func ListProducts(ctx context.Context, d *db.DB, q Query) (*List, error) {
 	defer rows.Close()
 
 	type row struct {
-		id              int64
-		name, slug      string
-		description     sql.NullString
-		shortDesc       sql.NullString
-		hasVariations   bool
-		basePrice       sql.NullString
-		weightGrams     sql.NullInt64
-		status          string
-		sku             sql.NullString
-		catID           sql.NullInt64
-		catName         sql.NullString
-		catSlug         sql.NullString
+		id            int64
+		name, slug    string
+		description   sql.NullString
+		shortDesc     sql.NullString
+		hasVariations bool
+		basePrice     sql.NullString
+		weightGrams   sql.NullInt64
+		status        string
+		sku           sql.NullString
+		catID         sql.NullInt64
+		catName       sql.NullString
+		catSlug       sql.NullString
 	}
 	var items []row
 	for rows.Next() {
@@ -169,7 +168,6 @@ func ListProducts(ctx context.Context, d *db.DB, q Query) (*List, error) {
 	if err != nil {
 		return nil, err
 	}
-	
 
 	out := make([]map[string]any, 0, len(items))
 	for _, r := range items {
@@ -188,18 +186,18 @@ func ListProducts(ctx context.Context, d *db.DB, q Query) (*List, error) {
 // ProductBySlug renders one active product (ProductController::show).
 func ProductBySlug(ctx context.Context, d *db.DB, slug string) (map[string]any, error) {
 	var (
-		id            int64
-		name, s       string
-		description   sql.NullString
-		shortDesc     sql.NullString
-		hasVar        int
-		basePrice     sql.NullString
-		weightGrams   sql.NullInt64
-		status        string
-		sku           sql.NullString
-		catID         sql.NullInt64
-		catName       sql.NullString
-		catSlug       sql.NullString
+		id          int64
+		name, s     string
+		description sql.NullString
+		shortDesc   sql.NullString
+		hasVar      int
+		basePrice   sql.NullString
+		weightGrams sql.NullInt64
+		status      string
+		sku         sql.NullString
+		catID       sql.NullInt64
+		catName     sql.NullString
+		catSlug     sql.NullString
 	)
 	err := d.QueryRowContext(ctx, `SELECT p.id, p.name, p.slug, p.description, p.short_description,
 			p.has_variations, p.base_price, p.weight_grams, p.status, p.sku, c.id, c.name, c.slug
@@ -312,11 +310,11 @@ func placeholders(n int) string {
 }
 
 type imageRow struct {
-	id, productID      int64
-	variationID        sql.NullInt64
-	path               string
-	isPrimary          bool
-	sortOrder          int64
+	id, productID int64
+	variationID   sql.NullInt64
+	path          string
+	isPrimary     bool
+	sortOrder     int64
 }
 
 func loadImages(ctx context.Context, d *db.DB, productIDs []int64) (map[int64][]map[string]any, error) {
@@ -336,7 +334,7 @@ func loadImages(ctx context.Context, d *db.DB, productIDs []int64) (map[int64][]
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	for rows.Next() {
 		var r imageRow
 		var primary int

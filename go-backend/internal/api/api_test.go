@@ -603,11 +603,12 @@ func TestProductPaginationMeta(t *testing.T) {
 	if _, exists := env.Meta["per_page"]; exists {
 		t.Error("meta must not contain per_page (verified against the Laravel reference)")
 	}
-	if env.Meta["last_page"].(float64) != 2 {
-		t.Errorf("last_page = %v, want 2", env.Meta["last_page"])
+	// Fixture: 3 active products, per_page=1 → 3 pages.
+	if env.Meta["last_page"].(float64) != 3 {
+		t.Errorf("last_page = %v, want 3", env.Meta["last_page"])
 	}
-	if env.Meta["total"].(float64) != 2 {
-		t.Errorf("total = %v, want 2", env.Meta["total"])
+	if env.Meta["total"].(float64) != 3 {
+		t.Errorf("total = %v, want 3", env.Meta["total"])
 	}
 }
 
@@ -756,10 +757,10 @@ func TestParityReportIsConsistent(t *testing.T) {
 	}
 	var env struct {
 		Data struct {
-			LaravelRoutes     int      `json:"laravel_routes_total"`
-			Implemented       int      `json:"implemented_total"`
-			CoveragePercent   float64  `json:"coverage_percent"`
-			ImplementedRoutes []string `json:"implemented_routes"`
+			LaravelRoutes     int            `json:"laravel_routes_total"`
+			Implemented       int            `json:"implemented_total"`
+			CoveragePercent   float64        `json:"coverage_percent"`
+			ImplementedRoutes []string       `json:"implemented_routes"`
 			Outstanding       map[string]int `json:"outstanding_by_area"`
 		} `json:"data"`
 	}

@@ -59,3 +59,6 @@ deploy/output/
 # frontend/package-lock.json. This older untracked file is deliberately kept
 # on disk and never used, tracked or deleted. See docs/18 §D.
 /frontend/pnpm-lock.yaml
+
+# Python bytecode from the parity tooling.
+__pycache__/

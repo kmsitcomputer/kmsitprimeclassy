@@ -37,6 +37,10 @@ KEYS = {
         "logout_success",
         "registration_unavailable",
     ],
+    "stock": [
+        "agent_id_required",
+        "invalid_agent",
+    ],
     "profile": [
         "current_password_incorrect",
         "password_updated",

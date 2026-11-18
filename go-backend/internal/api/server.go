@@ -111,6 +111,30 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/articles/{slug}", s.handleArticleDetail)
 	s.mux.HandleFunc("GET /api/v1/pages/{slug}", s.handlePageDetail)
 
+	// Inventory (agent/warehouse read surfaces). Role gates mirror the Laravel route groups exactly:
+	//   stock/*            role:super_admin,agen,admin,gudang
+	//   warehouse-stock    role:super_admin,agen,admin,gudang
+	//   warehouse/sellable role:super_admin,agen,admin,gudang
+	//   warehouse/settings role:super_admin,agen,admin,gudang
+	//   warehouse/sub-locations (list/show/stocks) role:super_admin,agen,admin,gudang
+	//   warehouse/stock-cards                     role:admin,gudang
+	//   warehouse/sub-locations/{id}/stock-cards  role:admin,gudang
+	//   sub-stock/my, sub-stock/replenishment-targets role:sales-kurir-sub
+	stockRead := "super_admin,agen,admin,gudang"
+	s.mux.Handle("GET /api/v1/stock/products", chain(http.HandlerFunc(s.handleStockProducts), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/stock/variations", chain(http.HandlerFunc(s.handleStockVariations), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse-stock", chain(http.HandlerFunc(s.handleWarehouseStock), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse/sellable", chain(http.HandlerFunc(s.handleWarehouseSellable), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse/settings", chain(http.HandlerFunc(s.handleWarehouseSettings), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse/sub-locations", chain(http.HandlerFunc(s.handleSubLocations), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse/sub-locations/{subLocation}", chain(http.HandlerFunc(s.handleSubLocationShow), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse/sub-locations/{subLocation}/stocks", chain(http.HandlerFunc(s.handleSubLocationStocks), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
+	s.mux.Handle("GET /api/v1/warehouse/stock-cards", chain(http.HandlerFunc(s.handleStockCards), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/sub-locations/{subLocation}/stock-cards", chain(http.HandlerFunc(s.handleSubLocationCards), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
+	s.mux.Handle("GET /api/v1/sub-stock/my", chain(http.HandlerFunc(s.handleSubStockMy), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
+	s.mux.Handle("GET /api/v1/sub-stock/replenishment-targets", chain(http.HandlerFunc(s.handleSubStockReplenishment), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub")))
+	s.mux.Handle("GET /api/v1/sub-stock/requests", chain(http.HandlerFunc(s.handleSubStockRequests), RequireAuth, s.RequireAgentLinked, RequireRole("sales-kurir-sub,agen,admin,gudang")))
+
 	// Machine-readable parity report (Go-only, additive, underscore-prefixed so it can never collide with a
 	// Laravel route).
 	s.mux.HandleFunc("GET /api/v1/_parity", s.handleParity)
@@ -145,9 +169,9 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	status := map[string]any{
-		"status":  "ok",
-		"service": "primeclassy-go",
-		"env":     string(s.cfg.Env),
+		"status":   "ok",
+		"service":  "primeclassy-go",
+		"env":      string(s.cfg.Env),
 		"uptime_s": int(time.Since(s.startedAt).Seconds()),
 	}
 	code := http.StatusOK
@@ -164,11 +188,11 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // ---- parity ----------------------------------------------------------------------------------------
 
 type parityReport struct {
-	Service          string   `json:"service"`
-	LaravelRoutes    int      `json:"laravel_routes_total"`
-	Implemented      int      `json:"implemented_total"`
-	CoveragePercent  float64  `json:"coverage_percent"`
-	ImplementedRoute []string `json:"implemented_routes"`
+	Service           string         `json:"service"`
+	LaravelRoutes     int            `json:"laravel_routes_total"`
+	Implemented       int            `json:"implemented_total"`
+	CoveragePercent   float64        `json:"coverage_percent"`
+	ImplementedRoute  []string       `json:"implemented_routes"`
 	OutstandingByArea map[string]int `json:"outstanding_by_area"`
 }
 

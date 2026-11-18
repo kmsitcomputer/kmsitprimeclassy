@@ -38,6 +38,20 @@ IMPLEMENTED = {
     ("GET", "/api/v1/articles/{slug}"): "",
     ("GET", "/api/v1/pages/{slug}"): "",
     ("GET", "/api/v1/homepage"): "\"bestseller\" block returns [] for anonymous visitors (identical to the reference); authenticated ranking not ported",
+    # --- checkpoint G: inventory read surface (contract-compared in tools/parity/compare_inventory.py)
+    ("GET", "/api/v1/stock/products"): "",
+    ("GET", "/api/v1/stock/variations"): "",
+    ("GET", "/api/v1/warehouse-stock"): "Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes",
+    ("GET", "/api/v1/warehouse/sellable"): "Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence)",
+    ("GET", "/api/v1/warehouse/settings"): "reproduces Laravel's firstOrCreate side effect (a GET may create the row)",
+    ("GET", "/api/v1/warehouse/sub-locations"): "",
+    ("GET", "/api/v1/warehouse/sub-locations/{subLocation}"): "",
+    ("GET", "/api/v1/warehouse/sub-locations/{subLocation}/stocks"): "",
+    ("GET", "/api/v1/warehouse/stock-cards"): "reads warehouse buckets only (no legacy fallback) — same asymmetry as the reference",
+    ("GET", "/api/v1/warehouse/sub-locations/{subLocation}/stock-cards"): "",
+    ("GET", "/api/v1/sub-stock/my"): "reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint)",
+    ("GET", "/api/v1/sub-stock/replenishment-targets"): "",
+    ("GET", "/api/v1/sub-stock/requests"): "list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported",
 }
 
 AREA_TITLES = OrderedDict([
@@ -65,6 +79,7 @@ AREA_TITLES = OrderedDict([
     ("stock", "Inventory — agent"),
     ("sub-stock", "Inventory — sub"),
     ("warehouse", "Inventory — warehouse"),
+    ("sub-stock", "Inventory — sub stock"),
     ("warehouse-stock", "Inventory — warehouse stock"),
     ("shipments", "Shipping & delivery"),
     ("kurir", "Courier"),

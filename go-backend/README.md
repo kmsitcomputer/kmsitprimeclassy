@@ -18,6 +18,7 @@ cannot drift):
 | Catalog | `GET /products`, `GET /products/{slug}`, `GET /categories` |
 | Content | `GET /homepage`, `GET /articles`, `GET /articles/{slug}`, `GET /pages/{slug}` |
 | Site | `GET /settings`, `GET /languages`, `GET /agents`, `GET /regions/{provinces,regencies,districts,villages}`, `GET /install/status` |
+| Inventory (read) | `GET /stock/products`, `/stock/variations`, `/warehouse-stock`, `/warehouse/sellable`, `/warehouse/settings`, `/warehouse/sub-locations` (+ `/{id}`, `/{id}/stocks`, `/{id}/stock-cards`), `/warehouse/stock-cards`, `/sub-stock/my`, `/sub-stock/replenishment-targets`, `/sub-stock/requests` |
 | Ops | `GET /up`, `GET /healthz` |
 
 Every other real Laravel route answers `501` with `errors.code = ["not_implemented"]`; an unknown path answers
@@ -42,6 +43,7 @@ curl -s localhost:8081/healthz
 tools/parity/run_go_tests.sh          # provisions the _testing database, then `go vet` + `go test ./...`
 tools/parity/compare_public_api.py    # Laravel ↔ Go contract comparison (both runtimes must be up)
 tools/parity/compare_auth.py          # Laravel ↔ Go authentication/CSRF/CSRF-419 comparison
+tools/parity/compare_inventory.py     # Laravel ↔ Go inventory read surface (3 roles, 29 checks)
 ```
 
 Integration tests skip themselves when no `_testing` database is reachable, so `go test ./...` still works on a
@@ -60,6 +62,7 @@ internal/auth     bcrypt verification, sessions/CSRF, RBAC gates, permission map
 internal/catalog  public product/category reads
 internal/cms      homepage blocks, articles, pages
 internal/site     settings, languages, agent directory, region cascades, install status
+internal/inventory canonical sellable projection + warehouse read surfaces
 internal/api      router, middleware chain, handlers, embedded parity inventory
 ```
 

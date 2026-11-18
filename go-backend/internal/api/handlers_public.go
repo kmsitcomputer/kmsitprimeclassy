@@ -36,12 +36,12 @@ func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := catalog.Query{
-		Search:    httpx.QueryString(r, "search"),
-		Category:  httpx.QueryString(r, "category"),
-		Sort:      httpx.QueryString(r, "sort"),
-		Random:    httpx.QueryBool(r, "random"),
-		Page:      httpx.QueryInt(r, "page", 1, 1),
-		PerPage:   httpx.QueryInt(r, "per_page", 15, 1),
+		Search:   httpx.QueryString(r, "search"),
+		Category: httpx.QueryString(r, "category"),
+		Sort:     httpx.QueryString(r, "sort"),
+		Random:   httpx.QueryBool(r, "random"),
+		Page:     httpx.QueryInt(r, "page", 1, 1),
+		PerPage:  httpx.QueryInt(r, "per_page", 15, 1),
 	}
 	if v := httpx.QueryString(r, "min_price"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {

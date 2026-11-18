@@ -127,10 +127,10 @@ func TestParameterisedMatching(t *testing.T) {
 
 func TestAreaGrouping(t *testing.T) {
 	cases := map[string]string{
-		"/api/v1/products":            "products",
-		"/api/v1/warehouse/opnames":   "warehouse",
-		"/api/v1/reports/sales":       "reports",
-		"/api/v1":                     "(root)",
+		"/api/v1/products":          "products",
+		"/api/v1/warehouse/opnames": "warehouse",
+		"/api/v1/reports/sales":     "reports",
+		"/api/v1":                   "(root)",
 	}
 	for uri, want := range cases {
 		if got := areaOf(uri); got != want {

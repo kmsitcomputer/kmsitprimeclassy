@@ -57,15 +57,17 @@ INSERT INTO roles (id, slug, name, created_at, updated_at) VALUES
 -- Users. Password for every fixture account is Secret123! (see the header).
 INSERT INTO users (id, role_id, parent_id, agent_id, korsal_id, sales_id, name, email, phone, referral_code, status, password, created_at, updated_at) VALUES
  (1,1,NULL,10,NULL,NULL,'Super Admin','super@imp010.test','081100000001','SA-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
- (10,2,NULL,NULL,NULL,NULL,'Agen Satu','agen@imp010.test','081100000010','AG-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
+ (10,2,NULL,10,NULL,NULL,'Agen Satu','agen@imp010.test','081100000010','AG-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (11,3,10,10,NULL,NULL,'Admin Agen','admin@imp010.test','081100000011',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (12,4,10,10,NULL,NULL,'Keuangan Agen','keuangan@imp010.test','081100000012',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (13,11,10,10,NULL,NULL,'Konsumen Satu','konsumen@imp010.test','081100000013',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
- (14,6,10,10,13,14,'Sales Satu','sales@imp010.test','081100000014','SL-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW());
+ (14,6,10,10,13,14,'Sales Satu','sales@imp010.test','081100000014','SL-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
+ (15,10,10,10,NULL,NULL,'Gudang Satu','gudang@imp010.test','081100000015',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
+ (16,7,10,10,13,16,'Sub Seller','sub@imp010.test','081100000016','SS-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW());
 
 INSERT INTO user_closures (ancestor_id, descendant_id, depth) VALUES
- (1,1,0),(10,10,0),(11,11,0),(12,12,0),(13,13,0),(14,14,0),
- (10,11,1),(10,12,1),(10,13,1),(10,14,1),(1,10,1),(1,11,2),(1,12,2),(1,13,2),(1,14,2);
+ (1,1,0),(10,10,0),(11,11,0),(12,12,0),(13,13,0),(14,14,0),(15,15,0),(16,16,0),
+ (10,11,1),(10,12,1),(10,13,1),(10,14,1),(10,15,1),(10,16,1),(1,10,1),(1,11,2),(1,12,2),(1,13,2),(1,14,2),(1,15,2),(1,16,2);
 
 INSERT INTO agent_profiles (id, user_id, store_name, address, latitude, longitude, phone, created_at, updated_at) VALUES
  (1,10,'Toko Prime Classy Imp010','Jl. Uji 1, Bandung',-6.9000000,107.6000000,'081100000010',NOW(),NOW());
@@ -87,7 +89,8 @@ INSERT INTO product_categories (id, parent_id, name, name_key, slug, is_active, 
 
 INSERT INTO products (id, category_id, created_by, name, slug, description, short_description, has_variations, base_price, weight_grams, status, sku, created_at, updated_at) VALUES
  (1,2,10,'Kue Lumpur','kue-lumpur','<p>Deskripsi kue lumpur</p>','Ringkas kue lumpur',0,45000.00,300,'active','SKU-LUMPUR','2026-11-10 10:00:00','2026-11-10 10:00:00'),
- (2,1,10,'Kue Ulang Tahun','kue-ulang-tahun','<p>Deskripsi kue ulang tahun</p>','Ringkas kue ulang tahun',1,NULL,NULL,'active',NULL,'2026-11-11 10:00:00','2026-11-11 10:00:00');
+ (2,1,10,'Kue Ulang Tahun','kue-ulang-tahun','<p>Deskripsi kue ulang tahun</p>','Ringkas kue ulang tahun',1,NULL,NULL,'active',NULL,'2026-11-11 10:00:00','2026-11-11 10:00:00'),
+ (3,1,10,'Kue Susu','kue-susu','<p>Deskripsi kue susu</p>','Ringkas kue susu',0,32000.00,250,'active','SKU-SUSU','2026-11-09 10:00:00','2026-11-09 10:00:00');
 
 INSERT INTO product_variations (id, product_id, sku, price, weight_grams, is_active, sort_order, created_at, updated_at) VALUES
  (1,2,'SKU-ULT-20',250000.00,1500,1,1,NOW(),NOW()),
