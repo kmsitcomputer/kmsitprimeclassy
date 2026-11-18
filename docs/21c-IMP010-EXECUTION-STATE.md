@@ -1,10 +1,11 @@
 # 21c — IMP-010 execution state and resumable continuation record
 
-**Written at commit `0469508` + checkpoints I (admin config) and J (opname/plan/eligible-owners).** This file exists because the 100% target is
-**not reached**: 301 of 375 routes are still Laravel-only. It records exactly where the work stands, what was
-verified, and what remains — so the next run continues rather than re-deriving.
+**Scope now governed by the Owner's final mandate: migrate 100% of the Laravel backend to Go, every feature and
+integration included, then archive Laravel.** `AGENTS.md` §0 records the mandate and removes the administrative
+review gates that previously stopped this work; the production-safety rules remain absolute.
 
-Do not read this as a completion report.
+This file is the resumable state. Read §1 (position), §4-x (what is done and its traps) and §4a (exact next action)
+before touching code. Do not re-derive a completed checkpoint.
 
 ## 1. Verified position
 
@@ -19,6 +20,20 @@ Do not read this as a completion report.
 | Cross-runtime comparison checks | **318 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
+
+## 1a. Owner mandate (final) — how work proceeds from here
+
+| Rule | Effect |
+|---|---|
+| Migrate everything | All 375 `/api/v1` routes to **GO**, plus jobs, queue, scheduler, installer, OAuth, payments, refunds, stock, commissions, invoices, PDF, Excel, media and integrations. |
+| Laravel is the specification | Every technical question is answered by reading the Laravel source, the schema, the contract and verified runtime behaviour. Do not ask the Owner to choose between implementation options. |
+| No administrative stops | No review checkpoint, stage gate or re-confirmation blocks progress. Fix findings directly, with tests, and continue. |
+| Scoped testing during migration | Tests for the changed area + the matching differential harness. Full regression only at final acceptance. |
+| Parity before removal | Laravel is archived and PHP removed only after full parity is verified. |
+| Still forbidden | Production access, deployment, remote push, destructive operations outside the isolated test environment. Security is never weakened to make a response match. |
+
+**No feature may be dropped or simplified to finish faster.** A domain that cannot be fully ported yet stays
+explicitly listed as outstanding rather than silently reduced.
 
 ## 2. Domains completed and verified
 
