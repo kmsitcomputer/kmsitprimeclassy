@@ -61,6 +61,14 @@ IMPLEMENTED = {
     ("POST", "/api/v1/warehouse/transfers/{transfer}/approve"): "executes + writes the handover; canonical lock order preserved, verified by two-connection tests",
     ("POST", "/api/v1/warehouse/transfers/{transfer}/cancel"): "",
     ("POST", "/api/v1/warehouse/transfers/{transfer}/reject"): "",
+    # --- checkpoint I: admin system configuration (compare_admin_config.py, 17 checks)
+    ("GET", "/api/v1/admin/languages"): "admin listing: every language, active or not",
+    ("POST", "/api/v1/admin/languages"): "",
+    ("PATCH", "/api/v1/admin/languages/{language}"): "",
+    ("PATCH", "/api/v1/admin/languages/{language}/set-default"): "exactly one default; the target must be active",
+    ("PATCH", "/api/v1/admin/languages/{language}/toggle-active"): "the default language can never be deactivated",
+    ("GET", "/api/v1/admin/settings"): "identical to the public read (single service in the reference)",
+    ("PUT", "/api/v1/admin/settings"): "unknown keys ignored, JSON keys encoded, returns the resolved settings",
 }
 
 AREA_TITLES = OrderedDict([

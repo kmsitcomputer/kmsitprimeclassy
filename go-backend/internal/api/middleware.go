@@ -54,6 +54,26 @@ func unknownChoice(ctx context.Context, field string) []string {
 	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "exists", field)}
 }
 
+// maxString renders the `max` sentence for a string field.
+func maxString(ctx context.Context, field string, max int) []string {
+	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "max.string", field, "max", strconv.Itoa(max))}
+}
+
+// minNumeric renders the `min` sentence for a numeric field.
+func minNumeric(ctx context.Context, field string, min int) []string {
+	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "min.numeric", field, "min", strconv.Itoa(min))}
+}
+
+// uniqueField renders the `unique` sentence.
+func uniqueField(ctx context.Context, field string) []string {
+	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "unique", field)}
+}
+
+// notInteger renders the `integer` sentence.
+func notInteger(ctx context.Context, field string) []string {
+	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "integer", field)}
+}
+
 // writeError renders any error as the API envelope, mapping unknown errors to 500 without leaking internals
 // (Laravel renders the same generic server_error message unless APP_DEBUG is on).
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

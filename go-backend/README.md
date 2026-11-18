@@ -20,7 +20,8 @@ cannot drift):
 | Site | `GET /settings`, `GET /languages`, `GET /agents`, `GET /regions/{provinces,regencies,districts,villages}`, `GET /install/status` |
 | Inventory (read) | `GET /stock/products`, `/stock/variations`, `/warehouse-stock`, `/warehouse/sellable`, `/warehouse/settings`, `/warehouse/sub-locations` (+ `/{id}`, `/{id}/stocks`, `/{id}/stock-cards`), `/warehouse/stock-cards`, `/sub-stock/my`, `/sub-stock/replenishment-targets`, `/sub-stock/requests` |
 | Inventory (mutations) | `POST /stock/adjust` (403 in warehouse-authoritative mode, as the reference), `PATCH /warehouse/settings/factory-plan`, `GET/POST /warehouse/transfers`, `GET /warehouse/transfers/{id}`, `POST /warehouse/transfers/{id}/approve|cancel|reject` |
-| Ops | `GET /up`, `GET /healthz` |
+| Admin config | `GET/POST /admin/languages`, `PATCH /admin/languages/{id}`, `PATCH /admin/languages/{id}/set-default`, `PATCH /admin/languages/{id}/toggle-active`, `GET /admin/settings`, `PUT /admin/settings` |
+| Ops | `GET /up`, `GET /healthz`, `GET /api/v1/_parity` |
 
 Every other real Laravel route answers `501` with `errors.code = ["not_implemented"]`; an unknown path answers
 `404` with the API envelope. That distinction is deliberate: a reverse proxy may send a chosen subset of

@@ -41,6 +41,13 @@ KEYS = {
         "agent_id_required",
         "invalid_agent",
     ],
+    "language": [
+        "cannot_deactivate_default",
+        "default_must_be_active",
+    ],
+    "settings": [
+        "updated",
+    ],
     "profile": [
         "current_password_incorrect",
         "password_updated",
@@ -54,9 +61,16 @@ KEYS = {
 
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
-VALIDATION_KEYS = ["in", "exists", "required"]
+VALIDATION_KEYS = ["in", "exists", "required", "integer", "date", "array", "unique"]
+# Nested variants: "rule.kind" (e.g. max.string).
+VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"), ("min", "string")]
 
 LOCALES = ["id", "en", "ar", "zh"]
+
+
+def unescape(v: str) -> str:
+    """PHP single-quoted strings only escape \\ and \'."""
+    return v.replace("\\'", "'").replace("\\\\", "\\")
 
 
 def block(src: str, name: str) -> str:
@@ -110,6 +124,12 @@ def main() -> int:
             if not m:
                 raise SystemExit(f"{loc}: missing validation.{key}")
             out[loc][f"validation.{key}"] = m.group(1).replace("\\'", "'").replace("\\\\", "\\")
+        for rule, kind in VALIDATION_NESTED:
+            body = block(vsrc, rule)  # bracket-balanced `'rule' => [ ... ]`
+            m = re.search(r"'%s'\s*=>\s*'((?:[^'\\]|\\.)*)'" % kind, body)
+            if not m:
+                raise SystemExit(f"{loc}: missing validation.{rule}.{kind}")
+            out[loc][f"validation.{rule}.{kind}"] = unescape(m.group(1))
 
     dest = os.path.join(root, "go-backend", "internal", "i18n", "catalog.json")
     os.makedirs(os.path.dirname(dest), exist_ok=True)

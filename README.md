@@ -24,6 +24,7 @@ README ini hanya pintu masuk. Sistem dijelaskan dalam **dokumentasi kanonis**:
 | [docs/21-IMP010-GO-BACKEND.md](docs/21-IMP010-GO-BACKEND.md) | IMP-010: layanan Go (increment terverifikasi), parity API, session/CSRF, rollback |
 | [docs/21a-IMP010-API-PARITY-MATRIX.md](docs/21a-IMP010-API-PARITY-MATRIX.md) | IMP-010: matriks parity 375 route `/api/v1` (generated) |
 | [docs/21b-IMP010-COMPATIBILITY-DEVIATIONS.md](docs/21b-IMP010-COMPATIBILITY-DEVIATIONS.md) | IMP-010: register deviasi kompatibilitas (wajib dibaca sebelum klaim parity) |
+| [docs/21c-IMP010-EXECUTION-STATE.md](docs/21c-IMP010-EXECUTION-STATE.md) | IMP-010: status eksekusi + catatan lanjutan (baca dulu saat melanjutkan) |
 | [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md) | Harness uji + kebijakan (Full Test = Owner) |
 | [docs/15-KNOWN-LIMITATIONS.md](docs/15-KNOWN-LIMITATIONS.md) | Gap ledger + keterbatasan |
 | [docs/16-TRACEABILITY.md](docs/16-TRACEABILITY.md) | Register keputusan Owner |

@@ -101,6 +101,17 @@ func TestSellableWarehouseAuthorityWithSubOnlyRows(t *testing.T) {
 // TestSellableFactoryPlanSwitch proves the plan bucket only counts when the agent enabled it.
 func TestSellableFactoryPlanSwitch(t *testing.T) {
 	h := newHarness(t)
+	// Establish the precondition explicitly instead of inheriting it from the fixtures: a previous run (or a
+	// concurrent comparison harness) may legitimately have left the flag in the other state, and a test must not
+	// fail for a reason it does not control.
+	if _, err := h.db.ExecContext(context.Background(),
+		`UPDATE warehouse_settings SET factory_plan_enabled = 1 WHERE agent_id = 10`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = h.db.ExecContext(context.Background(),
+			`UPDATE warehouse_settings SET factory_plan_enabled = 1 WHERE agent_id = 10`)
+	})
 	h.loginAs("agen@imp010.test", "Secret123!")
 
 	body := h.getJSON("/api/v1/warehouse/sellable?product_id=2")

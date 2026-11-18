@@ -10,8 +10,9 @@ Not deployed, not cut over, no production access. Laravel remains the reference 
 | Database | the existing MySQL/MariaDB schema. No PostgreSQL, no production import, one additive Go-owned table |
 | Frontend | untouched — no Vue, Nuxt, routing, PWA or locale change was made |
 | Verdict | **PASS WITH LIMITATIONS** (§14) |
-| Checkpoints done | A, B, C, F (identity + public reads) · G (inventory read surface) · **H (inventory mutations)** |
+| Checkpoints done | A, B, C, F (identity + public reads) · G (inventory read) · H (inventory mutations) · **I (admin configuration)** |
 | Deviation register | [21b — compatibility deviations](21b-IMP010-COMPATIBILITY-DEVIATIONS.md) (mandatory reading before any parity claim) |
+| Execution state | [21c — execution state and resumable continuation record](21c-IMP010-EXECUTION-STATE.md) (read this first when resuming) |
 
 Companion documents:
 

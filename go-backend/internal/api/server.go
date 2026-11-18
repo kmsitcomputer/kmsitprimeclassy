@@ -147,6 +147,16 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/cancel", chain(http.HandlerFunc(s.handleTransferCancel), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
 	s.mux.Handle("POST /api/v1/warehouse/transfers/{transfer}/reject", chain(http.HandlerFunc(s.handleTransferReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
 
+	// Administration — system configuration (Gate::authorize('manage-system-config') == super_admin).
+	cfgRole := RequireRole("super_admin")
+	s.mux.Handle("GET /api/v1/admin/languages", chain(http.HandlerFunc(s.handleAdminLanguages), RequireAuth, s.RequireAgentLinked, cfgRole))
+	s.mux.Handle("POST /api/v1/admin/languages", chain(http.HandlerFunc(s.handleAdminLanguageStore), RequireAuth, s.RequireAgentLinked, cfgRole))
+	s.mux.Handle("PATCH /api/v1/admin/languages/{language}", chain(http.HandlerFunc(s.handleAdminLanguageUpdate), RequireAuth, s.RequireAgentLinked, cfgRole))
+	s.mux.Handle("PATCH /api/v1/admin/languages/{language}/set-default", chain(http.HandlerFunc(s.handleAdminLanguageSetDefault), RequireAuth, s.RequireAgentLinked, cfgRole))
+	s.mux.Handle("PATCH /api/v1/admin/languages/{language}/toggle-active", chain(http.HandlerFunc(s.handleAdminLanguageToggle), RequireAuth, s.RequireAgentLinked, cfgRole))
+	s.mux.Handle("GET /api/v1/admin/settings", chain(http.HandlerFunc(s.handleAdminSettingsShow), RequireAuth, s.RequireAgentLinked, cfgRole))
+	s.mux.Handle("PUT /api/v1/admin/settings", chain(http.HandlerFunc(s.handleAdminSettingsUpdate), RequireAuth, s.RequireAgentLinked, cfgRole))
+
 	// Machine-readable parity report (Go-only, additive, underscore-prefixed so it can never collide with a
 	// Laravel route).
 	s.mux.HandleFunc("GET /api/v1/_parity", s.handleParity)

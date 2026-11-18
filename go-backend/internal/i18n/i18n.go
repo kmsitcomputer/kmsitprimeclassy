@@ -51,9 +51,16 @@ func Translate(locale, key string) string {
 
 // ValidationMessage renders a Laravel validation sentence for a rule, substituting :attribute with the field
 // name humanised the same way Laravel does (underscores become spaces: province_id → "province id").
-func ValidationMessage(locale, rule, field string) string {
+//
+// Extra parameters (:max, :min, :values) are substituted from params so the sentences stay byte-identical to
+// what the reference validation layer emits.
+func ValidationMessage(locale, rule, field string, params ...string) string {
 	template := Translate(locale, "validation."+rule)
-	return strings.ReplaceAll(template, ":attribute", strings.ReplaceAll(field, "_", " "))
+	out := strings.ReplaceAll(template, ":attribute", strings.ReplaceAll(field, "_", " "))
+	for i := 0; i+1 < len(params); i += 2 {
+		out = strings.ReplaceAll(out, ":"+params[i], params[i+1])
+	}
+	return out
 }
 
 // ResolveLocale mirrors the backend's SetLocale precedence.

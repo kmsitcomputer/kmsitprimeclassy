@@ -115,8 +115,23 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/stock/adjust",
 		"PATCH /api/v1/warehouse/settings/factory-plan",
 		"GET /api/v1/warehouse/transfers",
-		"POST /api/v1/warehouse/transfers":
+		"POST /api/v1/warehouse/transfers",
+		"GET /api/v1/admin/languages",
+		"POST /api/v1/admin/languages",
+		"GET /api/v1/admin/settings",
+		"PUT /api/v1/admin/settings":
 		return true
+	}
+	// /api/v1/admin/languages/<id> and /<id>/(set-default|toggle-active).
+	if method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/admin/languages/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/admin/languages/"), "/")
+		if len(parts) == 1 && parts[0] != "" {
+			return true
+		}
+		if len(parts) == 2 && (parts[1] == "set-default" || parts[1] == "toggle-active") {
+			return true
+		}
+		return false
 	}
 	// /api/v1/warehouse/transfers/<id> and /<id>/(approve|cancel|reject) — literal ids only.
 	if (method == http.MethodGet || method == http.MethodPost) && strings.HasPrefix(path, "/api/v1/warehouse/transfers/") {
