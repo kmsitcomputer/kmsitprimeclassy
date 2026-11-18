@@ -98,7 +98,7 @@ KEYS = {
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
-                   "array", "unique", "after_or_equal"]
+                   "array", "unique", "after_or_equal", "not_in"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric")]

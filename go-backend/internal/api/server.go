@@ -171,6 +171,16 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/warehouse/sub-locations/{subLocation}/assign-owner", chain(http.HandlerFunc(s.handleSubLocationAssignOwner), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin")))
 	s.mux.Handle("POST /api/v1/warehouse/sub-locations/{subLocation}/deactivate", chain(http.HandlerFunc(s.handleSubLocationDeactivate), RequireAuth, s.RequireAgentLinked, RequireRole("agen,admin,gudang")))
 
+	// Warehouse stock requests: Gudang drafts, Admin approves. The route group mirrors the reference exactly
+	// (create=gudang, approve/reject=admin, list/show=admin,gudang); the service re-checks the finer rule and
+	// scopes every row to the actor's branch, so a foreign id is a 404 rather than a 403.
+	s.mux.Handle("POST /api/v1/warehouse/stock-addition-requests", chain(http.HandlerFunc(s.handleStockAdditionStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/sub-adjustment-requests", chain(http.HandlerFunc(s.handleSubAdjustmentStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve", chain(http.HandlerFunc(s.handleStockAdditionApprove), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject", chain(http.HandlerFunc(s.handleStockAdditionReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("GET /api/v1/warehouse/stock-addition-requests", chain(http.HandlerFunc(s.handleStockAdditionIndex), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}", chain(http.HandlerFunc(s.handleStockAdditionShow), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
+
 	// Stock opname (Gudang drafts/counts/submits, Admin approves).
 	s.mux.Handle("GET /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameIndex), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
 	s.mux.Handle("POST /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))

@@ -133,7 +133,10 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/promo/discounts",
 		"GET /api/v1/checkout/steps",
 		"POST /api/v1/checkout/quote",
-		"POST /api/v1/orders":
+		"POST /api/v1/orders",
+		"GET /api/v1/warehouse/stock-addition-requests",
+		"POST /api/v1/warehouse/stock-addition-requests",
+		"POST /api/v1/warehouse/sub-adjustment-requests":
 		return true
 	}
 	for _, collection := range []string{"vouchers", "discounts"} {
@@ -146,6 +149,19 @@ func implementsRoute(method, path string) bool {
 	if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, "/api/v1/addresses/") {
 		rest := strings.TrimPrefix(path, "/api/v1/addresses/")
 		return rest != "" && !strings.Contains(rest, "/")
+	}
+	// /api/v1/warehouse/stock-addition-requests/<id> and /<id>/(approve|reject).
+	if strings.HasPrefix(path, "/api/v1/warehouse/stock-addition-requests/") {
+		rest := strings.TrimPrefix(path, "/api/v1/warehouse/stock-addition-requests/")
+		parts := strings.Split(rest, "/")
+		if len(parts) == 1 && parts[0] != "" && method == http.MethodGet {
+			return true
+		}
+		if len(parts) == 2 && parts[0] != "" && method == http.MethodPost &&
+			(parts[1] == "approve" || parts[1] == "reject") {
+			return true
+		}
+		return false
 	}
 	// /api/v1/warehouse/opnames/<id> and /<id>/(count|submit|approve|cancel|reject).
 	if strings.HasPrefix(path, "/api/v1/warehouse/opnames/") {

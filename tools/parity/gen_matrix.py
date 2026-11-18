@@ -41,6 +41,13 @@ IMPLEMENTED = {
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
+    # --- checkpoint R: warehouse stock-request two-party gate (compare_warehouse_requests.py, 22 checks)
+    ("GET", "/api/v1/warehouse/stock-addition-requests"): "agent-scoped list; sub_location is loaded here (unlike show)",
+    ("POST", "/api/v1/warehouse/stock-addition-requests"): "gudang only; target is product XOR variation; quantity > 0",
+    ("GET", "/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}"): "show does NOT eager-load sub_location, so that key is absent — the reference's own asymmetry",
+    ("POST", "/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve"): "admin only; idempotent (a second approve moves no stock); transit receipt or factory_plan change under the commitment guard",
+    ("POST", "/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject"): "admin only; leaves stock untouched; a missing id answers the endpoint-not-found sentence",
+    ("POST", "/api/v1/warehouse/sub-adjustment-requests"): "gudang only; a negative delta may never cut Sub physical below the active reservations",
     # --- checkpoint Q: order creation (compare_orders.py, 43 checks: response + DB state + idempotency + atomicity)
     ("POST", "/api/v1/orders"): "full chain: canonical target locks, reservation, fee/commission snapshots, voucher redemption, invoice sequence, shipment grouping, payment transaction, Stock Request (COD), initial report snapshot; idempotent replay and total rollback verified",
     # --- checkpoint G: inventory read surface (contract-compared in tools/parity/compare_inventory.py)

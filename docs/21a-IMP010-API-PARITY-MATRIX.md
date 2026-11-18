@@ -554,7 +554,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **GO** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (28/49 in Go)
+## Inventory — warehouse — `warehouse` (34/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -581,16 +581,16 @@ Status legend:
 | GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | **GO** | Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence) |
 | GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | **GO** | reproduces Laravel's firstOrCreate side effect (a GET may create the row) |
 | PATCH | `/api/v1/warehouse/settings/factory-plan` | session | admin | **GO** |  |
-| GET | `/api/v1/warehouse/stock-addition-requests` | session | admin, gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/stock-addition-requests` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}` | session | admin, gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve` | session | admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject` | session | admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/stock-addition-requests` | session | admin, gudang | **GO** | agent-scoped list; sub_location is loaded here (unlike show) |
+| POST | `/api/v1/warehouse/stock-addition-requests` | session | gudang | **GO** | gudang only; target is product XOR variation; quantity > 0 |
+| GET | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}` | session | admin, gudang | **GO** | show does NOT eager-load sub_location, so that key is absent — the reference's own asymmetry |
+| POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve` | session | admin | **GO** | admin only; idempotent (a second approve moves no stock); transit receipt or factory_plan change under the commitment guard |
+| POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject` | session | admin | **GO** | admin only; leaves stock untouched; a missing id answers the endpoint-not-found sentence |
 | GET | `/api/v1/warehouse/stock-cards` | session | admin, gudang | **GO** | reads warehouse buckets only (no legacy fallback) — same asymmetry as the reference |
 | POST | `/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy` | session | admin | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/fulfill` | session | gudang | LARAVEL |  |
 | POST | `/api/v1/warehouse/stock-requests/{stockRequest}/proposals` | session | gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/sub-adjustment-requests` | session | gudang | LARAVEL |  |
+| POST | `/api/v1/warehouse/sub-adjustment-requests` | session | gudang | **GO** | gudang only; a negative delta may never cut Sub physical below the active reservations |
 | GET | `/api/v1/warehouse/sub-locations` | session | admin, agen, gudang, super_admin | **GO** |  |
 | POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | **GO** | owner must be an active Sales-Kurir-Sub of the network that owns no other location |
 | GET | `/api/v1/warehouse/sub-locations/eligible-owners` | session | admin, agen | **GO** | active Sales-Kurir-Sub without a sub-location |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 77 (20.5%) |
-|   of which fully GO | 71 |
+| Served by Go now | 83 (22.1%) |
+|   of which fully GO | 77 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 298 |
+| Still Laravel-only | 292 |
 | Areas fully ported | 11 / 45 |

@@ -12,12 +12,12 @@ before touching code. Do not re-derive a completed checkpoint.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **77 (20.5%)** |
-| Fully GO | 71 |
+| Served by Go | **83 (22.1%)** |
+| Fully GO | 77 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **298** |
+| Laravel-only (Go answers 501) | **292** |
 | Go tests | **123 green**, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **318 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders) |
+| Cross-runtime comparison checks | **340 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -52,6 +52,7 @@ explicitly listed as outstanding rather than silently reduced.
 | Checkout quote (Review preview) | 1 | `compare_order_quote.py` (25) — pickup/address-book/inline destinations, fixed/percentage/targeted vouchers, inapplicable + unknown vouchers, provider-failure 422s, validation shapes, policy vs role 403, guest 401. Provider clients additionally pinned by 4 Go test groups incl. a stub ORS/RajaOngkir/KMSIT and the SSRF guard |
 | Agent stock reservations | — (primitive) | 12 two-connection oracles in `internal/inventory/reserve_test.go`: anti-oversell, exact-capacity lost-update, opposite-order deadlock, rollback, legacy boundary, warehouse-authoritative trap, provisioning, release clamp |
 | Order creation | 1 | `compare_orders.py` (43) — response body AND database state (order, items, commissions, shipments, stock request, payment transaction, snapshot, reservation), plus idempotent replay after a status change and full rollback on failure |
+| Warehouse stock requests | 6 | `compare_warehouse_requests.py` (22) — transit receipt, factory_plan change, Sub adjustment both directions, idempotent re-approval, rejection, the negative-Sub guard, route gates, and 7 validation shapes; DB state compared after every scenario |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
 ## 3. What remains (327 routes) — ordered, with the real obstacle for each
@@ -262,32 +263,51 @@ Fixture/harness note: `seed_test_fixtures.sql` DELETEs `users`, which cascades t
 scenarios invalidated both runtimes' cookies mid-run and produced spurious 419s. `compare_orders.py` therefore
 loads the fixtures ONCE and resets only order-scoped tables per scenario.
 
+## 4-5. Warehouse stock requests — DONE (do not re-derive)
+
+6 routes: `internal/inventory/stockrequests.go` + `internal/api/handlers_stockrequests.go`.
+
+**The reference's serialisation asymmetry is the contract, not a bug** — `sub_location` appears or not depending on
+which relations THAT action eager-loaded:
+`create(addition)` absent · `create(sub_adjustment)` present · `approve` present · `reject` present · `index`
+present · `show` absent. A loaded-but-empty relation renders `null`, never a dict of nulls. `current_stock` is the
+same: the key is always there but only `index`/`show` fill it.
+
+Other traps confirmed here:
+- A missing request id answers **`system.endpoint_not_found`** ("Endpoint tidak ditemukan."), not the model-not-found
+  sentence — the frontend branches on that text.
+- Approval is idempotent through the `warehouse_stock_request_id` marker on `stock_movements`, not through the
+  status column alone, so a retry after a partial failure cannot move stock twice.
+- A `sub_adjustment` delta may be negative but is refused when it would drop physical below the ACTIVE Sub
+  reservations; a `factory_plan` change is refused when `transit + plan` would fall below reserved.
+
 ## 4a. Next action (resume here)
 
-**A. The stock-request/proposal/handover chain** (~20 routes) — the next coherent unit:
-`StockRequestProposalService` (propose/approve/receive/settle/resolveDiscrepancy) is the §16/§31 two-party gate.
-It reuses the transfer infrastructure already built; lock order is Order → Stock Request → inventory, and the
-status/sum reconciliation under a lock must use locking reads, not `sum()` (REPEATABLE READ snapshot).
+**A. Stock-request proposals / handovers** (the remaining ~14 routes of this family):
+`StockRequestProposalService` (propose/approve/receive/reject/settle/resolveDiscrepancy) is the §16/§31 two-party
+gate. Read it together with `StockRequestController::fulfill`, `StockRequestProposalController` and the handover
+routes; lock order is Order → Stock Request → inventory, and the status/sum reconciliation under a lock must use
+locking reads, not `sum()`. `warehouse/handovers/{handover}` + `/print` belong to the same unit.
 
-**B. Sub stock-request workflow** (6 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/
-reject). Its execution path (`execute`) locks the Sub Location row EXCLUSIVELY and then the Sub stock rows —
-which is precisely the contract `lockSubLocationForCheckout` (SHARED lock first) was written to interleave with.
-A two-connection test proving checkout and execution do not deadlock against each other is required evidence.
+**B. Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/reject
++ index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart
+of `lockSubLocationForCheckout` (SHARED first). Required evidence: a two-connection test proving checkout and
+execute cannot deadlock against each other.
 
-**C. Order lifecycle**: `PATCH /orders/{order}/status`, `POST /orders/{order}/cancel` (release reservations via
-`inventory.ReleaseForProduct`/`ReleaseForSubStock`), item cancel/fulfilment, `GET /orders`,
-`GET /orders/{order}`. `OrderTotalCalculator` is already ported (`internal/pricing.RecalculateTotals`).
+**C. Order lifecycle**: `GET /orders`, `GET /orders/{order}`, `PATCH /orders/{order}/status`,
+`POST /orders/{order}/cancel` (release via `inventory.ReleaseForProduct`/`ReleaseForSubStock`), item cancel and
+`PATCH .../items/{item}/fulfillment`. `internal/pricing.RecalculateTotals` already exists.
 
-**D. Financial**: payments/refunds/commissions (`internal/payments` not started). Invoice issuance beyond the
-number allocation is still outstanding — the COD path sets `invoice_issued_at`, but
-`InvoiceIssuanceService::syncAfterChange` for the transfer path (issued on first verified payment) is not ported.
+**D. Financial**: payments (proofs, verification, COD, DP settlement), refunds, commissions, invoice issuance
+beyond the number allocation.
 
 **Known gaps recorded, not silently skipped:** the order-creation notification/queue side effect
 (`queue bridge outstanding`, same as registration); `OrderInitialSnapshotService` is ported but
 `FulfillmentShortageService` is not.
 
 **DONE, do not redo:** `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`; `/addresses` (4);
-`/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`.
+`/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`;
+warehouse stock-addition-requests + sub-adjustment-requests (6).
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the
