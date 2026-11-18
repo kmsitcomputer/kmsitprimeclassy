@@ -124,8 +124,14 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/warehouse/sub-locations/eligible-owners",
 		"GET /api/v1/warehouse/opnames",
 		"POST /api/v1/warehouse/opnames",
-		"POST /api/v1/warehouse/sub-locations":
+		"POST /api/v1/warehouse/sub-locations",
+		"GET /api/v1/addresses",
+		"POST /api/v1/addresses":
 		return true
+	}
+	if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, "/api/v1/addresses/") {
+		rest := strings.TrimPrefix(path, "/api/v1/addresses/")
+		return rest != "" && !strings.Contains(rest, "/")
 	}
 	// /api/v1/warehouse/opnames/<id> and /<id>/(count|submit|approve|cancel|reject).
 	if strings.HasPrefix(path, "/api/v1/warehouse/opnames/") {

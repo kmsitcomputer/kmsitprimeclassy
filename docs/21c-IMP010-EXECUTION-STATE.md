@@ -1,7 +1,7 @@
 # 21c — IMP-010 execution state and resumable continuation record
 
 **Written at commit `0469508` + checkpoints I (admin config) and J (opname/plan/eligible-owners).** This file exists because the 100% target is
-**not reached**: 313 of 375 routes are still Laravel-only. It records exactly where the work stands, what was
+**not reached**: 309 of 375 routes are still Laravel-only. It records exactly where the work stands, what was
 verified, and what remains — so the next run continues rather than re-deriving.
 
 Do not read this as a completion report.
@@ -11,12 +11,12 @@ Do not read this as a completion report.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **62 (16.5%)** |
-| Fully GO | 56 |
+| Served by Go | **66 (17.6%)** |
+| Fully GO | 60 |
 | PARTIAL (documented gap) | 6 |
-| Laravel-only (Go answers 501) | **313** |
+| Laravel-only (Go answers 501) | **309** |
 | Go tests | **87 green**, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **174 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config) |
+| Cross-runtime comparison checks | **191 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -31,6 +31,7 @@ Do not read this as a completion report.
 | Admin system configuration (languages, settings) | 7 | `compare_admin_config.py` (17) |
 | Inventory opname, plan transfer, eligible owners | 10 | `compare_inventory_mutations.py` (78, incl. the opname 409 stale-snapshot path) + 5 opname state-machine/concurrency tests |
 | Sub-location ownership (create/update/assign/deactivate) | 4 | `compare_inventory_mutations.py` sublocation scenario + owner/previous_owner/is_active state diff |
+| Konsumen address book | 4 | `compare_address.py` (17) — incl. the resolved province/regency/district columns and the ownership 404 |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
 ## 3. What remains (327 routes) — ordered, with the real obstacle for each
@@ -121,6 +122,12 @@ sequence in `settings`, 409 on namespace exhaustion), `CommissionFinalizer` (ide
 2. Sub stock-request workflow (6 routes) — `SubStockRequestService`; execution goes through the transfer
    approve path that already exists.
 3. ~~`PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`~~ **DONE** (checkpoint K).
+3a. ~~`/addresses` (4)~~ **DONE** (checkpoint L).
+
+**Note for the next run:** the i18n catalogue now also carries `attributes.*` (Laravel's field display names),
+so any new validation message renders "nama penerima" instead of "recipient name". Always render field
+sentences through `requiredField`/`maxString`/`invalidChoice`/`unknownChoice`/`betweenMessage` — never inline
+literal text — or the two runtimes will diverge on the message. `address` shows the pattern to copy.
 4. Then Phase B (orders) exactly as ordered in §3.2.
 
 ## 5. How to resume (exact steps)

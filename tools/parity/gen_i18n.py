@@ -48,6 +48,11 @@ KEYS = {
     "settings": [
         "updated",
     ],
+    "address": [
+        "created",
+        "updated",
+        "deleted",
+    ],
     "profile": [
         "current_password_incorrect",
         "password_updated",
@@ -63,7 +68,8 @@ KEYS = {
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "integer", "date", "array", "unique"]
 # Nested variants: "rule.kind" (e.g. max.string).
-VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"), ("min", "string")]
+VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
+                     ("min", "string"), ("between", "numeric")]
 
 LOCALES = ["id", "en", "ar", "zh"]
 
@@ -124,6 +130,12 @@ def main() -> int:
             if not m:
                 raise SystemExit(f"{loc}: missing validation.{key}")
             out[loc][f"validation.{key}"] = m.group(1).replace("\\'", "'").replace("\\\\", "\\")
+        # Attribute display names: Laravel renders ":attribute" through validation.attributes[field] when
+        # present, so "recipient_name" becomes "nama penerima". Without this the sentences differ.
+        attrs_body = block(vsrc, "attributes")
+        for field, display in PAIR.findall(attrs_body):
+            out[loc][f"attributes.{field}"] = unescape(display)
+
         for rule, kind in VALIDATION_NESTED:
             body = block(vsrc, rule)  # bracket-balanced `'rule' => [ ... ]`
             m = re.search(r"'%s'\s*=>\s*'((?:[^'\\]|\\.)*)'" % kind, body)

@@ -56,11 +56,27 @@ func Translate(locale, key string) string {
 // what the reference validation layer emits.
 func ValidationMessage(locale, rule, field string, params ...string) string {
 	template := Translate(locale, "validation."+rule)
-	out := strings.ReplaceAll(template, ":attribute", strings.ReplaceAll(field, "_", " "))
+	out := strings.ReplaceAll(template, ":attribute", AttributeName(locale, field))
 	for i := 0; i+1 < len(params); i += 2 {
 		out = strings.ReplaceAll(out, ":"+params[i], params[i+1])
 	}
 	return out
+}
+
+// AttributeName renders the display name Laravel uses for a field: validation.attributes[field] when the
+// catalogue defines one (e.g. recipient_name → "nama penerima"), otherwise the field with underscores turned
+// into spaces (Laravel's Str::snake → headline fallback).
+func AttributeName(locale, field string) string {
+	key := "attributes." + field
+	once.Do(load)
+	for _, loc := range []string{locale, Default} {
+		if m, ok := catalog[loc]; ok {
+			if v, ok := m[key]; ok && v != "" {
+				return v
+			}
+		}
+	}
+	return strings.ReplaceAll(field, "_", " ")
 }
 
 // ResolveLocale mirrors the backend's SetLocale precedence.

@@ -21,6 +21,7 @@ cannot drift):
 | Inventory (read) | `GET /stock/products`, `/stock/variations`, `/warehouse-stock`, `/warehouse/sellable`, `/warehouse/settings`, `/warehouse/sub-locations` (+ `/{id}`, `/{id}/stocks`, `/{id}/stock-cards`), `/warehouse/stock-cards`, `/sub-stock/my`, `/sub-stock/replenishment-targets`, `/sub-stock/requests` |
 | Inventory (mutations) | `POST /stock/adjust` (403 in warehouse-authoritative mode, as the reference), `PATCH /warehouse/settings/factory-plan`, `GET/POST /warehouse/transfers`, `GET /warehouse/transfers/{id}`, `POST /warehouse/transfers/{id}/approve|cancel|reject` |
 | Inventory (opname/plan/ownership) | `GET/POST /warehouse/opnames`, `GET /warehouse/opnames/{id}`, `PATCH /opnames/{id}/count`, `POST /opnames/{id}/{submit,approve,cancel,reject}`, `POST /warehouse/transfers/plan-to-transit`, `GET /warehouse/sub-locations/eligible-owners`, `POST/PATCH /warehouse/sub-locations[/{id}]`, `POST /warehouse/sub-locations/{id}/{assign-owner,deactivate}` |
+| Addresses | `GET/POST /addresses`, `PATCH/DELETE /addresses/{id}` (own rows only) |
 | Admin config | `GET/POST /admin/languages`, `PATCH /admin/languages/{id}`, `PATCH /admin/languages/{id}/set-default`, `PATCH /admin/languages/{id}/toggle-active`, `GET /admin/settings`, `PUT /admin/settings` |
 | Ops | `GET /up`, `GET /healthz`, `GET /api/v1/_parity` |
 

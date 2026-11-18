@@ -8,14 +8,14 @@ Status legend:
 - **PARTIAL** — served, with a documented behavioural gap in the Notes column.
 - **LARAVEL** — still served by Laravel only; the Go service answers `501 not_implemented`.
 
-## addresses — `addresses` (0/4 in Go)
+## addresses — `addresses` (4/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/addresses` | session | konsumen | LARAVEL |  |
-| POST | `/api/v1/addresses` | session | konsumen | LARAVEL |  |
-| DELETE | `/api/v1/addresses/{address}` | session | konsumen | LARAVEL |  |
-| PATCH | `/api/v1/addresses/{address}` | session | konsumen | LARAVEL |  |
+| GET | `/api/v1/addresses` | session | konsumen | **PARTIAL** | own rows only; list ordering differs (deviation D-10) |
+| POST | `/api/v1/addresses` | session | konsumen | **GO** |  |
+| DELETE | `/api/v1/addresses/{address}` | session | konsumen | **PARTIAL** | a foreign id is a 404 |
+| PATCH | `/api/v1/addresses/{address}` | session | konsumen | **PARTIAL** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
 ## Admin operations — `admin` (7/59 in Go)
 
@@ -613,6 +613,6 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now (incl. partial) | 62 (16.5%) |
-| Still Laravel-only | 313 |
+| Served by Go now (incl. partial) | 66 (17.6%) |
+| Still Laravel-only | 309 |
 | Areas fully ported | 6 / 45 |

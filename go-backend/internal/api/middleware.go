@@ -69,6 +69,19 @@ func uniqueField(ctx context.Context, field string) []string {
 	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "unique", field)}
 }
 
+// betweenMessage renders the `between.numeric` sentence.
+func betweenMessage(ctx context.Context, field string, min, max float64) string {
+	return i18n.ValidationMessage(LocaleFrom(ctx), "between.numeric", field,
+		"min", trimFloat(min), "max", trimFloat(max))
+}
+
+func trimFloat(v float64) string {
+	if v == float64(int64(v)) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
 // notInteger renders the `integer` sentence.
 func notInteger(ctx context.Context, field string) []string {
 	return []string{i18n.ValidationMessage(LocaleFrom(ctx), "integer", field)}

@@ -166,6 +166,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/warehouse/opnames/{opname}/cancel", chain(http.HandlerFunc(s.handleOpnameCancel), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
 	s.mux.Handle("POST /api/v1/warehouse/opnames/{opname}/reject", chain(http.HandlerFunc(s.handleOpnameReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
 
+	// Konsumen address book (own rows only).
+	s.mux.Handle("GET /api/v1/addresses", chain(http.HandlerFunc(s.handleAddressIndex), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
+	s.mux.Handle("POST /api/v1/addresses", chain(http.HandlerFunc(s.handleAddressStore), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
+	s.mux.Handle("PATCH /api/v1/addresses/{address}", chain(http.HandlerFunc(s.handleAddressUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
+	s.mux.Handle("DELETE /api/v1/addresses/{address}", chain(http.HandlerFunc(s.handleAddressDestroy), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
+
 	// Administration — system configuration (Gate::authorize('manage-system-config') == super_admin).
 	cfgRole := RequireRole("super_admin")
 	s.mux.Handle("GET /api/v1/admin/languages", chain(http.HandlerFunc(s.handleAdminLanguages), RequireAuth, s.RequireAgentLinked, cfgRole))

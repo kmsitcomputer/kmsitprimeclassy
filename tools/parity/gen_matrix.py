@@ -84,6 +84,11 @@ IMPLEMENTED = {
     ("POST", "/api/v1/warehouse/sub-locations"): "owner must be an active Sales-Kurir-Sub of the network that owns no other location",
     ("PATCH", "/api/v1/warehouse/sub-locations/{subLocation}"): "",
     ("POST", "/api/v1/warehouse/sub-locations/{subLocation}/assign-owner"): "unowned + active only; owner row locked before the location on create",
+    # --- checkpoint L: konsumen address book
+    ("GET", "/api/v1/addresses"): "own rows only; list ordering differs (deviation D-10)",
+    ("POST", "/api/v1/addresses"): "",
+    ("PATCH", "/api/v1/addresses/{address}"): "promotes the default correctly where the reference leaves none (deviation D-9)",
+    ("DELETE", "/api/v1/addresses/{address}"): "a foreign id is a 404",
     ("POST", "/api/v1/warehouse/sub-locations/{subLocation}/deactivate"): "refused while physical stock remains; releases the owner and remembers them in previous_owner_user_id",
 }
 
