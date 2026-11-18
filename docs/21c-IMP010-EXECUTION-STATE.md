@@ -12,12 +12,12 @@ before touching code. Do not re-derive a completed checkpoint.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **91 (24.3%)** |
-| Fully GO | 85 |
+| Served by Go | **93 (24.8%)** |
+| Fully GO | 87 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **284** |
+| Laravel-only (Go answers 501) | **282** |
 | Go tests | **133 green** (incl. 6 media oracles), `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **360 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals) |
+| Cross-runtime comparison checks | **365 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -52,6 +52,7 @@ explicitly listed as outstanding rather than silently reduced.
 | Checkout quote (Review preview) | 1 | `compare_order_quote.py` (25) — pickup/address-book/inline destinations, fixed/percentage/targeted vouchers, inapplicable + unknown vouchers, provider-failure 422s, validation shapes, policy vs role 403, guest 401. Provider clients additionally pinned by 4 Go test groups incl. a stub ORS/RajaOngkir/KMSIT and the SSRF guard |
 | Agent stock reservations | — (primitive) | 12 two-connection oracles in `internal/inventory/reserve_test.go`: anti-oversell, exact-capacity lost-update, opposite-order deadlock, rollback, legacy boundary, warehouse-authoritative trap, provisioning, release clamp |
 | Order creation | 1 | `compare_orders.py` (43) — response body AND database state (order, items, commissions, shipments, stock request, payment transaction, snapshot, reservation), plus idempotent replay after a status change and full rollback on failure |
+| Handover read + print | 2 | `compare_handovers.py` (5) — JSON shape (users serialize with NO hidden fields) and the A4 HTML page byte-for-byte after normalising the volatile timestamp/serial numbers |
 | Stock-request proposals | 8 | `compare_proposals.py` (20) — propose/receive/approve/reject/write-off across 20 scenarios, response + DB state |
 | Warehouse stock requests | 6 | `compare_warehouse_requests.py` (22) — transit receipt, factory_plan change, Sub adjustment both directions, idempotent re-approval, rejection, the negative-Sub guard, route gates, and 7 validation shapes; DB state compared after every scenario |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
@@ -330,15 +331,28 @@ REAL DEFECT FIXED in the reservation primitives while porting this: Laravel writ
 left the columns NULL, and release quantities were recorded POSITIVE where the reference records them NEGATIVE.
 Both fixed; compare_orders.py still 43/43.
 
+## 4-7. Handover read/print — DONE (do not re-render)
+
+2 routes: `internal/inventory/handovers.go` + `internal/api/handlers_handovers.go`. The rows themselves are
+written by the transfer approval path (checkpoint H); these are the read surfaces.
+
+Traps here:
+- **The User model has NO $hidden in this context**, so the handover payload serialises the actor rows WITH email
+  and phone — reproduce it exactly; do not "improve" the payload by hiding fields the reference exposes to this
+  authenticated warehouse audience.
+- **Blade whitespace is part of the contract**: the print page is compared byte-for-byte after normalising only
+  the "Printed:" timestamp and the two serial numbers (HOV-/TRF- date+random). `@foreach` indentation,
+  the `?? '-'` dashes for an absent receiver/note, and the absence of a trailing newline after `</html>` all had
+  to match. html/template reproduces Blade's `{{ }}` escaping.
+- A NULL users.korsal_id cannot be scanned into int64 — the obvious column-list bug; found by the harness.
+
 ## 4a. Next action (resume here)
 
-**A. Handovers + the Sub stock-request workflow**:
-   1. `warehouse/handovers/{handover}` + `/print` (2 routes) — the handover read/print surface over the transfer
-      infrastructure already built (stock_handovers rows exist).
-   2. `SubStockRequestService` (create/approve/execute/receive/cancel/reject + index/show, 7 routes). Its
-      `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart of
-      `lockSubLocationForCheckout` (SHARED first). Required evidence: a two-connection test proving checkout and
-      execute cannot deadlock against each other.
+**A. The Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/
+reject + index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact
+counterpart of `lockSubLocationForCheckout` (SHARED first). Required evidence: a two-connection test proving
+checkout and execute cannot deadlock against each other. The `GET /sub-stock/requests` PARTIAL note in the matrix
+clears when the mutations land (index is already served).
 
 **B. Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/reject
 + index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart
@@ -359,7 +373,7 @@ beyond the number allocation.
 **DONE, do not redo:** `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`; `/addresses` (4);
 `/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`;
 warehouse stock-addition-requests + sub-adjustment-requests (6); stock-request proposals (8) + the media
-pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal).
+pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal); handover show + print (2).
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

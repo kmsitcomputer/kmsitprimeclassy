@@ -41,6 +41,9 @@ IMPLEMENTED = {
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
+    # --- checkpoint T: handover read/print (compare_handovers.py)
+    ("GET", "/api/v1/warehouse/handovers/{handover}"): "the full model with transfer.items.product/variation and both actors (users serialize with NO hidden fields here)",
+    ("GET", "/api/v1/warehouse/handovers/{handover}/print"): "the A4 print page, HTML; the Blade template is ported 1:1 including its escaping",
     # --- checkpoint S: stock-request proposals (compare_proposals.py, 20 checks)
     ("POST", "/api/v1/warehouse/stock-requests/{stockRequest}/fulfill"): "the reference REFUSES direct Gudang fulfilment (the proposal gate is the only path); reproduced verbatim",
     ("POST", "/api/v1/warehouse/stock-requests/{stockRequest}/proposals"): "gudang; multipart with a REQUIRED proof image when goods are handed over; shortage-only reports carry none and create no proposal row",

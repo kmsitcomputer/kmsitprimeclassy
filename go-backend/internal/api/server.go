@@ -181,6 +181,10 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/warehouse/stock-addition-requests", chain(http.HandlerFunc(s.handleStockAdditionIndex), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
 	s.mux.Handle("GET /api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}", chain(http.HandlerFunc(s.handleStockAdditionShow), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
 
+	// Handover read/print (the rows the transfer approval path already writes).
+	s.mux.Handle("GET /api/v1/warehouse/handovers/{handover}", chain(http.HandlerFunc(s.handleHandoverShow), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,gudang,super_admin")))
+	s.mux.Handle("GET /api/v1/warehouse/handovers/{handover}/print", chain(http.HandlerFunc(s.handleHandoverPrint), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,gudang,super_admin")))
+
 	// Stock-request proposals — the §16/§31 fulfillment gate. Gudang proposes, Koordinator Kurir receives
 	// (the routine settlement), Admin keeps the exception approve/reject and the damaged write-off.
 	s.mux.Handle("POST /api/v1/warehouse/stock-requests/{stockRequest}/fulfill", chain(http.HandlerFunc(s.handleStockRequestFulfill), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))

@@ -554,7 +554,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **GO** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (42/49 in Go)
+## Inventory — warehouse — `warehouse` (44/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -563,8 +563,8 @@ Status legend:
 | POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/approve` | session | admin | **GO** | admin EXCEPTION path; a reason (min 5 chars) is mandatory and audited; settles the whole prepared quantity |
 | POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/receive` | session | koordinator-kurir | **GO** | koordinator-kurir — the routine settlement; accepted+short+damaged must equal the prepared quantity; stock moves transit→shipping for accepted units only; damaged units are held on the line |
 | POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/reject` | session | admin | **GO** | admin; moves no stock |
-| GET | `/api/v1/warehouse/handovers/{handover}` | session | admin, agen, gudang, super_admin | LARAVEL |  |
-| GET | `/api/v1/warehouse/handovers/{handover}/print` | session | admin, agen, gudang, super_admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/handovers/{handover}` | session | admin, agen, gudang, super_admin | **GO** | the full model with transfer.items.product/variation and both actors (users serialize with NO hidden fields here) |
+| GET | `/api/v1/warehouse/handovers/{handover}/print` | session | admin, agen, gudang, super_admin | **GO** | the A4 print page, HTML; the Blade template is ported 1:1 including its escaping |
 | GET | `/api/v1/warehouse/opnames` | session | admin, agen, gudang, super_admin | **GO** |  |
 | POST | `/api/v1/warehouse/opnames` | session | gudang | **PARTIAL** | snapshots system_quantity + stock id + physical revision per target |
 | GET | `/api/v1/warehouse/opnames/{opname}` | session | admin, agen, gudang, super_admin | **GO** |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 91 (24.3%) |
-|   of which fully GO | 85 |
+| Served by Go now | 93 (24.8%) |
+|   of which fully GO | 87 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 284 |
+| Still Laravel-only | 282 |
 | Areas fully ported | 11 / 45 |

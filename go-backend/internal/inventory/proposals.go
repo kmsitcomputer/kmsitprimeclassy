@@ -1412,7 +1412,7 @@ func primaryImagePath(product map[string]any) string {
 // serializeProduct renders a Product model exactly as Eloquent does: every column, the appended sku, and — only
 // when the caller loaded it — the `images` relation. `__image_path` is an internal helper key, removed before
 // rendering.
-func serializeProduct(ctx context.Context, d *db.DB, productID int64, withImages bool) (map[string]any, error) {
+func serializeProduct(ctx context.Context, d queryExecer, productID int64, withImages bool) (map[string]any, error) {
 	var (
 		product               serializedProduct
 		hasVariations, status sql.NullString
@@ -1488,7 +1488,7 @@ type serializedProduct struct {
 	DeletedAt        sql.NullTime
 }
 
-func serializeProductImages(ctx context.Context, d *db.DB, productID int64) ([]any, error) {
+func serializeProductImages(ctx context.Context, d queryExecer, productID int64) ([]any, error) {
 	rows, err := d.QueryContext(ctx, `SELECT id, product_id, product_variation_id, path, is_primary, sort_order,
 			created_at, updated_at
 		FROM product_images WHERE product_id = ? ORDER BY sort_order, id`, productID)
@@ -1530,7 +1530,7 @@ func serializeProductImages(ctx context.Context, d *db.DB, productID int64) ([]a
 }
 
 // serializeVariation renders a ProductVariation with compositions.option loaded.
-func serializeVariation(ctx context.Context, d *db.DB, variationID int64) (map[string]any, error) {
+func serializeVariation(ctx context.Context, d queryExecer, variationID int64) (map[string]any, error) {
 	var (
 		id, productID        int64
 		sku                  string
