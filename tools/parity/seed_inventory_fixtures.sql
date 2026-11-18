@@ -26,7 +26,9 @@ INSERT INTO product_stocks (id, agent_id, product_id, quantity_on_hand, quantity
  (3, 10, 2, 0, 0, '2026-11-09 09:00:00', '2026-11-09 09:00:00');
 
 -- Legacy (pre-warehouse) commitment rows for agent 10.
---   product 1  : on_hand 40, reserved 5  → available 35 via warehouse (a `sub` row exists) → base 0
+--   product 1  : on_hand 40, reserved 5  → a `sub` warehouse row exists below, so the WAREHOUSE is authoritative
+--                and its transit base is 0 → available 0, NOT 35. This is the canonical-projection trap: legacy
+--                on-hand must not survive once any warehouse row exists for the target.
 --   product 3  : on_hand 25, reserved 3  → available 22, source legacy (no warehouse row at all)
 --   variation 1: on_hand 10, reserved 2  → available  8, source legacy
 INSERT INTO product_stocks (id, agent_id, product_id, quantity_on_hand, quantity_reserved, created_at, updated_at) VALUES
@@ -41,7 +43,7 @@ INSERT INTO product_variation_stocks (id, agent_id, product_variation_id, quanti
 --   product 2  (variation product, but a warehouse row for the PRODUCT id keeps it a product target)
 --              transit 12 + factory_plan 4, plan ENABLED → base 16
 --   variation 2 transit 9, plan disabled → base 9
---   product 1  deliberately has NO warehouse row → legacy fallback (40 - 5)
+--   product 1  keeps its legacy row but HAS a `sub` row below → available 0 (warehouse authoritative)
 INSERT INTO warehouse_sub_locations (id, agent_id, owner_user_id, previous_owner_user_id, code, name, address, contact_number, description, is_active, created_by, created_at, updated_at) VALUES
  (1, 10, 13, NULL, 'SUB-BDG-01', 'Sub Bandung', 'Jl. Sub 1', '081200000001', 'Sub outlet', 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00'),
  (2, 10, 14, 13, 'SUB-BDG-02', 'Sub Bandung Dua', 'Jl. Sub 2', '081200000002', NULL, 1, 10, '2026-11-10 09:00:00', '2026-11-10 09:00:00'),
