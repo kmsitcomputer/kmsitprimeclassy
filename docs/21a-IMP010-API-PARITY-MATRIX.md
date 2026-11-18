@@ -355,12 +355,12 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 
-## Orders — `orders` (0/25 in Go)
+## Orders — `orders` (1/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/orders` | session | — | LARAVEL |  |
-| POST | `/api/v1/orders` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/orders` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | full chain: canonical target locks, reservation, fee/commission snapshots, voucher redemption, invoice sequence, shipment grouping, payment transaction, Stock Request (COD), initial report snapshot; idempotent replay and total rollback verified |
 | GET | `/api/v1/orders/regions` | session | — | LARAVEL |  |
 | GET | `/api/v1/orders/{order}` | session | — | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 76 (20.3%) |
-|   of which fully GO | 70 |
+| Served by Go now | 77 (20.5%) |
+|   of which fully GO | 71 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 299 |
+| Still Laravel-only | 298 |
 | Areas fully ported | 11 / 45 |

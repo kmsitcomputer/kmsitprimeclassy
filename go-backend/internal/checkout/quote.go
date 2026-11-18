@@ -78,10 +78,14 @@ type QuoteResponse struct {
 }
 
 // Problem is a domain failure the handler renders as an API error envelope.
+//
+// Fields is the single-sentence-per-field shape an ApiException with a [field => sentence] map serialises.
+// Errors is the literal mixed-typed payload for the exceptions that carry numbers (InsufficientStockException).
 type Problem struct {
 	Status  int
 	Message string
 	Fields  map[string]string
+	Errors  map[string]any
 }
 
 func (p *Problem) Error() string { return p.Message }
@@ -91,8 +95,8 @@ func fieldProblem(message, field, fieldMessage string) *Problem {
 	return &Problem{Status: 422, Message: message, Fields: map[string]string{field: fieldMessage}}
 }
 
-// destinationSnapshot is the resolved destination (address book or inline).
-type destinationSnapshot struct {
+// DestinationSnapshot is the resolved destination (address book or inline).
+type DestinationSnapshot struct {
 	AddressID      *int64
 	RecipientName  *string
 	RecipientPhone *string
@@ -103,16 +107,24 @@ type destinationSnapshot struct {
 	DistrictID     *string
 	ProvinceID     *string
 	VillageID      *string
+	// The resolved NAMES are what an ORDER persists as its address snapshot; a later region rename must never
+	// rewrite a historical order's text.
+	VillageName  *string
+	DistrictName *string
+	RegencyName  *string
+	ProvinceName *string
+	PostalCode   *string
 }
 
-// resolvedLine is OrderService::resolveLine's result.
-type resolvedLine struct {
-	Product   productRow
-	Variation *variationRow
+// ResolvedLine is OrderService::resolveLine's result. Exported because order creation reuses it verbatim —
+// the preview and the persisted order must resolve the SAME inventory target.
+type ResolvedLine struct {
+	Product   ProductRow
+	Variation *VariationRow
 	Quantity  int
 }
 
-type productRow struct {
+type ProductRow struct {
 	ID            int64
 	Name          string
 	HasVariations bool
@@ -121,7 +133,7 @@ type productRow struct {
 	SKU           *string
 }
 
-type variationRow struct {
+type VariationRow struct {
 	ID          int64
 	ProductID   int64
 	Price       float64
@@ -142,7 +154,7 @@ type Quoter struct {
 
 // Quote is OrderService::quote.
 func (q *Quoter) Quote(ctx context.Context, konsumenID int64, req QuoteRequest) (*QuoteResponse, error) {
-	agentID, err := q.agentBranchOf(ctx, konsumenID)
+	agentID, err := q.AgentBranchOf(ctx, konsumenID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +173,7 @@ func (q *Quoter) Quote(ctx context.Context, konsumenID int64, req QuoteRequest) 
 		return nil, &Problem{Status: 422, Message: q.Messages("order.agent_profile_incomplete")}
 	}
 
-	dest, err := q.resolveDestination(ctx, konsumenID, req.Destination)
+	dest, err := q.ResolveDestination(ctx, konsumenID, req.Destination)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +182,7 @@ func (q *Quoter) Quote(ctx context.Context, konsumenID int64, req QuoteRequest) 
 		subtotal     float64
 		totalWeight  int
 		warnings     []Warning
-		resolvedList []resolvedLine
+		resolvedList []ResolvedLine
 	)
 	for _, line := range req.Lines {
 		lineSubtotal, lineWeight, warning, resolved, err := q.quoteLine(ctx, *agentID, line)
@@ -186,7 +198,7 @@ func (q *Quoter) Quote(ctx context.Context, konsumenID int64, req QuoteRequest) 
 	}
 	subtotal = money.Round2(subtotal)
 
-	adminFee, err := q.adminFee(ctx)
+	adminFee, err := q.AdminFee(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -230,11 +242,11 @@ func (q *Quoter) Quote(ctx context.Context, konsumenID int64, req QuoteRequest) 
 		voucherID       *int64
 	)
 	if req.VoucherCode != nil && strings.TrimSpace(*req.VoucherCode) != "" {
-		voucher, err := q.resolveVoucher(ctx, *agentID, strings.TrimSpace(*req.VoucherCode))
+		voucher, err := q.LoadVoucher(ctx, *agentID, strings.TrimSpace(*req.VoucherCode))
 		if err != nil {
 			return nil, err
 		}
-		voucherDiscount, err = q.voucherBudgetForLines(ctx, *agentID, voucher, resolvedList)
+		voucherDiscount, err = q.VoucherBudgetForLines(ctx, *agentID, voucher, resolvedList)
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +297,7 @@ func shippingProblem(q *Quoter, err error) error {
 }
 
 // agentBranchOf reads the buyer's own branch (`users.agent_id`). Quote never trusts a client-supplied branch.
-func (q *Quoter) agentBranchOf(ctx context.Context, userID int64) (*int64, error) {
+func (q *Quoter) AgentBranchOf(ctx context.Context, userID int64) (*int64, error) {
 	var agent sql.NullInt64
 	err := q.Database.QueryRowContext(ctx, `SELECT agent_id FROM users WHERE id = ? AND deleted_at IS NULL`, userID).Scan(&agent)
 	if err != nil {
@@ -298,7 +310,7 @@ func (q *Quoter) agentBranchOf(ctx context.Context, userID int64) (*int64, error
 }
 
 // adminFee is Setting::get('checkout.admin_fee_amount', '0') — a non-negative decimal in the settings table.
-func (q *Quoter) adminFee(ctx context.Context) (float64, error) {
+func (q *Quoter) AdminFee(ctx context.Context) (float64, error) {
 	var raw sql.NullString
 	err := q.Database.QueryRowContext(ctx, "SELECT `value` FROM settings WHERE `key` = 'checkout.admin_fee_amount'").Scan(&raw)
 	if err != nil {
@@ -319,8 +331,8 @@ func (q *Quoter) adminFee(ctx context.Context) (float64, error) {
 
 // quoteLine is OrderService::quoteLine: price, weight, and a stock warning. Quantity is clamped to >= 1 for the
 // PREVIEW (the order path rejects < 1 instead), so a Review screen never shows a negative line.
-func (q *Quoter) quoteLine(ctx context.Context, agentID int64, line QuoteLine) (float64, int, *Warning, resolvedLine, error) {
-	resolved, err := q.resolveLine(ctx, line)
+func (q *Quoter) quoteLine(ctx context.Context, agentID int64, line QuoteLine) (float64, int, *Warning, ResolvedLine, error) {
+	resolved, err := q.ResolveLine(ctx, line)
 	if err != nil {
 		return 0, 0, nil, resolved, err
 	}
@@ -329,7 +341,7 @@ func (q *Quoter) quoteLine(ctx context.Context, agentID int64, line QuoteLine) (
 		qty = 1
 	}
 
-	unitPrice, unitWeight, err := q.unitPriceAndWeight(ctx, agentID, resolved)
+	unitPrice, unitWeight, err := q.UnitPriceAndWeight(ctx, agentID, resolved)
 	if err != nil {
 		return 0, 0, nil, resolved, err
 	}
@@ -341,7 +353,7 @@ func (q *Quoter) quoteLine(ctx context.Context, agentID int64, line QuoteLine) (
 		}
 	}
 
-	available, err := q.availableUnits(ctx, agentID, resolved)
+	available, err := q.AvailableUnits(ctx, agentID, resolved)
 	if err != nil {
 		return 0, 0, nil, resolved, err
 	}
@@ -362,7 +374,7 @@ func (q *Quoter) quoteLine(ctx context.Context, agentID int64, line QuoteLine) (
 	return unitPrice * float64(qty), unitWeight * qty, warning, resolved, nil
 }
 
-func variationID(v *variationRow) *int64 {
+func variationID(v *VariationRow) *int64 {
 	if v == nil {
 		return nil
 	}
@@ -371,7 +383,7 @@ func variationID(v *variationRow) *int64 {
 }
 
 // unitPriceAndWeight is the shared pricing rule, used by both the preview and (later) order creation.
-func (q *Quoter) unitPriceAndWeight(ctx context.Context, agentID int64, resolved resolvedLine) (float64, int, error) {
+func (q *Quoter) UnitPriceAndWeight(ctx context.Context, agentID int64, resolved ResolvedLine) (float64, int, error) {
 	basePrice := resolved.Product.BasePrice
 	unitWeight := resolved.Product.WeightGrams
 	if resolved.Variation != nil {
@@ -395,7 +407,7 @@ func (q *Quoter) unitPriceAndWeight(ctx context.Context, agentID int64, resolved
 }
 
 // availableUnits is the warning source: the canonical sellable figure, per target.
-func (q *Quoter) availableUnits(ctx context.Context, agentID int64, resolved resolvedLine) (int, error) {
+func (q *Quoter) AvailableUnits(ctx context.Context, agentID int64, resolved ResolvedLine) (int, error) {
 	if resolved.Variation != nil {
 		sellable, err := inventory.ForVariation(ctx, q.Database, agentID, resolved.Variation.ID)
 		if err != nil {
@@ -414,38 +426,38 @@ func (q *Quoter) availableUnits(ctx context.Context, agentID int64, resolved res
 //
 // A variation product REQUIRES an active variation of that product; a simple product REFUSES a variation id
 // rather than ignoring it — ignoring it would prelock a target the reserve path never touches.
-func (q *Quoter) resolveLine(ctx context.Context, line QuoteLine) (resolvedLine, error) {
+func (q *Quoter) ResolveLine(ctx context.Context, line QuoteLine) (ResolvedLine, error) {
 	product, err := q.loadProduct(ctx, line.ProductID)
 	if err != nil {
-		return resolvedLine{}, err
+		return ResolvedLine{}, err
 	}
 	if product == nil {
-		return resolvedLine{}, &Problem{Status: 404, Message: "No query results for model [App\\Models\\Product] " + strconv.FormatInt(line.ProductID, 10)}
+		return ResolvedLine{}, &Problem{Status: 404, Message: "No query results for model [App\\Models\\Product] " + strconv.FormatInt(line.ProductID, 10)}
 	}
 
 	if product.HasVariations {
 		if line.ProductVariationID == nil {
-			return resolvedLine{}, &Problem{Status: 422, Message: q.Messages("product.variation_required", "name", product.Name)}
+			return ResolvedLine{}, &Problem{Status: 422, Message: q.Messages("product.variation_required", "name", product.Name)}
 		}
 		variation, err := q.loadVariation(ctx, product.ID, *line.ProductVariationID)
 		if err != nil {
-			return resolvedLine{}, err
+			return ResolvedLine{}, err
 		}
 		if variation == nil {
-			return resolvedLine{}, &Problem{Status: 404, Message: "No query results for model [App\\Models\\ProductVariation] " + strconv.FormatInt(*line.ProductVariationID, 10)}
+			return ResolvedLine{}, &Problem{Status: 404, Message: "No query results for model [App\\Models\\ProductVariation] " + strconv.FormatInt(*line.ProductVariationID, 10)}
 		}
-		return resolvedLine{Product: *product, Variation: variation, Quantity: line.Quantity}, nil
+		return ResolvedLine{Product: *product, Variation: variation, Quantity: line.Quantity}, nil
 	}
 
 	if line.ProductVariationID != nil {
-		return resolvedLine{}, &Problem{Status: 422, Message: q.Messages("product.variation_not_allowed", "name", product.Name)}
+		return ResolvedLine{}, &Problem{Status: 422, Message: q.Messages("product.variation_not_allowed", "name", product.Name)}
 	}
-	return resolvedLine{Product: *product, Quantity: line.Quantity}, nil
+	return ResolvedLine{Product: *product, Quantity: line.Quantity}, nil
 }
 
-func (q *Quoter) loadProduct(ctx context.Context, id int64) (*productRow, error) {
+func (q *Quoter) loadProduct(ctx context.Context, id int64) (*ProductRow, error) {
 	var (
-		p         productRow
+		p         ProductRow
 		has       int
 		basePrice sql.NullString
 		weight    sql.NullInt64
@@ -472,9 +484,9 @@ func (q *Quoter) loadProduct(ctx context.Context, id int64) (*productRow, error)
 	return &p, nil
 }
 
-func (q *Quoter) loadVariation(ctx context.Context, productID, variationID int64) (*variationRow, error) {
+func (q *Quoter) loadVariation(ctx context.Context, productID, variationID int64) (*VariationRow, error) {
 	var (
-		v      variationRow
+		v      VariationRow
 		price  sql.NullString
 		weight sql.NullInt64
 		sku    sql.NullString
@@ -542,17 +554,26 @@ func (q *Quoter) variationLabel(ctx context.Context, variationID *int64) (*strin
 }
 
 // resolveDestination is OrderService::resolveDestination.
-func (q *Quoter) resolveDestination(ctx context.Context, konsumenID int64, d Destination) (destinationSnapshot, error) {
+func (q *Quoter) ResolveDestination(ctx context.Context, konsumenID int64, d Destination) (DestinationSnapshot, error) {
 	if d.AddressID != nil {
 		var (
-			snap     destinationSnapshot
-			lat, lng sql.NullString
+			snap                       DestinationSnapshot
+			lat, lng                   sql.NullString
+			villageName, districtName2 sql.NullString
+			regencyName, provinceName  sql.NullString
 		)
-		err := q.Database.QueryRowContext(ctx, `SELECT id, recipient_name, phone, address_line,
-				CAST(latitude AS CHAR), CAST(longitude AS CHAR), regency_id, district_id, province_id, village_id
-			FROM konsumen_addresses WHERE id = ? AND user_id = ?`, *d.AddressID, konsumenID).
+		err := q.Database.QueryRowContext(ctx, `SELECT a.id, a.recipient_name, a.phone, a.address_line,
+				CAST(a.latitude AS CHAR), CAST(a.longitude AS CHAR), a.regency_id, a.district_id, a.province_id, a.village_id,
+				v.name, d.name, r.name, p.name
+			FROM konsumen_addresses a
+			LEFT JOIN villages v ON v.id = a.village_id
+			LEFT JOIN districts d ON d.id = v.district_id
+			LEFT JOIN regencies r ON r.id = d.regency_id
+			LEFT JOIN provinces p ON p.id = r.province_id
+			WHERE a.id = ? AND a.user_id = ?`, *d.AddressID, konsumenID).
 			Scan(&snap.AddressID, &snap.RecipientName, &snap.RecipientPhone, &snap.AddressLine,
-				&lat, &lng, &snap.RegencyID, &snap.DistrictID, &snap.ProvinceID, &snap.VillageID)
+				&lat, &lng, &snap.RegencyID, &snap.DistrictID, &snap.ProvinceID, &snap.VillageID,
+				&villageName, &districtName2, &regencyName, &provinceName)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// findOrFail on a row that is not the caller's own: a 404, never a 403 — the reference does
@@ -569,10 +590,15 @@ func (q *Quoter) resolveDestination(ctx context.Context, konsumenID int64, d Des
 			f := parseNullableFloat(lng)
 			snap.Longitude = &f
 		}
+		snap.VillageName = nullStrPtr(villageName)
+		snap.DistrictName = nullStrPtr(districtName2)
+		snap.RegencyName = nullStrPtr(regencyName)
+		snap.ProvinceName = nullStrPtr(provinceName)
 		return snap, nil
 	}
 
-	snap := destinationSnapshot{
+	snap := DestinationSnapshot{
+		PostalCode:     d.PostalCode,
 		RecipientName:  d.RecipientName,
 		RecipientPhone: d.RecipientPhone,
 		AddressLine:    d.AddressLine,
@@ -586,11 +612,14 @@ func (q *Quoter) resolveDestination(ctx context.Context, konsumenID int64, d Des
 
 	if d.VillageID != nil && strings.TrimSpace(*d.VillageID) != "" {
 		var (
-			districtID sql.NullString
-			regencyID  sql.NullString
-			provinceID sql.NullString
+			districtID   sql.NullString
+			regencyID    sql.NullString
+			provinceID   sql.NullString
+			villageName  sql.NullString
+			districtName sql.NullString
 		)
-		err := q.Database.QueryRowContext(ctx, `SELECT district_id FROM villages WHERE id = ?`, *d.VillageID).Scan(&districtID)
+		err := q.Database.QueryRowContext(ctx, `SELECT district_id, name FROM villages WHERE id = ?`, *d.VillageID).
+			Scan(&districtID, &villageName)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return snap, fieldProblem(q.Messages("order.invalid_village"), "village_id", q.Messages("system.field_invalid"))
@@ -599,16 +628,29 @@ func (q *Quoter) resolveDestination(ctx context.Context, konsumenID int64, d Des
 		}
 		// The village is authoritative; district/regency/province are derived from it, and any client-supplied
 		// id must match the canonical chain (IMP-002 hierarchy validation).
+		var regencyName, provinceName sql.NullString
 		if districtID.Valid {
-			if err := q.Database.QueryRowContext(ctx, `SELECT regency_id FROM districts WHERE id = ?`, districtID.String).Scan(&regencyID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if err := q.Database.QueryRowContext(ctx, `SELECT regency_id, name FROM districts WHERE id = ?`, districtID.String).
+				Scan(&regencyID, &districtName); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return snap, err
 			}
 		}
 		if regencyID.Valid {
-			if err := q.Database.QueryRowContext(ctx, `SELECT province_id FROM regencies WHERE id = ?`, regencyID.String).Scan(&provinceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if err := q.Database.QueryRowContext(ctx, `SELECT province_id, name FROM regencies WHERE id = ?`, regencyID.String).
+				Scan(&provinceID, &regencyName); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return snap, err
 			}
 		}
+		if provinceID.Valid {
+			if err := q.Database.QueryRowContext(ctx, `SELECT name FROM provinces WHERE id = ?`, provinceID.String).
+				Scan(&provinceName); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return snap, err
+			}
+		}
+		snap.VillageName = nullStrPtr(villageName)
+		snap.DistrictName = nullStrPtr(districtName)
+		snap.RegencyName = nullStrPtr(regencyName)
+		snap.ProvinceName = nullStrPtr(provinceName)
 
 		if d.DistrictID != nil && *d.DistrictID != "" && *d.DistrictID != districtID.String {
 			return snap, fieldProblem(q.Messages("order.invalid_region_hierarchy"), "district_id", q.Messages("system.field_invalid"))
@@ -634,8 +676,8 @@ func (q *Quoter) resolveDestination(ctx context.Context, konsumenID int64, d Des
 	return snap, nil
 }
 
-// voucher is the subset of a vouchers row the preview needs.
-type voucher struct {
+// Voucher is the subset of a vouchers row the preview and the create path need.
+type Voucher struct {
 	ID                 int64
 	Type               string
 	Value              float64
@@ -649,9 +691,9 @@ type voucher struct {
 }
 
 // resolveVoucher is VoucherService::resolve — existence + scoped validity only, never cart applicability.
-func (q *Quoter) resolveVoucher(ctx context.Context, agentID int64, code string) (*voucher, error) {
+func (q *Quoter) LoadVoucher(ctx context.Context, agentID int64, code string) (*Voucher, error) {
 	var (
-		v                     voucher
+		v                     Voucher
 		value                 sql.NullString
 		validFrom, validUntil sql.NullString
 		maxUses               sql.NullInt64
@@ -702,7 +744,7 @@ func voucherInvalid(q *Quoter) *Problem {
 
 // isApplicableTo is VoucherService::isApplicableTo: variation-targeted → exact variation; product-targeted →
 // any variation of that product; whole-cart → everything.
-func (v *voucher) isApplicableTo(productID int64, variationID *int64) bool {
+func (v *Voucher) isApplicableTo(productID int64, variationID *int64) bool {
 	if v.ProductVariationID != nil {
 		return variationID != nil && *v.ProductVariationID == *variationID
 	}
@@ -714,9 +756,9 @@ func (v *voucher) isApplicableTo(productID int64, variationID *int64) bool {
 
 // voucherBudgetForLines is OrderService::voucherBudgetForLines — the canonical A1-06/A1-07 calculation the
 // order path uses too, so the preview can never disagree with the created order.
-func (q *Quoter) voucherBudgetForLines(ctx context.Context, agentID int64, v *voucher, lines []resolvedLine) (float64, error) {
+func (q *Quoter) VoucherBudgetForLines(ctx context.Context, agentID int64, v *Voucher, lines []ResolvedLine) (float64, error) {
 	type applicable struct {
-		resolved resolvedLine
+		resolved ResolvedLine
 		amount   float64
 	}
 	var chosen []applicable
@@ -725,7 +767,7 @@ func (q *Quoter) voucherBudgetForLines(ctx context.Context, agentID int64, v *vo
 		if !v.isApplicableTo(line.Product.ID, variationID(line.Variation)) {
 			continue
 		}
-		unitPrice, _, err := q.unitPriceAndWeight(ctx, agentID, line)
+		unitPrice, _, err := q.UnitPriceAndWeight(ctx, agentID, line)
 		if err != nil {
 			return 0, err
 		}

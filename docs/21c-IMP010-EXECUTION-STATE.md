@@ -11,12 +11,12 @@ Do not read this as a completion report.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **76 (20.3%)** |
-| Fully GO | 70 |
+| Served by Go | **77 (20.5%)** |
+| Fully GO | 71 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **299** |
-| Go tests | **113 green**, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **275 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote) |
+| Laravel-only (Go answers 501) | **298** |
+| Go tests | **123 green**, `go vet` clean, gofmt clean |
+| Cross-runtime comparison checks | **318 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -35,6 +35,8 @@ Do not read this as a completion report.
 | Promotions (vouchers + discounts) | 8 | `compare_promo.py` (21) — incl. both resulting row sets and the RBAC refusal |
 | Checkout wizard contract | 1 | `compare_checkout.py` (38) — 11 scenarios: guest, konsumen, sales, agen, super_admin, branch provider switches, the KMSIT fallback, "nothing to offer", and payment-method switches |
 | Checkout quote (Review preview) | 1 | `compare_order_quote.py` (25) — pickup/address-book/inline destinations, fixed/percentage/targeted vouchers, inapplicable + unknown vouchers, provider-failure 422s, validation shapes, policy vs role 403, guest 401. Provider clients additionally pinned by 4 Go test groups incl. a stub ORS/RajaOngkir/KMSIT and the SSRF guard |
+| Agent stock reservations | — (primitive) | 12 two-connection oracles in `internal/inventory/reserve_test.go`: anti-oversell, exact-capacity lost-update, opposite-order deadlock, rollback, legacy boundary, warehouse-authoritative trap, provisioning, release clamp |
+| Order creation | 1 | `compare_orders.py` (43) — response body AND database state (order, items, commissions, shipments, stock request, payment transaction, snapshot, reservation), plus idempotent replay after a status change and full rollback on failure |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
 ## 3. What remains (327 routes) — ordered, with the real obstacle for each
@@ -196,34 +198,81 @@ the same default and allows an override purely as a test seam.
 
 `APP_KEY` must be present in the Go process environment for real agent credentials to decrypt (deviation D-12).
 
+## 4-3. Agent reservations — DONE (do not re-derive)
+
+`internal/inventory/reserve.go` + `subreserve.go` port
+`StockService::{reserveForProduct,reserveForVariation,provision*,lockReservationTarget(s)}` and
+`SubStockService::{reserve,lockReservationTargets,reserved}`. The canonical ordering is the SAME
+`targetKey`/`sortTargets` vocabulary the transfer path already used — there is one ordering, not two.
+
+**Real defect found and fixed here:** `quantity_reserved` is UNSIGNED, and MySQL evaluates
+`quantity_reserved - ?` in UNSIGNED arithmetic, so releasing more than is reserved raised error 1690
+("BIGINT UNSIGNED value is out of range") BEFORE `GREATEST()` could clamp it. A cancellation of an
+already-released order would have been a 500 instead of a harmless no-op. Fixed with `CAST(... AS SIGNED)`.
+
+Design note (stronger than the reference, deliberately): the warehouse availability read is ONE locking read over
+every `stock_type` of the target. It must not be filtered by `stock_type` (a target holding only `sub` rows is
+warehouse-authoritative with base 0), and one statement takes the locks in a single index-ordered pass. It cannot
+cycle against the Sub domain, which takes a sub-location lock that an Agent reservation never takes.
+
+## 4-4. Order creation — DONE (do not re-derive)
+
+`POST /api/v1/orders` is served. Packages: `internal/orders/{create,support,load,render}.go`.
+
+Order of operations (the correctness argument): idempotency pre-check → payment method → StockSourceResolver →
+resolve ALL lines to targets → canonical target locks → placeholder order → per-line price+reserve+snapshot+commission
+→ shipping quote → payment-method re-check against the RESOLVED provider → voucher consume under row lock →
+invoice number under `settings` row lock (after the redemption) → totals → shipment grouping → Stock Request (COD)
+→ payment transaction → invoice_issued_at (COD) → initial report snapshot → activity log.
+
+Traps found the hard way, all now pinned by tests/fixtures:
+- **`activity_logs` uses `causer_id`, not `user_id`, and has no `updated_at`.** A wrong guess failed the whole
+  order with a 500 AFTER every reservation was taken. `properties` also has a `json_valid()` CHECK, so it is
+  always real JSON, and an empty set is persisted as NULL.
+- **A nil Go map in an `any` is not a nil interface.** `ErrorsPayload`'s `if e.ErrorsAny != nil` therefore
+  returned an EMPTY map and swallowed `FieldStrings`, so every ApiException-style 422 answered `"errors": null`
+  while its fields were populated. `internal/httpx/errors_payload_test.go` pins all four shapes.
+- **`InsufficientStockException` has its own payload**: `{"item": "label", "available": N, "requested": M}` — a
+  MIXED-typed map, neither the array nor the string shape. `httpx.Error` now carries `ErrorsAny` for it.
+- **DATE is not rendered the same everywhere**: an `order`'s `delivery_date_estimate` / `due_date` /
+  item `requested_delivery_date` are Eloquent `date` casts → ISO timestamps at midnight UTC, while
+  `delivery_groups[].delivery_date` comes from `?->toDateString()` → a BARE date. Making them identical would be
+  wrong in one of the two places.
+- **`decimal(10,7)` cast attributes serialise as STRINGS** (`"-6.9000000"`), not numbers — unlike the checkout
+  preview payload, which is computed in PHP from a float cast.
+- **COD orders create their Stock Request immediately** and their items carry the ORDER's status (`diproses`).
+- **Hand-written JSON fixtures with `//` comments break parsing** silently in the middle of a response body.
+
+Fixture/harness note: `seed_test_fixtures.sql` DELETEs `users`, which cascades to sessions — reseeding it between
+scenarios invalidated both runtimes' cookies mid-run and produced spurious 419s. `compare_orders.py` therefore
+loads the fixtures ONCE and resets only order-scoped tables per scenario.
+
 ## 4a. Next action (resume here)
 
-**A. Stock reservation primitives** (`StockService::reserveForProduct|reserveForVariation|provisionProductCommitment`,
-`canonicalReservationTargets`, `lockReservationTargets`). `internal/inventory/transfers.go` already contains the
-canonical `targetKey`/`sortTargets` ordering and the two-connection tests — REUSE it, never introduce a second
-ordering. Required evidence: a two-connection test proving two concurrent reservations of the same target cannot
-both succeed past `available`, plus the deadlock-freedom case for multi-target lines.
+**A. The stock-request/proposal/handover chain** (~20 routes) — the next coherent unit:
+`StockRequestProposalService` (propose/approve/receive/settle/resolveDiscrepancy) is the §16/§31 two-party gate.
+It reuses the transfer infrastructure already built; lock order is Order → Stock Request → inventory, and the
+status/sum reconciliation under a lock must use locking reads, not `sum()` (REPEATABLE READ snapshot).
 
-**B. `POST /api/v1/orders`** (`OrderService::createOrder`, 1,181 lines). Order of work inside it:
-   1. `resolveLine` + `quoteLine` (already ported in `internal/checkout`) and the money boundary
-      (`internal/money` + `internal/pricing`, verified).
-   2. `StockSourceResolver` + the `sub_location_id` ownership re-lock (`lockSubLocationForCheckout`: SHARED lock on
-      the Sub Location row BEFORE any Sub stock row — the reverse order deadlocks against
-      `SubStockRequestService::execute`).
-   3. `priceAndReserveLine`: price → reserve (Agent) or reserve-in-Sub (after the item row exists) → snapshot fees
-      (`FeeService::resolveForLine`) → commission row.
-   4. Idempotency: `UNIQUE(konsumen_id, idempotency_key)` / `UNIQUE(crm_customer_id, idempotency_key)` — a replay
-      must return the SAME order, never create a second one. Test replay AFTER the order has advanced status.
-   5. Invoice + notification side effects: invoice number needs the row-locked sequence; notification is a queue
-      concern (not yet ported) — record it as an explicit gap, do not silently skip it.
+**B. Sub stock-request workflow** (6 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/
+reject). Its execution path (`execute`) locks the Sub Location row EXCLUSIVELY and then the Sub stock rows —
+which is precisely the contract `lockSubLocationForCheckout` (SHARED lock first) was written to interleave with.
+A two-connection test proving checkout and execution do not deadlock against each other is required evidence.
 
-**C. The stock-request/proposal/handover chain** (~20 routes): `StockRequestProposalService`
-(propose/approve/receive/settle/resolveDiscrepancy) — the §16/§31 two-party gate, reusing the transfer
-infrastructure already built.
-   1. Sub stock-request workflow (6 routes): `SubStockRequestService`; execution goes through the transfer approve
-      path that already exists.
-   2. ~~`PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`~~ **DONE**.
-   3. ~~`/addresses` (4)~~ **DONE**. ~~`/promo/vouchers`, `/promo/discounts` (8)~~ **DONE**.
+**C. Order lifecycle**: `PATCH /orders/{order}/status`, `POST /orders/{order}/cancel` (release reservations via
+`inventory.ReleaseForProduct`/`ReleaseForSubStock`), item cancel/fulfilment, `GET /orders`,
+`GET /orders/{order}`. `OrderTotalCalculator` is already ported (`internal/pricing.RecalculateTotals`).
+
+**D. Financial**: payments/refunds/commissions (`internal/payments` not started). Invoice issuance beyond the
+number allocation is still outstanding — the COD path sets `invoice_issued_at`, but
+`InvoiceIssuanceService::syncAfterChange` for the transfer path (issued on first verified payment) is not ported.
+
+**Known gaps recorded, not silently skipped:** the order-creation notification/queue side effect
+(`queue bridge outstanding`, same as registration); `OrderInitialSnapshotService` is ported but
+`FulfillmentShortageService` is not.
+
+**DONE, do not redo:** `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`; `/addresses` (4);
+`/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`.
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

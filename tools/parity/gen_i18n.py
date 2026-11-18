@@ -70,6 +70,16 @@ KEYS = {
     "shipping": [
         "method_not_available",
     ],
+    "payment": [
+        "method_required",
+        "invalid_method",
+        "idempotency_key_required",
+        "invalid_dp_amount",
+        "method_not_configured",
+        "method_not_available_for_role",
+        "method_not_available_for_shipping",
+        "unsupported_method_type",
+    ],
     "product": [
         "variation_required",
         "variation_not_allowed",
@@ -88,7 +98,7 @@ KEYS = {
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
-                   "array", "unique"]
+                   "array", "unique", "after_or_equal"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric")]

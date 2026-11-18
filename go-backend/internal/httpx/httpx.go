@@ -89,6 +89,10 @@ type Error struct {
 	Message string
 	// Fields is the 422 `errors` payload: field -> []message.
 	Fields map[string][]string
+	// ErrorsAny is a literal `errors` payload with MIXED value types. InsufficientStockException serialises
+	// `{"item": "label", "available": 3, "requested": 5}` — neither the array shape nor the string shape, so it needs
+	// its own field rather than being forced into either.
+	ErrorsAny any
 	// FieldStrings is the OTHER 422 shape the reference produces: an ApiException with a single sentence per
 	// field serialises as `{"field": "text"}` (a string, not an array), while a ValidationException serialises
 	// as `{"field": ["text"]}`. The two are not interchangeable for the frontend, so they are kept apart.
@@ -112,6 +116,19 @@ func (e *Error) Unwrap() error { return e.Err }
 // ErrorsPayload renders the `errors` member exactly like Laravel: field errors, or {"code": [...]} when a
 // machine-readable code was attached, or null.
 func (e *Error) ErrorsPayload() any {
+	// TRAP: a nil Go map stored in an `any` is NOT a nil interface — `e.ErrorsAny != nil` is true and the method
+	// would return an EMPTY map, silently swallowing the FieldStrings branch below. That defect made every
+	// ApiException-style 422 answer `"errors": null` while its fields were populated. The emptiness is checked
+	// explicitly so the two payloads cannot shadow each other.
+	if e.ErrorsAny != nil {
+		if m, ok := e.ErrorsAny.(map[string]any); ok {
+			if len(m) > 0 {
+				return m
+			}
+		} else {
+			return e.ErrorsAny
+		}
+	}
 	if len(e.FieldStrings) > 0 {
 		out := make(map[string]any, len(e.FieldStrings))
 		for k, v := range e.FieldStrings {

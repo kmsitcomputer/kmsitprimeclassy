@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -176,8 +177,10 @@ func Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				// The STACK is part of the record: a bare "nil pointer" message cannot be acted on.
 				slog.ErrorContext(r.Context(), "panic recovered",
-					"panic", rec, "path", r.URL.Path, "request_id", RequestIDFrom(r.Context()))
+					"panic", rec, "path", r.URL.Path, "request_id", RequestIDFrom(r.Context()),
+					"stack", string(debug.Stack()))
 				httpx.Failure(w, http.StatusInternalServerError, msg(r.Context(), "system.server_error"), nil)
 			}
 		}()

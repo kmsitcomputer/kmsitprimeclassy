@@ -97,6 +97,31 @@ INSERT INTO payment_methods (id, code, name, type, is_active, created_at, update
  (3,'down_payment','DP / Down Payment','manual',1,NOW(),NOW()),
  (4,'gateway','Payment Gateway','gateway',1,NOW(),NOW());
 
+-- Order-creation fixtures: branch fee configuration (snapshotted onto every order line) and the branch's payment
+-- account used by manual transfer / DP. The payment config is Laravel-encrypted with the SAME APP_KEY as the test
+-- environment, so both runtimes read the identical payload.
+DELETE FROM product_fees;
+DELETE FROM product_variation_fees;
+INSERT INTO product_fees (id, product_id, beneficiary_role, amount, is_active, created_at, updated_at) VALUES
+ (1, 1, 'agent',   8000.00, 1, NOW(), NOW()),
+ (2, 1, 'sales',   4000.00, 1, NOW(), NOW()),
+ (3, 1, 'courier', 2000.00, 1, NOW(), NOW()),
+ (4, 3, 'agent',   5000.00, 1, NOW(), NOW()),
+ (5, 3, 'sales',   2500.00, 1, NOW(), NOW()),
+ (6, 3, 'courier', 1000.00, 1, NOW(), NOW());
+
+INSERT INTO product_variation_fees (id, product_variation_id, beneficiary_role, amount, is_active, created_at, updated_at) VALUES
+ (1, 1, 'agent',   20000.00, 1, NOW(), NOW()),
+ (2, 1, 'sales',   10000.00, 1, NOW(), NOW()),
+ (3, 1, 'courier',  5000.00, 1, NOW(), NOW()),
+ (4, 2, 'agent',   30000.00, 1, NOW(), NOW()),
+ (5, 2, 'sales',   15000.00, 1, NOW(), NOW()),
+ (6, 2, 'courier',  7500.00, 1, NOW(), NOW());
+
+DELETE FROM agent_payment_gateway_configs;
+INSERT INTO agent_payment_gateway_configs (id, agent_id, payment_method_id, environment, config, created_at, updated_at) VALUES
+ (1, 10, 1, 'sandbox', 'eyJpdiI6ImZhNUhxQlhyeEhpTkE5Z3FPV2p5aEE9PSIsInZhbHVlIjoibFVkNUYyWkNIeDdQOEhrR0JoU3h3ZmhxOHUxZmY4a2FmVmdoVlJqbWRPRFQyUXNwcEtET2hLWmZaZlE3SDNQVVppUTA3alV1Y0hhdTAwejFEdEtIWnpVck84b2hwazRUV21qWWdIbi9ZUE95OEpqTmRQYlQ4TkpOd2NKeVhXVTMiLCJtYWMiOiIxNGNmYjliM2RhYzNhMzI3ZjE1ZGE4MWE3NmIzZjY0MjAxYmFiZmQ0MGYyYzJhZDEwODcyZWM0YzZmMjYxYTNhIiwidGFnIjoiIn0=', NOW(), NOW());
+
 -- Courier master list (Super Admin). RajaOngkir quoting intersects this list with the agent's own enabled
 -- couriers, so both halves need a fixture.
 DELETE FROM shipping_couriers;
@@ -107,6 +132,17 @@ INSERT INTO shipping_couriers (id, code, name, is_active, created_at, updated_at
 
 -- Checkout/order fixtures: a per-order admin fee, the voucher shapes the preview must price, and one address
 -- book row so the address_id path is exercised (the inline path is exercised by the harness).
+-- Order rows from earlier runs are removed so an order-creation comparison always starts from one known state.
+DELETE FROM commissions;
+DELETE FROM order_initial_report_items;
+DELETE FROM stock_request_items;
+DELETE FROM stock_requests;
+DELETE FROM payment_transactions;
+DELETE FROM shipments;
+DELETE FROM order_items;
+DELETE FROM orders;
+DELETE FROM sub_stock_reservations;
+UPDATE settings SET `value` = '0' WHERE `key` = 'orders.invoice_sequence';
 DELETE FROM konsumen_addresses;
 INSERT INTO konsumen_addresses (id, user_id, label, recipient_name, phone, address_line,
   province_id, regency_id, district_id, village_id, latitude, longitude, is_default, created_at, updated_at) VALUES
