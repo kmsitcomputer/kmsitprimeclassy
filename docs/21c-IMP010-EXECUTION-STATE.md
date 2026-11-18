@@ -130,7 +130,18 @@ written against it instead of inventing a second arithmetic:
 expressible there — 12.5 belongs to a VOUCHER `value` (`decimal(12,2)`). Mixing them silently produces a wrong
 line price.
 
-## 4a. Next action (resume here)
+## 4a. Next action (resume here — start at the top)
+
+**0. `GET /api/v1/checkout/steps`** (self-contained, entrance to the checkout chain). Read
+`CheckoutStepResolver` + `CheckoutSteps` + `ShippingQuoteService::{activeProviders,isPickupAvailable,
+isShippingSelectionAvailable,availableShippingMethods}` + `AvailablePaymentMethodService::availableMethods`.
+The only non-obvious dependency is `ShippingQuoteService::activeProviders`, which also consults
+`OpenRoute::isAvailable` (the Agen's KMSIT fallback); port that predicate before the endpoint. Exact contract:
+`{steps[{key,label_key,active}], on_behalf_of_konsumen, shipping_enabled, map_picker_enabled,
+shipping_methods[{code,label}], pickup_location|null, payment_methods[{id,code,name,type}]}`, with
+`steps.account` active only for an anonymous caller and `steps.referral` always false.
+
+Then:
 
 1. **The stock-request/proposal/handover chain** (~20 routes):
    `StockRequestProposalService` (propose/approve/receive/settle/resolveDiscrepancy) — the §16/§31 two-party
