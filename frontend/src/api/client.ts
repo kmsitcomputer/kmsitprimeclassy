@@ -16,7 +16,26 @@ export { ApiError } from './errors'
 // Deliberately `??`, not `||`: an empty string is a MEANINGFUL value — this app is
 // single-domain, so '' means "same origin, relative requests" (the default in both dev
 // and the deploy/ layout). `||` would wrongly treat that as unset and substitute a host.
-const API_URL = window.__APP_CONFIG__?.API_URL ?? import.meta.env.VITE_API_URL ?? ''
+//
+// IMP-009 (Nuxt storefront SSR): this module is also evaluated on the Node server, where there
+// is no `window`. The browser value is therefore resolved lazily and the server uses an
+// explicitly configured INTERNAL base URL (set once per process by the Nuxt plugin through
+// configureServerApi — constant after startup, so it cannot leak between requests).
+let serverApiBase = ''
+
+/** Nuxt server only: absolute internal backend origin, e.g. http://localhost:8000 (never sent to browsers). */
+export function configureServerApi(base: string): void {
+  serverApiBase = base.replace(/\/+$/, '')
+}
+
+const isServer = typeof window === 'undefined'
+
+function resolveApiUrl(): string {
+  if (isServer) return serverApiBase
+  return window.__APP_CONFIG__?.API_URL ?? import.meta.env.VITE_API_URL ?? ''
+}
+
+const API_URL = resolveApiUrl()
 
 /**
  * Sanctum SPA session auth: cookies carry the auth state (withCredentials),
@@ -65,7 +84,23 @@ export function ensureCsrfCookie(): Promise<void> {
 // has no dependency on Pinia being installed yet — see stores/locale.ts,
 // which writes the same key on every language switch.
 http.interceptors.request.use((config) => {
-  const locale = localStorage.getItem('pc-locale')
+  if (isServer) {
+    // SSR is a PUBLIC, anonymous read path: no browser cookies exist here and none are forwarded
+    // (so no session/tenant-private data can enter a server-rendered or cached page). Any
+    // non-GET on the server is a programming error and is refused outright.
+    if ((config.method ?? 'get').toLowerCase() !== 'get') {
+      throw new Error('Mutating API calls are not allowed during server-side rendering.')
+    }
+    config.baseURL = `${resolveApiUrl()}/api/v1`
+    config.withCredentials = false
+    return config
+  }
+  let locale: string | null = null
+  try {
+    locale = localStorage.getItem('pc-locale')
+  } catch {
+    /* storage blocked — default locale */
+  }
   if (locale) config.headers['X-Locale'] = locale
   // Centralized PWA mutation guard (see pwa/connectivity.ts): mutations are
   // pre-blocked ONLY when the browser is certain there is no connectivity.

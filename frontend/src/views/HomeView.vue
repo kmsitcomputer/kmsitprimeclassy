@@ -1,20 +1,37 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onServerPrefetch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import HomepageBlockRenderer from '@/components/cms/HomepageBlockRenderer.vue'
 import { mergeSocialMarketplaceBlocks } from '@/utils/socialMarketplace'
 import { getHomepage, type HomepageBlock } from '@/api/cms'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import { useSsrData } from '@/utils/ssrData'
+import { getPersistedReferralCode } from '@/utils/referral'
 
 const { t } = useI18n()
-const blocks = ref<HomepageBlock[]>([])
+// Nuxt storefront SSR seam (no-op in the SPA): see utils/ssrData.ts.
+const ssr = useSsrData()
+const seeded = ssr.get<HomepageBlock[]>('homepage')
+const blocks = ref<HomepageBlock[]>(seeded ?? [])
 /** Social Media + Marketplace render as ONE card (Owner-approved); everything else is untouched. */
 const displayBlocks = computed(() => mergeSocialMarketplaceBlocks(blocks.value))
-const loading = ref(true)
+const loading = ref(!seeded)
 const error = ref<string | null>(null)
 
+onServerPrefetch(async () => {
+  try {
+    blocks.value = await ssr.load('homepage', () => getHomepage())
+  } catch {
+    error.value = t('home.loadError')
+  } finally {
+    loading.value = false
+  }
+})
+
 onMounted(async () => {
+  // The SSR payload is the default storefront. A persisted ?ref= (agent storefront) changes the homepage, so reload then.
+  if (seeded && !getPersistedReferralCode()) return
   try {
     blocks.value = await getHomepage()
   } catch {

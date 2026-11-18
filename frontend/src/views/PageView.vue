@@ -1,19 +1,26 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onServerPrefetch, watch } from 'vue'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import { getPage } from '@/api/cms'
 import type { Page } from '@/api/cmsContent'
 import { listLanguages, type Language } from '@/api/languages'
 import { useLocaleStore } from '@/stores/locale'
 import { pickTranslation } from '@/utils/i18nContent'
+import { useSsrData } from '@/utils/ssrData'
+import { fetchPageSeed, pageKey, type PageSeed } from '@/utils/ssrLoaders'
 
 const props = defineProps<{ slug: string }>()
 const locale = useLocaleStore()
 
-const page = ref<Page | null>(null)
-const languages = ref<Language[]>([])
-const loading = ref(true)
-const notFound = ref(false)
+// Nuxt storefront SSR seam (no-op in the SPA): see utils/ssrData.ts.
+const ssr = useSsrData()
+const ssrKey = pageKey(props.slug)
+const seeded = ssr.get<PageSeed>(ssrKey)
+const ssrFailed = ssr.failed(ssrKey)
+const page = ref<Page | null>(seeded?.page ?? null)
+const languages = ref<Language[]>(seeded?.languages ?? [])
+const loading = ref(!seeded && !ssrFailed)
+const notFound = ref(!!ssrFailed)
 
 async function load() {
   loading.value = true
@@ -29,7 +36,20 @@ async function load() {
   }
 }
 
-onMounted(load)
+onServerPrefetch(async () => {
+  try {
+    const loaded = await ssr.load<PageSeed>(ssrKey, () => fetchPageSeed(props.slug))
+    page.value = loaded.page
+    languages.value = loaded.languages
+  } catch {
+    notFound.value = true
+  } finally {
+    loading.value = false
+  }
+})
+onMounted(() => {
+  if (!seeded && !ssrFailed) load()
+})
 watch(() => props.slug, load)
 </script>
 

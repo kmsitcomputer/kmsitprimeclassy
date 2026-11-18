@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { isStorageHydrationDeferred } from '@/utils/storageHydration'
 
 export interface WishlistItem {
   productId: number
@@ -14,6 +15,7 @@ export interface WishlistItem {
 const STORAGE_KEY = 'pc-wishlist'
 
 function loadFromStorage(): WishlistItem[] {
+  if (isStorageHydrationDeferred()) return []
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     return raw ? (JSON.parse(raw) as WishlistItem[]) : []
@@ -39,6 +41,10 @@ export const useWishlistStore = defineStore('wishlist', {
     has: (state) => (productId: number) => state.items.some((i) => i.productId === productId),
   },
   actions: {
+    /** Nuxt SSR: state starts empty on the server; adopt the browser's persisted wishlist after hydration. */
+    hydrateFromStorage() {
+      this.items = loadFromStorage()
+    },
     toggle(item: WishlistItem) {
       if (this.has(item.productId)) {
         this.items = this.items.filter((i) => i.productId !== item.productId)

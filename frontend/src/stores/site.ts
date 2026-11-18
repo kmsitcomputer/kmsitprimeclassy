@@ -9,7 +9,7 @@ import { getPublicSettings } from '@/api/settings'
  * end up with two conflicting icon links.
  */
 function applyFavicon(url: string | null) {
-  if (!url) return
+  if (!url || typeof document === 'undefined') return
   const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
   if (link) link.href = url
 }

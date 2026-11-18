@@ -2,7 +2,7 @@
 import { ApiError } from '@/api/client'
 import StockSourceSelector from '@/components/shop/StockSourceSelector.vue'
 import { createLatestRequestGuard } from '@/utils/latestRequest'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onServerPrefetch, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
@@ -16,6 +16,8 @@ import { formatRupiah } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import { useWishlistStore } from '@/stores/wishlist'
+import { useSsrData } from '@/utils/ssrData'
+import { fetchProductSeed, productKey, type ProductSeed } from '@/utils/ssrLoaders'
 
 const props = defineProps<{ slug: string }>()
 const { t } = useI18n()
@@ -26,16 +28,26 @@ const wishlist = useWishlistStore()
 
 const stockSource = computed(() => auth.user?.role === 'sales-kurir-sub' ? cart.stockSourceFor(auth.user.id) : undefined)
 const loadGuard = createLatestRequestGuard()
-const product = ref<Product | null>(null)
-const loading = ref(true)
-const notFound = ref(false)
-const loadError = ref<string | null>(null)
+
+// Nuxt storefront SSR seam (no-op in the SPA): see utils/ssrData.ts. The server renders the ANONYMOUS
+// view of the product (no cookies, no stock-source choice); a signed-in visitor re-fetches below once
+// their session is known, so actor-specific availability is never served from the SSR payload.
+const ssr = useSsrData()
+const ssrKey = productKey(props.slug)
+const seeded = ssr.get<ProductSeed>(ssrKey)
+const ssrFailed = ssr.failed(ssrKey)
+const product = ref<Product | null>(seeded?.product ?? null)
+const loading = ref(!seeded && !ssrFailed)
+const notFound = ref(ssrFailed?.status === 404)
+const loadError = ref<string | null>(ssrFailed ? ssrFailed.message || 'Gagal memuat produk dan ketersediaan stok.' : null)
 const activeImageIndex = ref(0)
-const selectedVariation = ref<ProductVariation | null>(null)
+const selectedVariation = ref<ProductVariation | null>(
+  seeded?.product.has_variations ? (seeded.product.variations.find((v) => v.is_active) ?? null) : null,
+)
 const quantity = ref(1)
 const addedMessage = ref(false)
 
-const relatedProducts = ref<Product[]>([])
+const relatedProducts = ref<Product[]>(seeded?.related ?? [])
 const relatedLoading = ref(false)
 const relatedGuard = createLatestRequestGuard()
 
@@ -80,7 +92,30 @@ async function loadRelatedProducts(productId: number) {
   }
 }
 
-onMounted(load)
+onServerPrefetch(async () => {
+  try {
+    const result = await ssr.load<ProductSeed>(ssrKey, () => fetchProductSeed(props.slug))
+    product.value = result.product
+    selectedVariation.value = result.product.has_variations ? (result.product.variations.find((v) => v.is_active) ?? null) : null
+    relatedProducts.value = result.related
+  } catch (e) {
+    notFound.value = e instanceof ApiError && e.status === 404
+    loadError.value = e instanceof ApiError ? e.message : 'Gagal memuat produk dan ketersediaan stok.'
+  } finally {
+    loading.value = false
+  }
+})
+onMounted(() => {
+  if (!seeded && !ssrFailed) load()
+})
+// Hydrated from the anonymous SSR payload: once the session is known, a signed-in visitor gets their own view.
+watch(
+  () => auth.ready && auth.isLoggedIn,
+  (signedIn) => {
+    if (signedIn && seeded) load()
+  },
+  { immediate: true },
+)
 watch(() => [props.slug, stockSource.value], load)
 
 const activeImage = computed(() => galleryImages.value[activeImageIndex.value] ?? null)

@@ -44,3 +44,9 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# Nuxt storefront (IMP-009)
+nuxt-storefront/.nuxt
+nuxt-storefront/.output
+nuxt-storefront/.data
+nuxt-storefront/node_modules

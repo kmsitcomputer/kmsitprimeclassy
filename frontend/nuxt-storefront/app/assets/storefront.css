@@ -1,0 +1,5 @@
+/* Re-use the SPA's Tailwind entry unchanged; only add the SPA source tree to Tailwind's class scan,
+   because the Nuxt app root is nuxt-storefront/ and auto-detection would not see ../src. */
+@import '../../../src/assets/main.css';
+@source '../../../src';
+@source '../';

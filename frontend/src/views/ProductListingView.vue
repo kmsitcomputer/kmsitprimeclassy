@@ -4,7 +4,7 @@ import StockSourceSelector from '@/components/shop/StockSourceSelector.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import { createLatestRequestGuard } from '@/utils/latestRequest'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onServerPrefetch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
@@ -16,6 +16,7 @@ import { listCategories, listProducts } from '@/api/catalog'
 import { formatRupiah } from '@/utils/format'
 import { buildCategoryTree, categoryPath } from '@/utils/categoryTree'
 import type { Category, PaginationMeta, Product } from '@/api/types'
+import { useSsrData } from '@/utils/ssrData'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -25,12 +26,19 @@ const auth = useAuthStore()
 const cart = useCartStore()
 const stockSource = computed(() => auth.user?.role === 'sales-kurir-sub' ? cart.stockSourceFor(auth.user.id) : undefined)
 const loadGuard = createLatestRequestGuard()
-const products = ref<Product[]>([])
-const categories = ref<Category[]>([])
+
+// Nuxt storefront SSR seam (no-op in the SPA): see utils/ssrData.ts. The server renders the ANONYMOUS
+// listing for the requested URL; a signed-in visitor re-fetches once their session is known.
+const ssr = useSsrData()
+type Seed = { products: Product[]; meta: PaginationMeta; categories: Category[] }
+const ssrKey = `products:${route.fullPath}`
+const seeded = ssr.get<Seed>(ssrKey)
+const products = ref<Product[]>(seeded?.products ?? [])
+const categories = ref<Category[]>(seeded?.categories ?? [])
 /** REM-06: the real parent→child hierarchy (any depth); nothing here ever re-parents or promotes a category. */
 const tree = computed(() => buildCategoryTree(categories.value))
-const meta = ref<PaginationMeta | null>(null)
-const loading = ref(true)
+const meta = ref<PaginationMeta | null>(seeded?.meta ?? null)
+const loading = ref(!seeded)
 const loadError = ref<string | null>(null)
 const filtersOpen = ref(false)
 
@@ -91,21 +99,25 @@ function pickCategory(slug: string) {
   applyFilters()
 }
 
+function listParams() {
+  return {
+    stock_source: stockSource.value,
+    search: filters.search || undefined,
+    category: filters.category || undefined,
+    sort: filters.sort as 'newest' | 'price_asc' | 'price_desc',
+    min_price: filters.minPrice ? Number(filters.minPrice) : undefined,
+    max_price: filters.maxPrice ? Number(filters.maxPrice) : undefined,
+    page: filters.page,
+    per_page: 12,
+  }
+}
+
 async function fetchProducts() {
   const token = loadGuard.begin()
   loading.value = true
   loadError.value = null
   try {
-    const result = await listProducts({
-      stock_source: stockSource.value,
-      search: filters.search || undefined,
-      category: filters.category || undefined,
-      sort: filters.sort as 'newest' | 'price_asc' | 'price_desc',
-      min_price: filters.minPrice ? Number(filters.minPrice) : undefined,
-      max_price: filters.maxPrice ? Number(filters.maxPrice) : undefined,
-      page: filters.page,
-      per_page: 12,
-    })
+    const result = await listProducts(listParams())
     if (!loadGuard.isCurrent(token)) return
     products.value = result.products
     meta.value = result.meta
@@ -160,10 +172,36 @@ watch(
 
 watch(stockSource, () => { filters.page = 1; void fetchProducts() })
 
+onServerPrefetch(async () => {
+  try {
+    const result = await ssr.load<Seed>(ssrKey, async () => {
+      const [cats, listed] = await Promise.all([listCategories(), listProducts(listParams())])
+      return { products: listed.products, meta: listed.meta, categories: cats }
+    })
+    products.value = result.products
+    meta.value = result.meta
+    categories.value = result.categories
+  } catch (e) {
+    loadError.value = e instanceof ApiError ? e.message : 'Gagal memuat ketersediaan stok.'
+  } finally {
+    loading.value = false
+  }
+})
+
 onMounted(async () => {
+  if (seeded) return
   categories.value = await listCategories()
   await fetchProducts()
 })
+
+// Hydrated from the anonymous SSR payload: a signed-in visitor gets their own view once the session is known.
+watch(
+  () => auth.ready && auth.isLoggedIn,
+  (signedIn) => {
+    if (signedIn && seeded) void fetchProducts()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onServerPrefetch } from 'vue'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import { listArticles } from '@/api/cms'
 import type { Article } from '@/api/cmsContent'
 import { listLanguages, type Language } from '@/api/languages'
 import { useLocaleStore } from '@/stores/locale'
 import { pickTranslation } from '@/utils/i18nContent'
+import { useSsrData } from '@/utils/ssrData'
 
 const locale = useLocaleStore()
-const articles = ref<Article[]>([])
-const languages = ref<Language[]>([])
-const loading = ref(true)
-const currentPage = ref(1)
-const lastPage = ref(1)
+// Nuxt storefront SSR seam (no-op in the SPA): only the first page is server-rendered.
+const ssr = useSsrData()
+type FirstPage = { items: Article[]; currentPage: number; lastPage: number; languages: Language[] }
+const seeded = ssr.get<FirstPage>('articles:1')
+const articles = ref<Article[]>(seeded?.items ?? [])
+const languages = ref<Language[]>(seeded?.languages ?? [])
+const loading = ref(!seeded)
+const currentPage = ref(seeded?.currentPage ?? 1)
+const lastPage = ref(seeded?.lastPage ?? 1)
 
 async function load(page = 1) {
   loading.value = true
@@ -24,7 +29,24 @@ async function load(page = 1) {
   loading.value = false
 }
 
-onMounted(() => load())
+onServerPrefetch(async () => {
+  try {
+    const first = await ssr.load<FirstPage>('articles:1', async () => {
+      const [result, languageList] = await Promise.all([listArticles({ page: 1 }), listLanguages()])
+      return { items: result.items, currentPage: result.currentPage, lastPage: result.lastPage, languages: languageList }
+    })
+    articles.value = first.items
+    currentPage.value = first.currentPage
+    lastPage.value = first.lastPage
+    languages.value = first.languages
+  } finally {
+    loading.value = false
+  }
+})
+
+onMounted(() => {
+  if (!seeded) load()
+})
 </script>
 
 <template>

@@ -1,18 +1,33 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onServerPrefetch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ShopLayout from '@/layouts/ShopLayout.vue'
 import CategoryTreeList from '@/components/shop/CategoryTreeList.vue'
 import { buildCategoryTree } from '@/utils/categoryTree'
 import { listCategories } from '@/api/catalog'
 import type { Category } from '@/api/types'
+import { useSsrData } from '@/utils/ssrData'
 
 const { t } = useI18n()
-const categories = ref<Category[]>([])
-const loading = ref(true)
+// Nuxt storefront SSR seam (no-op in the SPA): see utils/ssrData.ts.
+const ssr = useSsrData()
+const seeded = ssr.get<Category[]>('categories')
+const categories = ref<Category[]>(seeded ?? [])
+const loading = ref(!seeded)
 const tree = computed(() => buildCategoryTree(categories.value))
 
+onServerPrefetch(async () => {
+  try {
+    categories.value = await ssr.load('categories', () => listCategories())
+  } catch {
+    categories.value = []
+  } finally {
+    loading.value = false
+  }
+})
+
 onMounted(async () => {
+  if (seeded) return
   categories.value = await listCategories()
   loading.value = false
 })

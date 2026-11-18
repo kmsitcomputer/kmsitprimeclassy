@@ -13,7 +13,11 @@
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
-    "format": "prettier --write --experimental-cli src/"
+    "format": "prettier --write --experimental-cli src/",
+    "nuxt:dev": "nuxt dev nuxt-storefront --port 3000",
+    "nuxt:build": "nuxt build nuxt-storefront",
+    "nuxt:preview": "node nuxt-storefront/.output/server/index.mjs",
+    "nuxt:typecheck": "nuxt typecheck nuxt-storefront"
   },
   "dependencies": {
     "@ckeditor/ckeditor5-vue": "^8.2.0",
@@ -29,6 +33,7 @@
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
+    "@pinia/nuxt": "^1.0.3",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.13.3",
     "@vitejs/plugin-vue": "^6.0.8",
@@ -42,6 +47,7 @@
     "jiti": "^2.7.0",
     "jsdom": "^30.1.2",
     "npm-run-all2": "^9.0.2",
+    "nuxt": "^4.6.4",
     "oxlint": "~1.81.0",
     "prettier": "3.9.5",
     "typescript": "~6.0.0",

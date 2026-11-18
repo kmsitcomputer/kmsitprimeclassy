@@ -77,6 +77,9 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
   if (isBypassedPath(url.pathname)) return
+  // IMP-009: the Nuxt storefront's hashed build assets (/_nuxt/*) are immutable and served with long-lived HTTP
+  // cache headers by their own server; they are not part of this shell cache (keeps the two apps isolated).
+  if (url.pathname.startsWith('/_nuxt/')) return
 
   // Rule 2: navigations are network-first so users never sit indefinitely
   // on an old shell while online; the cached shell is only a genuine
@@ -124,6 +127,10 @@ self.addEventListener('fetch', (event) => {
  */
 function isShellSafeResponse(response) {
   if (!response || response.ok !== true) return false
+  // IMP-009: a server-rendered Nuxt storefront page is valid HTML but is NOT the SPA shell. It carries
+  // x-pc-renderer: nuxt (set by nuxt-storefront routeRules) and must never replace the cached /index.html,
+  // otherwise the offline fallback for every SPA route would become one specific storefront page.
+  if (response.headers && response.headers.get('x-pc-renderer')) return false
   if (response.status !== 200) return false
   if (response.type !== 'basic') return false
   if (response.redirected === true) return false

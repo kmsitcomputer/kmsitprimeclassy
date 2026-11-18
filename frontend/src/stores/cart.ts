@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { isStorageHydrationDeferred } from '@/utils/storageHydration'
 
 /**
  * Cart is a client-side *shopping list* only — product/variation id + qty,
@@ -26,6 +27,7 @@ const STORAGE_KEY = 'pc-cart'
 const SOURCE_KEY = 'pc-cart-stock-source'
 type StockChoice = { actorId: number; source: 'agent' | 'sub' }
 function loadStockChoice(): StockChoice | null {
+  if (typeof sessionStorage === 'undefined' || isStorageHydrationDeferred()) return null // SSR / pre-hydration (Nuxt storefront)
   try {
     const value = JSON.parse(sessionStorage.getItem(SOURCE_KEY) ?? 'null') as StockChoice | null
     return value && Number.isInteger(value.actorId) && ['agent', 'sub'].includes(value.source) ? value : null
@@ -33,6 +35,7 @@ function loadStockChoice(): StockChoice | null {
 }
 
 function loadFromStorage(): CartLine[] {
+  if (isStorageHydrationDeferred()) return []
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     return raw ? (JSON.parse(raw) as CartLine[]) : []
@@ -60,6 +63,11 @@ export const useCartStore = defineStore('cart', {
     isEmpty: (state) => state.lines.length === 0,
   },
   actions: {
+    /** Nuxt SSR: state starts empty on the server; adopt the browser's persisted cart after hydration. */
+    hydrateFromStorage() {
+      this.lines = loadFromStorage()
+      this.stockChoice = loadStockChoice()
+    },
     stockSourceFor(actorId: number): 'agent' | 'sub' {
       return this.stockChoice?.actorId === actorId ? this.stockChoice.source : 'agent'
     },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocaleStore } from '@/stores/locale'
 import { SUPPORTED_LOCALES, type LocaleCode } from '@/i18n'
@@ -19,7 +19,8 @@ function onClickOutside(e: MouseEvent) {
   if (rootEl.value && !rootEl.value.contains(e.target as Node)) open.value = false
 }
 
-document.addEventListener('click', onClickOutside)
+// Listener registered on mount only (never during SSR — there is no `document` on the server).
+onMounted(() => document.addEventListener('click', onClickOutside))
 onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
 </script>
 

@@ -40,7 +40,10 @@ if (!existsSync(templatePath)) fail('src-pwa/sw.js template not found.')
 // edited on the deployed server without rebuilding. It is NEVER precached
 // and is bypassed network-only by the service worker, so it stays
 // runtime-editable.
-const precache = ['/', '/index.html', '/favicon.ico', '/manifest.webmanifest']
+// IMP-009: '/' is deliberately NOT precached. When the Nuxt storefront is deployed it owns '/', and caching its
+// server-rendered HTML here would put storefront pages in the shell cache. The offline fallback only ever
+// reads '/index.html' (the SPA shell), so '/' added nothing in the SPA-only layout either.
+const precache = ['/index.html', '/favicon.ico', '/manifest.webmanifest']
 const fixedShell = [
   'icons/icon-192.png',
   'icons/icon-512.png',
