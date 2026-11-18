@@ -12,12 +12,12 @@ before touching code. Do not re-derive a completed checkpoint.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **83 (22.1%)** |
-| Fully GO | 77 |
+| Served by Go | **91 (24.3%)** |
+| Fully GO | 85 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **292** |
-| Go tests | **123 green**, `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **340 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests) |
+| Laravel-only (Go answers 501) | **284** |
+| Go tests | **133 green** (incl. 6 media oracles), `go vet` clean, gofmt clean |
+| Cross-runtime comparison checks | **360 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -52,6 +52,7 @@ explicitly listed as outstanding rather than silently reduced.
 | Checkout quote (Review preview) | 1 | `compare_order_quote.py` (25) — pickup/address-book/inline destinations, fixed/percentage/targeted vouchers, inapplicable + unknown vouchers, provider-failure 422s, validation shapes, policy vs role 403, guest 401. Provider clients additionally pinned by 4 Go test groups incl. a stub ORS/RajaOngkir/KMSIT and the SSRF guard |
 | Agent stock reservations | — (primitive) | 12 two-connection oracles in `internal/inventory/reserve_test.go`: anti-oversell, exact-capacity lost-update, opposite-order deadlock, rollback, legacy boundary, warehouse-authoritative trap, provisioning, release clamp |
 | Order creation | 1 | `compare_orders.py` (43) — response body AND database state (order, items, commissions, shipments, stock request, payment transaction, snapshot, reservation), plus idempotent replay after a status change and full rollback on failure |
+| Stock-request proposals | 8 | `compare_proposals.py` (20) — propose/receive/approve/reject/write-off across 20 scenarios, response + DB state |
 | Warehouse stock requests | 6 | `compare_warehouse_requests.py` (22) — transit receipt, factory_plan change, Sub adjustment both directions, idempotent re-approval, rejection, the negative-Sub guard, route gates, and 7 validation shapes; DB state compared after every scenario |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
@@ -294,13 +295,50 @@ Check these after adding routes; each is cheap and each has caught a real defect
 | Secrets | provider/bank credentials are READ from Laravel's `encrypted:array` payloads with `APP_KEY`; Go never writes a new encrypted format. `activity_logs.properties` are redacted. |
 | No weakening for parity | a divergence is recorded in `docs/21b` as a deviation; the check is never removed to make a comparison pass. |
 
+## 4-6. Stock-request proposals + the media pipeline — DONE (do not re-derive)
+
+8 proposal routes (`internal/inventory/proposals.go`, `internal/api/handlers_proposals.go`) plus
+`internal/media` (MediaService + config/media.php) — the shared upload path every image slot uses.
+
+**Settlement moves stock EXACTLY ONCE**: Koordinator receipt (routine) or Admin approval (exception) share one
+`settleProposal`; only ACCEPTED units move transit→shipping; short/damaged units stay in Transit with their
+reservation intact and remain outstanding demand. Damaged units are HELD on the line (`damaged_hold_qty`) until an
+Admin write-off; `restock` is refused outright (the reference refuses it too, pending an Owner inspection rule).
+The demand-line sums after settlement use LOCKING reads (`FOR UPDATE`), never `SUM()` — a plain aggregate would
+read the pre-lock REPEATABLE READ snapshot.
+
+**Write-off idempotency** goes through a LOCKING activity-log lookup on `properties->idempotency_key`: a retried
+resolution answers 409.
+
+**Media pipeline** (needed by proposals AND shipment/COD proofs, avatars, CMS):
+- MIME is sniffed from the file CONTENT (never the client header); the stored extension comes from the
+  collection's allowlist (never echoed from the client); the file must actually DECODE as an image
+  (image.DecodeConfig); raster only — no SVG anywhere, exactly like the reference.
+- `proof` is REQUIRED on propose whenever goods are handed over (multipart); a shortage-only report carries none.
+  The controller's conditional rule is reproduced including its validation sentence.
+
+Reference asymmetries reproduced (each was a failing comparison until matched):
+- `request_item.product.images` is present ONLY on index/show (loaded there); the propose/settle responses omit
+  the key entirely.
+- `product` and `variation` keys are always PRESENT on a loaded relation (null for the target the line does not
+  have) — a null relation still renders.
+- An empty `receipt_note` persists as NULL, not ''.
+- The propose endpoint is Multipart; the same fields arrive as `items[i][item_id|...]` form names.
+
+REAL DEFECT FIXED in the reservation primitives while porting this: Laravel writes the reference pair
+(`reference_type`/`reference_id`) in DEDICATED movement columns; my earlier port put "order#123" in the note and
+left the columns NULL, and release quantities were recorded POSITIVE where the reference records them NEGATIVE.
+Both fixed; compare_orders.py still 43/43.
+
 ## 4a. Next action (resume here)
 
-**A. Stock-request proposals / handovers** (the remaining ~14 routes of this family):
-`StockRequestProposalService` (propose/approve/receive/reject/settle/resolveDiscrepancy) is the §16/§31 two-party
-gate. Read it together with `StockRequestController::fulfill`, `StockRequestProposalController` and the handover
-routes; lock order is Order → Stock Request → inventory, and the status/sum reconciliation under a lock must use
-locking reads, not `sum()`. `warehouse/handovers/{handover}` + `/print` belong to the same unit.
+**A. Handovers + the Sub stock-request workflow**:
+   1. `warehouse/handovers/{handover}` + `/print` (2 routes) — the handover read/print surface over the transfer
+      infrastructure already built (stock_handovers rows exist).
+   2. `SubStockRequestService` (create/approve/execute/receive/cancel/reject + index/show, 7 routes). Its
+      `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart of
+      `lockSubLocationForCheckout` (SHARED first). Required evidence: a two-connection test proving checkout and
+      execute cannot deadlock against each other.
 
 **B. Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/reject
 + index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart
@@ -320,7 +358,8 @@ beyond the number allocation.
 
 **DONE, do not redo:** `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`; `/addresses` (4);
 `/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`;
-warehouse stock-addition-requests + sub-adjustment-requests (6).
+warehouse stock-addition-requests + sub-adjustment-requests (6); stock-request proposals (8) + the media
+pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal).
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

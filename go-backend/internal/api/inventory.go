@@ -136,7 +136,10 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/orders",
 		"GET /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/stock-addition-requests",
-		"POST /api/v1/warehouse/sub-adjustment-requests":
+		"POST /api/v1/warehouse/sub-adjustment-requests",
+		"GET /api/v1/warehouse/fulfillment-proposals",
+		"POST /api/v1/warehouse/stock-requests/{stockRequest}/fulfill",
+		"POST /api/v1/warehouse/stock-requests/{stockRequest}/proposals":
 		return true
 	}
 	for _, collection := range []string{"vouchers", "discounts"} {
@@ -162,6 +165,33 @@ func implementsRoute(method, path string) bool {
 			return true
 		}
 		return false
+	}
+	// /api/v1/warehouse/fulfillment-proposals/<id> and /<id>/(receive|approve|reject).
+	if strings.HasPrefix(path, "/api/v1/warehouse/fulfillment-proposals/") {
+		rest := strings.TrimPrefix(path, "/api/v1/warehouse/fulfillment-proposals/")
+		parts := strings.Split(rest, "/")
+		if len(parts) == 1 && parts[0] != "" && method == http.MethodGet {
+			return true
+		}
+		if len(parts) == 2 && parts[0] != "" && method == http.MethodPost &&
+			(parts[1] == "receive" || parts[1] == "approve" || parts[1] == "reject") {
+			return true
+		}
+		return false
+	}
+	// /api/v1/warehouse/stock-requests/<id>/(fulfill|proposals).
+	if strings.HasPrefix(path, "/api/v1/warehouse/stock-requests/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/warehouse/stock-requests/"), "/")
+		if len(parts) == 2 && parts[0] != "" && method == http.MethodPost &&
+			(parts[1] == "fulfill" || parts[1] == "proposals") {
+			return true
+		}
+		return false
+	}
+	// /api/v1/warehouse/stock-request-items/<id>/resolve-discrepancy.
+	if strings.HasPrefix(path, "/api/v1/warehouse/stock-request-items/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/warehouse/stock-request-items/"), "/")
+		return len(parts) == 2 && parts[0] != "" && method == http.MethodPost && parts[1] == "resolve-discrepancy"
 	}
 	// /api/v1/warehouse/opnames/<id> and /<id>/(count|submit|approve|cancel|reject).
 	if strings.HasPrefix(path, "/api/v1/warehouse/opnames/") {

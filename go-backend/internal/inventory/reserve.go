@@ -127,12 +127,13 @@ func ReserveForProduct(ctx context.Context, tx *sql.Tx, agentID, productID int64
 		return err
 	}
 	return writeMovement(ctx, tx, movement{
-		AgentID:   agentID,
-		ProductID: &productID,
-		Type:      "reserve",
-		Quantity:  int64(qty),
-		CreatedBy: createdByOrZero(ref.CreatedBy),
-		Note:      referenceNote(ref),
+		AgentID:       agentID,
+		ProductID:     &productID,
+		Type:          "reserve",
+		Quantity:      int64(qty),
+		ReferenceType: ref.Type,
+		ReferenceID:   &ref.ID,
+		CreatedBy:     createdByOrZero(ref.CreatedBy),
 	})
 }
 
@@ -160,12 +161,13 @@ func ReserveForVariation(ctx context.Context, tx *sql.Tx, agentID, variationID i
 		return err
 	}
 	return writeMovement(ctx, tx, movement{
-		AgentID:     agentID,
-		VariationID: &variationID,
-		Type:        "reserve",
-		Quantity:    int64(qty),
-		CreatedBy:   createdByOrZero(ref.CreatedBy),
-		Note:        referenceNote(ref),
+		AgentID:       agentID,
+		VariationID:   &variationID,
+		Type:          "reserve",
+		Quantity:      int64(qty),
+		ReferenceType: ref.Type,
+		ReferenceID:   &ref.ID,
+		CreatedBy:     createdByOrZero(ref.CreatedBy),
 	})
 }
 
@@ -186,13 +188,15 @@ func ReleaseForProduct(ctx context.Context, tx *sql.Tx, agentID, productID int64
 		WHERE agent_id = ? AND product_id = ?`, qty, agentID, productID); err != nil {
 		return err
 	}
+	// The reference records the release quantity as NEGATIVE, exactly like StockService::releaseProduct.
 	return writeMovement(ctx, tx, movement{
-		AgentID:   agentID,
-		ProductID: &productID,
-		Type:      "release",
-		Quantity:  int64(qty),
-		CreatedBy: createdByOrZero(ref.CreatedBy),
-		Note:      referenceNote(ref),
+		AgentID:       agentID,
+		ProductID:     &productID,
+		Type:          "release",
+		Quantity:      -int64(qty),
+		ReferenceType: ref.Type,
+		ReferenceID:   &ref.ID,
+		CreatedBy:     createdByOrZero(ref.CreatedBy),
 	})
 }
 
@@ -207,12 +211,13 @@ func ReleaseForVariation(ctx context.Context, tx *sql.Tx, agentID, variationID i
 		return err
 	}
 	return writeMovement(ctx, tx, movement{
-		AgentID:     agentID,
-		VariationID: &variationID,
-		Type:        "release",
-		Quantity:    int64(qty),
-		CreatedBy:   createdByOrZero(ref.CreatedBy),
-		Note:        referenceNote(ref),
+		AgentID:       agentID,
+		VariationID:   &variationID,
+		Type:          "release",
+		Quantity:      -int64(qty),
+		ReferenceType: ref.Type,
+		ReferenceID:   &ref.ID,
+		CreatedBy:     createdByOrZero(ref.CreatedBy),
 	})
 }
 
@@ -223,18 +228,6 @@ func createdByOrZero(v *int64) int64 {
 		return 0
 	}
 	return *v
-}
-
-// referenceNote renders the reference onto the movement note.
-//
-// The reference keeps the {type,id} pair in dedicated columns, but the Go port writes it into `note` as well so
-// an operator reading the ledger can see which order a reserve belongs to without a join. It is additive: the
-// ledger columns are unchanged.
-func referenceNote(ref ReservationReference) string {
-	if ref.Type == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s#%d", ref.Type, ref.ID)
 }
 
 // lockCommitment locks (and, when absent, provisions) the Agent commitment row, returning the reserved figure

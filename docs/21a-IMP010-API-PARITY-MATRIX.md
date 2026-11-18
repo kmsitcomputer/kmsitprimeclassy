@@ -554,15 +554,15 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **GO** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (34/49 in Go)
+## Inventory — warehouse — `warehouse` (42/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/warehouse/fulfillment-proposals` | session | admin, gudang, koordinator-kurir | LARAVEL |  |
-| GET | `/api/v1/warehouse/fulfillment-proposals/{proposal}` | session | admin, gudang, koordinator-kurir | LARAVEL |  |
-| POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/approve` | session | admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/receive` | session | koordinator-kurir | LARAVEL |  |
-| POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/reject` | session | admin | LARAVEL |  |
+| GET | `/api/v1/warehouse/fulfillment-proposals` | session | admin, gudang, koordinator-kurir | **GO** | index loads product.images (key renders even when empty), unlike the propose/settle responses |
+| GET | `/api/v1/warehouse/fulfillment-proposals/{proposal}` | session | admin, gudang, koordinator-kurir | **GO** | same detail shape as the index |
+| POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/approve` | session | admin | **GO** | admin EXCEPTION path; a reason (min 5 chars) is mandatory and audited; settles the whole prepared quantity |
+| POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/receive` | session | koordinator-kurir | **GO** | koordinator-kurir — the routine settlement; accepted+short+damaged must equal the prepared quantity; stock moves transit→shipping for accepted units only; damaged units are held on the line |
+| POST | `/api/v1/warehouse/fulfillment-proposals/{proposal}/reject` | session | admin | **GO** | admin; moves no stock |
 | GET | `/api/v1/warehouse/handovers/{handover}` | session | admin, agen, gudang, super_admin | LARAVEL |  |
 | GET | `/api/v1/warehouse/handovers/{handover}/print` | session | admin, agen, gudang, super_admin | LARAVEL |  |
 | GET | `/api/v1/warehouse/opnames` | session | admin, agen, gudang, super_admin | **GO** |  |
@@ -587,9 +587,9 @@ Status legend:
 | POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve` | session | admin | **GO** | admin only; idempotent (a second approve moves no stock); transit receipt or factory_plan change under the commitment guard |
 | POST | `/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject` | session | admin | **GO** | admin only; leaves stock untouched; a missing id answers the endpoint-not-found sentence |
 | GET | `/api/v1/warehouse/stock-cards` | session | admin, gudang | **GO** | reads warehouse buckets only (no legacy fallback) — same asymmetry as the reference |
-| POST | `/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy` | session | admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/stock-requests/{stockRequest}/fulfill` | session | gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/stock-requests/{stockRequest}/proposals` | session | gudang | LARAVEL |  |
+| POST | `/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy` | session | admin | **GO** | F07: write_off reduces Transit by an adjustment movement and lifts the hold under a UUID idempotency key (retry answers 409); restock is refused pending an Owner inspection rule |
+| POST | `/api/v1/warehouse/stock-requests/{stockRequest}/fulfill` | session | gudang | **GO** | the reference REFUSES direct Gudang fulfilment (the proposal gate is the only path); reproduced verbatim |
+| POST | `/api/v1/warehouse/stock-requests/{stockRequest}/proposals` | session | gudang | **GO** | gudang; multipart with a REQUIRED proof image when goods are handed over; shortage-only reports carry none and create no proposal row |
 | POST | `/api/v1/warehouse/sub-adjustment-requests` | session | gudang | **GO** | gudang only; a negative delta may never cut Sub physical below the active reservations |
 | GET | `/api/v1/warehouse/sub-locations` | session | admin, agen, gudang, super_admin | **GO** |  |
 | POST | `/api/v1/warehouse/sub-locations` | session | admin, agen | **GO** | owner must be an active Sales-Kurir-Sub of the network that owns no other location |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 83 (22.1%) |
-|   of which fully GO | 77 |
+| Served by Go now | 91 (24.3%) |
+|   of which fully GO | 85 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 292 |
+| Still Laravel-only | 284 |
 | Areas fully ported | 11 / 45 |

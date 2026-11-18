@@ -63,12 +63,14 @@ INSERT INTO users (id, role_id, parent_id, agent_id, korsal_id, sales_id, name, 
  (14,6,10,10,13,14,'Sales Satu','sales@imp010.test','081100000014','SL-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (15,10,10,10,NULL,NULL,'Gudang Satu','gudang@imp010.test','081100000015',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
  (16,7,10,10,13,16,'Sub Seller','sub@imp010.test','081100000016','SS-IMP010','active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
- (17,11,10,10,13,14,'Konsumen Sales','konsumen2@imp010.test','081100000017',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW());
+ (17,11,10,10,13,14,'Konsumen Sales','konsumen2@imp010.test','081100000017',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
+ (18,9,10,10,NULL,NULL,'Koordinator Kurir','koordinator@imp010.test','081100000018',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW()),
+ (19,8,10,10,18,19,'Kurir Satu','kurir@imp010.test','081100000019',NULL,'active','$2y$10$NC8qJYD6.cH2h4T0hcVLcembfGXh1fSplxbkU7sRk9eBLZgl3rVDq',NOW(),NOW());
 
 INSERT INTO user_closures (ancestor_id, descendant_id, depth) VALUES
  (1,1,0),(10,10,0),(11,11,0),(12,12,0),(13,13,0),(14,14,0),(15,15,0),(16,16,0),
- (10,11,1),(10,12,1),(10,13,1),(10,14,1),(10,15,1),(10,16,1),(10,17,1),
- (1,10,1),(1,11,2),(1,12,2),(1,13,2),(1,14,2),(1,15,2),(1,16,2),(1,17,2);
+ (10,11,1),(10,12,1),(10,13,1),(10,14,1),(10,15,1),(10,16,1),(10,17,1),(10,18,1),(10,19,1),
+ (1,10,1),(1,11,2),(1,12,2),(1,13,2),(1,14,2),(1,15,2),(1,16,2),(1,17,2),(1,18,3),(1,19,3);
 
 INSERT INTO agent_profiles (id, user_id, store_name, address, latitude, longitude, phone, created_at, updated_at) VALUES
  (1,10,'Toko Prime Classy Imp010','Jl. Uji 1, Bandung',-6.9000000,107.6000000,'081100000010',NOW(),NOW());

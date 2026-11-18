@@ -988,6 +988,8 @@ type movement struct {
 	CounterpartStockType *string
 	TransferID           *int64
 	HandoverID           *int64
+	ReferenceType        string
+	ReferenceID          *int64
 	CreatedBy            int64
 	Note                 string
 }
@@ -995,11 +997,12 @@ type movement struct {
 func writeMovement(ctx context.Context, tx *sql.Tx, m movement) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO stock_movements
 		(agent_id, product_id, product_variation_id, type, quantity, stock_type, sub_location_id,
-		 counterpart_stock_type, transfer_id, handover_id, note, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+		 counterpart_stock_type, transfer_id, handover_id, reference_type, reference_id, note, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
 		m.AgentID, nullableInt(m.ProductID), nullableInt(m.VariationID), m.Type, m.Quantity,
 		nullableStrMember(m.StockType), nullableInt(m.SubLocationID), nullableStrPtr(m.CounterpartStockType),
-		nullableInt(m.TransferID), nullableInt(m.HandoverID), nullableStrMember(m.Note), m.CreatedBy)
+		nullableInt(m.TransferID), nullableInt(m.HandoverID),
+		nullableStrMember(m.ReferenceType), nullableInt(m.ReferenceID), nullableStrMember(m.Note), m.CreatedBy)
 	return err
 }
 

@@ -181,6 +181,17 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/warehouse/stock-addition-requests", chain(http.HandlerFunc(s.handleStockAdditionIndex), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
 	s.mux.Handle("GET /api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}", chain(http.HandlerFunc(s.handleStockAdditionShow), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang")))
 
+	// Stock-request proposals — the §16/§31 fulfillment gate. Gudang proposes, Koordinator Kurir receives
+	// (the routine settlement), Admin keeps the exception approve/reject and the damaged write-off.
+	s.mux.Handle("POST /api/v1/warehouse/stock-requests/{stockRequest}/fulfill", chain(http.HandlerFunc(s.handleStockRequestFulfill), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/stock-requests/{stockRequest}/proposals", chain(http.HandlerFunc(s.handleProposalStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/fulfillment-proposals", chain(http.HandlerFunc(s.handleProposalIndex), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang,koordinator-kurir")))
+	s.mux.Handle("GET /api/v1/warehouse/fulfillment-proposals/{proposal}", chain(http.HandlerFunc(s.handleProposalShow), RequireAuth, s.RequireAgentLinked, RequireRole("admin,gudang,koordinator-kurir")))
+	s.mux.Handle("POST /api/v1/warehouse/fulfillment-proposals/{proposal}/receive", chain(http.HandlerFunc(s.handleProposalReceive), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
+	s.mux.Handle("POST /api/v1/warehouse/fulfillment-proposals/{proposal}/approve", chain(http.HandlerFunc(s.handleProposalApprove), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/warehouse/fulfillment-proposals/{proposal}/reject", chain(http.HandlerFunc(s.handleProposalReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+	s.mux.Handle("POST /api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy", chain(http.HandlerFunc(s.handleResolveDiscrepancy), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+
 	// Stock opname (Gudang drafts/counts/submits, Admin approves).
 	s.mux.Handle("GET /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameIndex), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
 	s.mux.Handle("POST /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))

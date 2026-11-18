@@ -70,6 +70,18 @@ KEYS = {
     "shipping": [
         "method_not_available",
     ],
+    "media": [
+        "unknown_collection",
+        "upload_failed",
+        "invalid_type",
+        "too_large",
+        "dimensions_too_large",
+    ],
+    "fulfillment": [
+        "shortage_reason_required",
+        "shortage_item_invalid",
+        "shortage_item_duplicate",
+    ],
     "payment": [
         "method_required",
         "invalid_method",

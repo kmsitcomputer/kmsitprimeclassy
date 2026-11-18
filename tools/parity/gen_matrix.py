@@ -41,6 +41,15 @@ IMPLEMENTED = {
     # --- checkpoint N: checkout wizard contract (compare_checkout.py, 38 checks over 11 scenarios)
     ("GET", "/api/v1/checkout/steps"): "public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter",
     ("POST", "/api/v1/checkout/quote"): "read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher",
+    # --- checkpoint S: stock-request proposals (compare_proposals.py, 20 checks)
+    ("POST", "/api/v1/warehouse/stock-requests/{stockRequest}/fulfill"): "the reference REFUSES direct Gudang fulfilment (the proposal gate is the only path); reproduced verbatim",
+    ("POST", "/api/v1/warehouse/stock-requests/{stockRequest}/proposals"): "gudang; multipart with a REQUIRED proof image when goods are handed over; shortage-only reports carry none and create no proposal row",
+    ("GET", "/api/v1/warehouse/fulfillment-proposals"): "index loads product.images (key renders even when empty), unlike the propose/settle responses",
+    ("GET", "/api/v1/warehouse/fulfillment-proposals/{proposal}"): "same detail shape as the index",
+    ("POST", "/api/v1/warehouse/fulfillment-proposals/{proposal}/receive"): "koordinator-kurir — the routine settlement; accepted+short+damaged must equal the prepared quantity; stock moves transit→shipping for accepted units only; damaged units are held on the line",
+    ("POST", "/api/v1/warehouse/fulfillment-proposals/{proposal}/approve"): "admin EXCEPTION path; a reason (min 5 chars) is mandatory and audited; settles the whole prepared quantity",
+    ("POST", "/api/v1/warehouse/fulfillment-proposals/{proposal}/reject"): "admin; moves no stock",
+    ("POST", "/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy"): "F07: write_off reduces Transit by an adjustment movement and lifts the hold under a UUID idempotency key (retry answers 409); restock is refused pending an Owner inspection rule",
     # --- checkpoint R: warehouse stock-request two-party gate (compare_warehouse_requests.py, 22 checks)
     ("GET", "/api/v1/warehouse/stock-addition-requests"): "agent-scoped list; sub_location is loaded here (unlike show)",
     ("POST", "/api/v1/warehouse/stock-addition-requests"): "gudang only; target is product XOR variation; quantity > 0",
