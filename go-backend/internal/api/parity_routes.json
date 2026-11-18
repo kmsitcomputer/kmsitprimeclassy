@@ -1,0 +1,3813 @@
+[
+{
+"method": "GET",
+"uri": "/api/v1/addresses",
+"action": "App\\Http\\Controllers\\Api\\V1\\Address\\KonsumenAddressController@index",
+"auth": true,
+"roles": [
+"konsumen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/addresses",
+"action": "App\\Http\\Controllers\\Api\\V1\\Address\\KonsumenAddressController@store",
+"auth": true,
+"roles": [
+"konsumen"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/addresses/{address}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Address\\KonsumenAddressController@destroy",
+"auth": true,
+"roles": [
+"konsumen"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/addresses/{address}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Address\\KonsumenAddressController@update",
+"auth": true,
+"roles": [
+"konsumen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/additional-payments",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\OrderAdjustmentController@listAdditionalPayments",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/additional-payments/{payment}/status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\OrderAdjustmentController@markAdditionalPaymentStatus",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/agents",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentContactController@adminIndex",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/agents",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentContactController@store",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/admin/agents/{agentProfile}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentContactController@destroy",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/agents/{agentProfile}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentContactController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/agents/{agent}/toggle-status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentContactController@toggleStatus",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/audit-logs",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\AuditLogController@index",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@confirmCodProof",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/google-auth",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\GoogleAuthSettingController@show",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/admin/google-auth",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\GoogleAuthSettingController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/integrations/smtp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\SmtpSettingsController@show",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/admin/integrations/smtp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\SmtpSettingsController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/integrations/smtp/test-connection",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\SmtpSettingsController@testConnection",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/integrations/smtp/test-email",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\SmtpSettingsController@testEmail",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/integrations/whatsapp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@show",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/admin/integrations/whatsapp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/integrations/whatsapp/messages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@messages",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/integrations/whatsapp/messages/{message}/retry",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@retry",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/admin/integrations/whatsapp/templates/{event}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@resetTemplate",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/admin/integrations/whatsapp/templates/{event}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@updateTemplate",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/integrations/whatsapp/templates/{event}/preview",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@previewTemplate",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/integrations/whatsapp/test-connection",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@testConnection",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/integrations/whatsapp/test-message",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\WhatsAppGatewayController@testMessage",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/languages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Language\\LanguageController@adminIndex",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/languages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Language\\LanguageController@store",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/languages/{language}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Language\\LanguageController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/languages/{language}/set-default",
+"action": "App\\Http\\Controllers\\Api\\V1\\Language\\LanguageController@setDefault",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/languages/{language}/toggle-active",
+"action": "App\\Http\\Controllers\\Api\\V1\\Language\\LanguageController@toggleActive",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/order-refunds",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\OrderAdjustmentController@listRefunds",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/order-refunds/{adjustment}/status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\OrderAdjustmentController@markRefundStatus",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/order-sales-reductions/{reduction}/reinstate",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@reinstate",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/orders/{order}/cancellation/finalize",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@finalizeCancellation",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/orders/{order}/refunds",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-attempts/{attempt}/cancel",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@cancel",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-attempts/{attempt}/complete",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@complete",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-attempts/{attempt}/fail",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@markFailed",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-attempts/{attempt}/initiate",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@initiate",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-attempts/{attempt}/reconcile",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@reconcile",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-attempts/{attempt}/unknown",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@unknown",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-obligations/{obligation}/approve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@approve",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-obligations/{obligation}/attempts",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@storeAttempt",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-obligations/{obligation}/deferred/materialize",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@materialize",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-obligations/{obligation}/deferred/request",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@requestMaterialization",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RefundLedgerController@resolveVerification",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/regions/export",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RegionImportExportController@export",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/regions/import",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\RegionImportExportController@import",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/return-items/{item}/refund",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@markItemRefunded",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/returns",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/returns/{return}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/returns/{return}/pickup-schedule",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@schedulePickup",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/returns/{return}/review",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@review",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/settings",
+"action": "App\\Http\\Controllers\\Api\\V1\\Settings\\WebsiteSettingController@adminShow",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/admin/settings",
+"action": "App\\Http\\Controllers\\Api\\V1\\Settings\\WebsiteSettingController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/shipping-couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\ShippingCourierController@index",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/admin/shipping-couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\ShippingCourierController@store",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/shipping-couriers/{shippingCourier}/toggle",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\ShippingCourierController@toggle",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/admin/shipping-providers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\ShippingProviderController@index",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/admin/shipping-providers/{provider}/toggle",
+"action": "App\\Http\\Controllers\\Api\\V1\\Admin\\ShippingProviderController@toggle",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/google-auth",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentGoogleAuthConfigController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/google-auth",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentGoogleAuthConfigController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/payment-methods",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentPaymentMethodController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/payment-methods/{method}/config",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentPaymentMethodController@updateConfig",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/agent/payment-methods/{method}/toggle",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentPaymentMethodController@toggle",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/shipping-providers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@index",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/shipping-providers/{provider}/config",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@updateConfig",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/shipping-providers/{provider}/couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@couriers",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/shipping-providers/{provider}/couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@updateCouriers",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/shipping-providers/{provider}/destinations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@destinations",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/shipping-providers/{provider}/test",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@testConnection",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/agent/shipping-providers/{provider}/toggle",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingProviderController@toggle",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/shipping-tariff",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingTariffController@show",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/shipping-tariff",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentShippingTariffController@update",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/store-profile",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentStoreProfileController@show",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/store-profile",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentStoreProfileController@update",
+"auth": true,
+"roles": [
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/whatsapp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/device",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@createDevice",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/whatsapp/events",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@events",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/agent/whatsapp/events/{event}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@updateEvent",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/events/{event}/preview",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@previewEvent",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/agent/whatsapp/events/{event}/template",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@resetEventTemplate",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/logout",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@logout",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/whatsapp/messages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@messages",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/pair/code",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@pairCode",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/pair/qr",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@qr",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/reconnect",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@reconnect",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/replace",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@replace",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/whatsapp/scope",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@scope",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agent/whatsapp/test-numbers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@testNumbers",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/test-numbers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@addTestNumber",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/agent/whatsapp/test-numbers/{id}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@removeTestNumber",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/agent/whatsapp/test-send",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentWhatsAppController@testSend",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/agents",
+"action": "App\\Http\\Controllers\\Api\\V1\\Agent\\AgentContactController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/articles",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\ArticleController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/articles/{slug}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\ArticleController@show",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/auth/forgot-password",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\AccountRecoveryController@forgot",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/auth/google/callback",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\GoogleAuthController@callback",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/auth/google/redirect",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\GoogleAuthController@redirect",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/auth/login",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\AuthController@login",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/auth/logout",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\AuthController@logout",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/auth/me",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\AuthController@me",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/auth/register",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\AuthController@register",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/auth/reset-password",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\AccountRecoveryController@reset",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/bestsellers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\BestsellerController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/catalog/export",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\CatalogImportExportController@export",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/catalog/imports",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\CatalogImportExportController@apply",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/catalog/imports/preview",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\CatalogImportExportController@preview",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/categories",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductCategoryController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/categories",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductCategoryController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/categories/{category}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductCategoryController@destroy",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/categories/{category}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductCategoryController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/checkout/courier-options",
+"action": "App\\Http\\Controllers\\Api\\V1\\Checkout\\CheckoutController@courierOptions",
+"auth": true,
+"roles": [
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/checkout/geocode",
+"action": "App\\Http\\Controllers\\Api\\V1\\Checkout\\GeocodeController@locate",
+"auth": true,
+"roles": [
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/checkout/quote",
+"action": "App\\Http\\Controllers\\Api\\V1\\Checkout\\CheckoutController@quote",
+"auth": true,
+"roles": [
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/checkout/steps",
+"action": "App\\Http\\Controllers\\Api\\V1\\Checkout\\CheckoutController@steps",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/cms/articles",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\ArticleController@adminIndex",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/cms/articles",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\ArticleController@store",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/cms/articles/{article}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\ArticleController@destroy",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/cms/articles/{article}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\ArticleController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/cms/homepage-blocks",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageBlockController@index",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/cms/homepage-blocks",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageBlockController@store",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/cms/homepage-blocks/reorder",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageBlockController@reorder",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/cms/homepage-blocks/{block}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageBlockController@destroy",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/cms/homepage-blocks/{block}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageBlockController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/cms/homepage-blocks/{block}/toggle",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageBlockController@toggle",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/cms/pages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\PageController@adminIndex",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/cms/pages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\PageController@store",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/cms/pages/{page}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\PageController@destroy",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/cms/pages/{page}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\PageController@update",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/commissions",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fee\\CommissionController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/commissions/summary",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fee\\CommissionController@summary",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/consent-events",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@store",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/consent-events/{consentEvent}/dispute",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@dispute",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/consent-events/{consentEvent}/reinstate",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@reinstate",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/consent-events/{consentEvent}/withdraw",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@withdraw",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/consent/otp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@issueOtp",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/consent/otp/{challenge}/verify",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@verifyOtp",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/crm/customers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@store",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/crm/customers/{customer}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/crm/customers/{customer}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@update",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/archive",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@archive",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/consent-events",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@captureConsent",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/consent-otp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@consentOtp",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/link",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@link",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/link-otp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@linkOtp",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/orders",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@placeOrder",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/unlink",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@unlink",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/crm/customers/{customer}/visits",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@visits",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/crm/customers/{customer}/visits",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@storeVisit",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/crm/follow-ups",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@followUps",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/crm/link-candidates",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@linkCandidates",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/crm/visits/{visit}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmController@updateVisit",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dashboard/kpis",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\DashboardKpiController",
+"auth": true,
+"roles": [
+"agen",
+"gudang",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dashboard/summary",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@dashboardSummary",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/delivery-refusals/{refusal}/disposition",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\DeliveryRefusalController@dispose",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/delivery-refusals/{refusal}/hand-back",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\DeliveryRefusalController@handBack",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"kurir",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/delivery-refusals/{refusal}/receive",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\DeliveryRefusalController@receive",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch/couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@couriers",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch/expeditions",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@expeditions",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch/history",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@history",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/dispatch/order-items/{orderItem}/split-batch",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@splitBatch",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/dispatch/orders/{order}/request-fulfillment",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@requestFulfillment",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch/refusals",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@refusals",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch/regions",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@regions",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/dispatch/returns",
+"action": "App\\Http\\Controllers\\Api\\V1\\Dispatch\\DispatchController@returns",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/google-sheets",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/google-sheets/configs",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/google-sheets/configs/{config}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@destroy",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/google-sheets/configs/{config}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/google-sheets/configs/{config}/sync",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@sync",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/google-sheets/connection",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@connection",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/google-sheets/destinations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Integration\\SheetsController@destination",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/homepage",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\HomepageController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/install/configure-app",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@configureApp",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/install/database/save",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@saveDatabaseConfig",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/install/database/test",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@testDatabaseConnection",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/install/finalize",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@finalize",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/install/lock",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@lock",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/install/requirements",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@requirements",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/install/run",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@run",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/install/status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Install\\InstallController@status",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/invoice/config",
+"action": "App\\Http\\Controllers\\Api\\V1\\Invoice\\InvoiceConfigController@show",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/invoice/config",
+"action": "App\\Http\\Controllers\\Api\\V1\\Invoice\\InvoiceConfigController@update",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/kurir/orders",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\CourierDashboardController@orders",
+"auth": true,
+"roles": [
+"koordinator-kurir",
+"kurir",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/kurir/reports/delivered",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\CourierDashboardController@deliveredReport",
+"auth": true,
+"roles": [
+"kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/kurir/returns",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\CourierDashboardController@returns",
+"auth": true,
+"roles": [
+"kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/kurir/returns/pickup-today",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\CourierDashboardController@pickupToday",
+"auth": true,
+"roles": [
+"kurir"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/kurir/returns/{item}/confirm",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\CourierDashboardController@confirmReturn",
+"auth": true,
+"roles": [
+"kurir"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/kurir/returns/{item}/pickup",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\CourierDashboardController@pickupReturn",
+"auth": true,
+"roles": [
+"kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/languages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Language\\LanguageController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/manage/products",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductManagementController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/manage/products/{product}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductManagementController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/media",
+"action": "App\\Http\\Controllers\\Api\\V1\\Media\\MediaController@index",
+"auth": true,
+"roles": [
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/media",
+"action": "App\\Http\\Controllers\\Api\\V1\\Media\\MediaController@store",
+"auth": true,
+"roles": []
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/media/{media}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Media\\MediaController@destroy",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/notifications/admin",
+"action": "App\\Http\\Controllers\\Api\\V1\\AdminNotificationController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/notifications/admin/read-all",
+"action": "App\\Http\\Controllers\\Api\\V1\\AdminNotificationController@markAllRead",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/notifications/admin/unread-count",
+"action": "App\\Http\\Controllers\\Api\\V1\\AdminNotificationController@unreadCount",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/notifications/admin/{id}/read",
+"action": "App\\Http\\Controllers\\Api\\V1\\AdminNotificationController@markRead",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/order-items/{item}/receipts",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderItemReceiptController@index",
+"auth": true,
+"roles": [
+"admin",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/order-items/{item}/receipts",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderItemReceiptController@store",
+"auth": true,
+"roles": [
+"admin",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderController@index",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderController@store",
+"auth": true,
+"roles": [
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/regions",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderController@regions",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/{order}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderController@show",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/assisted-returns",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@initiateReturn",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/cancel",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderController@cancel",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/{order}/consent-context",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@context",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/{order}/consent-events",
+"action": "App\\Http\\Controllers\\Api\\V1\\Consent\\ConsentController@indexForOrder",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"konsumen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/orders/{order}/due-date",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@setDueDate",
+"auth": true,
+"roles": [
+"admin",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/{order}/invoice",
+"action": "App\\Http\\Controllers\\Api\\V1\\Invoice\\InvoiceController@show",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/items",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fulfillment\\OrderFulfillmentController@addItem",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/{order}/items/{item}/cancel-eligibility",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fulfillment\\OrderFulfillmentController@cancellationEligibility",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/items/{item}/cancel-undelivered",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fulfillment\\OrderFulfillmentController@cancelUndelivered",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/orders/{order}/items/{item}/fulfillment",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fulfillment\\OrderFulfillmentController@adjust",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/orders/{order}/items/{item}/reschedule",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fulfillment\\OrderFulfillmentController@reschedule",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/orders/{order}/payment/cod",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@markCod",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/payment/cod-proof",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@submitCodProof",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/payment/installment",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@installment",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/payment/proof",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@submitProof",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/payment/settle",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@settle",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/payment/verify",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@verify",
+"auth": true,
+"roles": [
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/orders/{order}/refund-recipient",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@indexRecipient",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/refund-recipient",
+"action": "App\\Http\\Controllers\\Api\\V1\\Crm\\CrmAssistedController@storeRecipient",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/orders/{order}/returns",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@store",
+"auth": true,
+"roles": [
+"konsumen"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/orders/{order}/status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\OrderController@updateStatus",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/pages/{slug}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Cms\\PageController@show",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/payment-proofs/{verification}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Payment\\PaymentController@proofFile",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/products",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductController@index",
+"auth": false,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/products",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/products/{id}/permanent",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductController@forceDestroy",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/products/{product}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductController@destroy",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/products/{product}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/products/{product}/fees",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fee\\FeeController@showForProduct",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/products/{product}/fees",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fee\\FeeController@setForProduct",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/products/{product}/images",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductImageController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/products/{product}/images/order",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductImageController@reorder",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/products/{product}/images/{image}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductImageController@destroy",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/products/{product}/images/{image}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductImageController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/products/{product}/variations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductVariationController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/products/{product}/variations/{variation}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductVariationController@destroy",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/products/{product}/variations/{variation}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductVariationController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/products/{product}/variations/{variation}/fees",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fee\\FeeController@showForVariation",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PUT",
+"uri": "/api/v1/products/{product}/variations/{variation}/fees",
+"action": "App\\Http\\Controllers\\Api\\V1\\Fee\\FeeController@setForVariation",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/products/{slug}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Catalog\\ProductController@show",
+"auth": false,
+"roles": []
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/profile",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\ProfileController@update",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/profile/email/verification",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\EmailVerificationController@show",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/profile/email/verification",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\EmailVerificationController@request",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/profile/email/verification/{challenge}/confirm",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\EmailVerificationController@confirm",
+"auth": true,
+"roles": []
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/profile/password",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\ProfileController@updatePassword",
+"auth": true,
+"roles": []
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/profile/referral-code",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\ProfileController@deleteReferralCode",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/profile/referral-code",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\ProfileController@updateReferralCode",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/profile/referral-code/regenerate",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\ProfileController@regenerateReferralCode",
+"auth": true,
+"roles": [
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/profile/whatsapp",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\WhatsAppNumberController@show",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/profile/whatsapp/verification",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\WhatsAppNumberController@request",
+"auth": true,
+"roles": []
+},
+{
+"method": "POST",
+"uri": "/api/v1/profile/whatsapp/verification/{challenge}/confirm",
+"action": "App\\Http\\Controllers\\Api\\V1\\Auth\\WhatsAppNumberController@confirm",
+"auth": true,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/promo/discounts",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\ProductDiscountController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/promo/discounts",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\ProductDiscountController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/promo/discounts/{discount}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\ProductDiscountController@destroy",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/promo/discounts/{discount}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\ProductDiscountController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/promo/vouchers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\VoucherController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/promo/vouchers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\VoucherController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/promo/vouchers/{voucher}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\VoucherController@destroy",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/promo/vouchers/{voucher}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Promo\\VoucherController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/referral/{code}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Referral\\ReferralController@show",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/regions/districts",
+"action": "App\\Http\\Controllers\\Api\\V1\\Region\\RegionController@districts",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/regions/provinces",
+"action": "App\\Http\\Controllers\\Api\\V1\\Region\\RegionController@provinces",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/regions/regencies",
+"action": "App\\Http\\Controllers\\Api\\V1\\Region\\RegionController@regencies",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/regions/villages",
+"action": "App\\Http\\Controllers\\Api\\V1\\Region\\RegionController@villages",
+"auth": false,
+"roles": []
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/cancellations-refunds",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@cancellationsRefunds",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@courierRoster",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/couriers-per-agent",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@couriersPerAgent",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/crm-visits",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@crmVisits",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/customers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@customers",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/fees/agent",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@agentFees",
+"auth": true,
+"roles": [
+"agen",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/fees/courier",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@courierFees",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/fees/sales-korsal",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@salesKorsalFees",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/finance-orders",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@financeOrders",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/finance-summary",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@financeSummary",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/korsal",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@korsalRoster",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/my-customers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@salesCustomers",
+"auth": true,
+"roles": [
+"korsal",
+"sales",
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/network-summary",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@networkSummary",
+"auth": true,
+"roles": [
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/network-transactions",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@networkTransactions",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/payment-status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@paymentStatus",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/sales",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@salesRoster",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/reports/transactions",
+"action": "App\\Http\\Controllers\\Api\\V1\\Report\\ReportController@transactions",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"korsal",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/return-items/{item}/courier",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@assignPickupCourier",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/return-items/{returnItem}/receipt-allocations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\ReturnReceiptAllocationController@store",
+"auth": true,
+"roles": [
+"admin",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/settings",
+"action": "App\\Http\\Controllers\\Api\\V1\\Settings\\WebsiteSettingController@show",
+"auth": false,
+"roles": []
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/shipments/{shipment}/courier",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@assign",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/shipments/{shipment}/delivery-verifications",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\DeliveryVerificationController@index",
+"auth": true,
+"roles": [
+"admin",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/shipments/{shipment}/delivery-verifications",
+"action": "App\\Http\\Controllers\\Api\\V1\\Order\\DeliveryVerificationController@store",
+"auth": true,
+"roles": [
+"admin",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/shipments/{shipment}/eligible-couriers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@eligibleCouriers",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/shipments/{shipment}/expedition-handover",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@recordExpeditionHandover",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/shipments/{shipment}/items/{orderItem}/refuse",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@refuse",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"kurir",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/shipments/{shipment}/items/{orderItem}/status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@updateItemStatus",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"kurir",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/shipments/{shipment}/receipt",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@receipt",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"kurir",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/shipments/{shipment}/status",
+"action": "App\\Http\\Controllers\\Api\\V1\\Courier\\ShipmentController@updateStatus",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"koordinator-kurir",
+"kurir",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/stock/adjust",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockController@adjust",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/stock/products",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockController@products",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/stock/variations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockController@variations",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/sub-stock/my",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@myStock",
+"auth": true,
+"roles": [
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/sub-stock/replenishment-targets",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@replenishmentTargets",
+"auth": true,
+"roles": [
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/sub-stock/requests",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/sub-stock/requests",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@store",
+"auth": true,
+"roles": [
+"sales-kurir-sub"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/sub-stock/requests/{subStockRequest}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/sub-stock/requests/{subStockRequest}/approve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@approve",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/sub-stock/requests/{subStockRequest}/cancel",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@cancel",
+"auth": true,
+"roles": [
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/sub-stock/requests/{subStockRequest}/execute",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@execute",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/sub-stock/requests/{subStockRequest}/receive",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@receive",
+"auth": true,
+"roles": [
+"sales-kurir-sub"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/sub-stock/requests/{subStockRequest}/reject",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\SubStockRequestController@reject",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/users",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/users",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@store",
+"auth": true,
+"roles": [
+"agen",
+"koordinator-kurir",
+"korsal",
+"super_admin"
+]
+},
+{
+"method": "DELETE",
+"uri": "/api/v1/users/{user}",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@destroy",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/users/{user}",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/users/{user}",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/users/{user}/convert-to-sales-kurir",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@convertToSalesKurirSub",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/users/{user}/convert-to-sales-kurir-sub",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@convertToSalesKurirSub",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/users/{user}/reassign-referral",
+"action": "App\\Http\\Controllers\\Api\\V1\\User\\UserController@reassignReferral",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"keuangan",
+"koordinator-kurir",
+"korsal",
+"kurir",
+"sales",
+"sales-kurir-sub",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse-stock",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockController@warehouse",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/fulfillment-proposals",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@index",
+"auth": true,
+"roles": [
+"admin",
+"gudang",
+"koordinator-kurir"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/fulfillment-proposals/{proposal}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@show",
+"auth": true,
+"roles": [
+"admin",
+"gudang",
+"koordinator-kurir"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/fulfillment-proposals/{proposal}/approve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@approve",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/fulfillment-proposals/{proposal}/receive",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@receive",
+"auth": true,
+"roles": [
+"koordinator-kurir"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/fulfillment-proposals/{proposal}/reject",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@reject",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/handovers/{handover}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@handover",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/handovers/{handover}/print",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@printHandover",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/opnames",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/opnames",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@store",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/opnames/{opname}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/opnames/{opname}/approve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@approve",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/opnames/{opname}/cancel",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@cancel",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/warehouse/opnames/{opname}/count",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@count",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/opnames/{opname}/reject",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@reject",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/opnames/{opname}/submit",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockOpnameController@submit",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/orders/diproses",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseOrderController@diproses",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/orders/{order}/stock-request",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseOrderController@stockRequest",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/returns",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@warehouseQueue",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/returns/{item}/finalize",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@finalize",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/returns/{item}/inspect",
+"action": "App\\Http\\Controllers\\Api\\V1\\Return\\ReturnController@inspect",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/sellable",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseController@sellable",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/settings",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSettingsController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/warehouse/settings/factory-plan",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSettingsController@update",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/stock-addition-requests",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@index",
+"auth": true,
+"roles": [
+"admin",
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/stock-addition-requests",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@store",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@show",
+"auth": true,
+"roles": [
+"admin",
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/approve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@approve",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/stock-addition-requests/{warehouseStockRequest}/reject",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@reject",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/stock-cards",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@cards",
+"auth": true,
+"roles": [
+"admin",
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@resolveDiscrepancy",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/stock-requests/{stockRequest}/fulfill",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestController@fulfill",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/stock-requests/{stockRequest}/proposals",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockRequestProposalController@store",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/sub-adjustment-requests",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@storeSubAdjustment",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/sub-locations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/sub-locations",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@store",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/sub-locations/eligible-owners",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@eligibleOwners",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/sub-locations/{subLocation}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "PATCH",
+"uri": "/api/v1/warehouse/sub-locations/{subLocation}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@update",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/sub-locations/{subLocation}/assign-owner",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@assignOwner",
+"auth": true,
+"roles": [
+"admin",
+"agen"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/sub-locations/{subLocation}/deactivate",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@deactivate",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/sub-locations/{subLocation}/stock-cards",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseStockRequestController@subCards",
+"auth": true,
+"roles": [
+"admin",
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/sub-locations/{subLocation}/stocks",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\WarehouseSubLocationController@stocks",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/transfers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@index",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/transfers",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@store",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/transfers/plan-to-transit",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@storePlanTransfer",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "GET",
+"uri": "/api/v1/warehouse/transfers/{transfer}",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@show",
+"auth": true,
+"roles": [
+"admin",
+"agen",
+"gudang",
+"super_admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/transfers/{transfer}/approve",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@approve",
+"auth": true,
+"roles": [
+"admin"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/transfers/{transfer}/cancel",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@cancel",
+"auth": true,
+"roles": [
+"gudang"
+]
+},
+{
+"method": "POST",
+"uri": "/api/v1/warehouse/transfers/{transfer}/reject",
+"action": "App\\Http\\Controllers\\Api\\V1\\Stock\\StockTransferController@reject",
+"auth": true,
+"roles": [
+"admin"
+]
+}
+]
