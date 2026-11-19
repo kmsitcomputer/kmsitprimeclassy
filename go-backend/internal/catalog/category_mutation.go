@@ -17,7 +17,9 @@ import (
 var (
 	ErrCategoryNotFound  = errors.New("category not found")
 	ErrCategoryCycle     = errors.New("category cannot create a hierarchy cycle")
+	ErrCategorySelf      = errors.New("category cannot be its own parent")
 	ErrCategoryDuplicate = errors.New("category duplicate")
+	ErrCategoryNameEmpty = errors.New("category name empty")
 	ErrCategoryParent    = errors.New("category parent not found")
 	ErrCategorySlug      = errors.New("category slug duplicate")
 	ErrCategoryDelete    = errors.New("category delete conflict")
@@ -27,9 +29,15 @@ type CategoryInput struct {
 	ParentID  *int64
 	SetParent bool
 	Name      *string
+	// Slug/IsActive/SortOrder are the presentation controls of the GLOBAL taxonomy: the controller passes
+	// them ONLY for a super_admin actor — a create-only role (admin/agen) cannot influence ordering,
+	// visibility or the slug, whatever the payload says (ProductCategoryController::store).
 	Slug      *string
 	IsActive  *bool
 	SortOrder *int64
+	// ActorRole/ActorAgentID go onto the audit row (ActivityLogger records role + branch identity).
+	ActorRole    *string
+	ActorAgentID *int64
 }
 
 func NormalizeCategoryName(name string) string {
@@ -73,14 +81,15 @@ func categorySlug(name string) (string, error) {
 		}
 	}
 	base := strings.Trim(b.String(), "-")
-	random := make([]byte, 7)
+	random := make([]byte, 7) // 13 hex chars: trimmed to match PHP uniqid()
 	if _, err := rand.Read(random); err != nil {
 		return "", err
 	}
 	if base == "" {
 		base = "kategori"
 	}
-	return base + "-" + hex.EncodeToString(random), nil
+	token := hex.EncodeToString(random)[:13]
+	return base + "-" + token, nil
 }
 
 func acquireCategoryLock(ctx context.Context, d *db.DB) (bool, error) {
@@ -317,6 +326,8 @@ func CreateCategory(ctx context.Context, d *db.DB, actorID int64, input Category
 		return writeCategoryActivity(ctx, tx, actorID, id, "category.create", "Kategori dibuat (taksonomi global)", map[string]any{
 			"category_id": id,
 			"parent_id":   input.ParentID,
+			"actor_role":  input.ActorRole,
+			"agent_id":    input.ActorAgentID,
 			"result":      "success",
 		})
 	})
@@ -357,12 +368,12 @@ func UpdateCategory(ctx context.Context, d *db.DB, actorID int64, id int64, inpu
 		if input.Name != nil {
 			newName = NormalizeCategoryName(*input.Name)
 			if newName == "" {
-				return ErrCategoryDuplicate
+				return ErrCategoryNameEmpty
 			}
 		}
 		if newParent != nil {
 			if *newParent == id {
-				return ErrCategoryCycle
+				return ErrCategorySelf
 			}
 			if err := assertParentExists(ctx, tx, newParent); err != nil {
 				return err
