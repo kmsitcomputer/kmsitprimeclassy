@@ -237,13 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("GET", "/api/v1/users/{user}"): "served; only index RBAC verified",
-    ("POST", "/api/v1/users"): "served; write contract probe pending",
-    ("PATCH", "/api/v1/users/{user}"): "served; write contract probe pending",
-    ("DELETE", "/api/v1/users/{user}"): "served; write contract probe pending",
-    ("PATCH", "/api/v1/users/{user}/reassign-referral"): "served; write contract probe pending",
-    ("PATCH", "/api/v1/users/{user}/convert-to-sales-kurir-sub"): "served; write contract probe pending",
-    ("PATCH", "/api/v1/users/{user}/convert-to-sales-kurir"): "served; write contract probe pending",
     ("PATCH", "/api/v1/agent/payment-methods/{method}/toggle"): "served; write contract probe pending",
     ("PUT", "/api/v1/agent/payment-methods/{method}/config"): "served; write contract probe pending (encrypted:array write path verified cross-runtime separately)",
     ("PUT", "/api/v1/agent/store-profile"): "served; write contract probe pending",

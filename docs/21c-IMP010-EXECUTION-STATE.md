@@ -462,6 +462,23 @@ carry the not-ported HTMLPurifier policy. Matrix: 192/375 served (51.2%), 123 GO
 The Copilot worktree is preserved at /Users/kmsitcomputer/KMSIT-Server/apps/primeclassy-imp010-copilot-ef
 (HEAD 93824f0 + d870e7f..bf30e4a) until every PARTIAL above is verified GO.
 
+**DONE — Phase 1A users write surface (Owner master mandate):** store/update/delete/reassign-referral/
+convert (+legacy alias) now GO via tools/parity/compare_users.py (9 scenarios: creation matrix incl.
+korsal-pinned + koordinator kurir, validation matrix byte-exact, RBAC denials, super→agen self-reference,
+update/delete/reassign/convert matrices, DB state compared across users/closures/couriers/activity).
+Key Laravel behaviours reproduced: CreateUserRequest::authorize runs BEFORE validation (403
+'system.unauthorized_action' for a role the actor may never create, even with an invalid payload) while
+controller $this->authorize denials render the DEFAULT 'This action is unauthorized.'; validation
+ACCUMULATES (required+email+unique in one envelope, id-locale attribute names via validation.attributes:
+nama/nomor telepon/kata sandi/korsal); unique email/phone are ordinary validation rules (not soft-delete
+aware); agen-creates-sales requires korsal_id under the branch ('korsal wajib diisi.'), korsal actor pinned
+to self; super→agen IGNORES client agent_id (self-reference); UpdateUserRequest never accepts hierarchy
+fields; phone normalised pre-validation; delete = soft delete + agent_profiles hard-delete for agen;
+reassign validation (required_without both-fields, exists:users) runs BEFORE policy; convert reports the
+korsal ApiException WITH field error. Fixture note: seed has NO korsal — compare_users seeds one identically
+both runtimes (id 20), and purges scenario-created @x.test users between L/G runs (SHARED database).
+Matrix: **130 GO / 62 PARTIAL / 183 Laravel-only**.
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 

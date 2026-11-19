@@ -540,13 +540,13 @@ Status legend:
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/users` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
-| POST | `/api/v1/users` | session | agen, koordinator-kurir, korsal, super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir-sub` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/users/{user}/reassign-referral` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| POST | `/api/v1/users` | session | agen, koordinator-kurir, korsal, super_admin | **GO** |  |
+| DELETE | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| GET | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| PATCH | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir-sub` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| PATCH | `/api/v1/users/{user}/reassign-referral` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
 
 ## Inventory — warehouse stock — `warehouse-stock` (1/1 in Go)
 
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 123 |
-|   of which PARTIAL (incomplete behaviour) | 69 |
+|   of which fully GO | 130 |
+|   of which PARTIAL (incomplete behaviour) | 62 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |
