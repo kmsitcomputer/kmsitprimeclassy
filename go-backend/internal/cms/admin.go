@@ -466,10 +466,13 @@ func DeletePage(ctx context.Context, d *db.DB, id int64) error {
 type BlockInput struct {
 	Type        *string        `json:"type"`
 	Content     map[string]any `json:"content"`
+	ContentSet  bool           `json:"-"`
 	SortOrder   *int           `json:"sort_order"`
 	IsActive    *bool          `json:"is_active"`
 	StartsAt    *string        `json:"starts_at"`
 	EndsAt      *string        `json:"ends_at"`
+	StartsAtSet bool           `json:"-"`
+	EndsAtSet   bool           `json:"-"`
 	RemoveImage *bool          `json:"remove_image"`
 }
 
@@ -512,6 +515,17 @@ func AdminBlocks(ctx context.Context, d *db.DB) ([]map[string]any, error) {
 		})
 	}
 	return out, rows.Err()
+}
+
+func HomepageBlockContent(ctx context.Context, d *db.DB, id int64) (string, map[string]any, error) {
+	var blockType string
+	var content sql.NullString
+	if err := d.QueryRowContext(ctx, `SELECT type, content FROM cms_homepage_blocks WHERE id = ?`, id).Scan(&blockType, &content); errors.Is(err, sql.ErrNoRows) {
+		return "", nil, ErrAdminContentNotFound
+	} else if err != nil {
+		return "", nil, err
+	}
+	return blockType, decodeObject(content), nil
 }
 
 func CreateBlock(ctx context.Context, d *db.DB, input BlockInput) (map[string]any, error) {
@@ -688,6 +702,10 @@ func storeHomepageBlockUpload(upload *media.Upload) (string, error) {
 }
 
 func UpdateBlock(ctx context.Context, d *db.DB, id int64, input BlockInput) (map[string]any, error) {
+	return UpdateBlockWithUploads(ctx, d, id, input, BlockUploads{})
+}
+
+func UpdateBlockWithUploads(ctx context.Context, d *db.DB, id int64, input BlockInput, uploads BlockUploads) (map[string]any, error) {
 	var blockType string
 	var oldContent sql.NullString
 	var oldOrder int
@@ -705,17 +723,49 @@ func UpdateBlock(ctx context.Context, d *db.DB, id int64, input BlockInput) (map
 	if input.Content != nil {
 		content = mergeContent(content, input.Content)
 	}
+	storedPaths := []string{}
+	store := func(file *media.Upload) (string, error) {
+		path, err := storeHomepageBlockUpload(file)
+		if err == nil {
+			storedPaths = append(storedPaths, path)
+		}
+		return path, err
+	}
+	if blockType == "banner_slider" {
+		content["slides"], err = updateHomepageBlockSlides(content["slides"], decodeObject(oldContent)["slides"], uploads.SlideImages, store)
+		if err != nil {
+			cleanupBlockUploads(storedPaths)
+			return nil, err
+		}
+	}
+	if uploads.Image != nil {
+		if blockType != "hero" && blockType != "banner" && blockType != "promotional" && blockType != "image" {
+			return nil, &httpx.Error{Status: 422, Message: strings.ReplaceAll(i18n.Translate(i18n.Default, "cms.type_rejects_image"), ":type", blockType)}
+		}
+		path, err := store(uploads.Image)
+		if err != nil {
+			cleanupBlockUploads(storedPaths)
+			return nil, err
+		}
+		deleteStoredPath(content["image_path"])
+		content["image_path"] = path
+	} else if input.RemoveImage != nil && *input.RemoveImage {
+		deleteStoredPath(content["image_path"])
+		delete(content, "image_path")
+	}
 	if err := sanitizeAndValidateBlock(blockType, content); err != nil {
+		cleanupBlockUploads(storedPaths)
 		return nil, err
 	}
 	starts, ends, err := parseBlockDates(input.StartsAt, input.EndsAt)
 	if err != nil {
+		cleanupBlockUploads(storedPaths)
 		return nil, err
 	}
-	if input.StartsAt == nil {
+	if input.StartsAt == nil && !input.StartsAtSet {
 		starts = oldStarts
 	}
-	if input.EndsAt == nil {
+	if input.EndsAt == nil && !input.EndsAtSet {
 		ends = oldEnds
 	}
 	sortOrder, active := oldOrder, oldActive
@@ -728,21 +778,101 @@ func UpdateBlock(ctx context.Context, d *db.DB, id int64, input BlockInput) (map
 	if input.IsActive != nil {
 		active = *input.IsActive
 	}
-	if input.RemoveImage != nil && *input.RemoveImage {
-		deleteStoredPath(content["image_path"])
-		delete(content, "image_path")
-	}
 	buf, err := json.Marshal(content)
 	if err != nil {
+		cleanupBlockUploads(storedPaths)
 		return nil, err
 	}
 	_, err = d.ExecContext(ctx, `UPDATE cms_homepage_blocks SET content = ?, sort_order = ?, is_active = ?,
 		starts_at = ?, ends_at = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
 		string(buf), sortOrder, active, starts, ends, id)
 	if err != nil {
+		cleanupBlockUploads(storedPaths)
 		return nil, err
 	}
 	return blockByID(ctx, d, id)
+}
+
+func updateHomepageBlockSlides(incomingValue, existingValue any, uploads map[string]map[string]*media.Upload, store func(*media.Upload) (string, error)) ([]any, error) {
+	incoming, _ := incomingValue.([]any)
+	existing, _ := existingValue.([]any)
+	oldByKey := map[string]map[string]any{}
+	for _, raw := range existing {
+		if slide, ok := raw.(map[string]any); ok {
+			if key, ok := slide["key"].(string); ok {
+				oldByKey[key] = slide
+			}
+		}
+	}
+	result := make([]any, 0, len(incoming))
+	kept := map[string]bool{}
+	for _, raw := range incoming {
+		slide, ok := raw.(map[string]any)
+		if !ok {
+			result = append(result, raw)
+			continue
+		}
+		key, _ := slide["key"].(string)
+		kept[key] = true
+		old := oldByKey[key]
+		files := uploads[key]
+		clean := map[string]any{
+			"key": key, "title": blockNullableText(slide["title"]), "description": blockNullableText(slide["description"]),
+			"alt": blockNullableText(slide["alt"]), "button_label": blockNullableText(slide["button_label"]),
+			"button_url": blockNullableText(slide["button_url"]), "overlay": valueOrText(slide["overlay"], "dark"),
+			"content_position": valueOrText(slide["content_position"], "left"),
+		}
+		if old != nil {
+			clean["image_path"] = old["image_path"]
+			clean["mobile_image_path"] = old["mobile_image_path"]
+		} else {
+			clean["image_path"], clean["mobile_image_path"] = nil, nil
+		}
+		if files["desktop"] != nil {
+			path, err := store(files["desktop"])
+			if err != nil {
+				return nil, err
+			}
+			if old != nil {
+				deleteStoredPath(old["image_path"])
+			}
+			clean["image_path"] = path
+		}
+		if files["mobile"] != nil {
+			path, err := store(files["mobile"])
+			if err != nil {
+				return nil, err
+			}
+			if old != nil {
+				deleteStoredPath(old["mobile_image_path"])
+			}
+			clean["mobile_image_path"] = path
+		} else if old != nil && blockFlag(slide["remove_mobile"]) {
+			deleteStoredPath(old["mobile_image_path"])
+			clean["mobile_image_path"] = nil
+		}
+		result = append(result, clean)
+	}
+	for key, old := range oldByKey {
+		if !kept[key] {
+			deleteStoredPath(old["image_path"])
+			deleteStoredPath(old["mobile_image_path"])
+		}
+	}
+	return result, nil
+}
+
+func blockFlag(value any) bool {
+	switch flag := value.(type) {
+	case bool:
+		return flag
+	case float64:
+		return flag == 1
+	case string:
+		return flag == "1" || strings.EqualFold(flag, "true") || strings.EqualFold(flag, "yes") || strings.EqualFold(flag, "on")
+	default:
+		return false
+	}
 }
 
 func ToggleBlock(ctx context.Context, d *db.DB, id int64) (map[string]any, error) {

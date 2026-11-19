@@ -17,6 +17,14 @@ var cmsPhone = regexp.MustCompile(`^[1-9][0-9]{7,14}$`)
 var cmsSafeLink = regexp.MustCompile(`(?i)^(?:https?://[^\s<>"'\\]+|mailto:[^\s<>"'\\]+|tel:\+?[0-9][0-9\-\s().]{3,30}|/[^\s<>"'\\]*|#[^\s<>"'\\]*)$`)
 
 func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, content map[string]any) error {
+	return validateHomepageBlockContentMode(ctx, d, typ, content, false)
+}
+
+func validateHomepageBlockContentUpdate(ctx context.Context, d *db.DB, typ *string, content map[string]any) error {
+	return validateHomepageBlockContentMode(ctx, d, typ, content, true)
+}
+
+func validateHomepageBlockContentMode(ctx context.Context, d *db.DB, typ *string, content map[string]any, partial bool) error {
 	if typ == nil || !isCMSBlockType(*typ) {
 		return nil
 	}
@@ -27,7 +35,14 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 	req := func(key string, max int) {
 		field := "content." + key
 		v, ok := content[key]
+		if !ok && partial {
+			return
+		}
 		if !ok || v == nil || v == "" {
+			if partial {
+				errs.add(field, vmsg(ctx, "string", field))
+				return
+			}
 			errs.add(field, vmsg(ctx, "required", field))
 			return
 		}
@@ -78,8 +93,10 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 		field := "content." + key
 		v, exists := content[key]
 		if !exists || v == nil || v == "" {
-			if required {
+			if required && !partial {
 				errs.add(field, vmsg(ctx, "required", field))
+			} else if partial && exists {
+				errs.add(field, vmsg(ctx, "array", field))
 			}
 			return nil
 		}
@@ -89,7 +106,11 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 			return nil
 		}
 		if required && len(items) == 0 {
-			errs.add(field, vmsg(ctx, "required", field))
+			if partial {
+				errs.add(field, vmsg(ctx, "min.array", field, "min", "1"))
+			} else {
+				errs.add(field, vmsg(ctx, "required", field))
+			}
 		}
 		if max > 0 && len(items) > max {
 			errs.add(field, vmsg(ctx, "max.array", field, "max", strconv.Itoa(max)))
@@ -100,8 +121,10 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 		field := "content." + key
 		v, exists := content[key]
 		if !exists || v == nil || v == "" {
-			if required {
+			if required && !partial {
 				errs.add(field, vmsg(ctx, "required", field))
+			} else if partial && exists {
+				errs.add(field, cmsFieldVmsg(ctx, "integer", field))
 			}
 			return
 		}
@@ -129,8 +152,10 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 		field := "content." + key
 		v, exists := content[key]
 		if !exists || v == nil || v == "" {
-			if required {
+			if required && !partial {
 				errs.add(field, vmsg(ctx, "required", field))
+			} else if partial && exists {
+				errs.add(field, vmsg(ctx, "boolean", field))
 			}
 			return
 		}
@@ -186,8 +211,12 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 	case "bestseller":
 		opt("heading", 150)
 		allowed("period", "7", "30", "90", "all")
-		if _, ok := content["period"]; !ok || content["period"] == nil || content["period"] == "" {
-			errs.add("content.period", vmsg(ctx, "required", "content.period"))
+		if value, ok := content["period"]; !ok || value == nil || value == "" {
+			if !partial {
+				errs.add("content.period", vmsg(ctx, "required", "content.period"))
+			} else if ok {
+				errs.add("content.period", vmsg(ctx, "in", "content.period"))
+			}
 		}
 		integer("limit", true, 0, 0, 4, 8, 12)
 	case "promotional":
@@ -221,17 +250,26 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 		} else {
 			allowed("layout", "cards", "horizontal")
 		}
-		if _, ok := content["layout"]; !ok || content["layout"] == nil || content["layout"] == "" {
-			errs.add("content.layout", vmsg(ctx, "required", "content.layout"))
+		if value, ok := content["layout"]; !ok || value == nil || value == "" {
+			if !partial {
+				errs.add("content.layout", vmsg(ctx, "required", "content.layout"))
+			} else if ok {
+				errs.add("content.layout", vmsg(ctx, "in", "content.layout"))
+			}
 		}
 		platforms, ok := content["platforms"].(map[string]any)
 		if !ok {
 			if content["platforms"] == nil || content["platforms"] == "" {
-				errs.add("content.platforms", vmsg(ctx, "required", "content.platforms"))
+				if !partial || content["platforms"] != nil {
+					errs.add("content.platforms", vmsg(ctx, "required", "content.platforms"))
+				}
 			} else {
 				errs.add("content.platforms", vmsg(ctx, "array", "content.platforms"))
 			}
 			platforms = map[string]any{}
+		}
+		if partial && !ok {
+			break
 		}
 		domains := map[string]string{"instagram": "instagram.com", "tiktok": "tiktok.com", "facebook": "facebook.com", "tokopedia": "tokopedia.com", "shopee": "shopee.co.id"}
 		names := []string{"instagram", "tiktok", "facebook"}
@@ -242,12 +280,18 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 			field := "content.platforms." + name + ".enabled"
 			config, ok := platforms[name].(map[string]any)
 			if !ok {
-				errs.add(field, vmsg(ctx, "required", field))
+				if !partial {
+					errs.add(field, vmsg(ctx, "required", field))
+				}
 				continue
 			}
 			v, ok := config["enabled"]
 			if !ok || v == nil || v == "" {
-				errs.add(field, vmsg(ctx, "required", field))
+				if !partial {
+					errs.add(field, vmsg(ctx, "required", field))
+				} else if ok {
+					errs.add(field, vmsg(ctx, "boolean", field))
+				}
 			} else if !cmsBool(v) {
 				errs.add(field, vmsg(ctx, "boolean", field))
 			}
@@ -285,13 +329,21 @@ func validateHomepageBlockContent(ctx context.Context, d *db.DB, typ *string, co
 		opt("message", 1000)
 		req("button_label", 50)
 		allowed("mode", "card", "floating")
-		if _, ok := content["mode"]; !ok || content["mode"] == nil || content["mode"] == "" {
-			errs.add("content.mode", vmsg(ctx, "required", "content.mode"))
+		if value, ok := content["mode"]; !ok || value == nil || value == "" {
+			if !partial {
+				errs.add("content.mode", vmsg(ctx, "required", "content.mode"))
+			} else if ok {
+				errs.add("content.mode", vmsg(ctx, "in", "content.mode"))
+			}
 		}
 	case "banner_slider":
 		allowed("layout", "contained", "wide")
-		if _, ok := content["layout"]; !ok || content["layout"] == nil || content["layout"] == "" {
-			errs.add("content.layout", vmsg(ctx, "required", "content.layout"))
+		if value, ok := content["layout"]; !ok || value == nil || value == "" {
+			if !partial {
+				errs.add("content.layout", vmsg(ctx, "required", "content.layout"))
+			} else if ok {
+				errs.add("content.layout", vmsg(ctx, "in", "content.layout"))
+			}
 		}
 		boolean("autoplay", true)
 		integer("interval_seconds", true, 3, 10)
