@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -83,10 +84,37 @@ func (s *Server) handleCMSArticleStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := requireUser(w, r)
-	var input cms.ArticleInput
-	if err := httpx.DecodeJSON(r, &input); err != nil {
+	raw := map[string]json.RawMessage{}
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		writeError(w, r, err)
 		return
+	}
+	fields, translations := validateCMSArticle(r.Context(), s, raw, true, 0)
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	input := cms.ArticleInput{Translations: &[]cms.ArticleTranslation{}}
+	if err := remarshalRaw(raw, &input); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	input.Translations = &[]cms.ArticleTranslation{}
+	for _, entry := range translations {
+		translation := cms.ArticleTranslation{}
+		if entry.LanguageID != nil {
+			translation.LanguageID = *entry.LanguageID
+		}
+		if entry.Title != nil {
+			translation.Title = *entry.Title
+		}
+		if entry.Excerpt != nil {
+			translation.Excerpt = entry.Excerpt
+		}
+		if entry.Body != nil {
+			translation.Body = *entry.Body
+		}
+		*input.Translations = append(*input.Translations, translation)
 	}
 	result, err := cms.CreateArticle(r.Context(), s.database, input, u.ID)
 	if db.IsDuplicateKey(err) {
@@ -108,10 +136,39 @@ func (s *Server) handleCMSArticleUpdate(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	var input cms.ArticleInput
-	if err := httpx.DecodeJSON(r, &input); err != nil {
+	raw := map[string]json.RawMessage{}
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		writeError(w, r, err)
 		return
+	}
+	fields, translations := validateCMSArticle(r.Context(), s, raw, false, id)
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	input := cms.ArticleInput{}
+	if err := remarshalRaw(raw, &input); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if _, present := raw["translations"]; present {
+		input.Translations = &[]cms.ArticleTranslation{}
+		for _, entry := range translations {
+			translation := cms.ArticleTranslation{}
+			if entry.LanguageID != nil {
+				translation.LanguageID = *entry.LanguageID
+			}
+			if entry.Title != nil {
+				translation.Title = *entry.Title
+			}
+			if entry.Excerpt != nil {
+				translation.Excerpt = entry.Excerpt
+			}
+			if entry.Body != nil {
+				translation.Body = *entry.Body
+			}
+			*input.Translations = append(*input.Translations, translation)
+		}
 	}
 	result, err := cms.UpdateArticle(r.Context(), s.database, id, input)
 	if db.IsDuplicateKey(err) {
@@ -357,4 +414,16 @@ func (s *Server) handleCMSBlockDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, nil, msg(r.Context(), "cms.block_deleted"), nil)
+}
+
+// remarshalRaw re-decodes a raw-map body into a typed payload (RawMessage variant of remarshal).
+func remarshalRaw(raw map[string]json.RawMessage, dst any) error {
+	buf, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(buf, dst); err != nil {
+		return httpx.Validation(map[string][]string{"body": {"The body must be valid JSON."}})
+	}
+	return nil
 }
