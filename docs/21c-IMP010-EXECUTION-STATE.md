@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 152 |
-| PARTIAL (incomplete behaviour) | 40 |
+| Fully GO | 153 |
+| PARTIAL (incomplete behaviour) | 39 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -458,7 +458,9 @@ carries `actor_role`.
 
 **DONE — Profile self-update (`tools/parity/compare_profile_update.py`, 1/1):** Agen/Admin/Konsumen self-updates, phone normalization, protected-field ignoring, email verification invalidation, case-only email behavior, accumulated validation, uniqueness, avatar clearing, response resources and audit state match Laravel. Scoped `go test`/`go vet` for `api`, `profile`, `auth`, and `i18n` passed. Matrix **152 GO / 40 PARTIAL / 183 Laravel-only**.
 
-**EXACT NEXT ACTION:** verify `GET /api/v1/profile/email/verification` against Laravel, including authenticated self-only state, response shape, role behavior, and read-only DB effects.
+**DONE — Email verification state read (`tools/parity/compare_profile_email_verification_state.py`, 1/1):** all authenticated fixture roles receive their own masked address and verified state; active and expired challenges produce the expected pending value, response shapes match, and the OTP table remains unchanged. Matrix **153 GO / 39 PARTIAL / 183 Laravel-only**.
+
+**EXACT NEXT ACTION:** verify `GET /api/v1/cms/homepage-blocks` against Laravel for its admin gate, list/order/active fields, and read-only DB effects.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

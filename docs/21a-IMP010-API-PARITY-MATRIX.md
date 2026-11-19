@@ -424,7 +424,7 @@ Status legend:
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | PATCH | `/api/v1/profile` | session | — | **GO** | accumulated field validation, phone normalization, email verification reset, uniqueness, protected fields, self-scope, response and audit compared by compare_profile_update.py |
-| GET | `/api/v1/profile/email/verification` | session | — | **PARTIAL** |  |
+| GET | `/api/v1/profile/email/verification` | session | — | **GO** | masked current address, verified and active-pending state across roles, and read-only OTP state compared by compare_profile_email_verification_state.py |
 | POST | `/api/v1/profile/email/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/email/verification/{challenge}/confirm` | session | — | LARAVEL |  |
 | PATCH | `/api/v1/profile/password` | session | — | **GO** |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 152 |
-|   of which PARTIAL (incomplete behaviour) | 40 |
+|   of which fully GO | 153 |
+|   of which PARTIAL (incomplete behaviour) | 39 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

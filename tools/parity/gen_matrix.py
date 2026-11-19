@@ -62,7 +62,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/agent/whatsapp/test-numbers"): "Laravel accepted/required/max validation, MSISDN normalization, duplicate and 5-number cap behavior, branch scope, resulting rows and conditional audit compared by compare_whatsapp_test_number_add.py",
     ("DELETE", "/api/v1/agent/whatsapp/test-numbers/{id}"): "owned/missing/foreign row behavior, selector scope, resulting rows and conditional AgentWhatsAppTestNumber audit compared by compare_whatsapp_test_number_delete.py",
     ("PATCH", "/api/v1/profile"): "accumulated field validation, phone normalization, email verification reset, uniqueness, protected fields, self-scope, response and audit compared by compare_profile_update.py",
-    ("GET", "/api/v1/profile/email/verification"): "",
+    ("GET", "/api/v1/profile/email/verification"): "masked current address, verified and active-pending state across roles, and read-only OTP state compared by compare_profile_email_verification_state.py",
     ("PATCH", "/api/v1/profile/referral-code"): "format/required/max/unique validation, success projection, self-scope and audit compared by compare_profile_referral.py",
     ("POST", "/api/v1/profile/referral-code/regenerate"): "generated role prefix/code format, response, DB update and audit compared by compare_profile_referral.py",
     ("DELETE", "/api/v1/profile/referral-code"): "response, cleared code, and old-only audit projection compared by compare_profile_referral.py",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("GET", "/api/v1/profile/email/verification"): "served; contract probe pending",
     ("GET", "/api/v1/cms/homepage-blocks"): "served; contract probe pending",
     ("POST", "/api/v1/cms/homepage-blocks"): "served; HTMLPurifier policy NOT ported — write paths must not be treated as parity-complete",
     ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "served; HTMLPurifier policy NOT ported",
