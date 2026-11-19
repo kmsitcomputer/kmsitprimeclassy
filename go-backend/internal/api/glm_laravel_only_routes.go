@@ -48,6 +48,28 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("PATCH /api/v1/admin/agents/{agentProfile}", chain(http.HandlerFunc(s.handleAdminAgentsUpdate), RequireAuth, s.RequireAgentLinked, adminAgents))
 	s.mux.Handle("DELETE /api/v1/admin/agents/{agentProfile}", chain(http.HandlerFunc(s.handleAdminAgentsDestroy), RequireAuth, s.RequireAgentLinked, adminAgents))
 	s.mux.Handle("PATCH /api/v1/admin/agents/{agent}/toggle-status", chain(http.HandlerFunc(s.handleAdminAgentsToggleStatus), RequireAuth, s.RequireAgentLinked, adminAgents))
+
+	// Management reports (ReportController) — read-only, role-gated per route below.
+	// Each route mirrors its Laravel route/middleware gate exactly (see backend/routes/api_v1.php).
+	s.mux.Handle("GET /api/v1/reports/cancellations-refunds", chain(http.HandlerFunc(s.handleReportCancellationsRefunds), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/couriers", chain(http.HandlerFunc(s.handleReportCouriers), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/couriers-per-agent", chain(http.HandlerFunc(s.handleReportCouriersPerAgent), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/crm-visits", chain(http.HandlerFunc(s.handleReportCrmVisits), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,korsal,sales,sales-kurir-sub,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/customers", chain(http.HandlerFunc(s.handleReportCustomers), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/fees/agent", chain(http.HandlerFunc(s.handleReportAgentFees), RequireAuth, s.RequireAgentLinked, RequireRole("agen,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/fees/courier", chain(http.HandlerFunc(s.handleReportCourierFees), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/fees/sales-korsal", chain(http.HandlerFunc(s.handleReportSalesKorsalFees), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/finance-orders", chain(http.HandlerFunc(s.handleReportFinanceOrders), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/finance-summary", chain(http.HandlerFunc(s.handleReportFinanceSummary), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/korsal", chain(http.HandlerFunc(s.handleReportKorsal), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/my-customers", chain(http.HandlerFunc(s.handleReportMyCustomers), RequireAuth, s.RequireAgentLinked, RequireRole("korsal,sales,sales-kurir-sub")))
+	s.mux.Handle("GET /api/v1/reports/network-summary", chain(http.HandlerFunc(s.handleReportNetworkSummary), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/network-transactions", chain(http.HandlerFunc(s.handleReportNetworkTransactions), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,korsal,sales,sales-kurir-sub,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/payment-status", chain(http.HandlerFunc(s.handleReportPaymentStatus), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
+	s.mux.Handle("GET /api/v1/reports/sales", chain(http.HandlerFunc(s.handleReportSales), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,korsal,super_admin")))
+
+	// Audit logs (AuditLogController) — read-only activity browse, super_admin only.
+	s.mux.Handle("GET /api/v1/admin/audit-logs", chain(http.HandlerFunc(s.handleReportAuditLogs), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 }
 
 // matchesGLMLaravelOnlyRoute is consulted by implementsRoute (inventory.go) so the 501-vs-404
@@ -61,7 +83,24 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/media",
 		"POST /api/v1/media",
 		"GET /api/v1/admin/agents",
-		"POST /api/v1/admin/agents":
+		"POST /api/v1/admin/agents",
+		"GET /api/v1/reports/cancellations-refunds",
+		"GET /api/v1/reports/couriers",
+		"GET /api/v1/reports/couriers-per-agent",
+		"GET /api/v1/reports/crm-visits",
+		"GET /api/v1/reports/customers",
+		"GET /api/v1/reports/fees/agent",
+		"GET /api/v1/reports/fees/courier",
+		"GET /api/v1/reports/fees/sales-korsal",
+		"GET /api/v1/reports/finance-orders",
+		"GET /api/v1/reports/finance-summary",
+		"GET /api/v1/reports/korsal",
+		"GET /api/v1/reports/my-customers",
+		"GET /api/v1/reports/network-summary",
+		"GET /api/v1/reports/network-transactions",
+		"GET /api/v1/reports/payment-status",
+		"GET /api/v1/reports/sales",
+		"GET /api/v1/admin/audit-logs":
 		return true
 	}
 	// PATCH/DELETE /api/v1/admin/agents/{id}[...] — route model binding: any shape of the last

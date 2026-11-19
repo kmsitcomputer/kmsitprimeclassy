@@ -123,3 +123,55 @@ Verified Laravel behaviours worth knowing for integration:
   `internal/config/config.go` (+`MediaRoot`), `tools/parity/gen_i18n.py` (+`media.uploaded`/`media.deleted`
   keys → catalog.json regenerated, 822 messages), `go-backend/.env` APP_URL aligned to the harness origin
   (local-only, gitignored).
+
+### Reporting reads + audit logs — 17 Laravel-only routes (ReportController + AuditLogController) — commit <this>
+
+| Route | Status |
+|---|---|
+| GET `/api/v1/reports/cancellations-refunds` | **GO (GLM)** |
+| GET `/api/v1/reports/couriers` | **GO (GLM)** |
+| GET `/api/v1/reports/couriers-per-agent` | **GO (GLM)** |
+| GET `/api/v1/reports/crm-visits` | **GO (GLM)** |
+| GET `/api/v1/reports/customers` | **GO (GLM)** |
+| GET `/api/v1/reports/fees/agent` | **GO (GLM)** |
+| GET `/api/v1/reports/fees/courier` | **GO (GLM)** |
+| GET `/api/v1/reports/fees/sales-korsal` | **GO (GLM)** |
+| GET `/api/v1/reports/finance-orders` | **GO (GLM)** |
+| GET `/api/v1/reports/finance-summary` | **GO (GLM)** |
+| GET `/api/v1/reports/korsal` | **GO (GLM)** |
+| GET `/api/v1/reports/my-customers` | **GO (GLM)** |
+| GET `/api/v1/reports/network-summary` | **GO (GLM)** |
+| GET `/api/v1/reports/network-transactions` | **GO (GLM)** |
+| GET `/api/v1/reports/payment-status` | **GO (GLM)** |
+| GET `/api/v1/reports/sales` | **GO (GLM)** |
+| GET `/api/v1/admin/audit-logs` | **GO (GLM)** |
+
+Evidence: `tools/parity-glm/compare_reports.py` — **150 passed, 0 failed** over the GLM worktree
+(Laravel 8898 vs Go 8083, `primeclassy_testing_glm`): unauthenticated 401 matrix, full RBAC matrix
+(super_admin/agen/admin/keuangan/korsal/sales × 17 routes incl. route-gate 403 bodies), full projection
+byte-parity with seeded order/commission/adjustment/return/shipment data, filter + pagination scenarios
+(search, from/to, status, receivable, per_page/page meta), finance-orders PaymentSummaryService semantics
+(verified_dp = min(dp, paid), pending manual-transfer/COD triage, pending additional/refund ledgers,
+per-role fee breakdown), network-summary (headcounts, per-agen rollup incl. sellable-stock projection,
+product/method/status breakdowns), network-transactions (order-grained TANPA SALES/KORSAL groups),
+crm-visits funnel (latest-visit-per-customer SimpleV2 buckets), and audit-logs (JSON-cast properties,
+nullable description, microsecond ISO timestamps, 403 for non-super_admin).
+
+Laravel raw-shape behaviours reproduced (query-builder rows are raw PDO values — decimal aggregates as
+strings, datetime aggregates as `Y-m-d H:i:s`, `paginate()` has NO per_page cap, audit default 25):
+- `reports/customers` etc. serialize SUM() as decimal strings and `MAX(created_at)` as datetime strings.
+- `reports/finance-orders`/`finance-summary` scope the ORDERS table (bare `agent_id`), so the keuangan
+  role reads its own branch; keuangan is also allowed on couriers/customers/payment-status/cancellations.
+- `cancellations-refunds` returns FULL Order models + `konsumen`/`sales`/`korsal` user relations with
+  Laravel model casts (decimal:2/decimal:7 strings, microsecond ISO dates, password/remember_token hidden);
+  `?status` filters refund_status of adjustments/returns only — never `orders.status`.
+- Non-contractual tie order (Laravel has no secondary sort inside ORDER BY ties) is normalized in the
+  harness: payment-status per-status groups, my-customers equal order_count, audit-logs same-second rows.
+
+Shared-file changes for THIS unit: `glm_laravel_only_routes.go` (+17 routes, exact role gates), new
+`internal/api/handlers_reports.go`, new `internal/reporting/reports.go` + `reports2.go` (rosters, finance,
+network, CRM, audit services; `CollectibleReceivable::sql()` port as `collectibleSQL`). Harness seed:
+order/commission/return fixtures + `korsal@imp010.test` (id 20, agent 10) added to the GLM test DB.
+Scoped `go build ./...`, `go vet`, gofmt clean, `git diff --check` clean.
+
+**Inventory position: 29/183 GO verified, 154 remaining.**
