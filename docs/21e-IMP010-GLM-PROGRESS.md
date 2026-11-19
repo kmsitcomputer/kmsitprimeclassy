@@ -53,7 +53,8 @@ New GLM-owned files: `go-backend/internal/api/glm_laravel_only_routes.go`, `tool
 
 ## Remaining GLM inventory
 
-176 Laravel-only endpoints (see `.glm/laravel_only_inventory.tsv` in the worktree). Candidate next domains by
+176 Laravel-only endpoints (see `tools/parity-glm/laravel_only_inventory.tsv`, committed as the baseline
+inventory). Candidate next domains by
 independence: Reporting reads (16), admin agents CRUD (5), audit-logs (1), regions import/export (2).
 
 ## EXACT NEXT ACTION
