@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 150 |
-| PARTIAL (incomplete behaviour) | 42 |
+| Fully GO | 151 |
+| PARTIAL (incomplete behaviour) | 41 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -454,7 +454,9 @@ carries `actor_role`.
 
 **DONE — WhatsApp test-number registration (`tools/parity/compare_whatsapp_test_number_add.py`, 1/1):** accepted confirmation values, accumulated validation, normalization, duplicate idempotence, five-number cap, foreign selectors, unauthorized role, resulting rows, and audit attribution compare equal. The GET listing harness was rerun and passed; scoped Go tests/vet for `api`, `agentadmin`, and `i18n` passed. Matrix **150 GO / 42 PARTIAL / 183 Laravel-only**.
 
-**EXACT NEXT ACTION:** verify `DELETE /api/v1/agent/whatsapp/test-numbers/{id}` for owned/missing/foreign IDs, selectors, audit details, and resulting rows; continue with the next PARTIAL route.
+**DONE — WhatsApp test-number removal (`tools/parity/compare_whatsapp_test_number_delete.py`, 1/1):** owned deletion removes the row and writes a masked, correctly attributed audit; missing/foreign IDs are idempotent; invalid scope and unauthorized role are refused. Response and DB state match Laravel. Scoped `go test`/`go vet` for `api`, `agentadmin`, and `i18n` pass. Matrix **151 GO / 41 PARTIAL / 183 Laravel-only**.
+
+**EXACT NEXT ACTION:** verify `PATCH /api/v1/profile` against Laravel, including validation, self-scope, user and profile updates, audit side effects, and role behavior.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

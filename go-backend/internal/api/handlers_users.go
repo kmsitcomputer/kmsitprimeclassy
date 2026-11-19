@@ -941,8 +941,18 @@ func (s *Server) handleAgentWhatsAppTestNumberDelete(w http.ResponseWriter, r *h
 	if !ok {
 		return
 	}
+	if !whatsAppSelectorAllowed(r, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+		return
+	}
 	id, ok := pathID(w, r, "id")
 	if !ok {
+		return
+	}
+	var msisdn string
+	findErr := s.database.QueryRowContext(r.Context(), `SELECT msisdn FROM agent_whatsapp_test_numbers WHERE id=? AND agent_id=?`, id, agentID).Scan(&msisdn)
+	if findErr != nil && !errors.Is(findErr, sql.ErrNoRows) {
+		writeAgentAdminError(w, r, findErr)
 		return
 	}
 	data, err := agentadmin.New(s.database, s.cfg.AppKey).RemoveWhatsAppTestNumber(r.Context(), agentID, id)
@@ -950,9 +960,11 @@ func (s *Server) handleAgentWhatsAppTestNumberDelete(w http.ResponseWriter, r *h
 		writeAgentAdminError(w, r, err)
 		return
 	}
-	if err := s.recordAgentAudit(r, actor, agentID, "whatsapp.agent_test_number.removed", map[string]any{"id": id}); err != nil {
-		writeError(w, r, err)
-		return
+	if findErr == nil {
+		if err := s.recordAgentWhatsAppTestNumberAudit(r, actor, agentID, id, "whatsapp.agent_test_number.removed", map[string]any{"masked": agentadmin.MaskWhatsAppNumber(msisdn)}); err != nil {
+			writeError(w, r, err)
+			return
+		}
 	}
 	httpx.OK(w, map[string]any{"numbers": data, "max": 5}, "OK", nil)
 }
