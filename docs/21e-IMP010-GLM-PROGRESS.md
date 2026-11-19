@@ -1,0 +1,63 @@
+# 21e — IMP-010 GLM Laravel-only progress (GLM branch — NOT the canonical matrix)
+
+Branch `imp010/glm-laravel-only`, worktree `/Users/kmsitcomputer/KMSIT-Server/apps/primeclassy-imp010-glm`,
+baseline `imp010/go-backend@94c07b7`. This file is GLM-owned progress evidence; the canonical matrix
+(`docs/21a`) is updated only by Codex at integration.
+
+## Isolated environment (Owner mandate §9)
+
+| Component | Value |
+|---|---|
+| Laravel reference container | `pc_laravel_glm`, port 8898, mounts GLM worktree `backend/` + shared vendor (read) |
+| Go container | `pc_go_glm`, port 8083, mounts GLM worktree `go-backend/` |
+| Test database | `primeclassy_testing_glm` (shared MariaDB `primeclassy-mariadb`; additive DB, separate from Codex's `primeclassy_testing`) |
+| Harnesses | `tools/parity-glm/` (ports 8898/8083, DB `primeclassy_testing_glm`) |
+| Migration | Laravel `php artisan migrate` + Go `cmd/migrate` + `seed_test_fixtures.sql` + `seed_inventory_fixtures.sql` applied |
+| Codex env | untouched: `pc_go_imp010`, `pc_laravel_imp010`, `primeclassy_testing`, its worktree, and its uncommitted files were never modified |
+
+## Domains completed
+
+### Operator notification centre — 4 Laravel-only routes (AdminNotificationController)
+
+| Route | Status |
+|---|---|
+| GET `/api/v1/notifications/admin` | **GO (GLM)** |
+| GET `/api/v1/notifications/admin/unread-count` | **GO (GLM)** |
+| POST `/api/v1/notifications/admin/read-all` | **GO (GLM)** |
+| POST `/api/v1/notifications/admin/{id}/read` | **GO (GLM)** |
+
+Evidence: `tools/parity-glm/compare_notifications_admin.py` — **97 passed, 0 failed** (RBAC matrix 4 roles × 4
+routes + unauth 401, index projection/pagination/unread filter, validation byte-parity incl. strict `boolean`
+rule and `getSize` between semantics, read-all/idempotent mark-read, foreign-recipient 404, non-numeric id
+404, DB read_at state). Scoped `go test ./internal/api ./internal/i18n` green, `go vet` clean, gofmt clean.
+
+Verified Laravel behaviours worth knowing for integration:
+- `boolean` rule is strict (`is_bool || in [0,1,'0','1']`) — the string "true" is a 422.
+- Query keys are validated whenever present, including empty values (`?per_page` → 422 with BOTH integer and
+  between messages); ConvertEmptyStringsToNull does not shield GET input.
+- `between:1,50` uses getSize(): numeric → numeric compare, else strlen.
+- `toIso8601String()` renders `Y-m-d\TH:i:sP` (`2026-...+00:00`, second precision).
+- The route-not-found fallback (non-numeric `{id}` with `whereNumber`) renders BEFORE the api middleware
+  group, so its message is the app default locale (`en`, "Endpoint not found.") — unlike in-group localized
+  404s. Recorded here, NOT in docs/21b (that register stays Codex-owned).
+
+## Shared-file changes for Codex integration (minimal, §5)
+
+| File | Diff | Reason |
+|---|---|---|
+| `go-backend/internal/api/server.go` | +1 line: `s.registerGLMLaravelOnlyRoutes()` after `registerDomainERoutes()` | route registration entry point |
+| `go-backend/internal/api/inventory.go` | 1 line: `|| matchesGLMLaravelOnlyRoute(method, path)` in `implementsRoute` | 501-vs-404 decision and `/_parity` report must include the GLM slice |
+| `go-backend/internal/notifications/notifications.go` | +additive `TableReady(ctx)` method | ports `AdminNotification::tableReady()` for the `migration_pending` meta path |
+
+New GLM-owned files: `go-backend/internal/api/glm_laravel_only_routes.go`, `tools/parity-glm/compare_notifications_admin.py`.
+
+## Remaining GLM inventory
+
+179 Laravel-only endpoints (see `.glm/laravel_only_inventory.tsv` in the worktree). Candidate next domains by
+independence: Media (3), Reporting reads (16), admin agents CRUD (5), audit-logs (1), regions import/export (2).
+
+## EXACT NEXT ACTION
+
+Implement the Media domain (GET/POST/DELETE `/api/v1/media`, 3 routes): read the Laravel MediaController +
+HTMLPurifier-adjacent constraints, port with the GLM slice pattern, add `tools/parity-glm/compare_media.py`,
+run against the GLM isolated environment, commit. Then continue with Reporting reads.

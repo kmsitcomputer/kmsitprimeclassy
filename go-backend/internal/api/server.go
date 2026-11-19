@@ -87,6 +87,7 @@ func (s *Server) routes() {
 
 	// Domain E route slices. Their implementations are isolated in dedicated packages and handlers.
 	s.registerDomainERoutes()
+	s.registerGLMLaravelOnlyRoutes()
 	s.registerCMSProfileRoutes()
 	s.registerProductAdminRoutes()
 

@@ -153,3 +153,15 @@ func (s *Store) MarkAllRead(ctx context.Context, userID int64) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// TableReady ports AdminNotification::tableReady(): the notification centre is inert until the
+// additive admin_notifications migration exists, so every endpoint degrades to the empty answer
+// (index carries migration_pending in its meta) instead of failing. The check is per-call and cheap;
+// the reference memoises per-process and this build restarts with migrations in place anyway.
+func (s *Store) TableReady(ctx context.Context) bool {
+	var count int
+	err := s.database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'admin_notifications'`).
+		Scan(&count)
+	return err == nil && count > 0
+}
