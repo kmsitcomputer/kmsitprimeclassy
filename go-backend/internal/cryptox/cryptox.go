@@ -93,13 +93,23 @@ func DecryptArray(appKey, payload string) (map[string]any, error) {
 // JSON string without PHP serialization; preserving that exact representation lets Laravel and Go continue
 // sharing the same credential rows during the migration.
 func EncryptArray(appKey string, value map[string]any) (string, error) {
-	key, err := Key(appKey)
-	if err != nil {
-		return "", err
-	}
 	plain, err := json.Marshal(value)
 	if err != nil {
 		return "", fmt.Errorf("%w: JSON encode", ErrDecrypt)
+	}
+	return encrypt(appKey, plain)
+}
+
+// EncryptString emits the Laravel Crypt::encryptString representation
+// (AES-256-CBC, the shared APP_KEY, and the authenticated Laravel envelope).
+func EncryptString(appKey, value string) (string, error) {
+	return encrypt(appKey, []byte(value))
+}
+
+func encrypt(appKey string, plain []byte) (string, error) {
+	key, err := Key(appKey)
+	if err != nil {
+		return "", err
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
