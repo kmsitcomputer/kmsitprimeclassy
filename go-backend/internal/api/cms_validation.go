@@ -7,6 +7,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -223,6 +224,144 @@ func rawString(raw json.RawMessage) (string, bool) {
 // cmsSlugFree is `unique:cms_articles,slug` (soft-deleted rows still count, like the bare unique rule).
 func cmsSlugFree(ctx context.Context, s *Server, slug string, exceptID int64) bool {
 	return !existsWhere(ctx, s.database, "cms_articles", "slug", slug, exceptID)
+}
+
+type cmsPageTranslationPath struct {
+	cmsTranslationPath
+	SEOTitle       *string
+	SEODescription *string
+}
+
+// decodeCMSPageTranslations decodes the page translation shape (body nullable + seo_* fields).
+func decodeCMSPageTranslations(raw json.RawMessage) []cmsPageTranslationPath {
+	base := decodeCMSTranslations(raw)
+	out := make([]cmsPageTranslationPath, 0, len(base))
+	var asList []map[string]json.RawMessage
+	var asObject map[string]map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &asList)
+	_ = json.Unmarshal(raw, &asObject)
+	var keys []string
+	if len(asList) > 0 {
+		for i := range asList {
+			keys = append(keys, strconv.Itoa(i))
+		}
+	} else {
+		for key := range asObject {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+	}
+	for i, entry := range base {
+		page := cmsPageTranslationPath{cmsTranslationPath: entry}
+		var item map[string]json.RawMessage
+		if len(asList) > 0 && i < len(asList) {
+			item = asList[i]
+		} else if i < len(keys) {
+			item = asObject[keys[i]]
+		}
+		if value, ok := item["seo_title"]; ok && string(value) != "null" {
+			var text string
+			if json.Unmarshal(value, &text) == nil {
+				page.SEOTitle = &text
+			}
+		}
+		if value, ok := item["seo_description"]; ok && string(value) != "null" {
+			var text string
+			if json.Unmarshal(value, &text) == nil {
+				page.SEODescription = &text
+			}
+		}
+		out = append(out, page)
+	}
+	return out
+}
+
+// validateCMSPage is Store/UpdatePageRequest::rules (slug max 150, title required, body NULLABLE,
+// seo_title 200, seo_description 300).
+func validateCMSPage(ctx context.Context, s *Server, raw map[string]json.RawMessage, create bool,
+	currentID int64) (map[string][]string, []cmsPageTranslationPath) {
+
+	fields := map[string][]string{}
+	if _, present := raw["slug"]; !present || string(raw["slug"]) == "null" {
+		if create {
+			fields["slug"] = append(fields["slug"], nestedMsg(ctx, "required", "slug"))
+		}
+	} else if text, ok := rawString(jsonValue(raw, "slug")); ok {
+		if text == "" {
+			fields["slug"] = append(fields["slug"], nestedMsg(ctx, "required", "slug"))
+		} else if utf8Len(text) > 150 {
+			fields["slug"] = append(fields["slug"], nestedMsg(ctx, "max.string", "slug", "max", "150"))
+		} else if existsWhere(ctx, s.database, "cms_pages", "slug", text, currentID) {
+			fields["slug"] = append(fields["slug"], nestedMsg(ctx, "unique", "slug"))
+		}
+	}
+	if value, present := raw["status"]; present && string(value) != "null" {
+		if text, ok := rawString(jsonValue(raw, "status")); !ok || (text != "draft" && text != "published") {
+			fields["status"] = append(fields["status"], nestedMsg(ctx, "in", "status"))
+		}
+	}
+	if value, present := raw["published_at"]; present && string(value) != "null" {
+		if _, ok := rawString(jsonValue(raw, "published_at")); !ok {
+			fields["published_at"] = append(fields["published_at"], nestedMsg(ctx, "date", "published_at"))
+		}
+	}
+	if value, present := raw["cover_media_id"]; present && string(value) != "null" {
+		if id, ok := intValue(jsonValue(raw, "cover_media_id")); !ok {
+			fields["cover_media_id"] = append(fields["cover_media_id"], nestedMsg(ctx, "integer", "cover media"))
+		} else if !existsIn(ctx, s.database, "media", "id", formatID(int64(id))) {
+			fields["cover_media_id"] = append(fields["cover_media_id"], nestedMsg(ctx, "exists", "cover media"))
+		}
+	}
+	var translations []cmsPageTranslationPath
+	if value, present := raw["translations"]; present && string(value) != "null" {
+		translations = decodeCMSPageTranslations(value)
+		if len(translations) == 0 {
+			fields["translations"] = append(fields["translations"], nestedMsg(ctx, "array", "translations"))
+		}
+	} else if create {
+		fields["translations"] = append(fields["translations"], nestedMsg(ctx, "required", "translations"))
+	}
+	counts := map[int64]int{}
+	for _, entry := range translations {
+		if entry.HasLangID {
+			counts[*entry.LanguageID]++
+		}
+	}
+	for _, entry := range translations {
+		if entry.HasLangID {
+			if !existsIn(ctx, s.database, "languages", "id", formatID(*entry.LanguageID)) {
+				fields[entry.Path+".language_id"] = append(fields[entry.Path+".language_id"],
+					nestedRawMsg(ctx, "exists", entry.Path+".language_id"))
+			}
+			if counts[*entry.LanguageID] > 1 {
+				fields[entry.Path+".language_id"] = append(fields[entry.Path+".language_id"],
+					nestedRawMsg(ctx, "distinct", entry.Path+".language_id"))
+			}
+		} else {
+			fields[entry.Path+".language_id"] = append(fields[entry.Path+".language_id"],
+				nestedRawMsg(ctx, "required", entry.Path+".language_id"))
+		}
+		if entry.Title == nil {
+			fields[entry.Path+".title"] = append(fields[entry.Path+".title"],
+				nestedRawMsg(ctx, "required", entry.Path+".title"))
+		} else if utf8Len(*entry.Title) > 200 {
+			fields[entry.Path+".title"] = append(fields[entry.Path+".title"],
+				nestedRawMsg(ctx, "max.string", entry.Path+".title", "max", "200"))
+		}
+		// body is NULLABLE for pages (unlike articles).
+		if entry.Body != nil {
+			// no max rule
+		}
+		if entry.SEOTitle != nil && utf8Len(*entry.SEOTitle) > 200 {
+			fields[entry.Path+".seo_title"] = append(fields[entry.Path+".seo_title"],
+				nestedRawMsg(ctx, "max.string", entry.Path+".seo_title", "max", "200"))
+		}
+		if entry.SEODescription != nil && utf8Len(*entry.SEODescription) > 300 {
+			fields[entry.Path+".seo_description"] = append(fields[entry.Path+".seo_description"],
+				nestedRawMsg(ctx, "max.string", entry.Path+".seo_description", "max", "300"))
+		}
+	}
+	return fields, translations
 }
 
 // existsWhere is existsIn with an id exclusion (Rule::unique(...)->ignore($id)).

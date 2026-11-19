@@ -29,6 +29,11 @@ def purge_cms():
     db("""INSERT INTO cms_articles_translations (cms_article_id, language_id, title, excerpt, body, created_at, updated_at)
         VALUES (1,1,'Tips Kue','Cuplikan','<p>Isi artikel</p>',NOW(),NOW())""")
     db("DELETE FROM activity_logs WHERE event LIKE 'cms.%'")
+    # Fixture page (from seed_test_fixtures) — both runtimes must see the same slug universe.
+    db("INSERT INTO cms_pages (id, slug, cover_image_path, status, published_at, created_at, updated_at) "
+       "VALUES (1,'tentang-kami-imp010',NULL,'published','2026-11-01 00:00:00',NOW(),NOW())")
+    db("INSERT INTO cms_pages_translations (id, cms_page_id, language_id, title, body, seo_title, seo_description, created_at, updated_at) "
+       "VALUES (1,1,1,'Tentang Kami','<p>Tentang kami</p>','Tentang Kami','Deskripsi',NOW(),NOW())")
 
 
 def state():
@@ -38,6 +43,10 @@ def state():
         "translations": rows("SELECT (SELECT slug FROM cms_articles a WHERE a.id = t.cms_article_id), language_id, "
                              "title, IFNULL(excerpt,'-'), IFNULL(body,'-') FROM cms_articles_translations t "
                              "ORDER BY t.id"),
+        "pages": rows("SELECT slug, status, published_at IS NOT NULL FROM cms_pages ORDER BY id"),
+        "page_translations": rows("SELECT (SELECT slug FROM cms_pages a WHERE a.id = t.cms_page_id), language_id, "
+                                  "title, IFNULL(body,'-'), IFNULL(seo_title,'-'), IFNULL(seo_description,'-') "
+                                  "FROM cms_pages_translations t ORDER BY t.id"),
     }
 
 
@@ -114,6 +123,45 @@ def main():
         return res
 
     scenario("CMS article matrix (RBAC + validation + sanitisation)", article_matrix)
+
+
+    def page_matrix(base):
+        c = client_for(base, SUPER)
+        res = [c.call("GET", "/api/v1/cms/pages"),
+               c.call("POST", "/api/v1/cms/pages", {}),
+               c.call("POST", "/api/v1/cms/pages", {"slug": "uji-halaman",
+                                                    "translations": [{"language_id": 1, "title": "Halaman",
+                                                                      "body": "<p>Konten <script>x()</script></p>",
+                                                                      "seo_title": "SEO J",
+                                                                      "seo_description": "SEO D"}]}),
+               c.call("POST", "/api/v1/cms/pages", {"slug": "tips-kue-imp010",
+                                                    "translations": [{"language_id": 1, "title": "J", "body": "b"}]}),
+               c.call("POST", "/api/v1/cms/pages", {"slug": "uji-2",
+                                                    "translations": [{"language_id": 1, "title": "J", "body": "b"},
+                                                                     {"language_id": 1, "title": "J2", "body": "b2"}]}),
+               c.call("POST", "/api/v1/cms/pages", {"slug": "uji-3",
+                                                    "translations": [{"language_id": 1, "title": "J",
+                                                                      "seo_title": "x" * 201}]}),
+               c.call("POST", "/api/v1/cms/pages", {"slug": "uji-4",
+                                                    "translations": [{"language_id": 1, "title": "J",
+                                                                      "seo_description": "y" * 301}]}),
+               c.call("POST", "/api/v1/cms/pages", {"slug": "uji-5",
+                                                    "translations": [{"language_id": 1, "title": "J"}]})]
+        pid = None
+        for st, b in res:
+            if st == 201 and (b.get("data") or {}).get("slug") == "uji-halaman":
+                pid = b["data"]["id"]
+        if pid:
+            res.append(c.call("PATCH", f"/api/v1/cms/pages/{pid}",
+                              {"translations": [{"language_id": 1, "title": "Halaman Baru"}]}))
+            res.append(c.call("DELETE", f"/api/v1/cms/pages/{pid}"))
+            res.append(c.call("DELETE", f"/api/v1/cms/pages/{pid}"))
+        res.append(c.call("PATCH", "/api/v1/cms/pages/999999", {"slug": "x"}))
+        res.append(client_for(base, AGEN).call("POST", "/api/v1/cms/pages",
+                                               {"slug": "no-super", "translations": [{"language_id": 1, "title": "J"}]}))
+        return res
+
+    scenario("CMS page matrix (RBAC + validation + sanitisation)", page_matrix)
 
     failed = [r for r in f.results if not r[1]]
     print(f"{len(f.results) - len(failed)} passed, {len(failed)} failed")

@@ -94,12 +94,12 @@ func (s *Server) handleCMSArticleStore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, httpx.Validation(fields))
 		return
 	}
-	input := cms.ArticleInput{Translations: &[]cms.ArticleTranslation{}}
+	input := cms.ArticleInput{}
 	if err := remarshalRaw(raw, &input); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	input.Translations = &[]cms.ArticleTranslation{}
+	list := make([]cms.ArticleTranslation, 0, len(translations))
 	for _, entry := range translations {
 		translation := cms.ArticleTranslation{}
 		if entry.LanguageID != nil {
@@ -114,8 +114,9 @@ func (s *Server) handleCMSArticleStore(w http.ResponseWriter, r *http.Request) {
 		if entry.Body != nil {
 			translation.Body = *entry.Body
 		}
-		*input.Translations = append(*input.Translations, translation)
+		list = append(list, translation)
 	}
+	input.Translations = &list
 	result, err := cms.CreateArticle(r.Context(), s.database, input, u.ID)
 	if db.IsDuplicateKey(err) {
 		writeError(w, r, httpx.Validation(map[string][]string{"slug": uniqueField(r.Context(), "slug")}))
@@ -152,7 +153,7 @@ func (s *Server) handleCMSArticleUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if _, present := raw["translations"]; present {
-		input.Translations = &[]cms.ArticleTranslation{}
+		list := make([]cms.ArticleTranslation, 0, len(translations))
 		for _, entry := range translations {
 			translation := cms.ArticleTranslation{}
 			if entry.LanguageID != nil {
@@ -167,8 +168,9 @@ func (s *Server) handleCMSArticleUpdate(w http.ResponseWriter, r *http.Request) 
 			if entry.Body != nil {
 				translation.Body = *entry.Body
 			}
-			*input.Translations = append(*input.Translations, translation)
+			list = append(list, translation)
 		}
+		input.Translations = &list
 	}
 	result, err := cms.UpdateArticle(r.Context(), s.database, id, input)
 	if db.IsDuplicateKey(err) {
@@ -229,11 +231,36 @@ func (s *Server) handleCMSPageStore(w http.ResponseWriter, r *http.Request) {
 	if !s.requireCMSAdmin(w, r) {
 		return
 	}
-	var input cms.PageInput
-	if err := httpx.DecodeJSON(r, &input); err != nil {
+	raw := map[string]json.RawMessage{}
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		writeError(w, r, err)
 		return
 	}
+	fields, translations := validateCMSPage(r.Context(), s, raw, true, 0)
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	input := cms.PageInput{}
+	if err := remarshalRaw(raw, &input); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	list := make([]cms.PageTranslation, 0, len(translations))
+	for _, entry := range translations {
+		translation := cms.PageTranslation{}
+		if entry.LanguageID != nil {
+			translation.LanguageID = *entry.LanguageID
+		}
+		if entry.Title != nil {
+			translation.Title = *entry.Title
+		}
+		translation.Body = entry.Body
+		translation.SEOTitle = entry.SEOTitle
+		translation.SEODescription = entry.SEODescription
+		list = append(list, translation)
+	}
+	input.Translations = &list
 	result, err := cms.CreatePage(r.Context(), s.database, input)
 	if db.IsDuplicateKey(err) {
 		writeError(w, r, httpx.Validation(map[string][]string{"slug": uniqueField(r.Context(), "slug")}))
@@ -254,10 +281,37 @@ func (s *Server) handleCMSPageUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input cms.PageInput
-	if err := httpx.DecodeJSON(r, &input); err != nil {
+	raw := map[string]json.RawMessage{}
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		writeError(w, r, err)
 		return
+	}
+	fields, translations := validateCMSPage(r.Context(), s, raw, false, id)
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	input := cms.PageInput{}
+	if err := remarshalRaw(raw, &input); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if _, present := raw["translations"]; present {
+		list := make([]cms.PageTranslation, 0, len(translations))
+		for _, entry := range translations {
+			translation := cms.PageTranslation{}
+			if entry.LanguageID != nil {
+				translation.LanguageID = *entry.LanguageID
+			}
+			if entry.Title != nil {
+				translation.Title = *entry.Title
+			}
+			translation.Body = entry.Body
+			translation.SEOTitle = entry.SEOTitle
+			translation.SEODescription = entry.SEODescription
+			list = append(list, translation)
+		}
+		input.Translations = &list
 	}
 	result, err := cms.UpdatePage(r.Context(), s.database, id, input)
 	if db.IsDuplicateKey(err) {
