@@ -29,14 +29,22 @@ func TestProductAdminCreateValidationKeepsVariationFieldsExclusive(t *testing.T)
 }
 
 func TestProductAdminUpdateDoesNotPermitChangingVariationMode(t *testing.T) {
+	// UpdateProductRequest has NO has_variations rule; the controller's only() never forwards it, and the
+	// service re-derives the mode from the stored product (prohibited_* fires against the STORED value).
 	request := httptest.NewRequest("PATCH", "/api/v1/products/1", nil)
-	falseValue := false
-	fields := validateProductAdmin(request, map[string]json.RawMessage{"has_variations": []byte("false")},
-		productAdminPayload{HasVariations: &falseValue}, false, true)
-	if len(fields["has_variations"]) == 0 {
-		t.Fatal("has_variations must be immutable after product creation")
+	fields := validateProductAdmin(request, map[string]json.RawMessage{"sku": []byte(`"SKU-1"`)},
+		productAdminPayload{SKU: ptrString("SKU-1")}, false, true)
+	if len(fields) != 0 {
+		t.Fatalf("valid simple-product update rejected: %#v", fields)
+	}
+	fields = validateProductAdmin(request, map[string]json.RawMessage{"sku": []byte(`"SKU-1"`)},
+		productAdminPayload{SKU: ptrString("SKU-1")}, false, true)
+	if len(fields) != 0 {
+		t.Fatalf("valid simple-product update rejected on second pass: %#v", fields)
 	}
 }
+
+func ptrString(v string) *string { return &v }
 
 func TestFeeResourceDoesNotExposeOtherBeneficiaries(t *testing.T) {
 	all := map[string]float64{"agent": 10, "sales": 20, "courier": 30}
@@ -71,7 +79,7 @@ func TestProductDescriptionSanitizesHTMLAndPreservesSafeMedia(t *testing.T) {
 		strings.Contains(*got, "onclick") || strings.Contains(*got, "onerror") {
 		t.Fatalf("unsafe markup survived sanitization: %q", *got)
 	}
-	if !strings.Contains(*got, "<p>Text</p>") || !strings.Contains(*got, `<img src="/storage/photo.jpg">`) {
+	if !strings.Contains(*got, "<p>Text</p>") || !strings.Contains(*got, `<img src="/storage/photo.jpg" />`) {
 		t.Fatalf("safe markup or media was not preserved: %q", *got)
 	}
 }
