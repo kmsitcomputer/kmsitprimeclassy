@@ -188,7 +188,7 @@ Status legend:
 | GET | `/api/v1/cms/homepage-blocks` | session | super_admin | **GO** | resource projection, sort order, Super Admin gate, and read-only state compared by compare_cms_homepage_blocks.py |
 | POST | `/api/v1/cms/homepage-blocks` | session | super_admin | **GO** | JSON + multipart validation, HTML sanitization, persistence and upload side effects compared with Laravel |
 | PATCH | `/api/v1/cms/homepage-blocks/reorder` | session | super_admin | **GO** | ordering, partial and duplicate ID lists, ID coercion, per-item existence validation, RBAC, response and persisted sort_order compared with Laravel |
-| DELETE | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **GO** | block and referenced image files, missing IDs, Super Admin gate and response compared with Laravel |
 | PATCH | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
 | PATCH | `/api/v1/cms/homepage-blocks/{block}/toggle` | session | super_admin | **PARTIAL** |  |
 | GET | `/api/v1/cms/pages` | session | super_admin | **GO** |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 156 |
-|   of which PARTIAL (incomplete behaviour) | 36 |
+|   of which fully GO | 157 |
+|   of which PARTIAL (incomplete behaviour) | 35 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

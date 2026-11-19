@@ -71,7 +71,7 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "ordering, partial and duplicate ID lists, ID coercion, per-item existence validation, RBAC, response and persisted sort_order compared with Laravel",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "",
-    ("DELETE", "/api/v1/cms/homepage-blocks/{block}"): "",
+    ("DELETE", "/api/v1/cms/homepage-blocks/{block}"): "block and referenced image files, missing IDs, Super Admin gate and response compared with Laravel",
     ("GET", "/api/v1/cms/articles"): "",
     ("POST", "/api/v1/cms/articles"): "",
     ("PATCH", "/api/v1/cms/articles/{article}"): "",
@@ -239,7 +239,6 @@ GAPS = {
     # differentially verified; every write path still needs its contract comparison.
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "served; HTMLPurifier policy NOT ported",
-    ("DELETE", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",
     ("POST", "/api/v1/cms/articles"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/articles/{article}"): "served; HTMLPurifier policy NOT ported",
     ("DELETE", "/api/v1/cms/articles/{article}"): "served; HTMLPurifier policy NOT ported",
