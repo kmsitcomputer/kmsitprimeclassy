@@ -88,8 +88,8 @@ Status legend:
 | GET | `/api/v1/agent/google-auth` | session | admin, agen | LARAVEL |  |
 | PUT | `/api/v1/agent/google-auth` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/payment-methods` | session | admin, agen | **GO** |  |
-| PUT | `/api/v1/agent/payment-methods/{method}/config` | session | admin, agen | **PARTIAL** |  |
-| PATCH | `/api/v1/agent/payment-methods/{method}/toggle` | session | admin, agen | **PARTIAL** |  |
+| PUT | `/api/v1/agent/payment-methods/{method}/config` | session | admin, agen | **GO** | FormRequest validation order, localized messages, encrypted config writes, and RBAC compared by compare_agentadmin.py |
+| PATCH | `/api/v1/agent/payment-methods/{method}/toggle` | session | admin, agen | **GO** | role gates, toggle response shape, and resulting setting rows compared by compare_agentadmin.py |
 | GET | `/api/v1/agent/shipping-providers` | session | agen | **GO** |  |
 | PUT | `/api/v1/agent/shipping-providers/{provider}/config` | session | agen | **GO** | provider-specific validation, SSRF refusal, encrypted config side effect and localized response compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **GO** |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 138 |
-|   of which PARTIAL (incomplete behaviour) | 54 |
+|   of which fully GO | 140 |
+|   of which PARTIAL (incomplete behaviour) | 52 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

@@ -43,8 +43,8 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/users/{user}/convert-to-sales-kurir-sub"): "",
     ("PATCH", "/api/v1/users/{user}/convert-to-sales-kurir"): "",
     ("GET", "/api/v1/agent/payment-methods"): "",
-    ("PATCH", "/api/v1/agent/payment-methods/{method}/toggle"): "",
-    ("PUT", "/api/v1/agent/payment-methods/{method}/config"): "",
+    ("PATCH", "/api/v1/agent/payment-methods/{method}/toggle"): "role gates, toggle response shape, and resulting setting rows compared by compare_agentadmin.py",
+    ("PUT", "/api/v1/agent/payment-methods/{method}/config"): "FormRequest validation order, localized messages, encrypted config writes, and RBAC compared by compare_agentadmin.py",
     ("GET", "/api/v1/agent/store-profile"): "",
     ("PUT", "/api/v1/agent/store-profile"): "",
     ("GET", "/api/v1/agent/shipping-tariff"): "",
@@ -237,8 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("PATCH", "/api/v1/agent/payment-methods/{method}/toggle"): "served; write contract probe pending",
-    ("PUT", "/api/v1/agent/payment-methods/{method}/config"): "served; write contract probe pending (encrypted:array write path verified cross-runtime separately)",
     ("PUT", "/api/v1/agent/store-profile"): "served; write contract probe pending",
     ("GET", "/api/v1/agent/whatsapp/scope"): "served; contract probe pending",
     ("GET", "/api/v1/agent/whatsapp/events"): "served; contract probe pending",
