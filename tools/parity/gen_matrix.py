@@ -68,7 +68,7 @@ IMPLEMENTED = {
     ("DELETE", "/api/v1/profile/referral-code"): "response, cleared code, and old-only audit projection compared by compare_profile_referral.py",
     ("GET", "/api/v1/cms/homepage-blocks"): "resource projection, sort order, Super Admin gate, and read-only state compared by compare_cms_homepage_blocks.py",
     ("POST", "/api/v1/cms/homepage-blocks"): "JSON + multipart validation, HTML sanitization, persistence and upload side effects compared with Laravel",
-    ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "",
+    ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "ordering, partial and duplicate ID lists, ID coercion, per-item existence validation, RBAC, response and persisted sort_order compared with Laravel",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "",
     ("DELETE", "/api/v1/cms/homepage-blocks/{block}"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "served; HTMLPurifier policy NOT ported",
     ("DELETE", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",

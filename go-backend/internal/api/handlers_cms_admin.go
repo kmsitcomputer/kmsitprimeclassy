@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -606,14 +608,28 @@ func (s *Server) handleCMSBlockReorder(w http.ResponseWriter, r *http.Request) {
 	if !s.requireCMSAdmin(w, r) {
 		return
 	}
-	var body struct {
-		BlockIDs []int64 `json:"block_ids"`
-	}
-	if err := httpx.DecodeJSON(r, &body); err != nil {
+	ids, err := decodeCMSBlockIDs(r)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	result, err := cms.ReorderBlocks(r.Context(), s.database, body.BlockIDs)
+	validationErrors := fieldErrors{}
+	for i, id := range ids {
+		var exists bool
+		if err := s.database.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM cms_homepage_blocks WHERE id = ?)`, id).Scan(&exists); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		if !exists {
+			field := "block_ids." + strconv.Itoa(i)
+			validationErrors.add(field, vmsgIndexed(r.Context(), "exists", field))
+		}
+	}
+	if err := validationErrors.fail(r.Context()); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	result, err := cms.ReorderBlocks(r.Context(), s.database, ids)
 	if errors.Is(err, cms.ErrAdminContentNotFound) {
 		writeError(w, r, notFoundError(r.Context()))
 		return
@@ -623,6 +639,89 @@ func (s *Server) handleCMSBlockReorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, result, msg(r.Context(), "cms.reorder_saved"), nil)
+}
+
+func decodeCMSBlockIDs(r *http.Request) ([]int64, error) {
+	raw := map[string]json.RawMessage{}
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
+		return nil, err
+	}
+	value, exists := raw["block_ids"]
+	if !exists || string(value) == "null" || string(value) == `""` {
+		return nil, httpx.Validation(map[string][]string{"block_ids": requiredField(r.Context(), "block_ids")})
+	}
+	trimmed := strings.TrimSpace(string(value))
+	var values []json.RawMessage
+	switch {
+	case strings.HasPrefix(trimmed, "["):
+		if err := json.Unmarshal(value, &values); err != nil {
+			return nil, httpx.Validation(map[string][]string{"block_ids": {vmsg(r.Context(), "array", "block_ids")}})
+		}
+	case strings.HasPrefix(trimmed, "{"):
+		decoder := json.NewDecoder(strings.NewReader(trimmed))
+		if _, err := decoder.Token(); err != nil {
+			return nil, httpx.Validation(map[string][]string{"block_ids": {vmsg(r.Context(), "array", "block_ids")}})
+		}
+		for decoder.More() {
+			if _, err := decoder.Token(); err != nil {
+				return nil, httpx.Validation(map[string][]string{"block_ids": {vmsg(r.Context(), "array", "block_ids")}})
+			}
+			var item json.RawMessage
+			if err := decoder.Decode(&item); err != nil {
+				return nil, httpx.Validation(map[string][]string{"block_ids": {vmsg(r.Context(), "array", "block_ids")}})
+			}
+			values = append(values, item)
+		}
+	default:
+		return nil, httpx.Validation(map[string][]string{"block_ids": {vmsg(r.Context(), "array", "block_ids")}})
+	}
+	if len(values) == 0 {
+		return nil, httpx.Validation(map[string][]string{"block_ids": requiredField(r.Context(), "block_ids")})
+	}
+	ids := make([]int64, len(values))
+	errs := fieldErrors{}
+	for i, item := range values {
+		var rawID any
+		decoder := json.NewDecoder(strings.NewReader(string(item)))
+		decoder.UseNumber()
+		if err := decoder.Decode(&rawID); err != nil {
+			field := "block_ids." + strconv.Itoa(i)
+			errs.add(field, vmsgIndexed(r.Context(), "exists", field))
+			continue
+		}
+		text := ""
+		switch candidate := rawID.(type) {
+		case json.Number:
+			text = candidate.String()
+		case string:
+			text = candidate
+		case bool:
+			if candidate {
+				text = "1"
+			} else {
+				text = "0"
+			}
+		}
+		id, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			value, floatErr := strconv.ParseFloat(text, 64)
+			if floatErr != nil || math.Trunc(value) != value || value < math.MinInt64 || value >= math.MaxInt64 {
+				field := "block_ids." + strconv.Itoa(i)
+				errs.add(field, vmsgIndexed(r.Context(), "exists", field))
+				continue
+			}
+			id = int64(value)
+		}
+		ids[i] = id
+	}
+	if err := errs.fail(r.Context()); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func vmsgIndexed(ctx context.Context, rule, field string) string {
+	return strings.ReplaceAll(i18n.Translate(LocaleFrom(ctx), "validation."+rule), ":attribute", field)
 }
 
 func (s *Server) handleCMSBlockDestroy(w http.ResponseWriter, r *http.Request) {
