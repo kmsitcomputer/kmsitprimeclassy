@@ -35,6 +35,9 @@ type Config struct {
 	HTTPAddr string
 	// PublicURL is the browser-facing origin (Laravel: APP_URL). Used to build absolute asset URLs.
 	PublicURL string
+	// MediaRoot is the `public` disk root (Laravel: storage/app/public via MEDIA_DISK=public). Empty
+	// leaves the internal/media package default, which is the relative path the container layout uses.
+	MediaRoot string
 
 	// AppKey is Laravel's APP_KEY. The Go service needs it ONLY to READ values Laravel encrypted (the
 	// agent shipping-provider credentials). It is never used to encrypt anything Go owns.
@@ -233,6 +236,7 @@ func Load(getenv func(string) string) (Config, error) {
 		AppKey:    getenv("APP_KEY"),
 		HTTPAddr:  defaultStr(getenv("HTTP_ADDR"), ":8081"),
 		PublicURL: strings.TrimRight(strings.TrimSpace(getenv("APP_URL")), "/"),
+		MediaRoot: strings.TrimSpace(getenv("MEDIA_ROOT")),
 		DB:        db,
 		Session:   sess,
 		HTTP:      httpCfg,

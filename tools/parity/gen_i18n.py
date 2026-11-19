@@ -83,6 +83,8 @@ KEYS = {
         "invalid_type",
         "too_large",
         "dimensions_too_large",
+        "uploaded",
+        "deleted",
     ],
     "fulfillment": [
         "shortage_reason_required",

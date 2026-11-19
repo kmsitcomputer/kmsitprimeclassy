@@ -2,12 +2,18 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
+	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
 )
 
@@ -23,6 +29,14 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("GET /api/v1/notifications/admin/unread-count", chain(http.HandlerFunc(s.handleNotificationsAdminUnreadCount), RequireAuth, s.RequireAgentLinked, RequireRole(notifRoles)))
 	s.mux.Handle("POST /api/v1/notifications/admin/read-all", chain(http.HandlerFunc(s.handleNotificationsAdminReadAll), RequireAuth, s.RequireAgentLinked, RequireRole(notifRoles)))
 	s.mux.Handle("POST /api/v1/notifications/admin/{id}/read", chain(http.HandlerFunc(s.handleNotificationsAdminMarkRead), RequireAuth, s.RequireAgentLinked, RequireRole(notifRoles)))
+
+	// Media — POST/DELETE are auth-only at the ROUTE level on purpose (MediaPolicy decides per
+	// collection: 'user_avatar' is open to every authenticated role); GET /media lives inside the
+	// super_admin-only CMS group (verified against the reference: agen gets 403 even though the
+	// policy itself would allow it — the route gate is deliberately narrower than the policy).
+	s.mux.Handle("GET /api/v1/media", chain(http.HandlerFunc(s.handleMediaIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("POST /api/v1/media", chain(http.HandlerFunc(s.handleMediaStore), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("DELETE /api/v1/media/{media}", chain(http.HandlerFunc(s.handleMediaDestroy), RequireAuth, s.RequireAgentLinked))
 }
 
 // matchesGLMLaravelOnlyRoute is consulted by implementsRoute (inventory.go) so the 501-vs-404
@@ -32,7 +46,15 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 	case
 		"GET /api/v1/notifications/admin",
 		"GET /api/v1/notifications/admin/unread-count",
-		"POST /api/v1/notifications/admin/read-all":
+		"POST /api/v1/notifications/admin/read-all",
+		"GET /api/v1/media",
+		"POST /api/v1/media":
+		return true
+	}
+	// DELETE /api/v1/media/{media} — Laravel route model binding: any last segment is the route; a
+	// non-existent id is a 404 (binding miss → ModelNotFoundException), a non-numeric segment also
+	// 404s (verified against the reference).
+	if method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/media/") && len(path) > len("/api/v1/media/") {
 		return true
 	}
 	// POST /api/v1/notifications/admin/{id}/read — Laravel declares ->whereNumber('id'): any non-numeric
@@ -191,6 +213,238 @@ func (s *Server) handleNotificationsAdminReadAll(w http.ResponseWriter, r *http.
 		updated = n
 	}
 	httpx.OK(w, map[string]any{"updated": updated}, "OK", nil)
+}
+
+// ---- GLM media (Laravel-only slice) ---------------------------------------------------------------
+
+// mediaResource renders Laravel's MediaResource projection.
+func mediaResource(m *media.Media, base string) map[string]any {
+	url := media.URL(m.Path)
+	if base != "" {
+		url = base + url
+	}
+	item := map[string]any{
+		"id":         m.ID,
+		"url":        url,
+		"collection": m.Collection,
+		"mime_type":  m.MimeType,
+		"width":      nil,
+		"height":     nil,
+		"created_at": m.CreatedAt.UTC().Format("2006-01-02T15:04:05+00:00"),
+	}
+	if m.OriginalFilename != nil {
+		item["original_filename"] = *m.OriginalFilename
+	} else {
+		item["original_filename"] = nil
+	}
+	if m.Size != nil {
+		item["size"] = *m.Size
+	} else {
+		item["size"] = nil
+	}
+	if m.Width != nil {
+		item["width"] = *m.Width
+	}
+	if m.Height != nil {
+		item["height"] = *m.Height
+	}
+	return item
+}
+
+// mediaPolicyCreate ports MediaPolicy::create: 'user_avatar' is open to every authenticated role,
+// every other collection is super_admin/agen only.
+func mediaPolicyCreate(role, collection string) bool {
+	if collection == "user_avatar" {
+		return true
+	}
+	return role == "super_admin" || role == "agen"
+}
+
+// mediaPolicyDelete ports MediaPolicy::delete: a user_avatar row may be deleted by its owner only,
+// any other collection by super_admin/agen.
+func mediaPolicyDelete(role, collection string, createdBy, userID int64) bool {
+	if collection == "user_avatar" {
+		return createdBy == userID
+	}
+	return role == "super_admin" || role == "agen"
+}
+
+func (s *Server) handleMediaIndex(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	u := UserFrom(ctx)
+	// Laravel: $this->authorize('create', [Media::class, null]) → super_admin/agen only.
+	if !mediaPolicyCreate(u.Role, "") {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	perPage, _ := strconv.Atoi(httpx.QueryString(r, "per_page"))
+	if perPage < 1 {
+		perPage = 30
+	}
+	page := 1
+	if raw := httpx.QueryString(r, "page"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			page = n
+		}
+	}
+	// Laravel: where('collection','!=','user_avatar'), ->latest() (created_at DESC, ties undefined —
+	// Go orders by id DESC; D-1-class deviation, compared as a set by the harness), optional collection filter.
+	query := `FROM media WHERE collection != 'user_avatar'`
+	args := []any{}
+	if filter := httpx.QueryString(r, "collection"); filter != "" {
+		query += ` AND collection = ?`
+		args = append(args, filter)
+	}
+	var total int
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) `+query, args...).Scan(&total); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	lastPage := (total + perPage - 1) / perPage
+	if lastPage < 1 {
+		lastPage = 1
+	}
+	args = append(args, perPage, (page-1)*perPage)
+	rows, err := s.database.QueryContext(ctx, `SELECT id,path,collection,original_filename,mime_type,size,width,height,created_at `+
+		query+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	items := []any{}
+	for rows.Next() {
+		m, serr := scanMedia(rows)
+		if serr != nil {
+			writeError(w, r, serr)
+			return
+		}
+		items = append(items, mediaResource(m, s.cfg.PublicURL))
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, items, "OK", map[string]any{"current_page": page, "last_page": lastPage, "total": total})
+}
+
+func scanMedia(rows *sql.Rows) (*media.Media, error) {
+	var m media.Media
+	var filename sql.NullString
+	var size sql.NullInt64
+	var width, height sql.NullInt64
+	if err := rows.Scan(&m.ID, &m.Path, &m.Collection, &filename, &m.MimeType, &size, &width, &height, &m.CreatedAt); err != nil {
+		return nil, err
+	}
+	if filename.Valid {
+		m.OriginalFilename = &filename.String
+	}
+	if size.Valid {
+		v := size.Int64
+		m.Size = &v
+	}
+	if width.Valid {
+		v := int(width.Int64)
+		m.Width = &v
+	}
+	if height.Valid {
+		v := int(height.Int64)
+		m.Height = &v
+	}
+	return &m, nil
+}
+
+func (s *Server) handleMediaStore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Laravel: FormRequest validation runs FIRST (its authorize() is true), then MediaPolicy::create.
+	if err := r.ParseMultipartForm(12 << 20); err != nil {
+		writeError(w, r, httpx.Validation(map[string][]string{
+			"file":       {i18n.ValidationMessage(LocaleFrom(ctx), "required", "file")},
+			"collection": {i18n.ValidationMessage(LocaleFrom(ctx), "required", "collection")},
+		}))
+		return
+	}
+	fields := map[string][]string{}
+	var content []byte
+	var filename string
+	file, header, ferr := r.FormFile("file")
+	if ferr != nil {
+		fields["file"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "required", "file")}
+	} else {
+		content, ferr = io.ReadAll(file)
+		_ = file.Close()
+		if ferr != nil {
+			writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity, msg(ctx, "media.upload_failed")))
+			return
+		}
+		filename = header.Filename
+	}
+	collection := r.FormValue("collection")
+	if collection == "" {
+		fields["collection"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "required", "collection")}
+	} else if _, ok := media.Collections[collection]; !ok {
+		fields["collection"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "in", "collection")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	u := UserFrom(ctx)
+	if !mediaPolicyCreate(u.Role, collection) {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	var created *media.Media
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		m, err := media.Store(ctx, tx, collection, media.Upload{Filename: filename, Content: content}, nil, nil, &u.ID)
+		created = m
+		return err
+	})
+	if err != nil {
+		var p *media.Problem
+		if errors.As(err, &p) {
+			writeError(w, r, httpx.NewError(p.Status, msg(ctx, p.Message)))
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	httpx.Created(w, mediaResource(created, s.cfg.PublicURL), msg(ctx, "media.uploaded"))
+}
+
+func (s *Server) handleMediaDestroy(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "media"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	var collection string
+	var path string
+	var createdBy sql.NullInt64
+	qerr := s.database.QueryRowContext(ctx,
+		`SELECT collection, path, created_by FROM media WHERE id = ?`, id).
+		Scan(&collection, &path, &createdBy)
+	if qerr != nil {
+		if errors.Is(qerr, sql.ErrNoRows) {
+			// Laravel route-model binding miss → ModelNotFoundException → localized not_found.
+			writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.not_found")))
+			return
+		}
+		writeError(w, r, qerr)
+		return
+	}
+	u := UserFrom(ctx)
+	if !mediaPolicyDelete(u.Role, collection, createdBy.Int64, u.ID) {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	if _, derr := s.database.ExecContext(ctx, `DELETE FROM media WHERE id = ?`, id); derr != nil {
+		writeError(w, r, derr)
+		return
+	}
+	_ = os.Remove(filepath.Join(media.Root, filepath.FromSlash(path)))
+	httpx.OK(w, nil, msg(ctx, "media.deleted"), nil)
 }
 
 func (s *Server) handleNotificationsAdminMarkRead(w http.ResponseWriter, r *http.Request) {

@@ -17,7 +17,7 @@ baseline `imp010/go-backend@94c07b7`. This file is GLM-owned progress evidence; 
 
 ## Domains completed
 
-### Operator notification centre — 4 Laravel-only routes (AdminNotificationController)
+### Operator notification centre — 4 Laravel-only routes (AdminNotificationController) — commit 4d9a2f7
 
 | Route | Status |
 |---|---|
@@ -53,11 +53,41 @@ New GLM-owned files: `go-backend/internal/api/glm_laravel_only_routes.go`, `tool
 
 ## Remaining GLM inventory
 
-179 Laravel-only endpoints (see `.glm/laravel_only_inventory.tsv` in the worktree). Candidate next domains by
-independence: Media (3), Reporting reads (16), admin agents CRUD (5), audit-logs (1), regions import/export (2).
+176 Laravel-only endpoints (see `.glm/laravel_only_inventory.tsv` in the worktree). Candidate next domains by
+independence: Reporting reads (16), admin agents CRUD (5), audit-logs (1), regions import/export (2).
 
 ## EXACT NEXT ACTION
 
-Implement the Media domain (GET/POST/DELETE `/api/v1/media`, 3 routes): read the Laravel MediaController +
-HTMLPurifier-adjacent constraints, port with the GLM slice pattern, add `tools/parity-glm/compare_media.py`,
+Implement the **admin agents CRUD** domain (5 Laravel-only routes: GET/POST `/admin/agents`,
+PATCH/DELETE `/admin/agents/{agentProfile}`, PATCH `/admin/agents/{agent}/toggle-status`): read the Laravel
+AgentAdminController/policies, port with the GLM slice pattern, add `tools/parity-glm/compare_admin_agents.py`,
 run against the GLM isolated environment, commit. Then continue with Reporting reads.
+
+### Generic media — 3 Laravel-only routes (MediaController) — commit <this>
+
+| Route | Status |
+|---|---|
+| GET `/api/v1/media` | **GO (GLM)** |
+| POST `/api/v1/media` | **GO (GLM)** |
+| DELETE `/api/v1/media/{media}` | **GO (GLM)** |
+
+Evidence: `tools/parity-glm/compare_media.py` — **73 passed, 0 failed** (index RBAC incl. the verified
+super_admin-only route gate, projection/filter/pagination, accumulated store validation, policy-after-validation
+ordering, `user_avatar` open-collection policy for upload AND owner-only delete, foreign 403, unknown id →
+localized 404, uuid path/url shape, DB state). `internal/media` (pre-existing port of MediaService) is wired via
+new handlers in the GLM slice; scoped `go test ./internal/api ./internal/media ./internal/i18n` green, `go vet`
+clean, gofmt clean, `git diff --check` clean.
+
+Verified Laravel behaviours worth knowing for integration:
+- GET `/media` route gate is **super_admin only** (inside the super_admin CMS group) — narrower than
+  MediaPolicy, so an AGEN is 403 on index even though the policy itself allows it. POST/DELETE are
+  auth-only at the route level (policy per collection).
+- Store validation runs BEFORE MediaPolicy::create (FormRequest authorize() is true) — an unauthorized role
+  with an invalid payload gets 422, with a valid payload 403 `system.unauthorized_action`.
+- `user_avatar`: every authenticated role may upload; only the OWNER may delete; other collections are
+  super_admin/agen for both.
+- Missing media id → route-model binding → localized `system.not_found` 404 (in-group, not the en default).
+- Shared-file changes for THIS unit: `cmd/api/main.go` (+import, `media.SetRoot(cfg.MediaRoot)`),
+  `internal/config/config.go` (+`MediaRoot`), `tools/parity/gen_i18n.py` (+`media.uploaded`/`media.deleted`
+  keys → catalog.json regenerated, 822 messages), `go-backend/.env` APP_URL aligned to the harness origin
+  (local-only, gitignored).
