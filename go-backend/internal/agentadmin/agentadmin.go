@@ -931,12 +931,14 @@ func (s *Service) WhatsAppTestNumbers(ctx context.Context, agentID int64) ([]Wha
 	}
 	return out, rows.Err()
 }
-func (s *Service) AddWhatsAppTestNumber(ctx context.Context, actorID, agentID int64, raw string) ([]WhatsAppTestNumber, error) {
+func (s *Service) AddWhatsAppTestNumber(ctx context.Context, actorID, agentID int64, raw string) ([]WhatsAppTestNumber, bool, error) {
 	n := normalizeMSISDN(raw)
 	if n == "" {
-		return nil, fail(422, "Nomor WhatsApp tidak valid.")
+		message := i18n.Translate(i18n.Default, "whatsapp.invalid_number")
+		return nil, false, &Error{Status: 422, Message: message, Fields: map[string][]string{"number": {message}}}
 	}
 	returnValue := []WhatsAppTestNumber{}
+	created := false
 	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var locked int64
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=? AND deleted_at IS NULL FOR UPDATE`, agentID).Scan(&locked); err != nil {
@@ -954,19 +956,21 @@ func (s *Service) AddWhatsAppTestNumber(ctx context.Context, actorID, agentID in
 			return err
 		}
 		if count >= 5 {
-			return fail(422, "Maksimal 5 nomor uji WhatsApp.")
+			message := strings.ReplaceAll(i18n.Translate(i18n.Default, "whatsapp.test_numbers_limit"), ":max", "5")
+			return &Error{Status: 422, Message: message, Fields: map[string][]string{"number": {message}}}
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO agent_whatsapp_test_numbers (agent_id,msisdn,registered_by,created_at,updated_at) VALUES (?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, agentID, n, actorID)
+		created = err == nil
 		return err
 	})
 	if err != nil {
 		if db.IsNoSuchTable(err) {
-			return nil, fail(503, "Migrasi konfigurasi WhatsApp belum diterapkan.")
+			return nil, false, fail(503, "Migrasi konfigurasi WhatsApp belum diterapkan.")
 		}
-		return nil, err
+		return nil, false, err
 	}
 	returnValue, err = s.WhatsAppTestNumbers(ctx, agentID)
-	return returnValue, err
+	return returnValue, created, err
 }
 func (s *Service) RemoveWhatsAppTestNumber(ctx context.Context, agentID, id int64) ([]WhatsAppTestNumber, error) {
 	_, err := s.database.ExecContext(ctx, `DELETE FROM agent_whatsapp_test_numbers WHERE id=? AND agent_id=?`, id, agentID)
@@ -1028,6 +1032,8 @@ func maskNumber(n string) string {
 }
 
 func MaskWhatsAppNumber(raw string) string { return maskNumber(normalizeMSISDN(raw)) }
+
+func NormalizeWhatsAppNumber(raw string) string { return normalizeMSISDN(raw) }
 func nullableString(v *string) any {
 	if v == nil {
 		return nil

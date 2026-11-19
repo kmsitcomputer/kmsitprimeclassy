@@ -59,7 +59,7 @@ IMPLEMENTED = {
     ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py",
     ("DELETE", "/api/v1/agent/whatsapp/events/{event}/template"): "idempotent reset, no-op persistence, event validation, branch scope and conditional AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_resets.py",
     ("GET", "/api/v1/agent/whatsapp/test-numbers"): "masked numbers, max limit, Agen/Admin scope, forbidden roles and agent_id selector compared with read-only DB state by compare_whatsapp_test_numbers.py",
-    ("POST", "/api/v1/agent/whatsapp/test-numbers"): "",
+    ("POST", "/api/v1/agent/whatsapp/test-numbers"): "Laravel accepted/required/max validation, MSISDN normalization, duplicate and 5-number cap behavior, branch scope, resulting rows and conditional audit compared by compare_whatsapp_test_number_add.py",
     ("DELETE", "/api/v1/agent/whatsapp/test-numbers/{id}"): "",
     ("PATCH", "/api/v1/profile"): "",
     ("GET", "/api/v1/profile/email/verification"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("POST", "/api/v1/agent/whatsapp/test-numbers"): "served; write contract probe pending",
     ("DELETE", "/api/v1/agent/whatsapp/test-numbers/{id}"): "served; write contract probe pending",
     ("PATCH", "/api/v1/profile"): "served; write contract probe pending",
     ("GET", "/api/v1/profile/email/verification"): "served; contract probe pending",

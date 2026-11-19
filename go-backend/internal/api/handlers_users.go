@@ -89,6 +89,23 @@ func (s *Server) recordAgentWhatsAppTemplateResetAudit(r *http.Request, actor *a
 	return err
 }
 
+func (s *Server) recordAgentWhatsAppTestNumberAudit(r *http.Request, actor *auth.User, agentID, subjectID int64, event string, properties map[string]any) error {
+	properties["actor_id"] = actor.ID
+	properties["target_agent_id"] = agentID
+	raw, err := json.Marshal(properties)
+	if err != nil {
+		return err
+	}
+	userAgent := r.UserAgent()
+	if len(userAgent) > 500 {
+		userAgent = userAgent[:500]
+	}
+	_, err = s.database.ExecContext(r.Context(), `INSERT INTO activity_logs
+		(causer_id,subject_type,subject_id,event,properties,ip_address,user_agent,created_at)
+		VALUES (?,'App\\Models\\AgentWhatsAppTestNumber',?,?,?,?,?,UTC_TIMESTAMP(6))`, actor.ID, subjectID, event, raw, clientIP(r), userAgent)
+	return err
+}
+
 func (s *Server) recordAgentProfileAudit(r *http.Request, actor *auth.User, agentID int64, old, current any) error {
 	var profileID int64
 	if err := s.database.QueryRowContext(r.Context(), `SELECT id FROM agent_profiles WHERE user_id=?`, agentID).Scan(&profileID); err != nil {
@@ -845,27 +862,78 @@ func (s *Server) handleAgentWhatsAppTestNumberAdd(w http.ResponseWriter, r *http
 		return
 	}
 	var body struct {
-		Number  string `json:"number"`
-		Confirm bool   `json:"confirm_authorized"`
+		Number  json.RawMessage `json:"number"`
+		Confirm json.RawMessage `json:"confirm_authorized"`
+		AgentID json.RawMessage `json:"agent_id"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	if strings.TrimSpace(body.Number) == "" || !body.Confirm {
-		writeError(w, r, httpx.Validation(map[string][]string{"number": requiredField(r.Context(), "number")}))
+	if !whatsAppInputSelectorAllowed(r, body.AgentID, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
 		return
 	}
-	data, err := agentadmin.New(s.database, s.cfg.AppKey).AddWhatsAppTestNumber(r.Context(), actor.ID, agentID, body.Number)
+	fields := map[string][]string{}
+	var number string
+	if len(body.Number) == 0 || strings.TrimSpace(string(body.Number)) == "null" {
+		fields["number"] = []string{i18n.ValidationMessage(i18n.Default, "required", "number")}
+	} else if err := json.Unmarshal(body.Number, &number); err != nil {
+		fields["number"] = []string{i18n.ValidationMessage(i18n.Default, "string", "number")}
+	} else {
+		number = strings.TrimSpace(number)
+		if number == "" {
+			fields["number"] = []string{i18n.ValidationMessage(i18n.Default, "required", "number")}
+		} else if len([]rune(number)) > 20 {
+			fields["number"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "number", "max", "20")}
+		}
+	}
+	if len(body.Confirm) == 0 || strings.TrimSpace(string(body.Confirm)) == "null" || strings.TrimSpace(string(body.Confirm)) == `""` {
+		fields["confirm_authorized"] = []string{i18n.ValidationMessage(i18n.Default, "required", "confirm_authorized")}
+	} else if !parseLaravelAccepted(body.Confirm) {
+		fields["confirm_authorized"] = []string{i18n.ValidationMessage(i18n.Default, "accepted", "confirm_authorized")}
+	}
+	if len(fields) > 0 {
+		httpx.Failure(w, http.StatusUnprocessableEntity, msg(r.Context(), "system.validation_failed"), fields)
+		return
+	}
+	normalized := agentadmin.NormalizeWhatsAppNumber(number)
+	data, created, err := agentadmin.New(s.database, s.cfg.AppKey).AddWhatsAppTestNumber(r.Context(), actor.ID, agentID, number)
 	if err != nil {
 		writeAgentAdminError(w, r, err)
 		return
 	}
-	if err := s.recordAgentAudit(r, actor, agentID, "whatsapp.agent_test_number.registered", map[string]any{"masked": agentadmin.MaskWhatsAppNumber(body.Number)}); err != nil {
-		writeError(w, r, err)
-		return
+	if created {
+		var existingID int64
+		if err := s.database.QueryRowContext(r.Context(), `SELECT id FROM agent_whatsapp_test_numbers WHERE agent_id=? AND msisdn=?`, agentID, normalized).Scan(&existingID); err != nil {
+			writeAgentAdminError(w, r, err)
+			return
+		}
+		if err := s.recordAgentWhatsAppTestNumberAudit(r, actor, agentID, existingID, "whatsapp.agent_test_number.registered", map[string]any{"masked": agentadmin.MaskWhatsAppNumber(number)}); err != nil {
+			writeError(w, r, err)
+			return
+		}
 	}
-	httpx.OK(w, map[string]any{"numbers": data, "max": 5}, "Nomor uji terdaftar.", nil)
+	httpx.OK(w, map[string]any{"numbers": data, "max": 5}, msg(r.Context(), "whatsapp.test_number_registered"), nil)
+}
+
+func parseLaravelAccepted(raw json.RawMessage) bool {
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v
+	case json.Number:
+		return v == "1"
+	case string:
+		return v == "1" || v == "yes" || v == "on"
+	default:
+		return false
+	}
 }
 
 func (s *Server) handleAgentWhatsAppTestNumberDelete(w http.ResponseWriter, r *http.Request) {

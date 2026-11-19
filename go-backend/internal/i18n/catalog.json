@@ -201,12 +201,15 @@
   "voucher.invalid": "messages.voucher.invalid",
   "voucher.not_applicable": "messages.voucher.not_applicable",
   "whatsapp.event_not_configurable": "لا يمكن ضبط هذا الحدث.",
+  "whatsapp.invalid_number": "أدخل رقم WhatsApp صالحًا.",
   "whatsapp.saved": "تم حفظ إعدادات WhatsApp.",
   "whatsapp.scope_forbidden": "غير مصرح لك بإدارة واتساب لهذا الوكيل.",
   "whatsapp.template_braces": "أقواس القالب غير متوازنة أو غير صحيحة. استخدم رموز {متغير} فقط.",
   "whatsapp.template_chars": "يحتوي القالب على أحرف تحكم.",
   "whatsapp.template_length": "يجب أن يكون القالب من 1 إلى :max حرفًا.",
-  "whatsapp.template_unknown_vars": "يستخدم القالب متغيرات غير مسموحة لهذا الحدث: :vars"
+  "whatsapp.template_unknown_vars": "يستخدم القالب متغيرات غير مسموحة لهذا الحدث: :vars",
+  "whatsapp.test_number_registered": "تم تسجيل رقم الاختبار.",
+  "whatsapp.test_numbers_limit": "الحد الأقصى :max أرقام اختبار لكل وكيل."
  },
  "en": {
   "address.created": "Address saved successfully.",
@@ -385,12 +388,15 @@
   "voucher.invalid": "messages.voucher.invalid",
   "voucher.not_applicable": "messages.voucher.not_applicable",
   "whatsapp.event_not_configurable": "This event cannot be configured.",
+  "whatsapp.invalid_number": "Enter a valid WhatsApp number.",
   "whatsapp.saved": "WhatsApp settings saved.",
   "whatsapp.scope_forbidden": "You are not authorised to manage WhatsApp for this Agent.",
   "whatsapp.template_braces": "The template has an unbalanced or malformed {brace}. Use only {variable} tokens.",
   "whatsapp.template_chars": "The template contains control characters.",
   "whatsapp.template_length": "The template must be 1–:max characters.",
-  "whatsapp.template_unknown_vars": "The template uses variables that are not allowed for this event: :vars"
+  "whatsapp.template_unknown_vars": "The template uses variables that are not allowed for this event: :vars",
+  "whatsapp.test_number_registered": "Test number registered.",
+  "whatsapp.test_numbers_limit": "At most :max test numbers per Agent."
  },
  "id": {
   "address.created": "Alamat berhasil disimpan.",
@@ -605,12 +611,15 @@
   "voucher.invalid": "messages.voucher.invalid",
   "voucher.not_applicable": "messages.voucher.not_applicable",
   "whatsapp.event_not_configurable": "Peristiwa ini tidak dapat diatur.",
+  "whatsapp.invalid_number": "Masukkan nomor WhatsApp yang valid.",
   "whatsapp.saved": "Pengaturan WhatsApp disimpan.",
   "whatsapp.scope_forbidden": "Anda tidak berwenang mengelola WhatsApp untuk Agen ini.",
   "whatsapp.template_braces": "Template memiliki tanda kurung {} yang tidak seimbang atau salah. Gunakan hanya token {variabel}.",
   "whatsapp.template_chars": "Template mengandung karakter kontrol.",
   "whatsapp.template_length": "Template harus 1–:max karakter.",
-  "whatsapp.template_unknown_vars": "Template memakai variabel yang tidak diizinkan untuk event ini: :vars"
+  "whatsapp.template_unknown_vars": "Template memakai variabel yang tidak diizinkan untuk event ini: :vars",
+  "whatsapp.test_number_registered": "Nomor uji didaftarkan.",
+  "whatsapp.test_numbers_limit": "Maksimal :max nomor uji per Agen."
  },
  "zh": {
   "address.created": "地址保存成功。",
@@ -814,11 +823,14 @@
   "voucher.invalid": "messages.voucher.invalid",
   "voucher.not_applicable": "messages.voucher.not_applicable",
   "whatsapp.event_not_configurable": "此事件不可配置。",
+  "whatsapp.invalid_number": "请输入有效的 WhatsApp 号码。",
   "whatsapp.saved": "WhatsApp 设置已保存。",
   "whatsapp.scope_forbidden": "您无权管理该代理的 WhatsApp。",
   "whatsapp.template_braces": "模板的大括号不平衡或格式错误。请仅使用 {变量} 标记。",
   "whatsapp.template_chars": "模板包含控制字符。",
   "whatsapp.template_length": "模板必须为 1–:max 个字符。",
-  "whatsapp.template_unknown_vars": "模板使用了此事件不允许的变量：:vars"
+  "whatsapp.template_unknown_vars": "模板使用了此事件不允许的变量：:vars",
+  "whatsapp.test_number_registered": "测试号码已登记。",
+  "whatsapp.test_numbers_limit": "每个代理最多 :max 个测试号码。"
  }
 }

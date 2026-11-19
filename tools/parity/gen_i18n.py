@@ -177,6 +177,9 @@ KEYS = {
         "template_chars",
         "template_braces",
         "template_unknown_vars",
+        "invalid_number",
+        "test_numbers_limit",
+        "test_number_registered",
     ],
     "user": [
         "created",
