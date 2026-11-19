@@ -490,6 +490,15 @@ on fee routes (mismatched product/variation still resolves — Laravel quirk), F
 REMAINING in products: images (multipart create/reorder/delete), variation attributes, manage/products
 list read, catalog_skus edge cases — harness scenarios 7+ to be added next.
 
+**DONE — HTMLPurifier policy (Phase 1C core):** SanitizeLaravelHTML now reproduces
+HtmlSanitizerService byte-for-byte on 10 golden fixtures probed against the RUNNING reference
+(style="text-align:center;" trailing semicolon + no space after colon, void elements `<img />`/`<br />`,
+TargetBlank forcing every absolute http(s) link to target="_blank" rel="noreferrer noopener",
+mailto/relative links keeping NO rel, `javascript:` hrefs collapsing to a bare `<a>` that bluemonday
+would delete — solved with a sentinel href the pre-strip plants and the post-pass converts back, onclick
+stripped, table/iframe/script unwrapped, `<figure>` unwrapped to the inner `<img>`). The legacy regexp
+sanitizer and its duplicates were removed; bluemonday allowlist unchanged (same CKEditor vocabulary).
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 
