@@ -62,3 +62,4 @@ deploy/output/
 
 # Python bytecode from the parity tooling.
 __pycache__/
+go-backend/storage/
