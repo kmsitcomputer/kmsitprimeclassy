@@ -14,16 +14,26 @@ package orders
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
 )
 
+// publicBase is the APP_URL the asset URLs are built against (set once at boot).
+var publicBase string
+
+// SetPublicBase configures the absolute asset base used by the order/proof renderers.
+func SetPublicBase(base string) { publicBase = strings.TrimRight(base, "/") }
+
 // Viewer is the authenticated caller reduced to what rendering may consult.
 type Viewer struct {
-	ID    int64
-	Roles []string
+	ID      int64
+	Roles   []string
+	Role    string
+	AgentID *int64
 }
 
 func (v Viewer) hasRole(roles ...string) bool {
@@ -108,9 +118,10 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		"delivery_date_estimate": renderDate(order.DeliveryDate),
 		"cancellation_reason":    nullableString(order.CancellationReason),
 		// G17: which authoritative origin owns the transaction. A CRM order is a different shape (staff-facing).
-		"buyer_origin": "account",
-		// `couriers` is ONE entry per DISTINCT courier actually assigned; a fresh order has none.
-		"couriers":                []any{},
+		"buyer_origin": buyerOrigin(order.CrmCustomerID != nil),
+		"crm_customer": crmCustomer(order),
+		// `couriers` is ONE entry per DISTINCT courier actually assigned (never a placeholder block).
+		"couriers":                couriersFor(order.Shipments),
 		"items":                   renderItems(order.Items, viewer, order.LoadItemShipment),
 		"shipment_delivery_dates": shipmentDates,
 		"delivery_groups":         deliveryGroups(order.Items),
@@ -120,11 +131,13 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		out[key] = value
 	}
 
-	// `viewer_can_download_invoice`: present for every authenticated viewer; the value is the viewInvoice
-	// capability (own konsumen, or super_admin/agen/admin/keuangan/sales/korsal) AND the invoice is issued or
-	// eligible. An operational viewer (gudang) has view() but NOT viewInvoice, so the key renders false here.
-	out["viewer_can_download_invoice"] = (viewer.hasRole("konsumen") || viewer.seesFinancials()) &&
-		(order.InvoiceIssuedAt != nil || viewer.seesFinancials())
+	// `viewer_can_download_invoice`: present for every authenticated viewer; the value is OrderPolicy::viewInvoice
+	// (view() AND the invoice-audience role list) AND the invoice is issued or eligible.
+	canDownload, err := s.viewerCanDownloadInvoice(ctx, viewer, order)
+	if err != nil {
+		return nil, err
+	}
+	out["viewer_can_download_invoice"] = canDownload
 
 	// `agent_id` is branch ROUTING data, exposed only to the courier-assignment roles.
 	if viewer.hasRole("super_admin", "agen", "admin", "koordinator-kurir") {
@@ -141,36 +154,68 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		if order.KonsumenID != nil {
 			if konsumen, err := s.loadKonsumenUser(order.KonsumenID); err == nil && konsumen != nil {
 				out["konsumen"] = konsumen
+			} else if err != nil {
+				return nil, err
 			}
+		} else {
+			// A CRM-origin order has no account buyer: whenLoaded('konsumen') renders the key as null.
+			out["konsumen"] = nil
 		}
 		if !viewer.hasRole("konsumen") {
 			if order.SalesID != nil {
 				if sales, err := s.loadTinyUser(order.SalesID); err == nil && sales != nil {
 					out["sales"] = sales
+				} else if err != nil {
+					return nil, err
 				}
+			} else {
+				out["sales"] = nil
 			}
 			if order.KorsalID != nil {
 				if korsal, err := s.loadTinyUser(order.KorsalID); err == nil && korsal != nil {
 					out["korsal"] = korsal
+				} else if err != nil {
+					return nil, err
 				}
+			} else {
+				out["korsal"] = nil
 			}
 		}
 	}
 
-	if seesFinancials && order.PaymentMethod != nil {
+	if seesFinancials && order.LoadPaymentMethod && order.PaymentMethod != nil {
 		out["payment_method"] = map[string]any{
 			"code": order.PaymentMethod.Code,
 			"name": order.PaymentMethod.Name,
 			"type": order.PaymentMethod.Type,
 		}
 	}
-	if seesFinancials && order.LoadFinancialRelations && order.Payment != nil {
-		out["payment_transaction"] = renderPaymentTransaction(order.Payment)
+	// `payment_transaction` renders only when the paymentTransactions relation was loaded (and non-empty):
+	// `when(seesFinancials && relationLoaded('paymentTransactions') && isNotEmpty, ...)`.
+	if seesFinancials && order.LoadPaymentTransactions && order.Payment != nil {
+		out["payment_transaction"] = renderPaymentTransaction(order.Payment,
+			order.LoadTransactionVerification, order.LoadTransactionCodProof)
 	}
-	// `returns`: the loaded returnRequests relation — present only on the SHOW controller (which loads it);
-	// the list omits the key entirely.
-	if order.LoadFinancialRelations {
+	// `returns`: present only when the returnRequests relation was loaded — the SHOW controller loads it,
+	// the list and every payment response leave it absent.
+	if order.LoadReturns {
 		out["returns"] = []any{}
+	}
+	// `fulfillment_shortage`: gated on relationLoaded('paymentTransactions') && the Admin-decision roles.
+	if order.LoadPaymentTransactions && viewer.hasRole("super_admin", "agen", "admin") {
+		shortage, err := s.fulfillmentShortageForOrder(ctx, order.ID)
+		if err != nil {
+			return nil, err
+		}
+		out["fulfillment_shortage"] = shortage
+	}
+	// `delivery_verifications`: the append-only Admin history — order-level relation, Admin/Super Admin only.
+	if order.LoadDeliveryVerifications && viewer.hasRole("super_admin", "admin") {
+		verifications, err := s.loadDeliveryVerifications(ctx, order.ID)
+		if err != nil {
+			return nil, err
+		}
+		out["delivery_verifications"] = verifications
 	}
 	return out, nil
 }
@@ -231,24 +276,152 @@ func renderItems(items []Item, viewer Viewer, withShipment bool) []any {
 	return out
 }
 
-// renderPaymentTransaction is PaymentTransactionResource::toArray for the show path (the two verification
-// relations are loaded-but-null for a fresh order, so both keys render null).
-func renderPaymentTransaction(p *PaymentTransaction) map[string]any {
-	instructions := p.Instructions
-	if instructions == nil {
-		instructions = map[string]any{}
+// renderPaymentTransaction is PaymentTransactionResource::toArray. `whenLoaded` semantics rule the two
+// verification keys: a relation the controller did NOT load OMITS the key entirely, while a loaded-but-null
+// relation renders null. Laravel:
+//
+//	whenLoaded('bankTransferVerification', fn () => ...) — func_num_args() < 3 → default = MissingValue,
+//	so an unloaded relation drops the key; a loaded one renders null or the object.
+func renderPaymentTransaction(p *PaymentTransaction, loadVerification, loadCodProof bool) map[string]any {
+	var instructions any
+	if p.Instructions != nil {
+		instructions = p.Instructions
+	}
+	out := map[string]any{
+		"id":                p.ID,
+		"type":              p.Type,
+		"amount":            money.String(p.Amount),
+		"status":            p.Status,
+		"gateway_reference": nullableString(p.GatewayReference),
+		"instructions":      instructions,
+		"paid_at":           renderTimePtr(p.PaidAt),
+	}
+	if loadVerification {
+		out["bank_transfer_verification"] = renderBankVerification(p.Verification, p.Amount)
+	}
+	if loadCodProof {
+		out["cod_payment_proof"] = renderCodProof(p.CodProof)
+	}
+	return out
+}
+
+// renderBankVerification is the bank_transfer_verification sub-object.
+func renderBankVerification(v *BankTransferVerification, fallbackAmount float64) any {
+	if v == nil {
+		return nil
+	}
+	var proofURL any
+	if v.ProofImagePath != "" {
+		if v.ProofDisk == "local" {
+			proofURL = fmt.Sprintf("/api/v1/payment-proofs/%d", v.ID)
+		} else {
+			proofURL = storageURL(v.ProofImagePath)
+		}
 	}
 	return map[string]any{
-		"id":                         p.ID,
-		"type":                       p.Type,
-		"amount":                     money.String(p.Amount),
-		"status":                     p.Status,
-		"gateway_reference":          nullableString(p.GatewayReference),
-		"instructions":               instructions,
-		"paid_at":                    nil,
-		"bank_transfer_verification": nil,
-		"cod_payment_proof":          nil,
+		"id":                       v.ID,
+		"status":                   v.Status,
+		"proof_url":                proofURL,
+		"proof_private":            v.ProofDisk == "local",
+		"channel":                  v.Channel,
+		"submitted_amount":         submittedAmountOr(v.SubmittedAmount, fallbackAmount),
+		"verified_amount":          moneyPtrOrNil(v.VerifiedAmount),
+		"amount_adjustment_reason": nullableString(v.AmountAdjustmentReason),
+		"cash_received_by":         v.CashReceivedBy,
+		"cash_received_at":         renderTimePtr(v.CashReceivedAt),
+		"receipt_reference":        nullableString(v.ReceiptReference),
+		"rejection_reason":         nullableString(v.RejectionReason),
+		"submitted_on_behalf":      v.SubmittedOnBehalf,
+		"submitted_by":             v.SubmittedBy,
+		"paid_by":                  nullableString(v.PaidByRole),
+		"submitted_at":             renderTimePtr(v.SubmittedAt),
+		"verified_by":              v.VerifiedBy,
+		"verified_at":              renderTimePtr(v.VerifiedAt),
 	}
+}
+
+// renderCodProof is the cod_payment_proof sub-object.
+func renderCodProof(p *CodPaymentProof) any {
+	if p == nil {
+		return nil
+	}
+	var proofURL any
+	if p.ProofPath != "" {
+		proofURL = storageURL(p.ProofPath)
+	}
+	return map[string]any{
+		"id":                  p.ID,
+		"status":              p.Status,
+		"proof_url":           proofURL,
+		"rejection_reason":    nullableString(p.RejectionReason),
+		"submitted_on_behalf": p.SubmittedOnBehalf,
+		"submitted_by":        p.SubmittedBy,
+		"paid_by":             nullableString(p.PaidByRole),
+		"submitted_at":        renderTimePtr(p.SubmittedAt),
+		"verified_by":         p.ConfirmedByUser,
+		"verified_at":         renderTimePtr(p.ConfirmedAt),
+	}
+}
+
+// couriersFor is OrderResource::couriers — ONE entry per DISTINCT courier across the order's shipments,
+// in shipment order (pluck → filter → unique('id') keeps the first occurrence).
+func couriersFor(shipments []Shipment) []any {
+	out := []any{}
+	seen := map[int64]bool{}
+	for _, shipment := range shipments {
+		if shipment.CourierID == nil || shipment.CourierName == nil || seen[*shipment.CourierID] {
+			continue
+		}
+		seen[*shipment.CourierID] = true
+		out = append(out, map[string]any{
+			"name":  *shipment.CourierName,
+			"phone": nullableString(shipment.CourierPhone),
+		})
+	}
+	return out
+}
+
+// buyerOrigin is Order::isCrmOrigin ? 'crm' : 'account'.
+func buyerOrigin(crm bool) string {
+	if crm {
+		return "crm"
+	}
+	return "account"
+}
+
+// crmCustomer is the staff-facing CRM identity block, present only on CRM-origin orders.
+func crmCustomer(order *Order) any {
+	if order.CrmCustomerID == nil {
+		return nil
+	}
+	return map[string]any{
+		"id":    *order.CrmCustomerID,
+		"name":  nullableString(order.BuyerNameSnapshot),
+		"phone": nullableString(order.BuyerPhoneSnapshot),
+	}
+}
+
+// storageURL mirrors Storage::disk('public')->url(): APP_URL + /storage + path (relative when unset).
+func storageURL(path string) string {
+	base := publicBase
+	if base == "" {
+		return "/storage/" + strings.TrimLeft(path, "/")
+	}
+	return base + "/storage/" + strings.TrimLeft(path, "/")
+}
+
+func submittedAmountOr(v *float64, fallback float64) any {
+	if v == nil {
+		return money.String(fallback)
+	}
+	return money.String(*v)
+}
+
+func moneyPtrOrNil(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return money.String(*v)
 }
 
 // deliveryGroups is the derived R-03 projection: one group per requested delivery date. There is no group table;

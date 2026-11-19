@@ -173,7 +173,7 @@ func (s *Server) handleOrderStore(w http.ResponseWriter, r *http.Request) {
 
 // viewerOf reduces an authenticated user to the renderer's viewer.
 func viewerOf(u *auth.User) orders.Viewer {
-	return orders.Viewer{ID: u.ID, Roles: auth.SlugsFor(u.Role)}
+	return orders.Viewer{ID: u.ID, Roles: auth.SlugsFor(u.Role), Role: u.Role, AgentID: u.AgentID}
 }
 
 func derefOrEmpty(v *string) string {

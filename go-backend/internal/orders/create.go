@@ -86,6 +86,7 @@ type Order struct {
 	DPAmount           float64
 	PaidAmount         float64
 	RemainingAmount    float64
+	GrossReceived      float64
 	RecipientName      string
 	RecipientPhone     string
 	Address            string
@@ -119,14 +120,26 @@ type Order struct {
 	Shipments     []Shipment
 	Payment       *PaymentTransaction
 	PaymentMethod *PaymentMethod
-	// LoadActors mirrors create vs show/cancel relation loading: create() loads ONLY
-	// items + shipments.courier.user + paymentMethod + paymentTransactions, so konsumen/sales/korsal are ABSENT
-	// there. show()/cancel() load them. LoadItemShipment gates the item's delivery_mode/self_delivered_by_user_id.
-	LoadActors       bool
-	LoadItemShipment bool
-	// LoadFinancialRelations gates the payment_transaction + returns keys: the SHOW controller loads
-	// paymentTransactions and returnRequests, the INDEX does NOT (so those keys are absent from the list).
-	LoadFinancialRelations bool
+	// The flags below mirror Laravel's relationLoaded() exactly, because every `whenLoaded(...)` in
+	// OrderResource is a JSON-presence rule, not a null: an UNLOADED relation OMITS the key while a
+	// loaded-but-null relation renders null.
+	//
+	//   create:        items, shipments.courier.user, paymentMethod, paymentTransactions.bankTransferVerification
+	//   index:         + items.shipment.courier.user, items.shipment.proof, konsumen, sales, korsal
+	//   show:          + paymentTransactions.codPaymentProof.proof, returnRequests, deliveryVerifications
+	//   status/cancel: items.shipment.*, konsumen, sales, korsal (cancel adds paymentMethod; status does NOT)
+	//   markCod/settle/confirmCodProof: items (NO shipment), paymentMethod, paymentTransactions with exactly
+	//                  ONE verification relation each.
+	LoadActors        bool
+	LoadItemShipment  bool
+	LoadPaymentMethod bool
+	// LoadPaymentTransactions gates the payment_transaction key AND the fulfillment_shortage key.
+	LoadPaymentTransactions bool
+	// The two verification relations the controller eager loaded on paymentTransactions.
+	LoadTransactionVerification bool
+	LoadTransactionCodProof     bool
+	LoadReturns                 bool
+	LoadDeliveryVerifications   bool
 }
 
 // Item is one persisted order line.
@@ -169,6 +182,8 @@ type Shipment struct {
 	DistanceKm           *float64
 	RatePerKm            *float64
 	ShippingFeeSnapshot  float64
+	CourierName          *string
+	CourierPhone         *string
 }
 
 // PaymentMethod is the chosen method.
@@ -182,12 +197,20 @@ type PaymentMethod struct {
 // PaymentTransaction is the initiated transaction.
 type PaymentTransaction struct {
 	ID               int64
+	OrderID          int64
+	PaymentMethodID  int64
 	Type             string
 	Amount           float64
 	Status           string
 	GatewayReference *string
+	PaidAt           *time.Time
 	// Instructions is the decoded raw_payload (the reference's `instructions` key).
 	Instructions map[string]any
+	// whenLoaded semantics: the two verification relations only render when the controller loaded them.
+	LoadVerification bool
+	Verification     *BankTransferVerification
+	LoadCodProof     bool
+	CodProof         *CodPaymentProof
 }
 
 // Problem is a domain failure with an API status.

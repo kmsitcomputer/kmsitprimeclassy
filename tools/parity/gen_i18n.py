@@ -110,6 +110,36 @@ KEYS = {
         "method_not_available_for_role",
         "method_not_available_for_shipping",
         "unsupported_method_type",
+        "proof_locked",
+        "on_behalf_forbidden",
+        "order_not_awaiting_proof",
+        "proof_submitted",
+        "verified",
+        "rejected",
+        "already_verified",
+        "order_not_cod",
+        "cod_status_updated",
+        "cod_proof_submitted",
+        "cod_proof_confirmed",
+        "cod_proof_already_processed",
+        "cod_proof_not_found",
+        "not_dp_order",
+        "nothing_to_settle",
+        "self_verification_forbidden",
+        "verified_amount_exceeds_remaining",
+        "verified_amount_exceeds_submitted",
+        "adjustment_reason_required",
+        "installment_not_for_cod",
+        "payment_limit_reached",
+        "third_payment_must_settle",
+        "overpayment_refused",
+        "expedition_full_payment_only",
+        "cod_undo_not_allowed",
+        "installment_not_allowed_yet",
+        "installment_amount_invalid",
+        "settlement_requested",
+        "settlement_replayed",
+        "already_processed",
     ],
     "product": [
         "variation_required",
@@ -129,10 +159,12 @@ KEYS = {
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
-                   "string", "array", "unique", "after_or_equal", "not_in"]
+                   "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes",
+                   "image", "file", "required_if", "before_or_equal"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
-                     ("min", "string"), ("between", "numeric")]
+                     ("min", "string"), ("between", "numeric"), ("gt", "numeric"), ("gt", "file"),
+                     ("max", "file")]
 
 LOCALES = ["id", "en", "ar", "zh"]
 

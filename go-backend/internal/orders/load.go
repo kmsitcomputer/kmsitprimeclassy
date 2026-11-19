@@ -15,7 +15,7 @@ func (s *Service) loadOrder(ctx context.Context, orderID, paymentTxnID int64) (*
 		o                               Order
 		subtotal, shippingFee, adminFee string
 		discount, total, dp, paid       string
-		remaining                       string
+		remaining, grossReceived        string
 		villageSnap, districtSnap       sql.NullString
 		regencySnap, provinceSnap       sql.NullString
 		lat, lng                        sql.NullString
@@ -37,7 +37,8 @@ func (s *Service) loadOrder(ctx context.Context, orderID, paymentTxnID int64) (*
 	err := s.Database.QueryRowContext(ctx, `SELECT id, order_no, status, payment_status,
 			CAST(subtotal_amount AS CHAR), CAST(shipping_fee_amount AS CHAR), CAST(admin_fee_amount AS CHAR),
 			CAST(discount_amount AS CHAR), CAST(total_amount AS CHAR), CAST(dp_amount AS CHAR),
-			CAST(paid_amount AS CHAR), CAST(remaining_amount AS CHAR), voucher_id,
+			CAST(paid_amount AS CHAR), CAST(remaining_amount AS CHAR), CAST(gross_received_amount AS CHAR),
+			voucher_id,
 			recipient_name_snapshot, recipient_phone_snapshot, address_snapshot,
 			village_snapshot, district_snapshot, regency_snapshot, province_snapshot,
 			CAST(latitude_snapshot AS CHAR), CAST(longitude_snapshot AS CHAR),
@@ -48,7 +49,8 @@ func (s *Service) loadOrder(ctx context.Context, orderID, paymentTxnID int64) (*
 			payment_method_id, created_at
 		FROM orders WHERE id = ?`, orderID).
 		Scan(&o.ID, &o.OrderNo, &o.Status, &o.PaymentStatus,
-			&subtotal, &shippingFee, &adminFee, &discount, &total, &dp, &paid, &remaining, &voucherID,
+			&subtotal, &shippingFee, &adminFee, &discount, &total, &dp, &paid, &remaining, &grossReceived,
+			&voucherID,
 			&o.RecipientName, &o.RecipientPhone, &o.Address,
 			&villageSnap, &districtSnap, &regencySnap, &provinceSnap, &lat, &lng,
 			&provinceID, &regencyID, &districtID, &villageID, &postalCode,
@@ -68,6 +70,7 @@ func (s *Service) loadOrder(ctx context.Context, orderID, paymentTxnID int64) (*
 	o.DPAmount = parseString(dp)
 	o.PaidAmount = parseString(paid)
 	o.RemainingAmount = parseString(remaining)
+	o.GrossReceived = parseString(grossReceived)
 	o.VoucherID = nullIntPtr(voucherID)
 	o.VillageSnapshot = nullStringPtr(villageSnap)
 	o.DistrictSnapshot = nullStringPtr(districtSnap)
@@ -118,18 +121,15 @@ func (s *Service) loadOrder(ctx context.Context, orderID, paymentTxnID int64) (*
 		return nil, err
 	}
 	o.Shipments = shipments
+	// create / index / show / cancel all eager load paymentMethod; the status controller clears it.
+	o.LoadPaymentMethod = true
 
 	if paymentTxnID > 0 {
-		var p PaymentTransaction
-		var amount sql.NullString
-		var reference sql.NullString
-		err := s.Database.QueryRowContext(ctx, `SELECT id, type, CAST(amount AS CHAR), status, gateway_reference
-			FROM payment_transactions WHERE id = ?`, paymentTxnID).
-			Scan(&p.ID, &p.Type, &amount, &p.Status, &reference)
+		o.LoadPaymentTransactions = true
+		o.LoadTransactionVerification = true
+		p, err := s.loadPaymentTransaction(ctx, s.Database, paymentTxnID, false)
 		if err == nil {
-			p.Amount = parseString(amount.String)
-			p.GatewayReference = nullStringPtr(reference)
-			o.Payment = &p
+			o.Payment = p
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -191,10 +191,13 @@ func (s *Service) loadItems(ctx context.Context, orderID int64) ([]Item, error) 
 }
 
 func (s *Service) loadShipments(ctx context.Context, orderID int64) ([]Shipment, error) {
-	rows, err := s.Database.QueryContext(ctx, `SELECT id, courier_id, shipping_provider_id, shipping_provider_code,
-			status, delivery_mode, self_delivered_by_user_id, CAST(distance_km AS CHAR),
-			CAST(rate_per_km AS CHAR), CAST(shipping_fee_snapshot AS CHAR)
-		FROM shipments WHERE order_id = ? ORDER BY id`, orderID)
+	rows, err := s.Database.QueryContext(ctx, `SELECT sh.id, sh.courier_id, sh.shipping_provider_id, sh.shipping_provider_code,
+			sh.status, sh.delivery_mode, sh.self_delivered_by_user_id, CAST(sh.distance_km AS CHAR),
+			CAST(sh.rate_per_km AS CHAR), CAST(sh.shipping_fee_snapshot AS CHAR), c.name, u.phone
+		FROM shipments sh
+		LEFT JOIN couriers c ON c.id = sh.courier_id
+		LEFT JOIN users u ON u.id = c.user_id
+		WHERE sh.order_id = ? ORDER BY sh.id`, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,11 +210,14 @@ func (s *Service) loadShipments(ctx context.Context, orderID int64) ([]Shipment,
 			courierID, providerID, selfDel sql.NullInt64
 			providerCode, distance         sql.NullString
 			ratePerKm, fee                 sql.NullString
+			courierName, courierPhone      sql.NullString
 		)
 		if err := rows.Scan(&sh.ID, &courierID, &providerID, &providerCode, &sh.Status, &sh.DeliveryMode,
-			&selfDel, &distance, &ratePerKm, &fee); err != nil {
+			&selfDel, &distance, &ratePerKm, &fee, &courierName, &courierPhone); err != nil {
 			return nil, err
 		}
+		sh.CourierName = nullStringPtr(courierName)
+		sh.CourierPhone = nullStringPtr(courierPhone)
 		sh.CourierID = nullIntPtr(courierID)
 		sh.ShippingProviderID = nullIntPtr(providerID)
 		sh.ShippingProviderCode = nullStringPtr(providerCode)

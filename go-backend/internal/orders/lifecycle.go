@@ -158,6 +158,7 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*Orde
 	}
 	order.LoadActors = true
 	order.LoadItemShipment = true
+	order.LoadPaymentMethod = false
 	return order, nil
 }
 

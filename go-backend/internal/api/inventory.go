@@ -142,6 +142,15 @@ func implementsRoute(method, path string) bool {
 		"PATCH /api/v1/orders/{order}/items/{item}/reschedule",
 		"GET /api/v1/orders/{order}/items/{item}/cancel-eligibility",
 		"POST /api/v1/orders/{order}/items/{item}/cancel-undelivered",
+		"POST /api/v1/orders/{order}/payment/proof",
+		"POST /api/v1/orders/{order}/payment/cod-proof",
+		"POST /api/v1/orders/{order}/payment/installment",
+		"GET /api/v1/payment-proofs/{verification}",
+		"PUT /api/v1/orders/{order}/due-date",
+		"PATCH /api/v1/orders/{order}/payment/cod",
+		"POST /api/v1/orders/{order}/payment/verify",
+		"POST /api/v1/orders/{order}/payment/settle",
+		"PATCH /api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm",
 		"GET /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/sub-adjustment-requests",
@@ -191,6 +200,18 @@ func implementsRoute(method, path string) bool {
 			if method == http.MethodPatch && parts[1] == "status" {
 				return true
 			}
+			if method == http.MethodPut && parts[1] == "due-date" {
+				return true
+			}
+		}
+		// /api/v1/orders/<id>/payment/(proof|cod-proof|installment|cod|verify|settle).
+		if len(parts) == 3 && parts[1] == "payment" {
+			switch parts[2] {
+			case "proof", "cod-proof", "installment", "verify", "settle":
+				return method == http.MethodPost
+			case "cod":
+				return method == http.MethodPatch
+			}
 		}
 		// /api/v1/orders/<id>/items/<item>/(fulfillment|reschedule|cancel-eligibility|cancel-undelivered).
 		if len(parts) == 4 && parts[0] != "" && parts[1] == "items" && parts[2] != "" {
@@ -203,6 +224,15 @@ func implementsRoute(method, path string) bool {
 				return method == http.MethodPost
 			}
 		}
+	}
+	// /api/v1/payment-proofs/<id> (GET) and /api/v1/admin/cod-payment-proofs/<id>/confirm (PATCH).
+	if strings.HasPrefix(path, "/api/v1/payment-proofs/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/payment-proofs/"), "/")
+		return len(parts) == 1 && parts[0] != "" && method == http.MethodGet
+	}
+	if strings.HasPrefix(path, "/api/v1/admin/cod-payment-proofs/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/admin/cod-payment-proofs/"), "/")
+		return len(parts) == 2 && parts[0] != "" && parts[1] == "confirm" && method == http.MethodPatch
 	}
 	// /api/v1/sub-stock/requests/<id> and /<id>/(approve|reject|cancel|execute|receive).
 	if strings.HasPrefix(path, "/api/v1/sub-stock/requests/") {

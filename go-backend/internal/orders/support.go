@@ -890,6 +890,15 @@ func (s *Service) captureInitialSnapshot(ctx context.Context, tx *sql.Tx, orderI
 // `properties` has a json_valid() CHECK, so the value is always real JSON, and an empty property set is persisted
 // as NULL (the reference's `?: null`) rather than "{}".
 func logActivity(ctx context.Context, tx *sql.Tx, actorID, orderID int64, event string, properties map[string]any, ip, userAgent string) error {
+	return logActivityDescribed(ctx, tx, actorID, "App\\Models\\Order", orderID, event, nil, properties, ip, userAgent)
+}
+
+// logActivityDescribed is ActivityLogger::log with its optional description argument and an explicit subject —
+// the payment flow audits with the rejection/adjustment reason as the description, and the additional-payment
+// settlement audits with the OrderAdditionalPayment model itself as the subject.
+func logActivityDescribed(ctx context.Context, tx *sql.Tx, actorID int64, subjectType string, subjectID int64,
+	event string, description *string, properties map[string]any, ip, userAgent string) error {
+
 	var payload any
 	if len(properties) > 0 {
 		raw, err := json.Marshal(redactProperties(properties))
@@ -898,10 +907,20 @@ func logActivity(ctx context.Context, tx *sql.Tx, actorID, orderID int64, event 
 		}
 		payload = string(raw)
 	}
+	var described any
+	if description != nil {
+		described = *description
+	}
+	// Laravel's ActivityLogger takes a ?int causerId — several payment flows call it WITHOUT an actor
+	// (cod_collected / cod_unmarked / refund_processed), so their invoice.issued rows carry causer NULL.
+	var causer any
+	if actorID > 0 {
+		causer = actorID
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO activity_logs
 		(causer_id, subject_type, subject_id, event, description, properties, ip_address, user_agent, created_at)
-		VALUES (?, ?, ?, ?, NULL, ?, ?, ?, UTC_TIMESTAMP())`,
-		actorID, "App\\Models\\Order", orderID, event, payload,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+		causer, subjectType, subjectID, event, described, payload,
 		nullIfEmpty(ip), nullIfEmpty(truncate(userAgent, 500)))
 	return err
 }

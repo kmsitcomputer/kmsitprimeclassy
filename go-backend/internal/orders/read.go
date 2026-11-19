@@ -415,7 +415,12 @@ func (s *Service) LoadOrderForRead(ctx context.Context, orderID int64, full bool
 	if !full {
 		return order, nil
 	}
-	order.LoadFinancialRelations = true
+	order.LoadPaymentMethod = true
+	order.LoadPaymentTransactions = true
+	order.LoadTransactionVerification = true
+	order.LoadTransactionCodProof = true
+	order.LoadReturns = true
+	order.LoadDeliveryVerifications = true
 
 	// The most recent payment transaction (by id), if any.
 	var paymentID int64

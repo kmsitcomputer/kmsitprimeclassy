@@ -124,6 +124,15 @@ func (s *Server) routes() {
 	s.mux.Handle("PATCH /api/v1/orders/{order}/items/{item}/reschedule", chain(http.HandlerFunc(s.handleOrderItemReschedule), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("GET /api/v1/orders/{order}/items/{item}/cancel-eligibility", chain(http.HandlerFunc(s.handleOrderItemCancelEligibility), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("POST /api/v1/orders/{order}/items/{item}/cancel-undelivered", chain(http.HandlerFunc(s.handleOrderItemCancelUndelivered), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("POST /api/v1/orders/{order}/payment/proof", chain(http.HandlerFunc(s.handlePaymentProof), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/orders/{order}/payment/cod-proof", chain(http.HandlerFunc(s.handlePaymentCodProof), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/orders/{order}/payment/installment", chain(http.HandlerFunc(s.handlePaymentInstallment), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("GET /api/v1/payment-proofs/{verification}", chain(http.HandlerFunc(s.handlePaymentProofFile), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("PUT /api/v1/orders/{order}/due-date", chain(http.HandlerFunc(s.handleOrderDueDate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,admin,keuangan")))
+	s.mux.Handle("PATCH /api/v1/orders/{order}/payment/cod", chain(http.HandlerFunc(s.handlePaymentMarkCod), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,keuangan")))
+	s.mux.Handle("POST /api/v1/orders/{order}/payment/verify", chain(http.HandlerFunc(s.handlePaymentVerify), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,keuangan")))
+	s.mux.Handle("POST /api/v1/orders/{order}/payment/settle", chain(http.HandlerFunc(s.handlePaymentSettle), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,keuangan")))
+	s.mux.Handle("PATCH /api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm", chain(http.HandlerFunc(s.handleCodProofConfirm), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,keuangan")))
 	s.mux.Handle("POST /api/v1/orders", chain(http.HandlerFunc(s.handleOrderStore),
 		RequireAuth, s.RequireAgentLinked,
 		RequireRole("konsumen,agen,korsal,sales,sales-kurir-sub"),
