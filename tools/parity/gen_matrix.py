@@ -66,7 +66,7 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/profile/referral-code"): "format/required/max/unique validation, success projection, self-scope and audit compared by compare_profile_referral.py",
     ("POST", "/api/v1/profile/referral-code/regenerate"): "generated role prefix/code format, response, DB update and audit compared by compare_profile_referral.py",
     ("DELETE", "/api/v1/profile/referral-code"): "response, cleared code, and old-only audit projection compared by compare_profile_referral.py",
-    ("GET", "/api/v1/cms/homepage-blocks"): "",
+    ("GET", "/api/v1/cms/homepage-blocks"): "resource projection, sort order, Super Admin gate, and read-only state compared by compare_cms_homepage_blocks.py",
     ("POST", "/api/v1/cms/homepage-blocks"): "",
     ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("GET", "/api/v1/cms/homepage-blocks"): "served; contract probe pending",
     ("POST", "/api/v1/cms/homepage-blocks"): "served; HTMLPurifier policy NOT ported — write paths must not be treated as parity-complete",
     ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",

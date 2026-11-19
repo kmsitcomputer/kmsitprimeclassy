@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 153 |
-| PARTIAL (incomplete behaviour) | 39 |
+| Fully GO | 154 |
+| PARTIAL (incomplete behaviour) | 38 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -460,7 +460,9 @@ carries `actor_role`.
 
 **DONE — Email verification state read (`tools/parity/compare_profile_email_verification_state.py`, 1/1):** all authenticated fixture roles receive their own masked address and verified state; active and expired challenges produce the expected pending value, response shapes match, and the OTP table remains unchanged. Matrix **153 GO / 39 PARTIAL / 183 Laravel-only**.
 
-**EXACT NEXT ACTION:** verify `GET /api/v1/cms/homepage-blocks` against Laravel for its admin gate, list/order/active fields, and read-only DB effects.
+**DONE — CMS homepage-block listing (`tools/parity/compare_cms_homepage_blocks.py`, 1/1):** resource payload, ordering, Super Admin authorization, denied Agen/Admin roles, and read-only CMS table state match. Matrix **154 GO / 38 PARTIAL / 183 Laravel-only**.
+
+**EXACT NEXT ACTION:** verify `POST /api/v1/cms/homepage-blocks` against Laravel, preserving the existing HTMLPurifier policy and covering type/content validation, sanitization, sort order, image handling, and DB side effects.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.
