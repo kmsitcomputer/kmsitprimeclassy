@@ -1,0 +1,183 @@
+Admin operations	GET	`/api/v1/admin/additional-payments`	admin, agen, keuangan, super_admin
+Admin operations	PATCH	`/api/v1/admin/additional-payments/{payment}/status`	keuangan, super_admin
+Admin operations	GET	`/api/v1/admin/agents`	super_admin
+Admin operations	POST	`/api/v1/admin/agents`	super_admin
+Admin operations	DELETE	`/api/v1/admin/agents/{agentProfile}`	super_admin
+Admin operations	PATCH	`/api/v1/admin/agents/{agentProfile}`	super_admin
+Admin operations	PATCH	`/api/v1/admin/agents/{agent}/toggle-status`	super_admin
+Admin operations	GET	`/api/v1/admin/audit-logs`	super_admin
+Admin operations	GET	`/api/v1/admin/google-auth`	super_admin
+Admin operations	PUT	`/api/v1/admin/google-auth`	super_admin
+Admin operations	GET	`/api/v1/admin/integrations/smtp`	super_admin
+Admin operations	PUT	`/api/v1/admin/integrations/smtp`	super_admin
+Admin operations	POST	`/api/v1/admin/integrations/smtp/test-connection`	super_admin
+Admin operations	POST	`/api/v1/admin/integrations/smtp/test-email`	super_admin
+Admin operations	GET	`/api/v1/admin/integrations/whatsapp`	super_admin
+Admin operations	PUT	`/api/v1/admin/integrations/whatsapp`	super_admin
+Admin operations	GET	`/api/v1/admin/integrations/whatsapp/messages`	super_admin
+Admin operations	POST	`/api/v1/admin/integrations/whatsapp/messages/{message}/retry`	super_admin
+Admin operations	DELETE	`/api/v1/admin/integrations/whatsapp/templates/{event}`	super_admin
+Admin operations	PUT	`/api/v1/admin/integrations/whatsapp/templates/{event}`	super_admin
+Admin operations	POST	`/api/v1/admin/integrations/whatsapp/templates/{event}/preview`	super_admin
+Admin operations	POST	`/api/v1/admin/integrations/whatsapp/test-connection`	super_admin
+Admin operations	POST	`/api/v1/admin/integrations/whatsapp/test-message`	super_admin
+Admin operations	GET	`/api/v1/admin/order-refunds`	admin, agen, keuangan, super_admin
+Admin operations	PATCH	`/api/v1/admin/order-refunds/{adjustment}/status`	keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/order-sales-reductions/{reduction}/reinstate`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/orders/{order}/cancellation/finalize`	agen, keuangan, super_admin
+Admin operations	GET	`/api/v1/admin/orders/{order}/refunds`	admin, agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-attempts/{attempt}/cancel`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-attempts/{attempt}/complete`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-attempts/{attempt}/fail`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-attempts/{attempt}/initiate`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-attempts/{attempt}/reconcile`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-attempts/{attempt}/unknown`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-obligations/{obligation}/approve`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-obligations/{obligation}/attempts`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-obligations/{obligation}/deferred/materialize`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-obligations/{obligation}/deferred/request`	agen, keuangan, super_admin
+Admin operations	POST	`/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve`	agen, keuangan, super_admin
+Admin operations	GET	`/api/v1/admin/regions/export`	super_admin
+Admin operations	POST	`/api/v1/admin/regions/import`	super_admin
+Admin operations	PATCH	`/api/v1/admin/return-items/{item}/refund`	keuangan, super_admin
+Admin operations	GET	`/api/v1/admin/returns`	admin, agen, super_admin
+Admin operations	GET	`/api/v1/admin/returns/{return}`	admin, agen, super_admin
+Admin operations	PATCH	`/api/v1/admin/returns/{return}/pickup-schedule`	admin, agen, super_admin
+Admin operations	PATCH	`/api/v1/admin/returns/{return}/review`	admin, agen, super_admin
+Admin operations	GET	`/api/v1/admin/shipping-couriers`	super_admin
+Admin operations	POST	`/api/v1/admin/shipping-couriers`	super_admin
+Admin operations	PATCH	`/api/v1/admin/shipping-couriers/{shippingCourier}/toggle`	super_admin
+Admin operations	GET	`/api/v1/admin/shipping-providers`	super_admin
+Admin operations	PATCH	`/api/v1/admin/shipping-providers/{provider}/toggle`	super_admin
+agent	GET	`/api/v1/agent/google-auth`	admin, agen
+agent	PUT	`/api/v1/agent/google-auth`	admin, agen
+agent	POST	`/api/v1/agent/shipping-providers/{provider}/destinations`	agen
+agent	POST	`/api/v1/agent/shipping-providers/{provider}/test`	agen
+agent	GET	`/api/v1/agent/whatsapp`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/device`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/events/{event}/preview`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/logout`	admin, agen
+agent	GET	`/api/v1/agent/whatsapp/messages`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/pair/code`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/pair/qr`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/reconnect`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/replace`	admin, agen
+agent	POST	`/api/v1/agent/whatsapp/test-send`	admin, agen
+Identity & session	POST	`/api/v1/auth/forgot-password`	—
+Identity & session	GET	`/api/v1/auth/google/callback`	—
+Identity & session	GET	`/api/v1/auth/google/redirect`	—
+Identity & session	POST	`/api/v1/auth/reset-password`	—
+Catalog — bestsellers	GET	`/api/v1/bestsellers`	—
+catalog	GET	`/api/v1/catalog/export`	admin, agen, super_admin
+catalog	POST	`/api/v1/catalog/imports`	admin, agen, super_admin
+catalog	POST	`/api/v1/catalog/imports/preview`	admin, agen, super_admin
+Checkout	POST	`/api/v1/checkout/courier-options`	agen, konsumen, korsal, sales, sales-kurir-sub
+Checkout	POST	`/api/v1/checkout/geocode`	agen, konsumen, korsal, sales, sales-kurir-sub
+consent-events	POST	`/api/v1/consent-events`	agen, korsal, sales, sales-kurir-sub
+consent-events	POST	`/api/v1/consent-events/{consentEvent}/dispute`	admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin
+consent-events	POST	`/api/v1/consent-events/{consentEvent}/reinstate`	admin, agen, super_admin
+consent-events	POST	`/api/v1/consent-events/{consentEvent}/withdraw`	admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin
+Consent	POST	`/api/v1/consent/otp`	agen, korsal, sales, sales-kurir-sub
+Consent	POST	`/api/v1/consent/otp/{challenge}/verify`	agen, korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers`	korsal, sales, sales-kurir-sub
+CRM	PATCH	`/api/v1/crm/customers/{customer}`	korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/archive`	korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/consent-events`	korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/consent-otp`	korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/link`	korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/link-otp`	korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/orders`	agen, korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/unlink`	admin, agen, korsal, sales, sales-kurir-sub
+CRM	POST	`/api/v1/crm/customers/{customer}/visits`	korsal, sales, sales-kurir-sub
+CRM	GET	`/api/v1/crm/link-candidates`	korsal, sales, sales-kurir-sub
+CRM	PATCH	`/api/v1/crm/visits/{visit}`	korsal, sales, sales-kurir-sub
+dashboard	GET	`/api/v1/dashboard/kpis`	agen, gudang, korsal, kurir, sales, sales-kurir-sub
+dashboard	GET	`/api/v1/dashboard/summary`	admin, agen, korsal, sales, sales-kurir-sub, super_admin
+delivery-refusals	POST	`/api/v1/delivery-refusals/{refusal}/disposition`	koordinator-kurir
+delivery-refusals	POST	`/api/v1/delivery-refusals/{refusal}/hand-back`	admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin
+delivery-refusals	POST	`/api/v1/delivery-refusals/{refusal}/receive`	koordinator-kurir
+Dispatch	GET	`/api/v1/dispatch`	admin, agen, koordinator-kurir, super_admin
+Dispatch	GET	`/api/v1/dispatch/couriers`	admin, agen, koordinator-kurir, super_admin
+Dispatch	GET	`/api/v1/dispatch/expeditions`	koordinator-kurir
+Dispatch	GET	`/api/v1/dispatch/history`	admin, agen, koordinator-kurir, super_admin
+Dispatch	POST	`/api/v1/dispatch/order-items/{orderItem}/split-batch`	koordinator-kurir
+Dispatch	POST	`/api/v1/dispatch/orders/{order}/request-fulfillment`	koordinator-kurir
+Dispatch	GET	`/api/v1/dispatch/refusals`	koordinator-kurir
+Dispatch	GET	`/api/v1/dispatch/regions`	admin, agen, koordinator-kurir, super_admin
+Dispatch	GET	`/api/v1/dispatch/returns`	admin, agen, koordinator-kurir, super_admin
+Integrations — Google Sheets	GET	`/api/v1/google-sheets`	admin, agen, super_admin
+Integrations — Google Sheets	POST	`/api/v1/google-sheets/configs`	admin, agen, super_admin
+Integrations — Google Sheets	DELETE	`/api/v1/google-sheets/configs/{config}`	admin, agen, super_admin
+Integrations — Google Sheets	PUT	`/api/v1/google-sheets/configs/{config}`	admin, agen, super_admin
+Integrations — Google Sheets	POST	`/api/v1/google-sheets/configs/{config}/sync`	admin, agen, super_admin
+Integrations — Google Sheets	POST	`/api/v1/google-sheets/connection`	admin, agen, super_admin
+Integrations — Google Sheets	POST	`/api/v1/google-sheets/destinations`	admin, agen, super_admin
+Installer	POST	`/api/v1/install/configure-app`	—
+Installer	POST	`/api/v1/install/database/save`	—
+Installer	POST	`/api/v1/install/database/test`	—
+Installer	POST	`/api/v1/install/finalize`	—
+Installer	POST	`/api/v1/install/lock`	—
+Installer	GET	`/api/v1/install/requirements`	—
+Installer	POST	`/api/v1/install/run`	—
+Invoices	GET	`/api/v1/invoice/config`	agen, super_admin
+Invoices	PUT	`/api/v1/invoice/config`	agen, super_admin
+Courier	GET	`/api/v1/kurir/orders`	koordinator-kurir, kurir, sales-kurir-sub
+Courier	GET	`/api/v1/kurir/reports/delivered`	kurir
+Courier	GET	`/api/v1/kurir/returns`	kurir
+Courier	GET	`/api/v1/kurir/returns/pickup-today`	kurir
+Courier	PATCH	`/api/v1/kurir/returns/{item}/confirm`	kurir
+Courier	PATCH	`/api/v1/kurir/returns/{item}/pickup`	kurir
+Media	GET	`/api/v1/media`	super_admin
+Media	POST	`/api/v1/media`	—
+Media	DELETE	`/api/v1/media/{media}`	—
+Notifications	GET	`/api/v1/notifications/admin`	admin, agen, keuangan, super_admin
+Notifications	POST	`/api/v1/notifications/admin/read-all`	admin, agen, keuangan, super_admin
+Notifications	GET	`/api/v1/notifications/admin/unread-count`	admin, agen, keuangan, super_admin
+Notifications	POST	`/api/v1/notifications/admin/{id}/read`	admin, agen, keuangan, super_admin
+Orders — item receipts	GET	`/api/v1/order-items/{item}/receipts`	admin, super_admin
+Orders — item receipts	POST	`/api/v1/order-items/{item}/receipts`	admin, super_admin
+Orders	POST	`/api/v1/orders/{order}/assisted-returns`	korsal, sales, sales-kurir-sub
+Orders	GET	`/api/v1/orders/{order}/consent-context`	admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin
+Orders	GET	`/api/v1/orders/{order}/consent-events`	admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin
+Orders	GET	`/api/v1/orders/{order}/invoice`	—
+Orders	POST	`/api/v1/orders/{order}/items`	admin
+Orders	GET	`/api/v1/orders/{order}/refund-recipient`	admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin
+Orders	POST	`/api/v1/orders/{order}/refund-recipient`	admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin
+Orders	POST	`/api/v1/orders/{order}/returns`	konsumen
+Profile	POST	`/api/v1/profile/email/verification`	—
+Profile	POST	`/api/v1/profile/email/verification/{challenge}/confirm`	—
+Profile	GET	`/api/v1/profile/whatsapp`	—
+Profile	POST	`/api/v1/profile/whatsapp/verification`	—
+Profile	POST	`/api/v1/profile/whatsapp/verification/{challenge}/confirm`	—
+Reporting	GET	`/api/v1/reports/cancellations-refunds`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/couriers`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/couriers-per-agent`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/crm-visits`	admin, agen, korsal, sales, sales-kurir-sub, super_admin
+Reporting	GET	`/api/v1/reports/customers`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/fees/agent`	agen, super_admin
+Reporting	GET	`/api/v1/reports/fees/courier`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/fees/sales-korsal`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/finance-orders`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/finance-summary`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/korsal`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/my-customers`	korsal, sales, sales-kurir-sub
+Reporting	GET	`/api/v1/reports/network-summary`	agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/network-transactions`	admin, agen, korsal, sales, sales-kurir-sub, super_admin
+Reporting	GET	`/api/v1/reports/payment-status`	admin, agen, keuangan, super_admin
+Reporting	GET	`/api/v1/reports/sales`	admin, agen, korsal, super_admin
+Returns — items	PATCH	`/api/v1/return-items/{item}/courier`	admin, agen, koordinator-kurir, super_admin
+Returns — items	POST	`/api/v1/return-items/{returnItem}/receipt-allocations`	admin, super_admin
+Shipping & delivery	PATCH	`/api/v1/shipments/{shipment}/courier`	koordinator-kurir
+Shipping & delivery	GET	`/api/v1/shipments/{shipment}/delivery-verifications`	admin, super_admin
+Shipping & delivery	POST	`/api/v1/shipments/{shipment}/delivery-verifications`	admin, super_admin
+Shipping & delivery	GET	`/api/v1/shipments/{shipment}/eligible-couriers`	koordinator-kurir
+Shipping & delivery	PATCH	`/api/v1/shipments/{shipment}/expedition-handover`	koordinator-kurir
+Shipping & delivery	POST	`/api/v1/shipments/{shipment}/items/{orderItem}/refuse`	admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin
+Shipping & delivery	PATCH	`/api/v1/shipments/{shipment}/items/{orderItem}/status`	admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin
+Shipping & delivery	GET	`/api/v1/shipments/{shipment}/receipt`	admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin
+Shipping & delivery	PATCH	`/api/v1/shipments/{shipment}/status`	admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin
+Inventory — warehouse	GET	`/api/v1/warehouse/orders/diproses`	gudang
+Inventory — warehouse	GET	`/api/v1/warehouse/orders/{order}/stock-request`	gudang
+Inventory — warehouse	GET	`/api/v1/warehouse/returns`	gudang
+Inventory — warehouse	POST	`/api/v1/warehouse/returns/{item}/finalize`	admin
+Inventory — warehouse	POST	`/api/v1/warehouse/returns/{item}/inspect`	gudang
