@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/catalog"
@@ -133,6 +134,29 @@ func categoryFieldErrors(ctx context.Context, s *Server, raw map[string]any, isS
 	return fields
 }
 
+// normalizeCategoryRaw coerces the scalar forms Laravel's validator accepts BEFORE remarshal: the `integer`
+// rule passes "24"/24.0 (FILTER_VALIDATE_INT) and the `boolean` rule passes 0/1/"0"/"1". A strict JSON
+// re-decode would otherwise 422 payloads Laravel accepts.
+func normalizeCategoryRaw(raw map[string]any) map[string]any {
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		switch key {
+		case "parent_id", "sort_order":
+			if id, ok := intValue(value); ok {
+				out[key] = json.Number(strconv.Itoa(id))
+				continue
+			}
+		case "is_active":
+			if flag, ok := laravelBool(value); ok {
+				out[key] = flag
+				continue
+			}
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func (s *Server) handleCategoryStore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u, ok := requireUser(w, r)
@@ -144,6 +168,7 @@ func (s *Server) handleCategoryStore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	raw = normalizeCategoryRaw(raw)
 	if fields := categoryFieldErrors(ctx, s, raw, true); len(fields) > 0 {
 		writeError(w, r, httpx.Validation(fields))
 		return
@@ -184,6 +209,7 @@ func (s *Server) handleCategoryUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	raw = normalizeCategoryRaw(raw)
 	if fields := categoryFieldErrors(ctx, s, raw, false); len(fields) > 0 {
 		writeError(w, r, httpx.Validation(fields))
 		return
@@ -213,7 +239,7 @@ func (s *Server) handleCategoryDestroy(w http.ResponseWriter, r *http.Request) {
 		writeCategoryError(w, r, err)
 		return
 	}
-	httpx.OK(w, nil, msg(r.Context(), "messages.product.category_deleted"), nil)
+	httpx.OK(w, nil, msg(r.Context(), "product.category_deleted"), nil)
 }
 
 var _ = json.Marshal

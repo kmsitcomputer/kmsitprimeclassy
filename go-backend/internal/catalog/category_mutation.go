@@ -453,8 +453,14 @@ func DeleteCategory(ctx context.Context, d *db.DB, id int64) error {
 			if db.IsDuplicateKey(err) {
 				return ErrCategoryDuplicate
 			}
+			// Laravel's delete(): in_array(getCode(), ['23000','1761','1451']) || str_contains(message, 'duplicate entry')
+			// → the 409. Error 1761 is the generated-column duplicate when a promoted child would collide
+			// with an existing root of the same name.
 			var me *mysql.MySQLError
-			if errors.As(err, &me) && (me.Number == 1451 || me.Number == 23000) {
+			if errors.As(err, &me) && (me.Number == 1451 || me.Number == 1761 || me.Number == 23000) {
+				return ErrCategoryDelete
+			}
+			if strings.Contains(err.Error(), "duplicate entry") {
 				return ErrCategoryDelete
 			}
 			return err

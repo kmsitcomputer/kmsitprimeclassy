@@ -144,6 +144,7 @@ KEYS = {
     "product": [
         "variation_required",
         "variation_not_allowed",
+        "category_deleted",
     ],
     "profile": [
         "current_password_incorrect",
