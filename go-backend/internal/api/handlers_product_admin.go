@@ -20,6 +20,7 @@ import (
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/catalog"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 )
 
@@ -194,7 +195,9 @@ func (s *Server) handleProductCreate(w http.ResponseWriter, r *http.Request) {
 	if p.Description != nil {
 		p.Description = sanitizedProductHTML(p.Description)
 	}
-	row, err := catalog.CreateProductAdmin(r.Context(), s.database, u.ID, productAdminInput(raw, p))
+	in := productAdminInput(raw, p)
+	in.ActorRole = u.Role
+	row, err := catalog.CreateProductAdmin(r.Context(), s.database, u.ID, in)
 	if err != nil {
 		writeProductAdminError(w, r, err)
 		return
@@ -203,6 +206,10 @@ func (s *Server) handleProductCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProductUpdate(w http.ResponseWriter, r *http.Request) {
+	u, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
 	id, ok := pathID(w, r, "product")
 	if !ok {
 		return
@@ -226,7 +233,10 @@ func (s *Server) handleProductUpdate(w http.ResponseWriter, r *http.Request) {
 	if p.Description != nil {
 		p.Description = sanitizedProductHTML(p.Description)
 	}
-	row, err := catalog.UpdateProductAdmin(r.Context(), s.database, id, productAdminInput(raw, p))
+	in := productAdminInput(raw, p)
+	in.ActorID = u.ID
+	in.ActorRole = u.Role
+	row, err := catalog.UpdateProductAdmin(r.Context(), s.database, id, in)
 	if err != nil {
 		writeProductAdminError(w, r, err)
 		return
@@ -239,14 +249,31 @@ func (s *Server) handleProductDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := catalog.SoftDeleteProductAdmin(r.Context(), s.database, id); err != nil {
+	u, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	var exists int
+	if err := s.database.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM products WHERE id = ?", id).Scan(&exists); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if exists == 0 {
+		writeError(w, r, notFoundError(r.Context()))
+		return
+	}
+	if err := catalog.SoftDeleteProductAdmin(r.Context(), s.database, id, u.ID, u.Role); err != nil {
 		writeProductAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, nil, msg(r.Context(), "messages.product.deleted"), nil)
+	httpx.OK(w, nil, msg(r.Context(), "product.deleted"), nil)
 }
 
 func (s *Server) handleProductHardDelete(w http.ResponseWriter, r *http.Request) {
+	u, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
 	id, ok := pathID(w, r, "id")
 	if !ok {
 		return
@@ -261,19 +288,31 @@ func (s *Server) handleProductHardDelete(w http.ResponseWriter, r *http.Request)
 	accepted := string(p.Confirm) == "true" || string(p.Confirm) == "1" || string(p.Confirm) == `"1"` ||
 		string(p.Confirm) == `"yes"` || string(p.Confirm) == `"on"`
 	if !accepted {
-		writeError(w, r, httpx.Validation(map[string][]string{"confirm": requiredField(r.Context(), "confirm")}))
+		// The `accepted` rule fails for BOTH missing and false with the SAME sentence.
+		writeError(w, r, httpx.Validation(map[string][]string{"confirm": {i18n.ValidationMessage(LocaleFrom(r.Context()), "accepted", "confirm")}}))
 		return
 	}
-	if err := catalog.HardDeleteProductAdmin(r.Context(), s.database, id); err != nil {
+	if err := catalog.HardDeleteProductAdmin(r.Context(), s.database, id, u.ID, u.Role); err != nil {
 		writeProductAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, nil, msg(r.Context(), "messages.product.deleted"), nil)
+	httpx.OK(w, nil, msg(r.Context(), "product.deleted"), nil)
 }
 
 func (s *Server) handleVariationCreate(w http.ResponseWriter, r *http.Request) {
 	productID, ok := pathID(w, r, "product")
 	if !ok {
+		return
+	}
+	// Route-model binding for {product} happens BEFORE FormRequest validation in Laravel — a missing
+	// product answers 404 even with an invalid body.
+	var exists int
+	if err := s.database.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM products WHERE id = ? AND deleted_at IS NULL", productID).Scan(&exists); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if exists == 0 {
+		writeError(w, r, notFoundError(r.Context()))
 		return
 	}
 	raw, p, err := decodeProductAdmin(r)
@@ -342,7 +381,7 @@ func (s *Server) handleVariationDelete(w http.ResponseWriter, r *http.Request) {
 		writeProductAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, nil, msg(r.Context(), "messages.product.variation_deleted"), nil)
+	httpx.OK(w, nil, msg(r.Context(), "product.variation_deleted"), nil)
 }
 
 func (s *Server) handleProductImageCreate(w http.ResponseWriter, r *http.Request) {
@@ -461,7 +500,7 @@ func (s *Server) handleProductImageDelete(w http.ResponseWriter, r *http.Request
 		writeProductAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, nil, msg(r.Context(), "messages.product.image_deleted"), nil)
+	httpx.OK(w, nil, msg(r.Context(), "product.image_deleted"), nil)
 }
 
 func (s *Server) handleProductImagesReorder(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +542,7 @@ func (s *Server) handleProductFeesGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleVariationFeesGet(w http.ResponseWriter, r *http.Request) {
-	productID, ok := pathID(w, r, "product")
+	_, ok := pathID(w, r, "product")
 	if !ok {
 		return
 	}
@@ -511,7 +550,9 @@ func (s *Server) handleVariationFeesGet(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	fees, err := catalog.GetProductFees(r.Context(), s.database, productID, &variationID)
+	// Laravel binds {variation} by ID alone — a mismatched product/variation pair still resolves
+	// (FeeController::showForVariation never consults the owning product).
+	fees, err := catalog.GetProductFees(r.Context(), s.database, 0, &variationID)
 	if err != nil {
 		writeProductAdminError(w, r, err)
 		return
@@ -533,14 +574,10 @@ func (s *Server) handleProductFeesSet(w http.ResponseWriter, r *http.Request) {
 		writeProductAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, result, msg(r.Context(), "messages.fee.updated_product"), nil)
+	httpx.OK(w, visibleFees(UserFrom(r.Context()).Role, result), msg(r.Context(), "fee.updated_product"), nil)
 }
 
 func (s *Server) handleVariationFeesSet(w http.ResponseWriter, r *http.Request) {
-	productID, ok := pathID(w, r, "product")
-	if !ok {
-		return
-	}
 	variationID, ok := pathID(w, r, "variation")
 	if !ok {
 		return
@@ -549,12 +586,13 @@ func (s *Server) handleVariationFeesSet(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	result, err := catalog.SetProductFees(r.Context(), s.database, productID, &variationID, fees)
+	// Same binding-only rule as showForVariation: {variation} resolves by ID alone.
+	result, err := catalog.SetProductFees(r.Context(), s.database, 0, &variationID, fees)
 	if err != nil {
 		writeProductAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, result, msg(r.Context(), "messages.fee.updated_variation"), nil)
+	httpx.OK(w, visibleFees(UserFrom(r.Context()).Role, result), msg(r.Context(), "fee.updated_variation"), nil)
 }
 
 func decodeFees(w http.ResponseWriter, r *http.Request) (map[string]float64, bool) {
@@ -607,12 +645,34 @@ func validateProductAdmin(r *http.Request, raw map[string]json.RawMessage, p pro
 			}
 		}
 	}
+	// required_if:has_variations,false / prohibited_if:has_variations,true — Laravel's dependent rules
+	// evaluate ONLY when the condition field is PRESENT (Arr::has). An absent has_variations skips both,
+	// which is why an empty store payload reports ONLY name + has_variations.
+	// On UPDATE the field is not a rule at all (the controller's only() never forwards it).
 	if create && p.HasVariations == nil {
 		fields["has_variations"] = requiredField(ctx, "has_variations")
 	}
-	if !create {
-		if _, present := raw["has_variations"]; present {
-			fields["has_variations"] = []string{msg(ctx, "system.field_invalid")}
+	conditionPresent := create
+	if rawHas, present := raw["has_variations"]; present {
+		conditionPresent = true
+		_ = rawHas
+	}
+	if conditionPresent {
+		if p.HasVariations != nil && !*p.HasVariations {
+			for _, field := range []string{"sku", "base_price", "weight_grams"} {
+				if _, present := raw[field]; !present || productFieldIsNil(field, p) {
+					fields[field] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "required_if", field,
+						"other", i18n.AttributeName(LocaleFrom(ctx), "has_variations"), "value", "false")}
+				}
+			}
+		}
+		if (p.HasVariations != nil && *p.HasVariations) || (!create && hasVariations) {
+			for _, field := range []string{"sku", "base_price", "weight_grams"} {
+				if _, present := raw[field]; present && !productFieldIsNil(field, p) {
+					fields[field] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "prohibited_if", field,
+						"other", i18n.AttributeName(LocaleFrom(ctx), "has_variations"), "value", "true")}
+				}
+			}
 		}
 	}
 	if p.Slug != nil && utf8.RuneCountInString(*p.Slug) > 180 {
@@ -634,28 +694,6 @@ func validateProductAdmin(r *http.Request, raw map[string]json.RawMessage, p pro
 	}
 	if p.WeightGrams != nil && *p.WeightGrams < 1 {
 		fields["weight_grams"] = minNumeric(ctx, "weight_grams", 1)
-	}
-	modeHasVariations := hasVariations
-	if p.HasVariations != nil {
-		modeHasVariations = *p.HasVariations
-	}
-	if create && !modeHasVariations {
-		if p.SKU == nil && create {
-			fields["sku"] = requiredField(ctx, "sku")
-		}
-		if p.BasePrice == nil {
-			fields["base_price"] = requiredField(ctx, "base_price")
-		}
-		if p.WeightGrams == nil {
-			fields["weight_grams"] = requiredField(ctx, "weight_grams")
-		}
-	}
-	if modeHasVariations {
-		for _, field := range []string{"sku", "base_price", "weight_grams"} {
-			if _, present := raw[field]; present {
-				fields[field] = []string{msg(ctx, "system.field_invalid")}
-			}
-		}
 	}
 	if _, present := raw["category_id"]; present && len(raw["category_id"]) > 0 && string(raw["category_id"]) != "null" {
 		if p.CategoryID == nil || *p.CategoryID < 1 {
@@ -989,6 +1027,13 @@ func optionalPositiveInt(r *http.Request, key string) (int64, error) {
 }
 
 func writeProductAdminError(w http.ResponseWriter, r *http.Request, err error) {
+	// ProductHardDeleteService's guarded 409: message + errors {references: {table: count}}.
+	var blockers *catalog.ProductDeleteBlockers
+	if errors.As(err, &blockers) {
+		writeError(w, r, &httpx.Error{Status: http.StatusConflict, Message: blockers.Error(),
+			ErrorsAny: map[string]any{"references": blockers.Blockers}})
+		return
+	}
 	switch {
 	case errors.Is(err, catalog.ErrProductAdminNotFound), errors.Is(err, catalog.ErrVariationNotFound):
 		writeError(w, r, notFoundError(r.Context()))
@@ -999,15 +1044,15 @@ func writeProductAdminError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, catalog.ErrProductImageOrder):
 		writeError(w, r, httpx.Validation(map[string][]string{"ids": {"Daftar gambar harus persis sama dengan seluruh gambar galeri ini."}}))
 	case errors.Is(err, catalog.ErrProductSKU):
-		writeError(w, r, httpx.Validation(map[string][]string{"sku": uniqueField(r.Context(), "sku")}))
+		// App\Rules\GlobalSku fails with its own literal, not the validator's unique sentence.
+		writeError(w, r, httpx.Validation(map[string][]string{"sku": {"SKU sudah digunakan pada katalog."}}))
 	case errors.Is(err, catalog.ErrProductSlug):
 		writeError(w, r, httpx.Validation(map[string][]string{"slug": uniqueField(r.Context(), "slug")}))
 	case errors.Is(err, catalog.ErrProductCategory):
 		writeError(w, r, httpx.Validation(map[string][]string{"category_id": unknownChoice(r.Context(), "category_id")}))
 	case errors.Is(err, catalog.ErrProductMode), errors.Is(err, catalog.ErrVariationConflict):
 		writeError(w, r, httpx.Validation(map[string][]string{"attributes": {msg(r.Context(), "system.field_invalid")}}))
-	case errors.Is(err, catalog.ErrProductDeleteConflict):
-		writeError(w, r, httpx.NewError(http.StatusConflict, msg(r.Context(), "system.validation_failed")))
+
 	default:
 		writeError(w, r, err)
 	}

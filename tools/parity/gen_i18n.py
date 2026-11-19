@@ -145,7 +145,18 @@ KEYS = {
         "variation_required",
         "variation_not_allowed",
         "category_deleted",
+        "deleted",
+        "image_deleted",
+        "variation_deleted",
+        "variation_requires_attribute",
+        "variation_not_enabled",
+        "stock_uses_variation",
     ],
+    "fee": [
+        "updated_product",
+        "updated_variation",
+    ],
+
     "profile": [
         "current_password_incorrect",
         "password_updated",
@@ -173,7 +184,8 @@ KEYS = {
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
                    "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes",
-                   "image", "file", "required_if", "before_or_equal", "email", "confirmed"]
+                   "image", "file", "required_if", "before_or_equal", "email", "confirmed", "prohibited_if",
+                   "prohibited_if_accepted", "prohibited_if_declined", "accepted"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric"), ("gt", "numeric"), ("gt", "file"),

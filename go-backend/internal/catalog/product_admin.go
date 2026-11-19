@@ -1,10 +1,12 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -37,6 +39,16 @@ var (
 
 // ProductAdminInput contains only mutable product columns. A nil pointer means
 // the field was not supplied; SetCategory distinguishes null from omission.
+// ProductDeleteBlockers is the 409 payload ProductHardDeleteService::delete throws with:
+// message + errors {references: {table: count}}.
+type ProductDeleteBlockers struct {
+	Blockers map[string]int
+}
+
+func (e *ProductDeleteBlockers) Error() string {
+	return "Produk tidak dapat dihapus permanen karena masih direferensikan."
+}
+
 type ProductAdminInput struct {
 	Name                *string
 	Slug                *string
@@ -53,6 +65,9 @@ type ProductAdminInput struct {
 	WeightGrams         *int64
 	SetWeightGrams      bool
 	Status              *string
+	// Actor identity goes onto the audit row (ActivityLogger records causer + actor_role).
+	ActorID   int64
+	ActorRole string
 }
 
 type VariationAdminInput struct {
@@ -169,6 +184,58 @@ func ProductAdminByID(ctx context.Context, d *db.DB, id int64) (map[string]any, 
 	return product, nil
 }
 
+// productAudit is ActivityLogger::log for App\Models\Product subjects (description NULL, no ip/ua).
+func productAudit(ctx context.Context, tx *sql.Tx, actorID, productID int64, event string, properties map[string]any) error {
+	payload := any(nil)
+	if len(properties) > 0 {
+		// PHP json_encode never escapes <, > and &; Go's Marshal does by default. The properties column
+		// must hold the same bytes Laravel would store.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(properties); err != nil {
+			return err
+		}
+		// PHP json_encode escapes "/" as "\/" by default — the column must hold the same bytes.
+		payload = strings.ReplaceAll(strings.TrimSpace(buf.String()), "/", "\\/")
+	}
+	var causer any
+	if actorID > 0 {
+		causer = actorID
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO activity_logs
+		(causer_id, subject_type, subject_id, event, description, properties, ip_address, user_agent, created_at)
+		VALUES (?, ?, ?, ?, NULL, ?, NULL, NULL, UTC_TIMESTAMP(6))`,
+		causer, "App\\Models\\Product", productID, event, payload)
+	return err
+}
+
+// productSnapshot is the old/new projection ProductController::update audits.
+func productSnapshot(product map[string]any) map[string]any {
+	var categoryID any
+	if category, ok := product["category"].(map[string]any); ok {
+		categoryID = nullableAny(category["id"])
+	}
+	return map[string]any{
+		"sku":               nullableAny(product["sku"]),
+		"category_id":       categoryID,
+		"name":              product["name"],
+		"slug":              product["slug"],
+		"description":       nullableAny(product["description"]),
+		"short_description": nullableAny(product["short_description"]),
+		"base_price":        nullableAny(product["base_price"]),
+		"weight_grams":      nullableAny(product["weight_grams"]),
+		"status":            product["status"],
+	}
+}
+
+func nullableAny(v any) any {
+	if v == nil {
+		return nil
+	}
+	return v
+}
+
 func CreateProductAdmin(ctx context.Context, d *db.DB, actorID int64, in ProductAdminInput) (map[string]any, error) {
 	if in.Name == nil || strings.TrimSpace(*in.Name) == "" || in.HasVariations == nil {
 		return nil, ErrProductMode
@@ -218,7 +285,9 @@ func CreateProductAdmin(ctx context.Context, d *db.DB, actorID int64, in Product
 				return duplicateProductError(err)
 			}
 		}
-		return nil
+		return productAudit(ctx, tx, actorID, id, "product.created", map[string]any{
+			"actor_role": in.ActorRole,
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -235,6 +304,7 @@ func updateProductAdmin(ctx context.Context, d *db.DB, id int64, in ProductAdmin
 	if err != nil {
 		return nil, err
 	}
+	before := productSnapshot(product)
 	hasVariations := product["has_variations"].(bool)
 	if hasVariations && (in.SKU != nil || in.SetBasePrice || in.SetWeightGrams) {
 		return nil, ErrProductMode
@@ -272,6 +342,15 @@ func updateProductAdmin(ctx context.Context, d *db.DB, id int64, in ProductAdmin
 		add("sku", *in.SKU)
 	}
 	if len(sets) == 0 {
+		// Laravel ALWAYS logs product.updated (the controller audits after update(), even a no-op).
+		err := d.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return productAudit(ctx, tx, in.ActorID, id, "product.updated", map[string]any{
+				"actor_role": in.ActorRole, "old": before, "new": before,
+			})
+		})
+		if err != nil {
+			return nil, err
+		}
 		return product, nil
 	}
 	err = d.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -314,7 +393,41 @@ func updateProductAdmin(ctx context.Context, d *db.DB, id int64, in ProductAdmin
 			// explicit documents the same lifetime reservation as Laravel.
 			_ = oldSKU
 		}
-		return nil
+		// after MUST be a copy: mutating the shared map would rewrite the audit's old values.
+		after := map[string]any{}
+		for k, v := range before {
+			after[k] = v
+		}
+		if in.Name != nil {
+			after["name"] = strings.TrimSpace(*in.Name)
+		}
+		if in.Slug != nil {
+			after["slug"] = *in.Slug
+		}
+		if in.SetDescription {
+			after["description"] = nullableAny(in.Description)
+		}
+		if in.SetShortDescription {
+			after["short_description"] = nullableAny(in.ShortDescription)
+		}
+		if in.Status != nil {
+			after["status"] = *in.Status
+		}
+		if in.SetCategory {
+			after["category_id"] = nullableAny(in.CategoryID)
+		}
+		if in.SetBasePrice {
+			after["base_price"] = nullableAny(in.BasePrice)
+		}
+		if in.SetWeightGrams {
+			after["weight_grams"] = nullableAny(in.WeightGrams)
+		}
+		if in.SKU != nil {
+			after["sku"] = *in.SKU
+		}
+		return productAudit(ctx, tx, in.ActorID, id, "product.updated", map[string]any{
+			"actor_role": in.ActorRole, "old": before, "new": after,
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -322,21 +435,24 @@ func updateProductAdmin(ctx context.Context, d *db.DB, id int64, in ProductAdmin
 	return ProductAdminByID(ctx, d, id)
 }
 
-func SoftDeleteProductAdmin(ctx context.Context, d *db.DB, id int64) error {
-	res, err := d.ExecContext(ctx, "UPDATE products SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-		time.Now().UTC(), time.Now().UTC(), id)
+func SoftDeleteProductAdmin(ctx context.Context, d *db.DB, id int64, actorID int64, actorRole string) error {
+	err := d.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "UPDATE products SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+			time.Now().UTC(), time.Now().UTC(), id); err != nil {
+			return err
+		}
+		return productAudit(ctx, tx, actorID, id, "product.deleted", map[string]any{"actor_role": actorRole})
+	})
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err == nil && n == 0 {
-		return ErrProductAdminNotFound
-	}
-	return err
+	// RowsAffected is unavailable through Tx; a missing row already surfaced as a 404 binding in the caller.
+	return nil
 }
 
-func HardDeleteProductAdmin(ctx context.Context, d *db.DB, id int64) error {
+func HardDeleteProductAdmin(ctx context.Context, d *db.DB, id int64, actorID int64, actorRole string) error {
 	var paths []string
+	var snapshot map[string]any
 	err := d.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var found int64
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM products WHERE id = ? FOR UPDATE", id).Scan(&found); err != nil {
@@ -394,7 +510,17 @@ func HardDeleteProductAdmin(ctx context.Context, d *db.DB, id int64) error {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "DELETE FROM products WHERE id = ?", id)
-		return err
+		if err != nil {
+			return err
+		}
+		var sku sql.NullString
+		var name, status string
+		if err := tx.QueryRowContext(ctx, "SELECT sku, name, status FROM products WHERE id = ?", id).Scan(&sku, &name, &status); err == nil {
+			snapshot = map[string]any{"id": id, "sku": nullStr(sku), "name": name, "status": status}
+		}
+		return productAudit(ctx, tx, actorID, id, "product.hard_deleted", map[string]any{
+			"actor_role": actorRole, "old": snapshot,
+		})
 	})
 	if err != nil {
 		var mysqlErr *mysql.MySQLError
@@ -461,6 +587,7 @@ func assertProductUnreferenced(ctx context.Context, tx *sql.Tx, productID int64,
 		return err
 	}
 	columns.Close()
+	found := map[string]int{}
 	for _, ref := range refs {
 		table, column := ref.table, ref.column
 		if owned[table] {
@@ -481,8 +608,11 @@ func assertProductUnreferenced(ctx context.Context, tx *sql.Tx, productID int64,
 			return err
 		}
 		if count > 0 {
-			return ErrProductDeleteConflict
+			found[table] += count
 		}
+	}
+	if len(found) > 0 {
+		return &ProductDeleteBlockers{Blockers: found}
 	}
 	return nil
 }
@@ -639,7 +769,7 @@ func GetProductFees(ctx context.Context, d *db.DB, productID int64, variationID 
 	id := productID
 	if variationID != nil {
 		table, key, id = "product_variation_fees", "product_variation_id", *variationID
-		if _, err := ProductVariationAdminByID(ctx, d, productID, id); err != nil {
+		if err := variationExists(ctx, d, *variationID); err != nil {
 			return nil, err
 		}
 	} else {
@@ -677,7 +807,7 @@ func SetProductFees(ctx context.Context, d *db.DB, productID int64, variationID 
 	id := productID
 	if variationID != nil {
 		table, key, id = "product_variation_fees", "product_variation_id", *variationID
-		if _, err := ProductVariationAdminByID(ctx, d, productID, id); err != nil {
+		if err := variationExists(ctx, d, *variationID); err != nil {
 			return nil, err
 		}
 	} else {
@@ -1300,11 +1430,11 @@ func assertProductSlug(ctx context.Context, tx *sql.Tx, slug string, exceptID in
 func uniqueProductSlug(ctx context.Context, d *db.DB, name string) (string, error) {
 	base := productSlug(name)
 	for range 5 {
-		random := make([]byte, 4)
+		random := make([]byte, 7)
 		if _, err := rand.Read(random); err != nil {
 			return "", err
 		}
-		slug := base + "-" + hex.EncodeToString(random)
+		slug := base + "-" + hex.EncodeToString(random)[:13]
 		var exists int
 		if err := d.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM products WHERE slug = ?)", slug).Scan(&exists); err != nil {
 			return "", err
@@ -1374,4 +1504,18 @@ func sameIntMap(a, b map[int64]int64) bool {
 		}
 	}
 	return true
+}
+
+// variationExists is the route-model binding check for {variation}: the row must exist (404 otherwise);
+// the product path pairing is never consulted (FeeController binds {variation} by ID alone).
+func variationExists(ctx context.Context, d *db.DB, variationID int64) error {
+	var found int
+	err := d.QueryRowContext(ctx, "SELECT COUNT(*) FROM product_variations WHERE id = ? AND deleted_at IS NULL", variationID).Scan(&found)
+	if err != nil {
+		return err
+	}
+	if found == 0 {
+		return ErrProductAdminNotFound
+	}
+	return nil
 }
