@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
@@ -11,10 +12,21 @@ import (
 )
 
 type profileUpdateRequest struct {
-	Name        *string         `json:"name"`
-	Email       *string         `json:"email"`
-	Phone       *string         `json:"phone"`
+	Name        json.RawMessage `json:"name"`
+	Email       json.RawMessage `json:"email"`
+	Phone       json.RawMessage `json:"phone"`
 	AvatarMedia json.RawMessage `json:"avatar_media_id"`
+}
+
+func profileStringField(raw json.RawMessage) (*string, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var value string
+	if strings.TrimSpace(string(raw)) == "null" || json.Unmarshal(raw, &value) != nil {
+		return nil, true
+	}
+	return &value, true
 }
 
 func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
@@ -28,14 +40,20 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	input := profile.UpdateInput{Name: body.Name, Email: body.Email, Phone: body.Phone, AvatarSet: len(body.AvatarMedia) > 0}
-	if input.AvatarSet && string(body.AvatarMedia) != "null" {
+	name, nameSet := profileStringField(body.Name)
+	email, emailSet := profileStringField(body.Email)
+	phone, phoneSet := profileStringField(body.Phone)
+	input := profile.UpdateInput{Name: name, NameSet: nameSet, Email: email, EmailSet: emailSet,
+		Phone: phone, PhoneSet: phoneSet, AvatarSet: len(body.AvatarMedia) > 0}
+	if input.AvatarSet && strings.TrimSpace(string(body.AvatarMedia)) != "null" {
 		var id int64
-		if err := json.Unmarshal(body.AvatarMedia, &id); err != nil || id < 1 {
-			writeError(w, r, httpx.Validation(map[string][]string{"avatar_media_id": invalidField(ctx, "avatar_media_id")}))
-			return
+		if err := json.Unmarshal(body.AvatarMedia, &id); err != nil {
+			input.AvatarInvalid = true
+		} else if id < 1 {
+			input.AvatarInvalid = true
+		} else {
+			input.AvatarID = &id
 		}
-		input.AvatarID = &id
 	}
 	updated, err := profile.Update(ctx, s.database, user, input, clientMetaFrom(ctx))
 	if errors.Is(err, profile.ErrEmailTaken) {

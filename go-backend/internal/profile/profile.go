@@ -15,6 +15,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 )
 
 var (
@@ -26,11 +27,15 @@ var (
 // UpdateInput carries only self-editable profile fields. AvatarSet distinguishes
 // an omitted avatar_media_id from explicit null, which clears the avatar.
 type UpdateInput struct {
-	Name      *string
-	Email     *string
-	Phone     *string
-	AvatarID  *int64
-	AvatarSet bool
+	Name          *string
+	NameSet       bool
+	Email         *string
+	EmailSet      bool
+	Phone         *string
+	PhoneSet      bool
+	AvatarID      *int64
+	AvatarSet     bool
+	AvatarInvalid bool
 }
 
 var (
@@ -39,27 +44,69 @@ var (
 
 func Update(ctx context.Context, d *db.DB, user *auth.User, input UpdateInput, meta auth.ClientMeta) (*auth.User, error) {
 	fields := map[string][]string{}
-	if input.Name != nil {
+	if input.NameSet && input.Name == nil {
+		fields["name"] = []string{i18n.ValidationMessage(i18n.Default, "string", "name")}
+	} else if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		input.Name = &name
-		if name == "" || utf8.RuneCountInString(name) > 150 {
-			fields["name"] = []string{"The name field is invalid."}
+		if utf8.RuneCountInString(name) > 150 {
+			fields["name"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "name", "max", "150")}
 		}
 	}
-	if input.Email != nil {
+	if input.EmailSet && input.Email == nil {
+		fields["email"] = []string{i18n.ValidationMessage(i18n.Default, "email", "email")}
+	} else if input.Email != nil {
 		email := strings.TrimSpace(*input.Email)
 		if !auth.LooksLikeEmail(email) || utf8.RuneCountInString(email) > 255 {
-			fields["email"] = []string{"The email must be a valid email address."}
+			if utf8.RuneCountInString(email) > 255 {
+				fields["email"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "email", "max", "255")}
+			} else {
+				fields["email"] = []string{i18n.ValidationMessage(i18n.Default, "email", "email")}
+			}
 		} else {
 			input.Email = &email
 		}
 	}
-	if input.Phone != nil {
+	if input.PhoneSet && input.Phone == nil {
+		fields["phone"] = []string{i18n.ValidationMessage(i18n.Default, "string", "phone")}
+	} else if input.Phone != nil {
 		phone := auth.NormalizePhone(*input.Phone)
-		if phone == "" || utf8.RuneCountInString(phone) > 20 {
-			fields["phone"] = []string{"The phone field is invalid."}
+		if utf8.RuneCountInString(phone) > 20 {
+			fields["phone"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "phone", "max", "20")}
 		}
 		input.Phone = &phone
+	}
+	if input.AvatarInvalid {
+		fields["avatar_media_id"] = []string{i18n.ValidationMessage(i18n.Default, "integer", "avatar_media_id")}
+	}
+	if input.Email != nil && fields["email"] == nil {
+		var exists bool
+		if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id <> ?)`,
+			*input.Email, user.ID).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			fields["email"] = []string{i18n.ValidationMessage(i18n.Default, "unique", "email")}
+		}
+	}
+	if input.Phone != nil && fields["phone"] == nil {
+		var exists bool
+		if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE phone = ? AND id <> ?)`,
+			*input.Phone, user.ID).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			fields["phone"] = []string{i18n.ValidationMessage(i18n.Default, "unique", "phone")}
+		}
+	}
+	if input.AvatarSet && input.AvatarID != nil {
+		var exists bool
+		if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM media WHERE id = ?)`, *input.AvatarID).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			fields["avatar_media_id"] = []string{i18n.ValidationMessage(i18n.Default, "exists", "avatar_media_id")}
+		}
 	}
 	if len(fields) > 0 {
 		return nil, httpx.Validation(fields)
@@ -73,36 +120,6 @@ func Update(ctx context.Context, d *db.DB, user *auth.User, input UpdateInput, m
 	}
 	if err != nil {
 		return nil, err
-	}
-
-	if input.Email != nil {
-		var exists bool
-		if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id <> ?)`,
-			*input.Email, user.ID).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if exists {
-			return nil, ErrEmailTaken
-		}
-	}
-	if input.Phone != nil {
-		var exists bool
-		if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE phone = ? AND id <> ?)`,
-			*input.Phone, user.ID).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if exists {
-			return nil, ErrPhoneTaken
-		}
-	}
-	if input.AvatarSet && input.AvatarID != nil {
-		var exists bool
-		if err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM media WHERE id = ?)`, *input.AvatarID).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if !exists {
-			return nil, httpx.Validation(map[string][]string{"avatar_media_id": {"The selected avatar media is invalid."}})
-		}
 	}
 
 	emailChanged := input.Email != nil && !strings.EqualFold(*input.Email, oldEmail.String)

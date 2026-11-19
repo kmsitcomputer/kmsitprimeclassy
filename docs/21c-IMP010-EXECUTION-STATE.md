@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 151 |
-| PARTIAL (incomplete behaviour) | 41 |
+| Fully GO | 152 |
+| PARTIAL (incomplete behaviour) | 40 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -456,7 +456,9 @@ carries `actor_role`.
 
 **DONE — WhatsApp test-number removal (`tools/parity/compare_whatsapp_test_number_delete.py`, 1/1):** owned deletion removes the row and writes a masked, correctly attributed audit; missing/foreign IDs are idempotent; invalid scope and unauthorized role are refused. Response and DB state match Laravel. Scoped `go test`/`go vet` for `api`, `agentadmin`, and `i18n` pass. Matrix **151 GO / 41 PARTIAL / 183 Laravel-only**.
 
-**EXACT NEXT ACTION:** verify `PATCH /api/v1/profile` against Laravel, including validation, self-scope, user and profile updates, audit side effects, and role behavior.
+**DONE — Profile self-update (`tools/parity/compare_profile_update.py`, 1/1):** Agen/Admin/Konsumen self-updates, phone normalization, protected-field ignoring, email verification invalidation, case-only email behavior, accumulated validation, uniqueness, avatar clearing, response resources and audit state match Laravel. Scoped `go test`/`go vet` for `api`, `profile`, `auth`, and `i18n` passed. Matrix **152 GO / 40 PARTIAL / 183 Laravel-only**.
+
+**EXACT NEXT ACTION:** verify `GET /api/v1/profile/email/verification` against Laravel, including authenticated self-only state, response shape, role behavior, and read-only DB effects.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.
