@@ -11,6 +11,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/agentadmin"
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/users"
 )
 
@@ -248,6 +249,7 @@ func (s *Server) handleUsersConvertToSalesKurirSub(w http.ResponseWriter, r *htt
 }
 
 func (s *Server) handleUsersReassignReferral(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	actor, ok := requireUser(w, r)
 	if !ok {
 		return
@@ -264,14 +266,27 @@ func (s *Server) handleUsersReassignReferral(w http.ResponseWriter, r *http.Requ
 		writeError(w, r, err)
 		return
 	}
+	// ReassignReferralRequest::rules — BOTH required_without failures fire together, and each id must
+	// exist in users (exists:users,id). FormRequest validation runs BEFORE UserPolicy::update.
+	fields := map[string][]string{}
 	if body.KorsalID == nil && body.SalesID == nil {
-		writeError(w, r, httpx.Validation(map[string][]string{"korsal_id": requiredField(r.Context(), "korsal_id")}))
+		fields["korsal_id"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "required_without", "korsal_id", "values", "sales")}
+		fields["sales_id"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "required_without", "sales_id", "values", "korsal")}
+	}
+	if body.KorsalID != nil && !existsIn(ctx, s.database, "users", "id", formatID(*body.KorsalID)) {
+		fields["korsal_id"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "exists", "korsal_id")}
+	}
+	if body.SalesID != nil && !existsIn(ctx, s.database, "users", "id", formatID(*body.SalesID)) {
+		fields["sales_id"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "exists", "sales_id")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Message: msg(ctx, "system.validation_failed"), Fields: fields})
 		return
 	}
 	svc := users.New(s.database)
-	target, err := svc.Find(r.Context(), id)
+	target, err := svc.Find(ctx, id)
 	if err == nil {
-		target, err = svc.Reassign(r.Context(), actor, target, body.KorsalID, body.SalesID)
+		target, err = svc.Reassign(ctx, actor, target, body.KorsalID, body.SalesID)
 	}
 	if err != nil {
 		writeUsersError(w, r, err)

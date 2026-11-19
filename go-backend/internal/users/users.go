@@ -14,6 +14,7 @@ import (
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 )
 
 var ErrNotFound = errors.New("user not found")
@@ -28,6 +29,36 @@ type Error struct {
 func (e *Error) Error() string { return e.Message }
 
 func fail(status int, message string) error { return &Error{Status: status, Message: message} }
+
+func failFields(status int, message string, fields map[string][]string) error {
+	return &Error{Status: status, Message: message, Fields: fields}
+}
+
+// validationFailed is Laravel's ONE ValidationException message (BaseFormRequest::failedValidation).
+func validationFailed(fields map[string][]string) error {
+	return failFields(422, i18n.Translate(i18n.Default, "system.validation_failed"), fields)
+}
+
+// unauthorized is a FormRequest::failedAuthorization envelope ('system.unauthorized_action', 403) —
+// used by CreateUserRequest::authorize, which fails BEFORE validation.
+func unauthorized() error {
+	return fail(403, i18n.Translate(i18n.Default, "system.unauthorized_action"))
+}
+
+// policyDenied is a CONTROLLER $this->authorize() denial: Laravel renders the AuthorizationException
+// with its own default text ('This action is unauthorized.') — observed on the running reference
+// (sales deleting a user answers exactly this sentence), unlike the ApiResponse override which only
+// fires for FormRequest authorization failures.
+func policyDenied() error { return fail(403, "This action is unauthorized.") }
+
+// v renders one validation sentence through the catalogue (:attribute resolved via validation.attributes).
+func v(rule, field string, params ...string) string {
+	return i18n.ValidationMessage(i18n.Default, rule, field, params...)
+}
+
+func fieldMsg(rule, field string, params ...string) []string {
+	return []string{v(rule, field, params...)}
+}
 
 // Service owns the user-administration use cases. It never trusts role/agent hierarchy data from a caller.
 type Service struct {
@@ -229,10 +260,12 @@ func (s *Service) List(ctx context.Context, f Filters) (*Page, error) {
 
 func (s *Service) Create(ctx context.Context, actor *auth.User, input CreateInput) (*auth.User, error) {
 	role := auth.CanonicalSlug(strings.TrimSpace(input.Role))
+	// CreateUserRequest::authorize runs BEFORE validation: a target the actor may never create answers
+	// AuthorizationException (403 'Anda tidak memiliki akses...') even when the payload is also invalid.
 	if !CanCreate(actor, role) {
-		return nil, fail(403, "Role target tidak diizinkan.")
+		return nil, unauthorized()
 	}
-	if err := validateCreate(input); err != nil {
+	if err := s.validateCreate(ctx, actor, input); err != nil {
 		return nil, err
 	}
 	parentID, agentID, korsalID, err := s.creationScope(ctx, actor, role, input)
@@ -263,7 +296,7 @@ func (s *Service) Create(ctx context.Context, actor *auth.User, input CreateInpu
 		if exists, err := uniqueConflict(ctx, tx, input.Email, input.Phone, 0); err != nil {
 			return err
 		} else if exists {
-			return &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: uniqueFields(ctx, tx, input.Email, input.Phone, 0)}
+			return validationFailed(uniqueFields(ctx, tx, input.Email, input.Phone, 0))
 		}
 		code := any(nil)
 		if referral != "" {
@@ -324,60 +357,122 @@ type CreateInput struct {
 	KorsalID     *int64
 }
 
-func validateCreate(in CreateInput) error {
+// validateCreate is CreateUserRequest::rules with Laravel's id-locale sentences. Phone is already
+// normalised by prepareForValidation (the handler normalises before calling). Errors ACCUMULATE —
+// Laravel reports every failing rule, not just the first.
+func (s *Service) validateCreate(ctx context.Context, actor *auth.User, in CreateInput) error {
 	fields := map[string][]string{}
-	if strings.TrimSpace(in.Name) == "" {
-		fields["name"] = []string{"The name field is required."}
+	// agent_id: ['nullable','integer', Rule::in([actor.agent_id])] — a mismatched branch id is a
+	// validation failure ("agen yang dipilih tidak valid."), never the service error.
+	if in.AgentID != nil && !actor.IsRole(auth.RoleSuperAdmin) {
+		if actor.AgentID == nil || *in.AgentID != *actor.AgentID {
+			fields["agent_id"] = fieldMsg("in", "agent_id")
+		}
 	}
-	if len(in.Name) > 150 {
-		fields["name"] = []string{"The name may not be greater than 150 characters."}
+	if strings.TrimSpace(in.Name) == "" {
+		fields["name"] = fieldMsg("required", "name")
+	} else if len([]rune(in.Name)) > 150 {
+		fields["name"] = fieldMsg("max.string", "name", "max", "150")
 	}
 	if strings.TrimSpace(in.Email) == "" {
-		fields["email"] = []string{"The email field is required."}
-	}
-	if !auth.LooksLikeEmail(in.Email) {
-		fields["email"] = []string{"The email must be a valid email address."}
+		fields["email"] = fieldMsg("required", "email")
+	} else {
+		if !auth.LooksLikeEmail(in.Email) {
+			fields["email"] = fieldMsg("email", "email")
+		}
+		if len([]rune(in.Email)) > 255 {
+			fields["email"] = append(fields["email"], fieldMsg("max.string", "email", "max", "255")...)
+		}
 	}
 	if strings.TrimSpace(in.Phone) == "" {
-		fields["phone"] = []string{"The phone field is required."}
-	}
-	if len(in.Phone) > 20 {
-		fields["phone"] = []string{"The phone may not be greater than 20 characters."}
+		fields["phone"] = fieldMsg("required", "phone")
+	} else if len([]rune(in.Phone)) > 20 {
+		fields["phone"] = fieldMsg("max.string", "phone", "max", "20")
 	}
 	if len(in.Password) < 8 {
-		fields["password"] = []string{"The password must be at least 8 characters."}
+		fields["password"] = fieldMsg("min.string", "password", "min", "8")
 	}
 	if in.Password != in.Confirmation {
-		fields["password"] = []string{"The password field confirmation does not match."}
+		// The confirmed rule reports against the 'password' attribute itself.
+		fields["password"] = append(fields["password"], fieldMsg("confirmed", "password")...)
+	}
+
+	// korsal_id: required when an AGEN creates a sales/sales-kurir-sub; must be a korsal user under the
+	// actor's branch (the exists query); a korsal actor may only ever submit its own id.
+	needsKorsal := (in.Role == auth.RoleSales || in.Role == auth.RoleSalesKurirSub) && actor.IsRole(auth.RoleAgen)
+	if needsKorsal && in.KorsalID == nil {
+		fields["korsal_id"] = fieldMsg("required", "korsal_id")
+	} else if in.KorsalID != nil {
+		var valid bool
+		if s.database == nil {
+			// Unit-test seam: a service without a database cannot resolve the exists rule.
+			valid = true
+		} else {
+			err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id
+				WHERE u.id=? AND u.agent_id=? AND u.deleted_at IS NULL AND r.slug='korsal')`, *in.KorsalID, derefAgent(actor)).Scan(&valid)
+			if err != nil {
+				return err
+			}
+		}
+		if !valid {
+			fields["korsal_id"] = fieldMsg("exists", "korsal_id")
+		} else if actor.IsRole(auth.RoleKorsal) && *in.KorsalID != actor.ID {
+			fields["korsal_id"] = fieldMsg("in", "korsal_id")
+		}
+	}
+
+	// unique email/phone — Laravel runs these as ordinary validation rules, so they ACCUMULATE into the
+	// same envelope as every other failure (the table query is not soft-delete aware).
+	if s.database != nil {
+		// unique email/phone — Laravel runs these as ordinary validation rules, so they ACCUMULATE into
+		// the same envelope as every other failure (the table query is not soft-delete aware).
+		if strings.TrimSpace(in.Email) != "" {
+			var exists bool
+			if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email=? AND id<>?)`, in.Email, 0).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				fields["email"] = fieldMsg("unique", "email")
+			}
+		}
+		if strings.TrimSpace(in.Phone) != "" {
+			var exists bool
+			if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE phone=? AND id<>?)`, in.Phone, 0).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				fields["phone"] = fieldMsg("unique", "phone")
+			}
+		}
 	}
 	if len(fields) > 0 {
-		return &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: fields}
+		return validationFailed(fields)
 	}
 	return nil
 }
 
+func derefAgent(u *auth.User) int64 {
+	if u.AgentID == nil {
+		return -1
+	}
+	return *u.AgentID
+}
+
 func (s *Service) creationScope(ctx context.Context, actor *auth.User, role string, in CreateInput) (*int64, *int64, *int64, error) {
 	if actor.IsRole(auth.RoleSuperAdmin) {
-		if role != auth.RoleAgen {
-			return nil, nil, nil, fail(403, "Role target tidak diizinkan.")
-		}
-		if in.AgentID != nil {
-			return nil, nil, nil, &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"agent_id": {"Nilai Agen tidak valid."}}}
-		}
+		// Laravel's create match arm for 'agen' ignores any client agent_id entirely
+		// ([null, null, null] then self-reference) — no error, no honored value.
 		return nil, nil, nil, nil
 	}
 	if actor.AgentID == nil || (actor.IsRole(auth.RoleAgen) && *actor.AgentID != actor.ID) {
 		return nil, nil, nil, fail(422, "Network Agen tidak valid.")
-	}
-	if in.AgentID != nil && *in.AgentID != *actor.AgentID {
-		return nil, nil, nil, fail(422, "Tidak dapat membuat user pada network Agen lain.")
 	}
 	parentID, agentID := actor.ID, *actor.AgentID
 	var korsalID *int64
 	switch role {
 	case auth.RoleKorsal, auth.RoleAdmin, auth.RoleKeuangan, auth.RoleGudang, auth.RoleKoordinatorKurir:
 		if !actor.IsRole(auth.RoleAgen) && !(role == auth.RoleKurir && actor.IsRole(auth.RoleKoordinatorKurir)) {
-			return nil, nil, nil, fail(403, "Role target tidak diizinkan.")
+			return nil, nil, nil, unauthorized()
 		}
 	case auth.RoleSales, auth.RoleSalesKurirSub:
 		if actor.IsRole(auth.RoleKorsal) {
@@ -386,22 +481,11 @@ func (s *Service) creationScope(ctx context.Context, actor *auth.User, role stri
 				return nil, nil, nil, fail(422, "Korsal hanya dapat membuat Sales di bawah dirinya.")
 			}
 		} else if actor.IsRole(auth.RoleAgen) {
-			if in.KorsalID == nil {
-				return nil, nil, nil, &Error{Status: 422, Message: "Korsal wajib dipilih.", Fields: map[string][]string{"korsal_id": {"Korsal wajib dipilih."}}}
-			}
-			var valid bool
-			err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id
-				WHERE u.id=? AND u.agent_id=? AND u.deleted_at IS NULL AND r.slug='korsal')`, *in.KorsalID, actor.ID).Scan(&valid)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			if !valid {
-				return nil, nil, nil, fail(422, "Korsal wajib valid dalam network Agen.")
-			}
+			// Validated already; the service arm mirrors Laravel's [$korsalId, creator.id, korsalId].
 			korsalID = int64Ptr(*in.KorsalID)
 			parentID = *in.KorsalID
 		} else {
-			return nil, nil, nil, fail(403, "Role target tidak diizinkan.")
+			return nil, nil, nil, unauthorized()
 		}
 	case auth.RoleKurir:
 		if actor.IsRole(auth.RoleKoordinatorKurir) {
@@ -421,20 +505,24 @@ func (s *Service) creationScope(ctx context.Context, actor *auth.User, role stri
 }
 
 func (s *Service) Update(ctx context.Context, actor, target *auth.User, patch UpdateInput) (*auth.User, error) {
+	// UserPolicy::update — KEUANGAN may only ever edit its own profile through ProfileController.
 	if !CanUpdate(actor, target) {
-		return nil, fail(403, "Aksi tidak diizinkan.")
+		return nil, policyDenied()
 	}
-	if !patch.Name.Present && !patch.Phone.Present && !patch.Status.Present {
-		return target, nil
+	fields := map[string][]string{}
+	if patch.Name.Present {
+		if len([]rune(patch.Name.Value)) > 150 {
+			fields["name"] = fieldMsg("max.string", "name", "max", "150")
+		}
 	}
-	if patch.Name.Present && (strings.TrimSpace(patch.Name.Value) == "" || len(patch.Name.Value) > 150) {
-		return nil, &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"name": {"Nama tidak valid."}}}
-	}
-	if patch.Phone.Present && (patch.Phone.Value == "" || len(patch.Phone.Value) > 20) {
-		return nil, &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"phone": {"Nomor telepon tidak valid."}}}
+	if patch.Phone.Present && len([]rune(patch.Phone.Value)) > 20 {
+		fields["phone"] = fieldMsg("max.string", "phone", "max", "20")
 	}
 	if patch.Status.Present && patch.Status.Value != "active" && patch.Status.Value != "inactive" && patch.Status.Value != "suspended" {
-		return nil, &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"status": {"Status tidak valid."}}}
+		fields["status"] = fieldMsg("in", "status")
+	}
+	if len(fields) > 0 {
+		return nil, validationFailed(fields)
 	}
 	old := map[string]any{"name": target.Name, "phone": target.Phone, "status": target.Status}
 	sets, args := []string{}, []any{}
@@ -450,20 +538,22 @@ func (s *Service) Update(ctx context.Context, actor, target *auth.User, patch Up
 		sets = append(sets, "status=?")
 		args = append(args, patch.Status.Value)
 	}
-	sets = append(sets, "updated_at=UTC_TIMESTAMP(6)")
-	args = append(args, target.ID)
 	if err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if patch.Phone.Present {
+		if patch.Phone.Present && strings.TrimSpace(patch.Phone.Value) != "" {
 			var exists bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE phone=? AND id<>?)`, patch.Phone.Value, target.ID).Scan(&exists); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE phone=? AND id<>? AND deleted_at IS NULL)`, strings.TrimSpace(patch.Phone.Value), target.ID).Scan(&exists); err != nil {
 				return err
 			}
 			if exists {
-				return &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"phone": {"Nomor telepon sudah digunakan."}}}
+				return validationFailed(map[string][]string{"phone": fieldMsg("unique", "phone")})
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE users SET `+strings.Join(sets, ",")+` WHERE id=? AND deleted_at IS NULL`, args...); err != nil {
-			return err
+		if len(sets) > 0 {
+			sets = append(sets, "updated_at=UTC_TIMESTAMP(6)")
+			args = append(args, target.ID)
+			if _, err := tx.ExecContext(ctx, `UPDATE users SET `+strings.Join(sets, ",")+` WHERE id=? AND deleted_at IS NULL`, args...); err != nil {
+				return err
+			}
 		}
 		newData := map[string]any{"name": target.Name, "phone": target.Phone, "status": target.Status}
 		if patch.Name.Present {
@@ -500,7 +590,7 @@ func (s *Service) Delete(ctx context.Context, actor, target *auth.User) error {
 		return fail(403, "Akun Super Admin tidak dapat dihapus.")
 	}
 	if !CanDelete(actor, target) {
-		return fail(403, "Aksi tidak diizinkan.")
+		return policyDenied()
 	}
 	return s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if target.IsRole(auth.RoleAgen) {
@@ -519,25 +609,24 @@ func (s *Service) Delete(ctx context.Context, actor, target *auth.User) error {
 }
 
 func (s *Service) ConvertToSalesKurirSub(ctx context.Context, actor, target *auth.User) (*auth.User, error) {
-	if actor == nil || !actor.IsRole(auth.RoleAgen) {
-		return nil, fail(403, "Hanya Agen pemilik network yang dapat melakukan konversi.")
+	// UserPolicy::convertToSalesKurirSub runs FIRST (controller authorize): agen + same branch only.
+	if !CanConvert(actor, target) {
+		return nil, policyDenied()
 	}
 	if !target.IsRole(auth.RoleSales) {
 		return nil, fail(422, "User target harus memiliki role Sales.")
 	}
-	if actor.AgentID == nil || !sameID(actor.AgentID, target.AgentID) {
-		return nil, fail(403, "Sales harus berada dalam network Agen yang sama.")
-	}
+	// Both a missing and an invalid korsal surface as the SAME ApiException with a korsal_id field error.
 	var valid bool
-	if target.KorsalID == nil {
-		return nil, fail(422, "Sales harus memiliki Korsal valid dalam network yang sama.")
-	}
-	if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id
-		WHERE u.id=? AND u.agent_id=? AND u.deleted_at IS NULL AND r.slug='korsal')`, *target.KorsalID, *actor.AgentID).Scan(&valid); err != nil {
-		return nil, err
+	if target.KorsalID != nil {
+		if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id
+			WHERE u.id=? AND u.agent_id=? AND u.deleted_at IS NULL AND r.slug='korsal')`, *target.KorsalID, *actor.AgentID).Scan(&valid); err != nil {
+			return nil, err
+		}
 	}
 	if !valid {
-		return nil, fail(422, "Sales harus memiliki Korsal valid dalam network yang sama.")
+		return nil, &Error{Status: 422, Message: "Sales harus memiliki Korsal valid dalam network yang sama.",
+			Fields: map[string][]string{"korsal_id": {"Korsal wajib valid dalam network Agen."}}}
 	}
 	roleID, err := s.roleID(ctx, auth.RoleSalesKurirSub)
 	if err != nil {
@@ -579,29 +668,34 @@ func (s *Service) convertRole(ctx context.Context, actorID int64, target *auth.U
 
 func (s *Service) Reassign(ctx context.Context, actor, target *auth.User, korsalID, salesID *int64) (*auth.User, error) {
 	if !CanUpdate(actor, target) {
-		return nil, fail(403, "Aksi tidak diizinkan.")
+		return nil, policyDenied()
 	}
 	if korsalID != nil {
+		// ReferralReassignmentService::reassignSalesToKorsal.
 		if !target.IsRole(auth.RoleSales, auth.RoleSalesKurirSub) {
-			return nil, fail(422, "Role target tidak mendukung perubahan referral.")
+			return nil, fail(422, i18n.Translate(i18n.Default, "referral.unsupported_role"))
 		}
 		next, err := s.Find(ctx, *korsalID)
 		if err != nil || !next.IsRole(auth.RoleKorsal) || !sameID(next.AgentID, target.AgentID) {
-			return nil, fail(422, "Korsal tujuan tidak valid.")
+			return nil, fail(422, i18n.Translate(i18n.Default, "referral.invalid_target"))
 		}
 		return s.reassign(ctx, actor, target, next.ID, &next.ID, nil)
 	}
 	if salesID != nil {
+		// ReferralReassignmentService::reassignKonsumenToSales.
 		if !target.IsRole(auth.RoleKonsumen) {
-			return nil, fail(422, "Role target tidak mendukung perubahan referral.")
+			return nil, fail(422, i18n.Translate(i18n.Default, "referral.unsupported_role"))
 		}
 		next, err := s.Find(ctx, *salesID)
 		if err != nil || !next.IsRole(auth.RoleSales, auth.RoleSalesKurirSub) || !sameID(next.AgentID, target.AgentID) {
-			return nil, fail(422, "Sales tujuan tidak valid.")
+			return nil, fail(422, i18n.Translate(i18n.Default, "referral.invalid_target"))
 		}
 		return s.reassign(ctx, actor, target, next.ID, next.KorsalID, &next.ID)
 	}
-	return nil, &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"korsal_id": {"Pilih Korsal atau Sales tujuan."}}}
+	return nil, validationFailed(map[string][]string{
+		"korsal_id": fieldMsg("required_without", "korsal_id", "values", "sales"),
+		"sales_id":  fieldMsg("required_without", "sales_id", "values", "korsal"),
+	})
 }
 
 func (s *Service) reassign(ctx context.Context, actor, target *auth.User, parentID int64, korsalID, salesID *int64) (*auth.User, error) {
@@ -781,26 +875,17 @@ func uniqueConflict(ctx context.Context, tx *sql.Tx, email, phone string, except
 }
 
 func uniqueFields(ctx context.Context, tx *sql.Tx, email, phone string, except int64) map[string][]string {
-	out := map[string][]string{}
+	fields := map[string][]string{}
 	var exists bool
-	if tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND email=?)`, except, email).Scan(&exists) == nil && exists {
-		out["email"] = []string{"Email sudah digunakan."}
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email=? AND id<>? AND deleted_at IS NULL)`, email, except).Scan(&exists); err == nil && exists {
+		fields["email"] = fieldMsg("unique", "email")
 	}
-	if tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id<>? AND phone=?)`, except, phone).Scan(&exists) == nil && exists {
-		out["phone"] = []string{"Nomor telepon sudah digunakan."}
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE phone=? AND id<>? AND deleted_at IS NULL)`, phone, except).Scan(&exists); err == nil && exists {
+		fields["phone"] = fieldMsg("unique", "phone")
 	}
-	return out
+	return fields
 }
 
-func escapeLike(v string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(v)
-}
-func placeholders(n int) string {
-	if n < 1 {
-		return ""
-	}
-	return strings.TrimRight(strings.Repeat("?,", n), ",")
-}
 func nullableInt(v *int64) any {
 	if v == nil {
 		return nil
@@ -832,3 +917,21 @@ func ParseID(raw string) (int64, error) {
 }
 
 func NormalizeStatus(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// escapeLike escapes LIKE wildcards so a literal % or _ searches as text (UserController::index).
+func escapeLike(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `%`, `\%`)
+	v = strings.ReplaceAll(v, `_`, `\_`)
+	return v
+}
+
+// placeholders renders N question-mark placeholders for an IN (...) list.
+func placeholders(n int) string {
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
+}
+
+// CanConvert is UserPolicy::convertToSalesKurirSub (controller authorize before the service).
+func CanConvert(actor, target *auth.User) bool {
+	return actor.IsRole(auth.RoleAgen) && actor.AgentID != nil && sameID(actor.AgentID, target.AgentID)
+}

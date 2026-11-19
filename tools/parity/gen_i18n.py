@@ -150,10 +150,22 @@ KEYS = {
         "current_password_incorrect",
         "password_updated",
     ],
+    "user": [
+        "created",
+        "role_not_authorized",
+        "unsupported_role_combination",
+        "agent_id_required_for_role",
+        "invalid_agent",
+        "invalid_korsal",
+        "deleted",
+        "cannot_delete_super_admin",
+    ],
     "referral": [
         "not_linked_to_agent",
         "invalid_code",
         "code_not_found",
+        "unsupported_role",
+        "invalid_target",
     ],
 }
 
@@ -161,7 +173,7 @@ KEYS = {
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
                    "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes",
-                   "image", "file", "required_if", "before_or_equal"]
+                   "image", "file", "required_if", "before_or_equal", "email", "confirmed"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric"), ("gt", "numeric"), ("gt", "file"),
@@ -183,9 +195,12 @@ def unescape(v: str) -> str:
     return v.replace("\\'", "'").replace("\\\\", "\\")
 
 
-def block(src: str, name: str) -> str:
-    """Return the body of `'name' => [ ... ]` (bracket-balanced)."""
-    i = src.find("'" + name + "' => [")
+def block(src: str, name: str, occurrence: int = 1) -> str:
+    """Return the body of the Nth `'name' => [ ... ]` (bracket-balanced)."""
+    needle = "'" + name + "' => ["
+    i = -1
+    for _ in range(occurrence):
+        i = src.find(needle, i + 1)
     if i < 0:
         raise SystemExit(f"block {name} not found")
     start = src.index("[", i)
@@ -224,7 +239,12 @@ def main() -> int:
         out[loc] = {}
         for group, keys in KEYS.items():
             try:
-                body = block(src, group)
+                if group == "referral":
+                    # The lang file declares TWO referral groups (self-service referral lookup at the top,
+                    # the audited reassignment vocabulary further down); merge them.
+                    body = block(src, group, 1) + block(src, group, 2)
+                else:
+                    body = block(src, group)
             except SystemExit:
                 # A locale may omit an entire group; Laravel then falls back to the default locale, which
                 # internal/i18n mirrors. A gap in the default locale still fails loudly below.

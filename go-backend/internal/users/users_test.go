@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
@@ -48,12 +49,14 @@ func TestVisibilityAndDeletionRemainBranchScoped(t *testing.T) {
 }
 
 func TestCreateValidationRequiresMatchingPasswordAndKorsalData(t *testing.T) {
-	err := validateCreate(CreateInput{Name: "User", Email: "bad", Phone: "0812", Password: "password1", Confirmation: "password2"})
+	actor := &auth.User{ID: 4, Role: auth.RoleAgen, AgentID: intPtr(4)}
+	svc := New(nil)
+	err := svc.validateCreate(context.Background(), actor, CreateInput{Name: "User", Email: "bad", Phone: "0812", Password: "password1", Confirmation: "password2"})
 	domain, ok := err.(*Error)
 	if !ok || domain.Status != 422 || domain.Fields["email"] == nil || domain.Fields["password"] == nil {
 		t.Fatalf("invalid create request error = %#v", err)
 	}
-	if err := validateCreate(CreateInput{Name: "User", Email: "u@example.test", Phone: "08123456789", Password: "password1", Confirmation: "password1"}); err != nil {
+	if err := svc.validateCreate(context.Background(), actor, CreateInput{Role: auth.RoleSales, Name: "User", Email: "u@example.test", Phone: "08123456789", Password: "password1", Confirmation: "password1", KorsalID: intPtr(20)}); err != nil {
 		t.Fatalf("valid create request rejected: %v", err)
 	}
 }
