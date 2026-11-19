@@ -89,6 +89,9 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/settings",
 		"GET /api/v1/languages",
 		"GET /api/v1/categories",
+		"POST /api/v1/categories",
+		"PATCH /api/v1/categories/{category}",
+		"DELETE /api/v1/categories/{category}",
 		"GET /api/v1/products",
 		"GET /api/v1/articles",
 		"GET /api/v1/homepage",
@@ -166,6 +169,10 @@ func implementsRoute(method, path string) bool {
 			rest := strings.TrimPrefix(path, prefix)
 			return rest != "" && !strings.Contains(rest, "/")
 		}
+	}
+	if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, "/api/v1/categories/") {
+		rest := strings.TrimPrefix(path, "/api/v1/categories/")
+		return rest != "" && !strings.Contains(rest, "/")
 	}
 	if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, "/api/v1/addresses/") {
 		rest := strings.TrimPrefix(path, "/api/v1/addresses/")

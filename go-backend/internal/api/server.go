@@ -104,6 +104,9 @@ func (s *Server) routes() {
 
 	// Public catalog and content.
 	s.mux.HandleFunc("GET /api/v1/categories", s.handleCategories)
+	s.mux.Handle("POST /api/v1/categories", chain(http.HandlerFunc(s.handleCategoryStore), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,admin,agen")))
+	s.mux.Handle("PATCH /api/v1/categories/{category}", chain(http.HandlerFunc(s.handleCategoryUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("DELETE /api/v1/categories/{category}", chain(http.HandlerFunc(s.handleCategoryDestroy), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	// Checkout wizard contract. Public (a guest starting checkout still needs the step list); the session, when
 	// present, makes the same response role-aware.
 	s.mux.HandleFunc("GET /api/v1/checkout/steps", s.handleCheckoutSteps)

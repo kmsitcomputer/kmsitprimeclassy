@@ -12,10 +12,10 @@ before touching code. Do not re-derive a completed checkpoint.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **109 (29.1%)** |
-| Fully GO | 103 |
+| Served by Go | **112 (29.9%)** |
+| Fully GO | 106 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **266** |
+| Laravel-only (Go answers 501) | **263** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle + 11 order read + 14 item lifecycle) |
 | Laravel files modified by IMP-010 | **0** |
@@ -48,6 +48,7 @@ explicitly listed as outstanding rather than silently reduced.
 | Sub-location ownership (create/update/assign/deactivate) | 4 | `compare_inventory_mutations.py` sublocation scenario + owner/previous_owner/is_active state diff |
 | Konsumen address book | 4 | `compare_address.py` (17) — incl. the resolved province/regency/district columns and the ownership 404 |
 | Promotions (vouchers + discounts) | 8 | `compare_promo.py` (21) — incl. both resulting row sets and the RBAC refusal |
+| Product categories — admin mutations | 3 | create/update/delete; role split, normalized sibling names, parent-cycle/duplicate guards, slug uniqueness, delete conflict |
 | Checkout wizard contract | 1 | `compare_checkout.py` (38) — 11 scenarios: guest, konsumen, sales, agen, super_admin, branch provider switches, the KMSIT fallback, "nothing to offer", and payment-method switches |
 | Checkout quote (Review preview) | 1 | `compare_order_quote.py` (25) — pickup/address-book/inline destinations, fixed/percentage/targeted vouchers, inapplicable + unknown vouchers, provider-failure 422s, validation shapes, policy vs role 403, guest 401. Provider clients additionally pinned by 4 Go test groups incl. a stub ORS/RajaOngkir/KMSIT and the SSRF guard |
 | Agent stock reservations | — (primitive) | 12 two-connection oracles in `internal/inventory/reserve_test.go`: anti-oversell, exact-capacity lost-update, opposite-order deadlock, rollback, legacy boundary, warehouse-authoritative trap, provisioning, release clamp |

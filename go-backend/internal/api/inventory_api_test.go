@@ -469,6 +469,36 @@ func TestLiteralSiblingRouteIsNotSwallowed(t *testing.T) {
 	}
 }
 
+func TestCategoryCreateMutation(t *testing.T) {
+	h := newHarness(t)
+	h.loginAs("super@imp010.test", "Secret123!")
+	token := h.csrf()
+	name := "Go Category Imp010"
+	t.Cleanup(func() {
+		_, _ = h.db.ExecContext(context.Background(), "DELETE FROM product_categories WHERE name = ?", name)
+	})
+
+	res := h.post("/api/v1/categories", map[string]any{
+		"name": name, "sort_order": 999,
+	}, token)
+	if res.status != http.StatusCreated {
+		t.Fatalf("category create = %d body=%s", res.status, string(res.body))
+	}
+	ok, _, data, _ := h.decode(res)
+	if !ok {
+		t.Fatalf("category create envelope failed: %s", string(res.body))
+	}
+	row := data.(map[string]any)
+	if row["name"] != name || row["is_active"] != true || row["sort_order"] != float64(999) {
+		t.Fatalf("category create shape = %#v", row)
+	}
+
+	duplicate := h.post("/api/v1/categories", map[string]any{"name": name}, token)
+	if duplicate.status != http.StatusUnprocessableEntity {
+		t.Fatalf("duplicate category = %d, want 422 body=%s", duplicate.status, string(duplicate.body))
+	}
+}
+
 func itoa(v int64) string {
 	if v == 0 {
 		return "0"

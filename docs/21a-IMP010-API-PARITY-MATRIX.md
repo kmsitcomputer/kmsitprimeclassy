@@ -159,14 +159,14 @@ Status legend:
 | POST | `/api/v1/catalog/imports` | session | admin, agen, super_admin | LARAVEL |  |
 | POST | `/api/v1/catalog/imports/preview` | session | admin, agen, super_admin | LARAVEL |  |
 
-## Catalog — categories — `categories` (1/4 in Go)
+## Catalog — categories — `categories` (4/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/categories` | public | — | **GO** |  |
-| POST | `/api/v1/categories` | session | admin, agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/categories/{category}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/categories/{category}` | session | super_admin | LARAVEL |  |
+| POST | `/api/v1/categories` | session | admin, agen, super_admin | **GO** | global taxonomy create; super_admin/admin/agen; normalized name, sibling duplicate guard and server-generated slug |
+| DELETE | `/api/v1/categories/{category}` | session | super_admin | **GO** | super_admin only; children are promoted by ON DELETE SET NULL |
+| PATCH | `/api/v1/categories/{category}` | session | super_admin | **GO** | super_admin only; parent-cycle and sibling-duplicate guards |
 
 ## Checkout — `checkout` (2/4 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 109 (29.1%) |
-|   of which fully GO | 103 |
+| Served by Go now | 112 (29.9%) |
+|   of which fully GO | 106 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 266 |
-| Areas fully ported | 12 / 45 |
+| Still Laravel-only | 263 |
+| Areas fully ported | 13 / 45 |
