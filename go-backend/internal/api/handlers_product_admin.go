@@ -7,11 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"html"
 	"math"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/catalog"
+	"github.com/kmsitcomputer/primeclassy-go/internal/cms"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
@@ -843,173 +842,107 @@ func productMutationResource(product map[string]any) map[string]any {
 }
 
 func sanitizedProductHTML(value *string) *string {
-	safe := sanitizeProductHTML(*value)
+	safe := SanitizeLaravelHTML(*value)
 	return &safe
 }
 
 var (
-	productTagPattern  = regexp.MustCompile(`(?is)^<\s*(/?)\s*([a-z][a-z0-9]*)\b([^>]*)>$`)
-	productAttrPattern = regexp.MustCompile("(?is)([a-z][a-z0-9:-]*)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))")
+	// HTMLPurifier writes style values with a TRAILING SEMICOLON; bluemonday doesn't.
+	htmlStyleTail = regexp.MustCompile(`style="([^"]*?)"`)
+	// HTMLPurifier's TargetBlank emits rel="noreferrer noopener" in that exact order.
+	htmlRelOrder = regexp.MustCompile(`rel="([^"]*)"`)
+	// HTMLPurifier serialises void elements XHTML-style (`<img ... />`, `<br />`); bluemonday emits `<img ...>`.
+	htmlVoidTag = regexp.MustCompile(`<(img|br|hr|input)((?:[^>"']|"[^"]*")*)>`)
 )
 
-func sanitizeProductHTML(input string) string {
-	allowed := map[string]bool{
-		"p": true, "br": true, "strong": true, "b": true, "em": true, "i": true,
-		"s": true, "u": true, "h1": true, "h2": true, "h3": true, "h4": true,
-		"ul": true, "ol": true, "li": true, "a": true, "img": true,
-		"blockquote": true, "code": true, "pre": true,
-	}
-	dangerous := map[string]bool{"script": true, "style": true, "iframe": true, "object": true, "svg": true, "math": true, "form": true}
-	var out strings.Builder
-	drop := ""
-	for len(input) > 0 {
-		start := strings.IndexByte(input, '<')
-		if start < 0 {
-			if drop == "" {
-				out.WriteString(input)
-			}
-			break
+// SanitizeLaravelHTML reproduces HtmlSanitizerService byte-for-byte: the bluemonday allowlist (the same
+// CKEditor vocabulary) plus the three serialisation differences observed against the running reference
+// (golden fixtures in tools/parity probes).
+func SanitizeLaravelHTML(input string) string {
+	out := sanitizeAnchorHrefs(input)
+	out = cms.SanitizeHTML(out)
+	// HTMLPurifier keeps no space after the colon inside style values; bluemonday normalises to "a: b".
+	out = htmlStyleTail.ReplaceAllString(out, `style="$1;"`)
+	out = strings.ReplaceAll(out, `: `, `:`)
+	// TargetBlank semantics (HTMLPurifier): EVERY absolute http(s) link gets target="_blank" + rel
+	// ("noreferrer noopener"); relative links and mailto keep NO rel; a dropped href keeps a bare <a>.
+	out = htmlAnchorRewrite.ReplaceAllStringFunc(out, func(tag string) string {
+		attrs := parseHTMLAttrs(tag)
+		inner := htmlInner(tag)
+		href, hasHref := attrs["href"]
+		if !hasHref || href == "" || href == "#pc-bare-anchor" {
+			// Either bluemonday dropped the href, or the pre-strip marked a scheme the reference
+			// reduces to a bare <a> (javascript: etc.) — HTMLPurifier keeps the element itself.
+			return "<a>" + inner + "</a>"
 		}
-		if drop == "" {
-			out.WriteString(input[:start])
-		}
-		end := productTagEnd(input, start)
-		if end < 0 {
-			if drop == "" {
-				out.WriteString(html.EscapeString(input[start:]))
-			}
-			break
-		}
-		token := input[start : end+1]
-		input = input[end+1:]
-		match := productTagPattern.FindStringSubmatch(token)
-		if match == nil {
-			if drop == "" {
-				out.WriteString(html.EscapeString(token))
-			}
-			continue
-		}
-		closing, tag := match[1] == "/", strings.ToLower(match[2])
-		if drop != "" {
-			if closing && tag == drop {
-				drop = ""
-			}
-			continue
-		}
-		if dangerous[tag] && !closing {
-			if !strings.HasSuffix(strings.TrimSpace(match[3]), "/") {
-				drop = tag
-			}
-			continue
-		}
-		if !allowed[tag] {
-			continue
-		}
-		if closing {
-			if tag != "br" && tag != "img" {
-				out.WriteString("</" + tag + ">")
-			}
-			continue
-		}
-		attrs := safeProductAttributes(tag, match[3])
-		if tag == "img" {
-			if _, ok := attrs["src"]; !ok {
-				continue
-			}
-			out.WriteString("<img")
-			writeProductAttributes(&out, attrs)
-			out.WriteString(">")
-			continue
-		}
-		out.WriteString("<" + tag)
-		writeProductAttributes(&out, attrs)
-		out.WriteString(">")
-	}
-	return out.String()
+		external := strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://")
+		return rebuildAnchor(attrs, inner, external)
+	})
+	out = htmlVoidTag.ReplaceAllString(out, "<$1$2 />")
+	return out
 }
 
-func productTagEnd(input string, start int) int {
-	var quote byte
-	for i := start + 1; i < len(input); i++ {
-		switch input[i] {
-		case '"', '\'':
-			if quote == 0 {
-				quote = input[i]
-			} else if quote == input[i] {
-				quote = 0
-			}
-		case '>':
-			if quote == 0 {
-				return i
-			}
+// sanitizeAnchorHrefs pre-strips the href attribute bluemonday would reject by DELETING THE WHOLE
+// ELEMENT (observed: `<a href="javascript:...">x</a>` collapses to `x`, while HTMLPurifier keeps
+// `<a>x</a>`). An href that is neither an allowed scheme nor relative loses ONLY the attribute here,
+// so bluemonday then keeps the bare <a> exactly like the purifier.
+func sanitizeAnchorHrefs(input string) string {
+	return htmlAnchorTag.ReplaceAllStringFunc(input, func(tag string) string {
+		attrs := parseHTMLAttrs(tag)
+		href, hasHref := attrs["href"]
+		if !hasHref {
+			return tag
 		}
-	}
-	return -1
+		if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") ||
+			strings.HasPrefix(href, "mailto:") || strings.HasPrefix(href, "/") || strings.HasPrefix(href, "#") {
+			return tag
+		}
+		cleaned := htmlHrefAttr.ReplaceAllString(tag, ` href="#pc-bare-anchor"`)
+		return cleaned
+	})
 }
 
-func safeProductAttributes(tag, raw string) map[string]string {
-	attrs := map[string]string{}
-	for _, match := range productAttrPattern.FindAllStringSubmatch(raw, -1) {
-		name := strings.ToLower(match[1])
-		value := match[2]
-		if match[3] != "" {
-			value = match[3]
-		} else if match[4] != "" {
-			value = match[4]
-		}
-		value = html.UnescapeString(strings.TrimSpace(value))
-		switch {
-		case tag == "a" && (name == "href" || name == "title"):
-			if name != "href" || safeProductURL(value, true) {
-				attrs[name] = value
-			}
-		case tag == "img" && (name == "src" || name == "alt"):
-			if name != "src" || safeProductURL(value, false) {
-				attrs[name] = value
-			}
-		case tag == "img" && (name == "width" || name == "height"):
-			if value != "" && len(value) <= 5 && strings.Trim(value, "0123456789") == "" {
-				attrs[name] = value
-			}
-		}
+// parseHTMLAttrs extracts name="value" pairs from a full tag.
+func parseHTMLAttrs(tag string) map[string]string {
+	out := map[string]string{}
+	for _, m := range htmlAttrExtract.FindAllStringSubmatch(tag, -1) {
+		out[m[1]] = m[2]
 	}
-	if tag == "a" && attrs["href"] != "" {
-		attrs["rel"] = "noopener noreferrer"
-	}
-	return attrs
+	return out
 }
 
-func safeProductURL(value string, allowMail bool) bool {
-	if value == "" || strings.ContainsAny(value, "\r\n\t\x00") {
-		return false
+// rebuildAnchor emits the attributes in HTMLPurifier's serialisation order (href, title, target, rel);
+// a non-external link keeps neither target nor rel.
+func rebuildAnchor(attrs map[string]string, inner string, external bool) string {
+	parts := []string{"a"}
+	if href := attrs["href"]; href != "" {
+		parts = append(parts, `href="`+href+`"`)
 	}
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return false
+	if title := attrs["title"]; title != "" {
+		parts = append(parts, `title="`+title+`"`)
 	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https":
-		return true
-	case "mailto":
-		return allowMail
-	case "":
-		return parsed.Host == "" && !strings.HasPrefix(value, "//")
-	default:
-		return false
+	if external {
+		parts = append(parts, `target="_blank"`, `rel="noreferrer noopener"`)
 	}
+	return "<" + strings.Join(parts, " ") + ">" + inner + "</a>"
 }
 
-func writeProductAttributes(out *strings.Builder, attrs map[string]string) {
-	for _, name := range []string{"href", "src", "alt", "title", "width", "height", "rel"} {
-		if value, ok := attrs[name]; ok {
-			out.WriteByte(' ')
-			out.WriteString(name)
-			out.WriteString(`="`)
-			out.WriteString(html.EscapeString(value))
-			out.WriteByte('"')
-		}
+// htmlInner extracts the text between the opening <a ...> and its closing </a>.
+func htmlInner(tag string) string {
+	open := strings.Index(tag, ">")
+	close := strings.LastIndex(tag, "</a>")
+	if open < 0 || close <= open {
+		return ""
 	}
+	return tag[open+1 : close]
 }
+
+var (
+	htmlAnchorRewrite = regexp.MustCompile(`(?s)<a\b[^>]*>.*?</a>`)
+	htmlAnchorTag     = regexp.MustCompile(`(?s)<a\b[^>]*>`)
+	htmlHrefAttr      = regexp.MustCompile(`\s*href="[^"]*"`)
+	htmlAttrExtract   = regexp.MustCompile(`([a-z-]+)="([^"]*)"`)
+)
 
 func visibleFees(role string, amounts map[string]float64) map[string]float64 {
 	out := map[string]float64{"sales_fee": amounts["sales"]}
