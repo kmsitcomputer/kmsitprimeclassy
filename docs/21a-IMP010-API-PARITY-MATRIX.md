@@ -81,42 +81,42 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | LARAVEL |  |
 
-## agent — `agent` (0/33 in Go)
+## agent — `agent` (19/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/agent/google-auth` | session | admin, agen | LARAVEL |  |
 | PUT | `/api/v1/agent/google-auth` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/payment-methods` | session | admin, agen | LARAVEL |  |
-| PUT | `/api/v1/agent/payment-methods/{method}/config` | session | admin, agen | LARAVEL |  |
-| PATCH | `/api/v1/agent/payment-methods/{method}/toggle` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/shipping-providers` | session | agen | LARAVEL |  |
-| PUT | `/api/v1/agent/shipping-providers/{provider}/config` | session | agen | LARAVEL |  |
-| GET | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | LARAVEL |  |
-| PUT | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | LARAVEL |  |
+| GET | `/api/v1/agent/payment-methods` | session | admin, agen | **GO** |  |
+| PUT | `/api/v1/agent/payment-methods/{method}/config` | session | admin, agen | **PARTIAL** |  |
+| PATCH | `/api/v1/agent/payment-methods/{method}/toggle` | session | admin, agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/shipping-providers` | session | agen | **GO** |  |
+| PUT | `/api/v1/agent/shipping-providers/{provider}/config` | session | agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **GO** |  |
+| PUT | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **PARTIAL** |  |
 | POST | `/api/v1/agent/shipping-providers/{provider}/destinations` | session | agen | LARAVEL |  |
 | POST | `/api/v1/agent/shipping-providers/{provider}/test` | session | agen | LARAVEL |  |
-| PATCH | `/api/v1/agent/shipping-providers/{provider}/toggle` | session | agen | LARAVEL |  |
-| GET | `/api/v1/agent/shipping-tariff` | session | agen | LARAVEL |  |
-| PUT | `/api/v1/agent/shipping-tariff` | session | agen | LARAVEL |  |
-| GET | `/api/v1/agent/store-profile` | session | agen | LARAVEL |  |
-| PUT | `/api/v1/agent/store-profile` | session | agen | LARAVEL |  |
+| PATCH | `/api/v1/agent/shipping-providers/{provider}/toggle` | session | agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/shipping-tariff` | session | agen | **GO** |  |
+| PUT | `/api/v1/agent/shipping-tariff` | session | agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/store-profile` | session | agen | **GO** |  |
+| PUT | `/api/v1/agent/store-profile` | session | agen | **PARTIAL** |  |
 | GET | `/api/v1/agent/whatsapp` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/device` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | LARAVEL |  |
-| PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | LARAVEL |  |
+| GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **PARTIAL** |  |
+| PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **PARTIAL** |  |
 | POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | LARAVEL |  |
-| DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | LARAVEL |  |
+| DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **PARTIAL** |  |
 | POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/messages` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/pair/code` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/pair/qr` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/reconnect` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/replace` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/whatsapp/scope` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | LARAVEL |  |
-| POST | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | LARAVEL |  |
-| DELETE | `/api/v1/agent/whatsapp/test-numbers/{id}` | session | admin, agen | LARAVEL |  |
+| GET | `/api/v1/agent/whatsapp/scope` | session | admin, agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **PARTIAL** |  |
+| POST | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **PARTIAL** |  |
+| DELETE | `/api/v1/agent/whatsapp/test-numbers/{id}` | session | admin, agen | **PARTIAL** |  |
 | POST | `/api/v1/agent/whatsapp/test-send` | session | admin, agen | LARAVEL |  |
 
 ## Agent directory — `agents` (1/1 in Go)
@@ -177,31 +177,31 @@ Status legend:
 | POST | `/api/v1/checkout/quote` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher |
 | GET | `/api/v1/checkout/steps` | public | — | **GO** | public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter |
 
-## CMS — admin — `cms` (0/14 in Go)
+## CMS — admin — `cms` (14/14 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/cms/articles` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/cms/articles` | session | super_admin | LARAVEL |  |
-| DELETE | `/api/v1/cms/articles/{article}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/cms/articles/{article}` | session | super_admin | LARAVEL |  |
-| GET | `/api/v1/cms/homepage-blocks` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/cms/homepage-blocks` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/cms/homepage-blocks/reorder` | session | super_admin | LARAVEL |  |
-| DELETE | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/cms/homepage-blocks/{block}/toggle` | session | super_admin | LARAVEL |  |
-| GET | `/api/v1/cms/pages` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/cms/pages` | session | super_admin | LARAVEL |  |
-| DELETE | `/api/v1/cms/pages/{page}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/cms/pages/{page}` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/cms/articles` | session | super_admin | **GO** |  |
+| POST | `/api/v1/cms/articles` | session | super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/cms/articles/{article}` | session | super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/cms/articles/{article}` | session | super_admin | **PARTIAL** |  |
+| GET | `/api/v1/cms/homepage-blocks` | session | super_admin | **PARTIAL** |  |
+| POST | `/api/v1/cms/homepage-blocks` | session | super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/cms/homepage-blocks/reorder` | session | super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/cms/homepage-blocks/{block}/toggle` | session | super_admin | **PARTIAL** |  |
+| GET | `/api/v1/cms/pages` | session | super_admin | **PARTIAL** |  |
+| POST | `/api/v1/cms/pages` | session | super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/cms/pages/{page}` | session | super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/cms/pages/{page}` | session | super_admin | **PARTIAL** |  |
 
-## commissions — `commissions` (0/2 in Go)
+## commissions — `commissions` (2/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/commissions` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| GET | `/api/v1/commissions/summary` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/commissions` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/commissions/summary` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
 
 ## consent-events — `consent-events` (0/4 in Go)
 
@@ -219,13 +219,13 @@ Status legend:
 | POST | `/api/v1/consent/otp` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/consent/otp/{challenge}/verify` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 
-## CRM — `crm` (0/16 in Go)
+## CRM — `crm` (4/16 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/crm/customers` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/crm/customers` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | POST | `/api/v1/crm/customers` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/crm/customers/{customer}` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/crm/customers/{customer}` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
 | PATCH | `/api/v1/crm/customers/{customer}` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/crm/customers/{customer}/archive` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/crm/customers/{customer}/consent-events` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
@@ -234,9 +234,9 @@ Status legend:
 | POST | `/api/v1/crm/customers/{customer}/link-otp` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/crm/customers/{customer}/unlink` | session | admin, agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
 | POST | `/api/v1/crm/customers/{customer}/visits` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/crm/follow-ups` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/crm/follow-ups` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
 | GET | `/api/v1/crm/link-candidates` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 | PATCH | `/api/v1/crm/visits/{visit}` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 
@@ -324,12 +324,12 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/languages` | public | — | **GO** |  |
 
-## Catalog — management — `manage` (0/2 in Go)
+## Catalog — management — `manage` (2/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/manage/products` | session | admin, agen, super_admin | LARAVEL |  |
-| GET | `/api/v1/manage/products/{product}` | session | admin, agen, super_admin | LARAVEL |  |
+| GET | `/api/v1/manage/products` | session | admin, agen, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/manage/products/{product}` | session | admin, agen, super_admin | **PARTIAL** |  |
 
 ## Media — `media` (0/3 in Go)
 
@@ -397,40 +397,40 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/payment-proofs/{verification}` | session | — | **GO** | ownership-gated private proof download; Cache-Control private no-store |
 
-## Catalog — products — `products` (2/17 in Go)
+## Catalog — products — `products` (17/17 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/products` | public | — | **PARTIAL** | anonymous exact; authenticated agent/Sub availability (stock) not ported |
-| POST | `/api/v1/products` | session | admin, agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/products/{id}/permanent` | session | agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/products/{product}` | session | agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/products/{product}` | session | admin, agen, super_admin | LARAVEL |  |
-| GET | `/api/v1/products/{product}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PUT | `/api/v1/products/{product}/fees` | session | agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/products/{product}/images` | session | admin, agen, super_admin | LARAVEL |  |
-| PUT | `/api/v1/products/{product}/images/order` | session | admin, agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/products/{product}/variations` | session | admin, agen, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/products/{product}/variations/{variation}` | session | agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/products/{product}/variations/{variation}` | session | admin, agen, super_admin | LARAVEL |  |
-| GET | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PUT | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, super_admin | LARAVEL |  |
+| POST | `/api/v1/products` | session | admin, agen, super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/products/{id}/permanent` | session | agen, super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/products/{product}` | session | agen, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/products/{product}` | session | admin, agen, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/products/{product}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| PUT | `/api/v1/products/{product}/fees` | session | agen, super_admin | **PARTIAL** |  |
+| POST | `/api/v1/products/{product}/images` | session | admin, agen, super_admin | **PARTIAL** |  |
+| PUT | `/api/v1/products/{product}/images/order` | session | admin, agen, super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | **PARTIAL** |  |
+| POST | `/api/v1/products/{product}/variations` | session | admin, agen, super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/products/{product}/variations/{variation}` | session | agen, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/products/{product}/variations/{variation}` | session | admin, agen, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| PUT | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, super_admin | **PARTIAL** |  |
 | GET | `/api/v1/products/{slug}` | public | — | **PARTIAL** | anonymous exact; authenticated agent/Sub availability (stock) not ported |
 
-## Profile — `profile` (1/11 in Go)
+## Profile — `profile` (6/11 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| PATCH | `/api/v1/profile` | session | — | LARAVEL |  |
-| GET | `/api/v1/profile/email/verification` | session | — | LARAVEL |  |
+| PATCH | `/api/v1/profile` | session | — | **PARTIAL** |  |
+| GET | `/api/v1/profile/email/verification` | session | — | **PARTIAL** |  |
 | POST | `/api/v1/profile/email/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/email/verification/{challenge}/confirm` | session | — | LARAVEL |  |
 | PATCH | `/api/v1/profile/password` | session | — | **GO** |  |
-| DELETE | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| PATCH | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/profile/referral-code/regenerate` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| DELETE | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** |  |
+| PATCH | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** |  |
+| POST | `/api/v1/profile/referral-code/regenerate` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** |  |
 | GET | `/api/v1/profile/whatsapp` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/whatsapp/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/whatsapp/verification/{challenge}/confirm` | session | — | LARAVEL |  |
@@ -448,11 +448,11 @@ Status legend:
 | DELETE | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | **GO** |  |
 | PATCH | `/api/v1/promo/vouchers/{voucher}` | session | admin, agen, super_admin | **GO** |  |
 
-## Referral — `referral` (0/1 in Go)
+## Referral — `referral` (1/1 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/referral/{code}` | public | — | LARAVEL |  |
+| GET | `/api/v1/referral/{code}` | public | — | **PARTIAL** |  |
 
 ## Regions — `regions` (4/4 in Go)
 
@@ -463,7 +463,7 @@ Status legend:
 | GET | `/api/v1/regions/regencies` | public | — | **GO** |  |
 | GET | `/api/v1/regions/villages` | public | — | **GO** |  |
 
-## Reporting — `reports` (0/17 in Go)
+## Reporting — `reports` (1/17 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -483,7 +483,7 @@ Status legend:
 | GET | `/api/v1/reports/network-transactions` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | GET | `/api/v1/reports/payment-status` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
 | GET | `/api/v1/reports/sales` | session | admin, agen, korsal, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/transactions` | session | admin, agen, korsal, super_admin | LARAVEL |  |
+| GET | `/api/v1/reports/transactions` | session | admin, agen, korsal, super_admin | **PARTIAL** |  |
 
 ## Returns — items — `return-items` (0/2 in Go)
 
@@ -535,18 +535,18 @@ Status legend:
 | POST | `/api/v1/sub-stock/requests/{subStockRequest}/receive` | session | sales-kurir-sub | **GO** | the requester, replenish only; closes the handover |
 | POST | `/api/v1/sub-stock/requests/{subStockRequest}/reject` | session | admin | **GO** | admin; reason required |
 
-## User management — `users` (0/8 in Go)
+## User management — `users` (8/8 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/users` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| POST | `/api/v1/users` | session | agen, koordinator-kurir, korsal, super_admin | LARAVEL |  |
-| DELETE | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| GET | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir-sub` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/users/{user}/reassign-referral` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/users` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| POST | `/api/v1/users` | session | agen, koordinator-kurir, korsal, super_admin | **PARTIAL** |  |
+| DELETE | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/users/{user}` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/users/{user}/convert-to-sales-kurir-sub` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/users/{user}/reassign-referral` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
 
 ## Inventory — warehouse stock — `warehouse-stock` (1/1 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 121 (32.3%) |
-|   of which fully GO | 115 |
-|   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 254 |
-| Areas fully ported | 14 / 45 |
+| Served by Go now | 192 (51.2%) |
+|   of which fully GO | 123 |
+|   of which PARTIAL (incomplete behaviour) | 69 |
+| Still Laravel-only | 183 |
+| Areas fully ported | 20 / 45 |

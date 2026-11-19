@@ -447,6 +447,21 @@ uniqid()-shaped slug suffix, validator sentences (self-parent message, unique sl
 type coercions (Laravel accepts "24"/"1"), delete error 1761 → 409, i18n key product.category_deleted, and the
 audit row carries actor_role + agent_id.
 
+**DONE — Copilot Domain E/F integration (Owner directive 19 Nov):** commits bf30e4a (jobs worker+scheduler,
+Google OAuth), 9432dab (invoice PDF via gofpdf, XLSX via excelize), d870e7f (users, agent-admin, product admin,
+CMS admin, profile packages + handlers) and the secured WIP 93824f0 (crm, reporting, admininfra, install,
+notifications, cryptox EncryptArray) were cherry-picked onto imp010/go-backend and then repaired:
+reporting.go type error and the dead `crmActor`/`UserFromIDPlaceholder` scaffolding (WIP never compiled),
+CRM index re-shaped to Laravel's LengthAwarePaginator toArray (links array included, page URLs from the request),
+and the CRM/commission/report read surfaces wired with the exact Laravel route roles. Differential probes
+(5 actors x 9 paths) match on status + shape incl. per-role commission breakdown; `EncryptArray` verified
+CROSS-RUNTIME (Laravel decrypts Go output, Go decrypts Laravel encryptString). HONEST STATUS: the write paths
+(users store/update, product/CMS admin writes, agent config writes, profile writes, whatsapp) are SERVED but
+their contract comparisons are pending — every one is recorded PARTIAL in docs/21a, and CMS writes additionally
+carry the not-ported HTMLPurifier policy. Matrix: 192/375 served (51.2%), 123 GO, 69 PARTIAL, 183 Laravel-only.
+The Copilot worktree is preserved at /Users/kmsitcomputer/KMSIT-Server/apps/primeclassy-imp010-copilot-ef
+(HEAD 93824f0 + d870e7f..bf30e4a) until every PARTIAL above is verified GO.
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 
