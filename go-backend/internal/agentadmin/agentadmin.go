@@ -283,7 +283,8 @@ func (s *Service) ShippingProviders(ctx context.Context, agentID int64) ([]Shipp
 			p.Origin = stringVal(cfg, "origin_label")
 			p.Couriers = valueStrings(cfg["couriers"])
 		case "openroute":
-			p.Profile = stringVal(cfg, "profile")
+			// The index falls back to config('services.openroute.profile') — 'driving-car'.
+			p.Profile = stringPtr(valueString(cfg, "profile", "driving-car"))
 		case "kmsit":
 			p.Profile = stringPtr(valueString(cfg, "profile", "car"))
 			p.BaseURL = stringVal(cfg, "base_url")
@@ -293,16 +294,10 @@ func (s *Service) ShippingProviders(ctx context.Context, agentID int64) ([]Shipp
 		if p.Code == "openroute" && lat.Valid && lng.Valid {
 			p.OriginCoords = map[string]any{"latitude": lat.Float64, "longitude": lng.Float64}
 		}
+		// Laravel's pricing block carries EXACTLY three keys (price_per_km / minimum_distance_km /
+		// minimum_charge) — KurirTokoTariff::present output, no free-shipping fields.
 		if (p.Code == "openroute" || p.Code == "kmsit") && price.Valid {
 			p.Pricing = map[string]any{"price_per_km": price.Float64, "minimum_distance_km": floatOrZero(dist), "minimum_charge": floatOrZero(charge)}
-			if free.Valid {
-				p.Pricing["free_shipping_enabled"] = free.Bool
-			}
-			if freeMin.Valid {
-				p.Pricing["free_shipping_min_amount"] = freeMin.Float64
-			} else {
-				p.Pricing["free_shipping_min_amount"] = nil
-			}
 		}
 		out = append(out, p)
 	}
@@ -310,6 +305,17 @@ func (s *Service) ShippingProviders(ctx context.Context, agentID int64) ([]Shipp
 }
 
 func (s *Service) ToggleShippingProvider(ctx context.Context, agentID, providerID int64) (*ShippingProvider, error) {
+	full, err := s.toggleShippingProviderDetail(ctx, agentID, providerID)
+	if err != nil {
+		return nil, err
+	}
+	// Laravel's toggle response carries EXACTLY five keys: id/code/name/globally_active/is_active.
+	return &ShippingProvider{ID: full.ID, Code: full.Code, Name: full.Name,
+		GlobalActive: full.GlobalActive, Active: full.Active}, nil
+}
+
+// toggleShippingProviderDetail computes the toggle against the full projection (config rows, settings).
+func (s *Service) toggleShippingProviderDetail(ctx context.Context, agentID, providerID int64) (*ShippingProvider, error) {
 	var p ShippingProvider
 	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, `SELECT id,code,name,is_active FROM shipping_providers WHERE id=?`, providerID).Scan(&p.ID, &p.Code, &p.Name, &p.GlobalActive); err != nil {

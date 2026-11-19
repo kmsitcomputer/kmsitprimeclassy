@@ -449,7 +449,7 @@ func (s *Server) handleAgentShippingProviderToggle(w http.ResponseWriter, r *htt
 		writeError(w, r, err)
 		return
 	}
-	httpx.OK(w, data, "Pengaturan provider pengiriman diperbarui.", nil)
+	httpx.OK(w, data, msg(r.Context(), "shipping.provider_toggled"), nil)
 }
 
 func (s *Server) handleAgentShippingProviderConfig(w http.ResponseWriter, r *http.Request) {
