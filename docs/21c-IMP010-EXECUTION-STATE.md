@@ -432,13 +432,29 @@ carries `actor_role`.
 
 ## 4a. Next action (resume here)
 
-**A. Payments** (`internal/payment` package exists but is not wired to routes yet): the manual-transfer
-proof/verification surface, COD collection + proof, DP settlement, and the latest-manual-transaction rule.
-`PaymentService` is the port source. These routes gate the `diproses → dikirim` transition the lifecycle now
-enforces, so they come before the remaining order routes.
+**DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
+installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.
+Ported from PaymentService + PaymentController into `internal/orders/payment.go` (+ render_payment.go, shortage.go
+for the FulfillmentShortageService read model). The renderer now gates every key on the controller's ACTUAL
+relation-load set (create/index/show/status/cancel/markCod/settle/confirm differ — whenLoaded semantics, keys
+ABSENT not null). CSRF is now scoped to stateful requests (Sanctum fromFrontend: Origin/Referer on
+SANCTUM_STATEFUL_DOMAINS) — bare requests answer 401 like Laravel, stateful ones 419.
 
-**B. The remaining order routes**: due-date, consent-context/events, refund-recipient, returns, assisted-returns,
-`payment/cod-proof` + `installment` + `settle` + `verify`, invoice PDF.
+**DONE — Category admin mutations (3 routes, parity 3/3 via tools/parity/compare_category_mutations.py):**
+integrated from the Copilot branch (commit 348dfbc, cherry-picked cleanly) and then corrected to the Laravel
+contract: role-gated presentation attributes (slug/is_active/sort_order are super_admin-only on store),
+uniqid()-shaped slug suffix, validator sentences (self-parent message, unique slug, empty-name), integer/boolean
+type coercions (Laravel accepts "24"/"1"), delete error 1761 → 409, i18n key product.category_deleted, and the
+audit row carries actor_role + agent_id.
+
+**A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
+PDF (due-date is DONE with payments).
+
+**B. Then Phase A remainder (inventory), Phase C (financial: refunds, commissions) and Phase D (remaining
+domains), exactly as ordered in §3.**
+
+**C. Finally non-HTTP**: jobs/queue, scheduler, installer, PDF/Excel, Google OAuth, protected media streaming,
+then the Laravel archive/removal gate (§6).
 
 **C. Then Phase A remainder (inventory), Phase C (financial: refunds, commissions) and Phase D (remaining
 domains), exactly as ordered in §3.**

@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (7/59 in Go)
+## Admin operations — `admin` (8/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -29,7 +29,7 @@ Status legend:
 | PATCH | `/api/v1/admin/agents/{agentProfile}` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/agents/{agent}/toggle-status` | session | super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/audit-logs` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm` | session | keuangan, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm` | session | keuangan, super_admin | **GO** | keuangan/super_admin; confirm settles the real collection |
 | GET | `/api/v1/admin/google-auth` | session | super_admin | LARAVEL |  |
 | PUT | `/api/v1/admin/google-auth` | session | super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/integrations/smtp` | session | super_admin | LARAVEL |  |
@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 
-## Orders — `orders` (10/25 in Go)
+## Orders — `orders` (17/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -367,19 +367,19 @@ Status legend:
 | POST | `/api/v1/orders/{order}/cancel` | session | — | **GO** | konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction |
 | GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | GET | `/api/v1/orders/{order}/consent-events` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| PUT | `/api/v1/orders/{order}/due-date` | session | admin, keuangan, super_admin | LARAVEL |  |
+| PUT | `/api/v1/orders/{order}/due-date` | session | admin, keuangan, super_admin | **GO** | admin/keuangan/super_admin; audited old/new + reason; no-op when unchanged |
 | GET | `/api/v1/orders/{order}/invoice` | session | — | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/items` | session | admin | LARAVEL |  |
 | GET | `/api/v1/orders/{order}/items/{item}/cancel-eligibility` | session | admin, agen, super_admin | **GO** | read-only projector: order window, stock source, item status, open refusal, remaining quantity and a pending additional payment decide `eligible` + `reason_code`; max_quantity is fulfilled_quantity only when eligible |
 | POST | `/api/v1/orders/{order}/items/{item}/cancel-undelivered` | session | admin, agen, super_admin | **GO** | REM-003 Owner Option A: cancels part of the undelivered/undispatched remainder (also after first dispatch); expected_quantity mismatch is a 409 stale-quantity guard; recomputes the order status forward-only |
 | PATCH | `/api/v1/orders/{order}/items/{item}/fulfillment` | session | admin, agen, super_admin | **GO** | super_admin/branch agen/admin while diproses; reduce consumes frozen snapshot units, books the sales reduction + refund obligation (or the needs_verification variant for a provisional-legacy basis), reverses inventory Order→Stock Request→stock; increase restores cancelled units first, reserves stock, then raises the total and creates ONE additional-payment obligation only when the order was fully settled |
 | PATCH | `/api/v1/orders/{order}/items/{item}/reschedule` | session | admin, agen, super_admin | **GO** | re-dates a line; LOCKED to Kurir Online + Self Delivery/Sub (expedition/pickup refused), a dikirim order only for the line with an open shortage; a partial quantity splits the line onto a new OrderItem + Shipment, and the shipment is re-homed onto the canonical shipment for the date |
-| PATCH | `/api/v1/orders/{order}/payment/cod` | session | keuangan, super_admin | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/payment/cod-proof` | session | — | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/payment/installment` | session | — | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/payment/proof` | session | — | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/payment/settle` | session | keuangan, super_admin | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/payment/verify` | session | keuangan, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/orders/{order}/payment/cod` | session | keuangan, super_admin | **GO** | keuangan/super_admin; idempotent; single-full-collection undo only |
+| POST | `/api/v1/orders/{order}/payment/cod-proof` | session | — | **GO** | COD proof via the media pipeline (cod_payment_proof); partial amount optional |
+| POST | `/api/v1/orders/{order}/payment/installment` | session | — | **GO** | transfer/cash; idempotent replay; cash refuses the buyer and requires a receipt |
+| POST | `/api/v1/orders/{order}/payment/proof` | session | — | **GO** | bank-transfer proof; konsumen/branch staff/payOnBehalf; MIME-sniffed storage on the private local disk |
+| POST | `/api/v1/orders/{order}/payment/settle` | session | keuangan, super_admin | **GO** | keuangan/super_admin; DP only; equivalent replay, material-mismatch 422 |
+| POST | `/api/v1/orders/{order}/payment/verify` | session | keuangan, super_admin | **GO** | keuangan/super_admin; self-verification forbidden; verified_amount ≤ outstanding/submitted |
 | GET | `/api/v1/orders/{order}/refund-recipient` | session | admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/refund-recipient` | session | admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/returns` | session | konsumen | LARAVEL |  |
@@ -391,11 +391,11 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/pages/{slug}` | public | — | **GO** |  |
 
-## Payments — proofs — `payment-proofs` (0/1 in Go)
+## Payments — proofs — `payment-proofs` (1/1 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/payment-proofs/{verification}` | session | — | LARAVEL |  |
+| GET | `/api/v1/payment-proofs/{verification}` | session | — | **GO** | ownership-gated private proof download; Cache-Control private no-store |
 
 ## Catalog — products — `products` (2/17 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 112 (29.9%) |
-|   of which fully GO | 106 |
+| Served by Go now | 121 (32.3%) |
+|   of which fully GO | 115 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 263 |
-| Areas fully ported | 13 / 45 |
+| Still Laravel-only | 254 |
+| Areas fully ported | 14 / 45 |
