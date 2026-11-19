@@ -480,7 +480,7 @@ func (s *Server) handleAgentShippingProviderConfig(w http.ResponseWriter, r *htt
 		writeError(w, r, err)
 		return
 	}
-	httpx.OK(w, map[string]bool{"configured": true}, "Konfigurasi provider tersimpan.", nil)
+	httpx.OK(w, map[string]bool{"configured": true}, msg(r.Context(), "shipping.provider_config_saved"), nil)
 }
 
 func (s *Server) handleAgentShippingProviderCouriers(w http.ResponseWriter, r *http.Request) {
@@ -564,7 +564,7 @@ func (s *Server) handleAgentShippingTariffUpdate(w http.ResponseWriter, r *http.
 		writeError(w, r, err)
 		return
 	}
-	httpx.OK(w, map[string]any{"tariff": data}, "Konfigurasi provider tersimpan.", nil)
+	httpx.OK(w, map[string]any{"tariff": data}, msg(r.Context(), "shipping.provider_config_saved"), nil)
 }
 
 func (s *Server) handleAgentWhatsAppScope(w http.ResponseWriter, r *http.Request) {

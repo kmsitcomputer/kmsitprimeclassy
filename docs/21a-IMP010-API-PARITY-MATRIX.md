@@ -91,14 +91,14 @@ Status legend:
 | PUT | `/api/v1/agent/payment-methods/{method}/config` | session | admin, agen | **PARTIAL** |  |
 | PATCH | `/api/v1/agent/payment-methods/{method}/toggle` | session | admin, agen | **PARTIAL** |  |
 | GET | `/api/v1/agent/shipping-providers` | session | agen | **GO** |  |
-| PUT | `/api/v1/agent/shipping-providers/{provider}/config` | session | agen | **PARTIAL** |  |
+| PUT | `/api/v1/agent/shipping-providers/{provider}/config` | session | agen | **GO** | provider-specific validation, SSRF refusal, encrypted config side effect and localized response compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **GO** |  |
-| PUT | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **PARTIAL** |  |
+| PUT | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **GO** | supported-courier validation, response, and encrypted config side effect compared by compare_shipping_admin.py |
 | POST | `/api/v1/agent/shipping-providers/{provider}/destinations` | session | agen | LARAVEL |  |
 | POST | `/api/v1/agent/shipping-providers/{provider}/test` | session | agen | LARAVEL |  |
-| PATCH | `/api/v1/agent/shipping-providers/{provider}/toggle` | session | agen | **PARTIAL** |  |
+| PATCH | `/api/v1/agent/shipping-providers/{provider}/toggle` | session | agen | **GO** | five-key response projection, localized message, audit and setting row compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/shipping-tariff` | session | agen | **GO** |  |
-| PUT | `/api/v1/agent/shipping-tariff` | session | agen | **PARTIAL** |  |
+| PUT | `/api/v1/agent/shipping-tariff` | session | agen | **GO** | pricing validation, Laravel response message, audit properties and resulting tariff row compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/store-profile` | session | agen | **GO** |  |
 | PUT | `/api/v1/agent/store-profile` | session | agen | **PARTIAL** |  |
 | GET | `/api/v1/agent/whatsapp` | session | admin, agen | LARAVEL |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 134 |
-|   of which PARTIAL (incomplete behaviour) | 58 |
+|   of which fully GO | 138 |
+|   of which PARTIAL (incomplete behaviour) | 54 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

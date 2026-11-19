@@ -12,12 +12,12 @@ before touching code. Do not re-derive a completed checkpoint.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **112 (29.9%)** |
-| Fully GO | 106 |
-| PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **263** |
+| Served by Go | **192 (51.2%)** |
+| Fully GO | 138 |
+| PARTIAL (incomplete behaviour) | 54 |
+| Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **400 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle + 11 order read + 14 item lifecycle) |
+| Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -431,6 +431,8 @@ runtime by construction (compare its shape, not its bytes). `remaining_active` o
 carries `actor_role`.
 
 ## 4a. Next action (resume here)
+
+**DONE — Agent shipping administration parity (7 routes covered, `tools/parity/compare_shipping_admin.py`, 1/1 scenario):** shipping provider index/toggle/config, supported couriers, and tariff routes compare response bodies and resulting DB rows. The initial failure exposed the stale `go run` build cache; after a clean container cache rebuild, the live source still needed fixes: toggle now uses a five-field response type (avoids serializing zero-valued projection fields); shipping success messages use the Laravel i18n keys; `{config:{}}` accumulates the root and nested required errors; failed KMSIT endpoint vetting reproduces Laravel's 422 envelope without weakening the endpoint guard; non-RajaOngkir courier paths return Laravel's generic 404. Verified with `/healthz` and `PYTHONPATH=tools/parity python3 tools/parity/compare_shipping_admin.py` — **1 passed, 0 failed**. Runtime remained `pc_go_imp010`, bound to this worktree; only the isolated `primeclassy_testing` database was touched.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

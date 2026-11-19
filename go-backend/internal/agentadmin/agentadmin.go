@@ -304,13 +304,21 @@ func (s *Service) ShippingProviders(ctx context.Context, agentID int64) ([]Shipp
 	return out, rows.Err()
 }
 
-func (s *Service) ToggleShippingProvider(ctx context.Context, agentID, providerID int64) (*ShippingProvider, error) {
+type ShippingProviderToggle struct {
+	ID           int64  `json:"id"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	GlobalActive bool   `json:"globally_active"`
+	Active       bool   `json:"is_active"`
+}
+
+func (s *Service) ToggleShippingProvider(ctx context.Context, agentID, providerID int64) (*ShippingProviderToggle, error) {
 	full, err := s.toggleShippingProviderDetail(ctx, agentID, providerID)
 	if err != nil {
 		return nil, err
 	}
 	// Laravel's toggle response carries EXACTLY five keys: id/code/name/globally_active/is_active.
-	return &ShippingProvider{ID: full.ID, Code: full.Code, Name: full.Name,
+	return &ShippingProviderToggle{ID: full.ID, Code: full.Code, Name: full.Name,
 		GlobalActive: full.GlobalActive, Active: full.Active}, nil
 }
 
@@ -385,7 +393,10 @@ func (s *Service) SaveShippingConfig(ctx context.Context, agentID, providerID in
 			config["profile"] = "car"
 		}
 		if err := vetKmsitURL(valueString(config, "base_url", ""), s.trustedHosts); err != nil {
-			return err
+			return &Error{Status: 422,
+				Message: "Endpoint KMSIT tidak diizinkan atau tidak dapat dijangkau.",
+				Fields:  map[string][]string{"config.base_url": {"Endpoint ditolak oleh kebijakan keamanan."}},
+			}
 		}
 	}
 	raw, err := cryptox.EncryptArray(s.appKey, config)
@@ -436,10 +447,18 @@ func validateShippingConfig(code string, c map[string]any) error {
 		"openroute":  {"api_key", "profile"},
 		"kmsit":      {"base_url", "profile"},
 	}[code]
+	fields := make(map[string][]string)
+	if len(c) == 0 {
+		fields["config"] = []string{i18n.ValidationMessage(i18n.Default, "required", "config")}
+	}
 	for _, key := range required {
 		if c[key] == nil || strings.TrimSpace(fmt.Sprint(c[key])) == "" {
-			return &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"config." + key: {"Data konfigurasi tidak valid."}}}
+			path := "config." + key
+			fields[path] = []string{i18n.ValidationMessage(i18n.Default, "required", path)}
 		}
+	}
+	if len(fields) > 0 {
+		return &Error{Status: 422, Message: i18n.Translate(i18n.Default, "system.validation_failed"), Fields: fields}
 	}
 	for field, maxLength := range map[string]int{"api_key": 255, "origin_label": 255, "origin_search": 100, "base_url": 255, "token": 255} {
 		if value, ok := c[field].(string); ok && len(value) > maxLength {
@@ -517,7 +536,7 @@ func (s *Service) ShippingCouriers(ctx context.Context, agentID, providerID int6
 		return nil, err
 	}
 	if code != "rajaongkir" {
-		return nil, fail(404, "Provider tidak ditemukan.")
+		return nil, fail(404, i18n.Translate(i18n.Default, "system.endpoint_not_found"))
 	}
 	enabled := map[string]bool{}
 	var raw string
@@ -552,7 +571,7 @@ func (s *Service) UpdateCouriers(ctx context.Context, agentID, providerID int64,
 		return nil, err
 	}
 	if code != "rajaongkir" {
-		return nil, fail(404, "Provider tidak ditemukan.")
+		return nil, fail(404, i18n.Translate(i18n.Default, "system.endpoint_not_found"))
 	}
 	rows, err := s.database.QueryContext(ctx, `SELECT LOWER(code) FROM shipping_couriers WHERE is_active=1`)
 	if err != nil {
