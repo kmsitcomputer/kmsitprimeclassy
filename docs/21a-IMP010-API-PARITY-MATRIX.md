@@ -191,10 +191,10 @@ Status legend:
 | DELETE | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
 | PATCH | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
 | PATCH | `/api/v1/cms/homepage-blocks/{block}/toggle` | session | super_admin | **PARTIAL** |  |
-| GET | `/api/v1/cms/pages` | session | super_admin | **PARTIAL** |  |
-| POST | `/api/v1/cms/pages` | session | super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/cms/pages/{page}` | session | super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/cms/pages/{page}` | session | super_admin | **PARTIAL** |  |
+| GET | `/api/v1/cms/pages` | session | super_admin | **GO** |  |
+| POST | `/api/v1/cms/pages` | session | super_admin | **GO** |  |
+| DELETE | `/api/v1/cms/pages/{page}` | session | super_admin | **GO** |  |
+| PATCH | `/api/v1/cms/pages/{page}` | session | super_admin | **GO** |  |
 
 ## commissions — `commissions` (2/2 in Go)
 
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 130 |
-|   of which PARTIAL (incomplete behaviour) | 62 |
+|   of which fully GO | 134 |
+|   of which PARTIAL (incomplete behaviour) | 58 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

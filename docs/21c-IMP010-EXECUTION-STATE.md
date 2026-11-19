@@ -507,6 +507,19 @@ HTMLPurifier on body, PATCH type change, delete + replay 404, agen 403). Key fin
 humanise NESTED validation paths but DOES humanise top-level fields via validation.attributes. Note: the
 cms fixture article id/shape seeded identically per run (cms_articles/cms_articles_translations).
 
+**DONE — CMS page write surface (Phase 1C continued):** compare_cms.py now 2/2 (article matrix 14-call
++ page matrix 13-call). Page validator ported (slug max 150 unique:cms_pages, seo_title 200,
+seo_description 300, body NULLABLE — unlike articles). TWO root causes found and fixed: (1) the page
+unique-slug check was INVERTED (flagged slugs that DON'T exist — the binary's cached build made this
+look like a data problem; `go clean -cache` + restart exposed it); (2) ALL FOUR CMS handlers
+(article/page store/update) DOUBLE-APPENDED translations: remarshalRaw already decoded
+`translations` into the typed input, then the handler appended the validator's decoded entries again —
+every payload arrived at the service with each translation twice (index 1 duplicates, distinct
+firing wrongly). Fix: assign a freshly built slice, never append onto the remarshal result. NOTE for
+future units: `go run` inside pc_go_imp010 caches by content hash — after source edits that produce a
+binary with the SAME cached hash (e.g. touched files), `go clean -cache` + restart is required, and a
+stale binary manifests as "my fix didn't work" symptoms. Matrix: **134 GO / 58 PARTIAL / 183 Laravel-only**.
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 
