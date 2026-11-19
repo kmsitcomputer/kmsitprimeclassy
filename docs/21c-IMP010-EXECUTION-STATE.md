@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 146 |
-| PARTIAL (incomplete behaviour) | 46 |
+| Fully GO | 147 |
+| PARTIAL (incomplete behaviour) | 45 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -446,7 +446,9 @@ carries `actor_role`.
 
 **DONE — WhatsApp events read (`tools/parity/compare_whatsapp_events.py`, 1/1):** full event list, payload ordering/templates/variables, role gates, numeric/foreign `agent_id` selector behavior, and read-only DB state match Laravel. Differential found Go ignoring selector, the Go event order differing from Laravel, and one omitted duplicate variable in Laravel's returned array; all corrected. Scoped `go test` and `go vet` for `agentadmin`, `api`, and `i18n` pass. Matrix now **146 GO / 46 PARTIAL / 183 Laravel-only**.
 
-**EXACT NEXT ACTION:** port and differentially verify `PUT /api/v1/agent/whatsapp/events/{event}` (including validation, audit row, saved config, RBAC, invalid event, and no-change errors); then verify DELETE template reset and proceed to the next PARTIAL entry in `tools/parity/gen_matrix.py`.
+**DONE — WhatsApp event update (`tools/parity/compare_whatsapp_event_updates.py`, 1/1):** valid Agen/Admin writes, foreign selector refusals, string boolean semantics, invalid boolean/type, event validation, template variables/braces/length, no-change request, audit subject/properties and persisted configuration compare equal. Fixes included Laravel-compatible validation details, i18n messages, agent-event audit attribution, and correct event-selector enforcement. Scoped `go test`/`go vet` and both WhatsApp GET/PUT differential harnesses pass. Current matrix **147 GO / 45 PARTIAL / 183 Laravel-only**.
+
+**EXACT NEXT ACTION:** verify `DELETE /api/v1/agent/whatsapp/events/{event}/template` response, role/scope, idempotent reset, persisted template, and audit; then proceed through the next PARTIAL route in `tools/parity/gen_matrix.py`.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

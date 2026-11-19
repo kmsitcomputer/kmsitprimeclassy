@@ -56,7 +56,7 @@ IMPLEMENTED = {
     ("PUT", "/api/v1/agent/shipping-providers/{provider}/couriers"): "supported-courier validation, response, and encrypted config side effect compared by compare_shipping_admin.py",
     ("GET", "/api/v1/agent/whatsapp/scope"): "Agen self-scope, Admin branch-scope, denied roles, ignored client agent_id, and read-only DB state compared by compare_whatsapp_scope.py",
     ("GET", "/api/v1/agent/whatsapp/events"): "RBAC, agent_id selector, event ordering and full payload compared with database read-only evidence by compare_whatsapp_events.py",
-    ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "",
+    ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py",
     ("DELETE", "/api/v1/agent/whatsapp/events/{event}/template"): "",
     ("GET", "/api/v1/agent/whatsapp/test-numbers"): "",
     ("POST", "/api/v1/agent/whatsapp/test-numbers"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "served; write contract probe pending",
     ("DELETE", "/api/v1/agent/whatsapp/events/{event}/template"): "served; write contract probe pending",
     ("GET", "/api/v1/agent/whatsapp/test-numbers"): "served; contract probe pending",
     ("POST", "/api/v1/agent/whatsapp/test-numbers"): "served; write contract probe pending",

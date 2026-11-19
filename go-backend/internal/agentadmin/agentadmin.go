@@ -798,28 +798,29 @@ func (s *Service) WhatsAppEvents(ctx context.Context, agentID int64) ([]map[stri
 
 func (s *Service) UpdateWhatsAppEvent(ctx context.Context, actorID, agentID int64, event string, enabled *bool, template *string) (map[string]any, error) {
 	if !contains(WhatsAppEventKeys, event) {
-		return nil, fail(422, "Event WhatsApp tidak dapat dikonfigurasi.")
-	}
-	if enabled == nil && template == nil {
-		return nil, fail(422, "Tidak ada perubahan konfigurasi.")
+		message := i18n.Translate(i18n.Default, "whatsapp.event_not_configurable")
+		return nil, &Error{Status: 422, Message: message, Fields: map[string][]string{"event": {message}}}
 	}
 	if template != nil {
 		if err := validateTemplate(event, *template); err != nil {
 			return nil, err
 		}
 	}
-	var oldEnabled, oldTemplate any
+	var oldEnabled sql.NullBool
+	var oldTemplate sql.NullString
 	err := s.database.QueryRowContext(ctx, `SELECT enabled,template FROM agent_whatsapp_event_settings WHERE agent_id=? AND event=?`, agentID, event).Scan(&oldEnabled, &oldTemplate)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if enabled == nil {
-		if b, ok := oldEnabled.(bool); ok {
+		if oldEnabled.Valid {
+			b := oldEnabled.Bool
 			enabled = &b
 		}
 	}
 	if template == nil {
-		if t, ok := oldTemplate.(string); ok {
+		if oldTemplate.Valid {
+			t := oldTemplate.String
 			template = &t
 		}
 	}
@@ -864,23 +865,35 @@ func (s *Service) ResetWhatsAppTemplate(ctx context.Context, actorID, agentID in
 
 func validateTemplate(event, template string) error {
 	if !contains(WhatsAppEventKeys, event) {
-		return fail(422, "Event WhatsApp tidak dapat dikonfigurasi.")
+		message := i18n.Translate(i18n.Default, "whatsapp.event_not_configurable")
+		return &Error{Status: 422, Message: message, Fields: map[string][]string{"event": {message}}}
 	}
 	if strings.TrimSpace(template) == "" || len([]rune(template)) > 1000 {
-		return fail(422, "Template WhatsApp tidak valid.")
+		message := strings.ReplaceAll(i18n.Translate(i18n.Default, "whatsapp.template_length"), ":max", "1000")
+		return &Error{Status: 422, Message: message, Fields: map[string][]string{"template": {message}}}
 	}
 	if strings.ContainsAny(template, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f") {
-		return fail(422, "Template WhatsApp berisi karakter tidak valid.")
+		message := i18n.Translate(i18n.Default, "whatsapp.template_chars")
+		return &Error{Status: 422, Message: message, Fields: map[string][]string{"template": {message}}}
 	}
 	vars := eventVariables[event]
 	stripped := tokenPattern.ReplaceAllString(template, "")
 	if strings.ContainsAny(stripped, "{}") {
-		return fail(422, "Format variabel template tidak valid.")
+		message := i18n.Translate(i18n.Default, "whatsapp.template_braces")
+		return &Error{Status: 422, Message: message, Fields: map[string][]string{"template": {message}}}
 	}
+	unknown := []string{}
+	seen := map[string]bool{}
 	for _, token := range tokenPattern.FindAllStringSubmatch(template, -1) {
-		if !vars[token[1]] {
-			return fail(422, "Variabel template tidak diizinkan.")
+		if !vars[token[1]] && !seen[token[1]] {
+			unknown = append(unknown, token[1])
+			seen[token[1]] = true
 		}
+	}
+	if len(unknown) > 0 {
+		message := i18n.Translate(i18n.Default, "whatsapp.template_unknown_vars")
+		message = strings.ReplaceAll(message, ":vars", "{"+strings.Join(unknown, "}, {")+"}")
+		return &Error{Status: 422, Message: message, Fields: map[string][]string{"template": {message}}}
 	}
 	return nil
 }

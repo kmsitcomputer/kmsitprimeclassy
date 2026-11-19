@@ -53,6 +53,27 @@ func (s *Server) recordAgentAudit(r *http.Request, actor *auth.User, agentID int
 	return err
 }
 
+func (s *Server) recordAgentWhatsAppEventAudit(r *http.Request, actor *auth.User, agentID, subjectID int64, event string, oldEnabled, newEnabled any, templateChanged bool) error {
+	properties, err := json.Marshal(map[string]any{
+		"event":            event,
+		"enabled":          map[string]any{"old": oldEnabled, "new": newEnabled},
+		"template_changed": templateChanged,
+		"actor_id":         actor.ID,
+		"target_agent_id":  agentID,
+	})
+	if err != nil {
+		return err
+	}
+	userAgent := r.UserAgent()
+	if len(userAgent) > 500 {
+		userAgent = userAgent[:500]
+	}
+	_, err = s.database.ExecContext(r.Context(), `INSERT INTO activity_logs
+		(causer_id,subject_type,subject_id,event,properties,ip_address,user_agent,created_at)
+		VALUES (?,'App\\Models\\AgentWhatsAppEventSetting',?,?,?,?,?,UTC_TIMESTAMP(6))`, actor.ID, subjectID, "whatsapp.agent_event.updated", properties, clientIP(r), userAgent)
+	return err
+}
+
 func (s *Server) recordAgentProfileAudit(r *http.Request, actor *auth.User, agentID int64, old, current any) error {
 	var profileID int64
 	if err := s.database.QueryRowContext(r.Context(), `SELECT id FROM agent_profiles WHERE user_id=?`, agentID).Scan(&profileID); err != nil {
@@ -612,12 +633,9 @@ func (s *Server) handleAgentWhatsAppEvents(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if requested := r.URL.Query().Get("agent_id"); requested != "" {
-		numericID, err := strconv.ParseFloat(requested, 64)
-		if err != nil || math.IsNaN(numericID) || math.IsInf(numericID, 0) || numericID < -9.22e18 || numericID >= 9.22e18 || int64(numericID) != agentID {
-			httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
-			return
-		}
+	if !whatsAppSelectorAllowed(r, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+		return
 	}
 	data, err := agentadmin.New(s.database, s.cfg.AppKey).WhatsAppEvents(r.Context(), agentID)
 	if err != nil {
@@ -633,23 +651,131 @@ func (s *Server) handleAgentWhatsAppEventUpdate(w http.ResponseWriter, r *http.R
 		return
 	}
 	var body struct {
-		Enabled  *bool   `json:"enabled"`
-		Template *string `json:"template"`
+		Enabled  json.RawMessage `json:"enabled"`
+		Template json.RawMessage `json:"template"`
+		AgentID  json.RawMessage `json:"agent_id"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	data, err := agentadmin.New(s.database, s.cfg.AppKey).UpdateWhatsAppEvent(r.Context(), actor.ID, agentID, httpx.PathValue(r, "event"), body.Enabled, body.Template)
+	if !whatsAppInputSelectorAllowed(r, body.AgentID, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+		return
+	}
+	fields := map[string][]string{}
+	var enabled *bool
+	if len(body.Enabled) > 0 {
+		parsed, valid := parseLaravelBoolean(body.Enabled)
+		if valid {
+			enabled = &parsed
+		} else {
+			fields["enabled"] = []string{i18n.ValidationMessage(i18n.Default, "boolean", "enabled")}
+		}
+	}
+	var template *string
+	if len(body.Template) > 0 {
+		var parsed string
+		if strings.TrimSpace(string(body.Template)) == "null" {
+			fields["template"] = []string{i18n.ValidationMessage(i18n.Default, "string", "template")}
+		} else if err := json.Unmarshal(body.Template, &parsed); err != nil {
+			fields["template"] = []string{i18n.ValidationMessage(i18n.Default, "string", "template")}
+		} else if len([]rune(parsed)) > 2000 {
+			fields["template"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "template", "max", "2000")}
+		} else {
+			template = &parsed
+		}
+	}
+	if len(fields) > 0 {
+		httpx.Failure(w, http.StatusUnprocessableEntity, msg(r.Context(), "system.validation_failed"), fields)
+		return
+	}
+	event := httpx.PathValue(r, "event")
+	var subjectID int64
+	var oldEnabled sql.NullBool
+	var oldTemplate sql.NullString
+	if err := s.database.QueryRowContext(r.Context(), `SELECT id,enabled,template FROM agent_whatsapp_event_settings WHERE agent_id=? AND event=?`, agentID, event).Scan(&subjectID, &oldEnabled, &oldTemplate); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeAgentAdminError(w, r, err)
+		return
+	}
+	data, err := agentadmin.New(s.database, s.cfg.AppKey).UpdateWhatsAppEvent(r.Context(), actor.ID, agentID, event, enabled, template)
 	if err != nil {
 		writeAgentAdminError(w, r, err)
 		return
 	}
-	if err := s.recordAgentAudit(r, actor, agentID, "whatsapp.agent_event.updated", map[string]any{"event": httpx.PathValue(r, "event"), "template_changed": body.Template != nil, "enabled": body.Enabled}); err != nil {
+	var newEnabled sql.NullBool
+	var storedTemplate sql.NullString
+	if err := s.database.QueryRowContext(r.Context(), `SELECT id,enabled,template FROM agent_whatsapp_event_settings WHERE agent_id=? AND event=?`, agentID, event).Scan(&subjectID, &newEnabled, &storedTemplate); err != nil {
+		writeAgentAdminError(w, r, err)
+		return
+	}
+	var oldValue, newValue any
+	if oldEnabled.Valid {
+		oldValue = oldEnabled.Bool
+	}
+	if newEnabled.Valid {
+		newValue = newEnabled.Bool
+	}
+	templateChanged := oldTemplate.String != storedTemplate.String || oldTemplate.Valid != storedTemplate.Valid
+	if err := s.recordAgentWhatsAppEventAudit(r, actor, agentID, subjectID, event, oldValue, newValue, templateChanged); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	httpx.OK(w, data, "Konfigurasi WhatsApp tersimpan.", nil)
+	httpx.OK(w, data, msg(r.Context(), "whatsapp.saved"), nil)
+}
+
+func whatsAppSelectorAllowed(r *http.Request, agentID int64) bool {
+	return whatsAppSelectorValueAllowed(r.URL.Query().Get("agent_id"), agentID)
+}
+
+func whatsAppInputSelectorAllowed(r *http.Request, bodyValue json.RawMessage, agentID int64) bool {
+	if len(bodyValue) == 0 {
+		return whatsAppSelectorAllowed(r, agentID)
+	}
+	if strings.TrimSpace(string(bodyValue)) == "null" {
+		return true
+	}
+	var requested string
+	if json.Unmarshal(bodyValue, &requested) == nil {
+		return whatsAppSelectorValueAllowed(requested, agentID)
+	}
+	return whatsAppSelectorValueAllowed(strings.TrimSpace(string(bodyValue)), agentID)
+}
+
+func whatsAppSelectorValueAllowed(requested string, agentID int64) bool {
+	if requested == "" {
+		return true
+	}
+	numericID, err := strconv.ParseFloat(requested, 64)
+	return err == nil && !math.IsNaN(numericID) && !math.IsInf(numericID, 0) && numericID >= -9.22e18 && numericID < 9.22e18 && int64(numericID) == agentID
+}
+
+func parseLaravelBoolean(raw json.RawMessage) (bool, bool) {
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return false, false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case json.Number:
+		if v == "1" {
+			return true, true
+		}
+		if v == "0" {
+			return false, true
+		}
+	case string:
+		if v == "1" {
+			return true, true
+		}
+		if v == "0" {
+			return false, true
+		}
+	}
+	return false, false
 }
 
 func (s *Server) handleAgentWhatsAppTemplateReset(w http.ResponseWriter, r *http.Request) {

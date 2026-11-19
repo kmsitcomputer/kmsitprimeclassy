@@ -103,8 +103,8 @@ Status legend:
 | PUT | `/api/v1/agent/store-profile` | session | agen | **GO** | Laravel validation messages, decimal:7 response strings, ignored client ownership fields, activity old/new projection and owner-only scope compared by compare_agentadmin.py |
 | GET | `/api/v1/agent/whatsapp` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/device` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **PARTIAL** |  |
-| PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **GO** | RBAC, agent_id selector, event ordering and full payload compared with database read-only evidence by compare_whatsapp_events.py |
+| PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **GO** | boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py |
 | POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | LARAVEL |  |
 | DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **PARTIAL** |  |
 | POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | LARAVEL |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 145 |
-|   of which PARTIAL (incomplete behaviour) | 47 |
+|   of which fully GO | 147 |
+|   of which PARTIAL (incomplete behaviour) | 45 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

@@ -171,6 +171,12 @@ KEYS = {
     ],
     "whatsapp": [
         "scope_forbidden",
+        "saved",
+        "event_not_configurable",
+        "template_length",
+        "template_chars",
+        "template_braces",
+        "template_unknown_vars",
     ],
     "user": [
         "created",
@@ -307,7 +313,7 @@ def main() -> int:
             raise SystemExit(f"missing validation file: {vpath}")
         vsrc = open(vpath, encoding="utf-8").read()
         for key in VALIDATION_KEYS:
-            m = re.search(r"'%s'\s*=>\s*'((?:[^'\\]|\\.)*)'" % key, vsrc)
+            m = re.search(r"(?m)^    '%s'\s*=>\s*'((?:[^'\\]|\\.)*)'" % key, vsrc)
             if not m:
                 raise SystemExit(f"{loc}: missing validation.{key}")
             out[loc][f"validation.{key}"] = m.group(1).replace("\\'", "'").replace("\\\\", "\\")
