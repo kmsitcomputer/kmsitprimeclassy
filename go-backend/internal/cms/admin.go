@@ -2,10 +2,13 @@ package cms
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -470,6 +473,11 @@ type BlockInput struct {
 	RemoveImage *bool          `json:"remove_image"`
 }
 
+type BlockUploads struct {
+	Image       *media.Upload
+	SlideImages map[string]map[string]*media.Upload
+}
+
 func AdminBlocks(ctx context.Context, d *db.DB) ([]map[string]any, error) {
 	rows, err := d.QueryContext(ctx, `SELECT id, type, content, sort_order, is_active, starts_at, ends_at, updated_at
 		FROM cms_homepage_blocks ORDER BY sort_order ASC`)
@@ -507,6 +515,10 @@ func AdminBlocks(ctx context.Context, d *db.DB) ([]map[string]any, error) {
 }
 
 func CreateBlock(ctx context.Context, d *db.DB, input BlockInput) (map[string]any, error) {
+	return CreateBlockWithUploads(ctx, d, input, BlockUploads{})
+}
+
+func CreateBlockWithUploads(ctx context.Context, d *db.DB, input BlockInput, uploads BlockUploads) (map[string]any, error) {
 	if input.Type != nil && !validBlockType(*input.Type) {
 		message := strings.ReplaceAll(i18n.Translate(i18n.Default, "cms.unknown_type"), ":type", *input.Type)
 		return nil, &httpx.Error{Status: 422, Message: message, FieldStrings: map[string]string{"type": i18n.Translate(i18n.Default, "system.field_invalid")}}
@@ -517,17 +529,70 @@ func CreateBlock(ctx context.Context, d *db.DB, input BlockInput) (map[string]an
 	content := cloneContent(input.Content)
 	delete(content, "image_path")
 	stripSlideImagePaths(content)
+	storedPaths := []string{}
+	store := func(file *media.Upload) (string, error) {
+		path, err := storeHomepageBlockUpload(file)
+		if err == nil {
+			storedPaths = append(storedPaths, path)
+		}
+		return path, err
+	}
+	if *input.Type == "banner_slider" {
+		slides, _ := content["slides"].([]any)
+		for i, raw := range slides {
+			slide, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			key, _ := slide["key"].(string)
+			files := uploads.SlideImages[key]
+			clean := map[string]any{"key": key, "title": blockNullableText(slide["title"]), "description": blockNullableText(slide["description"]), "alt": blockNullableText(slide["alt"]), "button_label": blockNullableText(slide["button_label"]), "button_url": blockNullableText(slide["button_url"]), "overlay": valueOrText(slide["overlay"], "dark"), "content_position": valueOrText(slide["content_position"], "left"), "image_path": nil, "mobile_image_path": nil}
+			if files["desktop"] != nil {
+				path, err := store(files["desktop"])
+				if err != nil {
+					cleanupBlockUploads(storedPaths)
+					return nil, err
+				}
+				clean["image_path"] = path
+			}
+			if files["mobile"] != nil {
+				path, err := store(files["mobile"])
+				if err != nil {
+					cleanupBlockUploads(storedPaths)
+					return nil, err
+				}
+				clean["mobile_image_path"] = path
+			}
+			slides[i] = clean
+		}
+		content["slides"] = slides
+	}
+	if uploads.Image != nil {
+		if *input.Type != "hero" && *input.Type != "banner" && *input.Type != "promotional" && *input.Type != "image" {
+			return nil, &httpx.Error{Status: 422, Message: strings.ReplaceAll(i18n.Translate(i18n.Default, "cms.type_rejects_image"), ":type", *input.Type)}
+		}
+		path, err := store(uploads.Image)
+		if err != nil {
+			cleanupBlockUploads(storedPaths)
+			return nil, err
+		}
+		content["image_path"] = path
+	}
 	if err := sanitizeAndValidateBlock(*input.Type, content); err != nil {
+		if !isMissingSlideDesktopImage(err) {
+			cleanupBlockUploads(storedPaths)
+		}
 		return nil, err
 	}
 	starts, ends, err := parseBlockDates(input.StartsAt, input.EndsAt)
 	if err != nil {
+		cleanupBlockUploads(storedPaths)
 		return nil, err
 	}
 	var id int64
 	err = d.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var next int
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM cms_homepage_blocks`).Scan(&next); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), 0) + 1 FROM cms_homepage_blocks`).Scan(&next); err != nil {
 			return err
 		}
 		sortOrder := next
@@ -556,9 +621,70 @@ func CreateBlock(ctx context.Context, d *db.DB, input BlockInput) (map[string]an
 		return err
 	})
 	if err != nil {
+		cleanupBlockUploads(storedPaths)
 		return nil, err
 	}
 	return blockByID(ctx, d, id)
+}
+
+func cleanupBlockUploads(paths []string) {
+	for _, path := range paths {
+		deleteStoredPath(path)
+	}
+}
+func isMissingSlideDesktopImage(err error) bool {
+	apiErr, ok := err.(*httpx.Error)
+	if !ok {
+		return false
+	}
+	message := i18n.Translate(i18n.Default, "cms.slide_image_required")
+	for field, value := range apiErr.FieldStrings {
+		if strings.HasPrefix(field, "content.slides.") && strings.HasSuffix(field, ".image") && value == message {
+			return true
+		}
+	}
+	return false
+}
+func blockNullableText(value any) any {
+	text, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	return text
+}
+func valueOrText(value any, fallback string) string {
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return text
+}
+func storeHomepageBlockUpload(upload *media.Upload) (string, error) {
+	if upload == nil || len(upload.Content) == 0 || len(upload.Content) > 10<<20 {
+		return "", validation("image", "The image field must not be greater than 10240 kilobytes.")
+	}
+	mime := http.DetectContentType(upload.Content)
+	ext := map[string]string{"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[mime]
+	if ext == "" {
+		return "", validation("image", "The image field must be an image of type: jpg, jpeg, png, webp.")
+	}
+	random := make([]byte, 20)
+	if _, err := rand.Read(random); err != nil {
+		return "", err
+	}
+	path := "cms/homepage-blocks/" + hex.EncodeToString(random) + "." + ext
+	absolute := filepath.Join(media.Root, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(absolute, upload.Content, 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func UpdateBlock(ctx context.Context, d *db.DB, id int64, input BlockInput) (map[string]any, error) {
@@ -1014,7 +1140,7 @@ func sanitizeAndValidateBlock(typ string, content map[string]any) error {
 		if !ok || len(html) > 20000 {
 			return validation("content.html", "The html field is required and may not exceed 20000 characters.")
 		}
-		content["html"] = SanitizeHTML(html)
+		content["html"] = SanitizeHomepageBlockHTML(html)
 	case "social_media", "marketplace_links":
 		platforms, ok := content["platforms"].(map[string]any)
 		if !ok {
@@ -1044,8 +1170,11 @@ func sanitizeAndValidateBlock(typ string, content map[string]any) error {
 			if strings.TrimSpace(fmt.Sprint(slide["key"])) == "" {
 				return validation(fmt.Sprintf("content.slides.%d.key", i), "The slide key is required.")
 			}
-			if strings.TrimSpace(fmt.Sprint(slide["image_path"])) == "" {
-				return validation(fmt.Sprintf("content.slides.%d.image", i), "Slide image uploads are not supported by this Go handler yet.")
+			imagePath, ok := slide["image_path"].(string)
+			if !ok || strings.TrimSpace(imagePath) == "" {
+				message := i18n.Translate(i18n.Default, "cms.slide_image_required")
+				field := fmt.Sprintf("content.slides.%d.image", i)
+				return &httpx.Error{Status: 422, Message: message, FieldStrings: map[string]string{field: message}}
 			}
 		}
 	}

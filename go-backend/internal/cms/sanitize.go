@@ -19,6 +19,12 @@ var (
 	unsafeLinkAnchor = regexp.MustCompile(`(?i)<a\b[^>]*__primeclassy_unsafe_href__[^>]*>`)
 	unsafeMarkerAttr = regexp.MustCompile(`(?i)\s+(?:href|title)="[^"]*__primeclassy_unsafe_href__[^"]*"`)
 	unsafeNoFollow   = regexp.MustCompile(`(?i)\s+rel="nofollow"`)
+	anchorTag        = regexp.MustCompile(`(?i)<a\b[^>]*>`)
+	anchorRel        = regexp.MustCompile(`(?i)\s+rel=(?:"[^"]*"|'[^']*'|[^\s>]+)`)
+	paragraphEnd     = regexp.MustCompile(`(?i)</p\s*>`)
+	inlineTags       = regexp.MustCompile(`(?i)</?(strong|b|em|i|s|u|a|code)\b[^>]*>`)
+	homepageIframe   = regexp.MustCompile(`(?i)</?iframe\b[^>]*>`)
+	homepageVoidTag  = regexp.MustCompile(`(?i)<(img|br|hr|input)((?:[^>"']|"[^"]*")*)>`)
 )
 
 // SanitizeHTML follows HtmlSanitizerService's allowlist. It deliberately does not
@@ -66,4 +72,56 @@ func SanitizeHTML(input string) string {
 		return "text-align:" + strings.ToLower(parts[1]) + ";"
 	})
 	return out
+}
+
+// SanitizeHomepageBlockHTML matches the HTMLPurifier contract for custom
+// homepage blocks while keeping the shared product/article sanitizer unchanged.
+func SanitizeHomepageBlockHTML(input string) string {
+	input = closeInlineAtParagraphEnd(input)
+	// HTMLPurifier unwraps iframe tags and preserves their text content.
+	input = homepageIframe.ReplaceAllString(input, "")
+	out := SanitizeHTML(input)
+	out = anchorTag.ReplaceAllStringFunc(out, func(anchor string) string {
+		if regexp.MustCompile(`(?i)\btarget\s*=\s*(?:"_blank"|'_blank'|_blank)`).MatchString(anchor) {
+			anchor = anchorRel.ReplaceAllString(anchor, "")
+			return strings.TrimSuffix(anchor, ">") + ` rel="noreferrer noopener">`
+		}
+		return unsafeNoFollow.ReplaceAllString(anchor, "")
+	})
+	return homepageVoidTag.ReplaceAllString(out, `<$1$2 />`)
+}
+
+func closeInlineAtParagraphEnd(input string) string {
+	indices := paragraphEnd.FindAllStringIndex(input, -1)
+	if len(indices) == 0 {
+		return input
+	}
+	var out strings.Builder
+	last := 0
+	for _, index := range indices {
+		segment := input[last:index[0]]
+		stack := []string{}
+		for _, match := range inlineTags.FindAllStringSubmatch(segment, -1) {
+			tag := strings.ToLower(strings.TrimLeft(match[0], "</"))
+			tag = strings.FieldsFunc(tag, func(r rune) bool { return r == ' ' || r == '>' || r == '/' })[0]
+			if strings.HasPrefix(match[0], "</") {
+				for i := len(stack) - 1; i >= 0; i-- {
+					if stack[i] == tag {
+						stack = append(stack[:i], stack[i+1:]...)
+						break
+					}
+				}
+			} else {
+				stack = append(stack, tag)
+			}
+		}
+		out.WriteString(segment)
+		for i := len(stack) - 1; i >= 0; i-- {
+			out.WriteString("</" + stack[i] + ">")
+		}
+		out.WriteString(input[index[0]:index[1]])
+		last = index[1]
+	}
+	out.WriteString(input[last:])
+	return out.String()
 }

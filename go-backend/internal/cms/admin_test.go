@@ -53,3 +53,17 @@ func TestCustomHomepageBlockSanitizesStoredHTML(t *testing.T) {
 		t.Fatalf("custom block HTML was not safely sanitized: %s", html)
 	}
 }
+
+func TestHomepageBlockSanitizerMatchesPurifierParagraphAndLinkOutput(t *testing.T) {
+	got := SanitizeHomepageBlockHTML(`<p><strong>one</p><p>two<!--secret--></p><p><a href="https://example.test" target="_blank">safe</a><a href="mailto:help@example.test">mail</a></p>`)
+	want := `<p><strong>one</strong></p><p>two</p><p><a href="https://example.test" target="_blank" rel="noreferrer noopener">safe</a><a href="mailto:help@example.test">mail</a></p>`
+	if got != want {
+		t.Fatalf("SanitizeHomepageBlockHTML() = %q, want %q", got, want)
+	}
+	if got := SanitizeHomepageBlockHTML(`<iframe>kept text</iframe><script>removed text</script>`); got != `kept text` {
+		t.Fatalf("SanitizeHomepageBlockHTML() active content = %q, want %q", got, `kept text`)
+	}
+	if got := SanitizeHomepageBlockHTML(`<img src="https://example.test/a.png">`); got != `<img src="https://example.test/a.png" />` {
+		t.Fatalf("SanitizeHomepageBlockHTML() image = %q", got)
+	}
+}

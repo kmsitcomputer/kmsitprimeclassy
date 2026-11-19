@@ -67,7 +67,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/profile/referral-code/regenerate"): "generated role prefix/code format, response, DB update and audit compared by compare_profile_referral.py",
     ("DELETE", "/api/v1/profile/referral-code"): "response, cleared code, and old-only audit projection compared by compare_profile_referral.py",
     ("GET", "/api/v1/cms/homepage-blocks"): "resource projection, sort order, Super Admin gate, and read-only state compared by compare_cms_homepage_blocks.py",
-    ("POST", "/api/v1/cms/homepage-blocks"): "",
+    ("POST", "/api/v1/cms/homepage-blocks"): "JSON + multipart validation, HTML sanitization, persistence and upload side effects compared with Laravel",
     ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("POST", "/api/v1/cms/homepage-blocks"): "served; HTMLPurifier policy NOT ported — write paths must not be treated as parity-complete",
     ("PATCH", "/api/v1/cms/homepage-blocks/reorder"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",
     ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "served; HTMLPurifier policy NOT ported",

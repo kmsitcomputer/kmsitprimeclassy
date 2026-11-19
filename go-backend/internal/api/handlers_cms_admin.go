@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/cms"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 )
 
 // registerCMSProfileRoutes is called by the Domain E route aggregator. The
@@ -366,16 +369,188 @@ func (s *Server) handleCMSBlockStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input cms.BlockInput
-	if err := httpx.DecodeJSON(r, &input); err != nil {
+	var uploads cms.BlockUploads
+	var err error
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		input, uploads, err = decodeHomepageBlockMultipart(r)
+	} else {
+		input, err = decodeCMSBlockJSON(r)
+	}
+	contentErr := validateHomepageBlockContent(r.Context(), s.database, input.Type, input.Content)
+	if err = mergeValidationErrors(err, contentErr); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	result, err := cms.CreateBlock(r.Context(), s.database, input)
+	fileErrors := fieldErrors{}
+	validateHomepageBlockUpload(r.Context(), fileErrors, "image", uploads.Image)
+	if input.Type != nil && *input.Type == "banner_slider" && len(uploads.SlideImages) > 10 {
+		fileErrors.add("slide_images", vmsg(r.Context(), "max.array", "slide_images", "max", "10"))
+	}
+	for key, fields := range uploads.SlideImages {
+		for slot, file := range fields {
+			validateHomepageBlockUpload(r.Context(), fileErrors, "slide_images."+key+"."+slot, file)
+		}
+	}
+	if err := fileErrors.fail(r.Context()); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	result, err := cms.CreateBlockWithUploads(r.Context(), s.database, input, uploads)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	httpx.Created(w, result, "Created")
+}
+
+func mergeValidationErrors(first, second error) error {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	var left, right *httpx.Error
+	if !errors.As(first, &left) || !errors.As(second, &right) || left.Status != http.StatusUnprocessableEntity || right.Status != http.StatusUnprocessableEntity {
+		return first
+	}
+	if left.Fields == nil {
+		left.Fields = map[string][]string{}
+	}
+	for field, messages := range right.Fields {
+		left.Fields[field] = append(left.Fields[field], messages...)
+	}
+	if len(right.FieldStrings) > 0 && left.FieldStrings == nil {
+		left.FieldStrings = map[string]string{}
+	}
+	for field, message := range right.FieldStrings {
+		left.FieldStrings[field] = message
+	}
+	return left
+}
+
+func decodeCMSBlockJSON(r *http.Request) (cms.BlockInput, error) {
+	raw := map[string]json.RawMessage{}
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
+		return cms.BlockInput{}, err
+	}
+	input := cms.BlockInput{}
+	errs := fieldErrors{}
+	typeRaw, typePresent := raw["type"]
+	if !typePresent || string(typeRaw) == "null" || string(typeRaw) == `""` {
+		errs.add("type", vmsg(r.Context(), "required", "type"))
+	} else if json.Unmarshal(typeRaw, new(string)) != nil {
+		errs.add("type", vmsg(r.Context(), "string", "type"), vmsg(r.Context(), "in", "type"))
+	} else {
+		var value string
+		_ = json.Unmarshal(typeRaw, &value)
+		input.Type = &value
+	}
+	if contentRaw, present := raw["content"]; present && string(contentRaw) != "null" {
+		trimmed := strings.TrimSpace(string(contentRaw))
+		if strings.HasPrefix(trimmed, "{") {
+			if err := json.Unmarshal(contentRaw, &input.Content); err != nil {
+				errs.add("content", vmsg(r.Context(), "array", "content"))
+			}
+		} else if strings.HasPrefix(trimmed, "[") {
+			// Laravel accepts a JSON list as an array. Homepage block content is
+			// consumed as keyed data, so preserve its numeric keys in the Go map.
+			var values []any
+			if err := json.Unmarshal(contentRaw, &values); err != nil {
+				errs.add("content", vmsg(r.Context(), "array", "content"))
+			} else {
+				input.Content = make(map[string]any, len(values))
+				for i, value := range values {
+					input.Content[strconv.Itoa(i)] = value
+				}
+			}
+		} else {
+			input.Content = map[string]any{}
+			errs.add("content", vmsg(r.Context(), "array", "content"))
+		}
+	}
+	if value, present := raw["sort_order"]; present && (string(value) == "null" || string(value) == `""`) {
+		sortOrder := 0
+		input.SortOrder = &sortOrder
+	} else if present {
+		var number json.Number
+		decoder := json.NewDecoder(strings.NewReader(string(value)))
+		decoder.UseNumber()
+		var decoded any
+		if err := decoder.Decode(&decoded); err == nil {
+			switch candidate := decoded.(type) {
+			case json.Number:
+				number = candidate
+			case string:
+				number = json.Number(candidate)
+			}
+		}
+		integer, err := number.Int64()
+		if err != nil || int64(int(integer)) != integer {
+			errs.add("sort_order", vmsg(r.Context(), "integer", "sort_order"))
+		} else if integer < 0 {
+			errs.add("sort_order", vmsg(r.Context(), "min.numeric", "sort_order", "min", "0"))
+		} else {
+			value := int(integer)
+			input.SortOrder = &value
+		}
+	}
+	if value, present := raw["is_active"]; present {
+		var decoded any
+		if err := json.Unmarshal(value, &decoded); err == nil {
+			switch candidate := decoded.(type) {
+			case bool:
+				input.IsActive = &candidate
+			case json.Number:
+				if candidate == "0" || candidate == "1" {
+					active := candidate == "1"
+					input.IsActive = &active
+				} else {
+					errs.add("is_active", vmsg(r.Context(), "boolean", "is_active"))
+				}
+			case string:
+				if candidate == "0" || candidate == "1" {
+					active := candidate == "1"
+					input.IsActive = &active
+				} else {
+					errs.add("is_active", vmsg(r.Context(), "boolean", "is_active"))
+				}
+			default:
+				errs.add("is_active", vmsg(r.Context(), "boolean", "is_active"))
+			}
+		} else {
+			errs.add("is_active", vmsg(r.Context(), "boolean", "is_active"))
+		}
+	}
+	decodeDate := func(key string, target **string) {
+		value, present := raw[key]
+		if !present || string(value) == "null" || string(value) == `""` {
+			return
+		}
+		var text string
+		if err := json.Unmarshal(value, &text); err != nil {
+			errs.add(key, vmsg(r.Context(), "date", key))
+			return
+		}
+		if _, ok := parseHomepageFormDate(&text); !ok {
+			errs.add(key, vmsg(r.Context(), "date", key))
+			return
+		}
+		*target = &text
+	}
+	decodeDate("starts_at", &input.StartsAt)
+	decodeDate("ends_at", &input.EndsAt)
+	if input.StartsAt != nil && input.EndsAt != nil {
+		starts, _ := parseHomepageFormDate(input.StartsAt)
+		ends, _ := parseHomepageFormDate(input.EndsAt)
+		if ends.Before(starts) {
+			errs.add("ends_at", vmsg(r.Context(), "after_or_equal", "ends_at", "date", i18n.AttributeName(LocaleFrom(r.Context()), "starts_at")))
+		}
+	}
+	if err := errs.fail(r.Context()); err != nil {
+		return input, err
+	}
+	return input, nil
 }
 
 func (s *Server) handleCMSBlockUpdate(w http.ResponseWriter, r *http.Request) {

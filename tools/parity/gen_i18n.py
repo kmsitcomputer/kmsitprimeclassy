@@ -216,7 +216,7 @@ KEYS = {
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
                    "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes",
                    "image", "file", "required_if", "before_or_equal", "email", "confirmed", "prohibited_if",
-                   "prohibited_if_accepted", "prohibited_if_declined", "accepted", "distinct"]
+                   "prohibited_if_accepted", "prohibited_if_declined", "accepted", "distinct", "regex"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric"), ("gt", "numeric"), ("gt", "file"),
