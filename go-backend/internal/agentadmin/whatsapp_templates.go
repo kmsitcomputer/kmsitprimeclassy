@@ -1,0 +1,114 @@
+package agentadmin
+
+import "regexp"
+
+var tokenPattern = regexp.MustCompile(`\{([a-z_]+)\}`)
+
+var eventVariables = func() map[string]map[string]bool {
+	order := words("nama_pelanggan nomor_pesanan status total tanggal nama_toko link_pesanan")
+	invoice := words("daftar_produk subtotal diskon ongkir total_tagihan metode_pembayaran status_pembayaran jumlah_dibayarkan sisa_tagihan")
+	payment := merge(order, invoice, words("tanggal_pembayaran jumlah_pembayaran_ini"))
+	shipping := merge(order, words("nama_kurir layanan_pengiriman nomor_resi nomor_telepon_kurir estimasi_tiba link_pelacakan kurir resi tanggal_pengiriman"))
+	return map[string]map[string]bool{
+		"order_created":          order,
+		"payment_paid":           payment,
+		"payment_partial":        payment,
+		"order_processed":        order,
+		"order_shipped":          shipping,
+		"order_delivered":        merge(order, words("tanggal_diterima")),
+		"order_cancelled":        merge(order, words("tanggal_pembatalan")),
+		"return_requested":       merge(order, words("nomor_retur")),
+		"return_approved":        merge(order, words("nomor_retur")),
+		"refund_completed":       merge(order, words("nomor_retur jumlah_refund tanggal_refund")),
+		"payment_failed":         merge(order, words("jumlah_diajukan alasan_penolakan")),
+		"return_rejected":        merge(order, words("nomor_retur")),
+		"payment_proof_uploaded": merge(order, words("nama_keuangan nominal_klaim waktu_upload link_verifikasi_pembayaran")),
+		"refund_requested":       merge(order, words("nomor_refund jumlah_refund")),
+		"refund_approved":        merge(order, words("nomor_refund jumlah_refund")),
+		"refund_rejected":        merge(order, words("nomor_refund")),
+	}
+}()
+
+var eventVariableOrder = func() map[string][]string {
+	order := []string{"nama_pelanggan", "nomor_pesanan", "status", "total", "tanggal", "nama_toko", "link_pesanan"}
+	invoice := []string{"daftar_produk", "subtotal", "diskon", "ongkir", "total_tagihan", "metode_pembayaran", "status_pembayaran", "jumlah_dibayarkan", "sisa_tagihan"}
+	payment := append(append([]string{}, order...), invoice...)
+	payment = append(payment, "tanggal_pembayaran", "jumlah_pembayaran_ini")
+	shipping := append(append([]string{}, order...), "nama_kurir", "layanan_pengiriman", "nomor_resi", "nomor_telepon_kurir", "estimasi_tiba", "link_pelacakan", "kurir", "resi", "tanggal_pengiriman")
+	return map[string][]string{
+		"order_created":          order,
+		"payment_paid":           payment,
+		"payment_partial":        payment,
+		"order_processed":        order,
+		"order_shipped":          shipping,
+		"order_delivered":        append(append([]string{}, order...), "tanggal_diterima"),
+		"order_cancelled":        append(append([]string{}, order...), "tanggal_pembatalan"),
+		"return_requested":       append(append([]string{}, order...), "nomor_retur"),
+		"return_approved":        append(append([]string{}, order...), "nomor_retur"),
+		"refund_completed":       append(append([]string{}, order...), "nomor_retur", "jumlah_refund", "tanggal_refund"),
+		"payment_failed":         append(append([]string{}, order...), "jumlah_diajukan", "alasan_penolakan"),
+		"return_rejected":        append(append([]string{}, order...), "nomor_retur"),
+		"payment_proof_uploaded": append(append([]string{}, order...), "nama_keuangan", "nominal_klaim", "waktu_upload", "link_verifikasi_pembayaran"),
+		"refund_requested":       append(append([]string{}, order...), "nomor_refund", "jumlah_refund"),
+		"refund_approved":        append(append([]string{}, order...), "nomor_refund", "jumlah_refund"),
+		"refund_rejected":        append(append([]string{}, order...), "nomor_refund"),
+	}
+}()
+
+var eventLabels = map[string]string{
+	"order_created":          "Pesanan berhasil dibuat",
+	"payment_paid":           "Pembayaran berhasil",
+	"payment_partial":        "DP / pembayaran sebagian diterima",
+	"order_processed":        "Pesanan diproses",
+	"order_shipped":          "Pesanan dikirim",
+	"order_delivered":        "Pesanan selesai (terkirim)",
+	"order_cancelled":        "Pesanan dibatalkan",
+	"return_requested":       "Retur diajukan",
+	"return_approved":        "Retur disetujui",
+	"refund_completed":       "Refund berhasil",
+	"payment_failed":         "Pembayaran belum berhasil",
+	"return_rejected":        "Retur ditolak",
+	"payment_proof_uploaded": "Bukti pembayaran baru (perlu verifikasi)",
+	"refund_requested":       "Permohonan refund diterima",
+	"refund_approved":        "Refund disetujui",
+	"refund_rejected":        "Refund ditolak",
+}
+
+var eventDefaultTemplates = map[string]string{
+	"order_created":          "*PRIMECLASSY — PESANAN BARU*\n\nHalo {nama_pelanggan},\n\nPesanan Anda berhasil dibuat.\n\nNomor Pesanan: {nomor_pesanan}\nTanggal: {tanggal}\nTotal Pesanan: *{total}*\n\nLihat pesanan: {link_pesanan}\n\nTerima kasih telah berbelanja di {nama_toko}.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"payment_paid":           "*PRIMECLASSY — PEMBAYARAN LUNAS*\n\nHalo {nama_pelanggan},\n\nPembayaran pesanan Anda telah dikonfirmasi.\n\nNomor Pesanan: {nomor_pesanan}\nMetode Pembayaran: {metode_pembayaran}\nJumlah Diterima: *{jumlah_pembayaran_ini}*\nTotal Pesanan: {total}\nTotal Dibayar: *{jumlah_dibayarkan}*\nSisa Tagihan: {sisa_tagihan}\nTanggal Pembayaran: {tanggal_pembayaran}\n\nSimpan pesan ini sebagai bukti transaksi.\nLihat pesanan: {link_pesanan}\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"payment_partial":        "*PRIMECLASSY — PEMBAYARAN PARSIAL*\n\nHalo {nama_pelanggan},\n\nKami telah menerima pembayaran sebagian (DP) untuk pesanan Anda.\n\nNomor Pesanan: {nomor_pesanan}\nTotal Pesanan: {total}\nPembayaran Kali Ini: *{jumlah_pembayaran_ini}*\nAkumulasi Pembayaran: {jumlah_dibayarkan}\nSisa Tagihan: *{sisa_tagihan}*\n\nStatus Pembayaran: *Belum Lunas*\n\nInformasi pelunasan: {link_pesanan}\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"order_processed":        "*PRIMECLASSY — PESANAN DIPROSES*\n\nHalo {nama_pelanggan},\n\nPesanan *{nomor_pesanan}* saat ini sedang diproses.\nStatus: *{status}*\n\nKami akan memberi kabar ketika status pesanan berubah.\nLihat pesanan: {link_pesanan}\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"order_shipped":          "*PRIMECLASSY — PESANAN DIKIRIM*\n\nHalo {nama_pelanggan},\n\nPesanan Anda {nomor_pesanan} telah dikirim dan sedang dalam perjalanan.\n\nKurir: {kurir}\nNomor Resi: {resi}\nTanggal Pengiriman: {tanggal_pengiriman}\n\nPantau pesanan: {link_pesanan}\n\nTerima kasih telah berbelanja di {nama_toko}.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"order_delivered":        "*PRIMECLASSY — PESANAN SELESAI*\n\nHalo {nama_pelanggan},\n\nPesanan Anda {nomor_pesanan} telah sampai.\nTanggal Diterima: {tanggal_diterima}\n\nTerima kasih telah berbelanja di {nama_toko}.\nLihat pesanan: {link_pesanan}\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"order_cancelled":        "*PRIMECLASSY — PEMBATALAN PESANAN*\n\nHalo {nama_pelanggan},\n\nPesanan berikut telah dibatalkan:\n\nNomor Pesanan: {nomor_pesanan}\nTanggal Pembatalan: {tanggal_pembatalan}\nStatus: *{status}*\n\nJika Anda membutuhkan bantuan, hubungi layanan pelanggan {nama_toko}.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"return_requested":       "*PRIMECLASSY — PENGAJUAN RETUR*\n\nHalo {nama_pelanggan},\n\nPengajuan retur untuk pesanan {nomor_pesanan} telah kami terima.\n\nNomor Retur: {nomor_retur}\nStatus: *MENUNGGU PENINJAUAN*\n\nTim kami akan meninjau pengajuan sesuai ketentuan PrimeClassy.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"return_approved":        "*PRIMECLASSY — RETUR DISETUJUI*\n\nHalo {nama_pelanggan},\n\nPengajuan retur Anda telah disetujui.\n\nNomor Retur: {nomor_retur}\nPesanan: {nomor_pesanan}\n\nIkuti petunjuk resmi sebelum mengirimkan barang.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"refund_completed":       "*PRIMECLASSY — REFUND SELESAI*\n\nHalo {nama_pelanggan},\n\nPengembalian dana untuk pesanan Anda telah dicatat selesai.\n\nNomor Pesanan: {nomor_pesanan}\nJumlah Refund: *{jumlah_refund}*\nTanggal Penyelesaian: {tanggal_refund}\nStatus: *SELESAI*\n\nTerima kasih atas kesabaran Anda.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"payment_failed":         "*PRIMECLASSY — PEMBAYARAN BELUM BERHASIL*\n\nHalo {nama_pelanggan},\n\nPembayaran untuk pesanan {nomor_pesanan} belum dapat dikonfirmasi.\n\nJumlah Diajukan: {jumlah_diajukan}\nKeterangan: {alasan_penolakan}\n\nPeriksa informasi pembayaran: {link_pesanan}\n\nJangan melakukan pembayaran ulang sebelum memastikan status transaksi sebelumnya.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"return_rejected":        "*PRIMECLASSY — HASIL PENINJAUAN RETUR*\n\nHalo {nama_pelanggan},\n\nSetelah peninjauan, pengajuan retur {nomor_retur} untuk pesanan {nomor_pesanan} belum dapat disetujui.\n\nSilakan hubungi layanan pelanggan {nama_toko} jika membutuhkan penjelasan.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"payment_proof_uploaded": "*PRIMECLASSY — BUKTI PEMBAYARAN BARU*\n\nHalo {nama_keuangan},\n\nKonsumen telah mengunggah bukti pembayaran baru yang memerlukan pemeriksaan Tim Keuangan.\n\nNomor Pesanan: {nomor_pesanan}\nNama Konsumen: {nama_pelanggan}\nTotal Tagihan: {total}\nNominal yang Diklaim: {nominal_klaim}\nWaktu Upload: {waktu_upload}\nStatus: Menunggu Verifikasi Keuangan\n\nPeriksa bukti pembayaran: {link_verifikasi_pembayaran}\n\nUnggahan bukti pembayaran bukan konfirmasi bahwa dana telah diterima.\n\n_Pesan otomatis PrimeClassy. Khusus petugas Keuangan yang berwenang._",
+	"refund_requested":       "*PRIMECLASSY — PERMOHONAN REFUND*\n\nHalo {nama_pelanggan},\n\nPermohonan pengembalian dana telah kami terima.\n\nNomor Refund: {nomor_refund}\nNomor Pesanan: {nomor_pesanan}\nStatus: *DALAM PENINJAUAN*\n\nPermohonan ini belum berarti pengembalian dana telah disetujui.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"refund_approved":        "*PRIMECLASSY — REFUND DISETUJUI*\n\nHalo {nama_pelanggan},\n\nPermohonan refund Anda telah disetujui.\n\nNomor Refund: {nomor_refund}\nJumlah Disetujui: *{jumlah_refund}*\nStatus: *MENUNGGU PENYELESAIAN*\n\nKami akan memberi kabar setelah pengembalian dana tercatat selesai.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+	"refund_rejected":        "*PRIMECLASSY — HASIL PENINJAUAN REFUND*\n\nHalo {nama_pelanggan},\n\nPermohonan refund {nomor_refund} untuk pesanan {nomor_pesanan} belum dapat disetujui.\n\nJika membutuhkan penjelasan, silakan hubungi layanan pelanggan {nama_toko}.\n\nPesan otomatis dari PrimeClassy. Jangan membagikan OTP atau kata sandi kepada siapa pun.",
+}
+
+func words(source string) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range regexp.MustCompile(`\s+`).Split(source, -1) {
+		if v != "" {
+			out[v] = true
+		}
+	}
+	return out
+}
+
+func merge(groups ...map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for _, group := range groups {
+		for v := range group {
+			out[v] = true
+		}
+	}
+	return out
+}

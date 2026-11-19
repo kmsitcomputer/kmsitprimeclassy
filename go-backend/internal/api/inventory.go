@@ -163,6 +163,9 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/warehouse/stock-requests/{stockRequest}/proposals":
 		return true
 	}
+	if matchesDomainERoute(method, path) {
+		return true
+	}
 	for _, collection := range []string{"vouchers", "discounts"} {
 		prefix := "/api/v1/promo/" + collection + "/"
 		if (method == http.MethodPatch || method == http.MethodDelete) && strings.HasPrefix(path, prefix) {
@@ -382,6 +385,122 @@ func implementsRoute(method, path string) bool {
 			if rest != "" && !strings.Contains(rest, "/") {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func matchesDomainERoute(method, path string) bool {
+	exact := map[string]bool{
+		"GET /api/v1/manage/products":                   true,
+		"POST /api/v1/products":                         true,
+		"GET /api/v1/users":                             true,
+		"POST /api/v1/users":                            true,
+		"GET /api/v1/agent/store-profile":               true,
+		"PUT /api/v1/agent/store-profile":               true,
+		"GET /api/v1/agent/payment-methods":             true,
+		"GET /api/v1/agent/shipping-tariff":             true,
+		"PUT /api/v1/agent/shipping-tariff":             true,
+		"GET /api/v1/agent/shipping-providers":          true,
+		"GET /api/v1/agent/whatsapp/scope":              true,
+		"GET /api/v1/agent/whatsapp/events":             true,
+		"GET /api/v1/agent/whatsapp/test-numbers":       true,
+		"POST /api/v1/agent/whatsapp/test-numbers":      true,
+		"PATCH /api/v1/profile":                         true,
+		"GET /api/v1/profile/email/verification":        true,
+		"PATCH /api/v1/profile/referral-code":           true,
+		"POST /api/v1/profile/referral-code/regenerate": true,
+		"DELETE /api/v1/profile/referral-code":          true,
+		"GET /api/v1/cms/homepage-blocks":               true,
+		"POST /api/v1/cms/homepage-blocks":              true,
+		"PATCH /api/v1/cms/homepage-blocks/reorder":     true,
+		"GET /api/v1/cms/articles":                      true,
+		"POST /api/v1/cms/articles":                     true,
+		"GET /api/v1/cms/pages":                         true,
+		"POST /api/v1/cms/pages":                        true,
+	}
+	if exact[method+" "+path] {
+		return true
+	}
+	p := strings.Split(strings.TrimPrefix(path, "/api/v1/"), "/")
+	if len(p) == 0 {
+		return false
+	}
+	switch p[0] {
+	case "referral":
+		return method == http.MethodGet && len(p) == 2 && p[1] != ""
+	case "users":
+		if len(p) == 2 {
+			return p[1] != "" && (method == http.MethodGet || method == http.MethodPatch || method == http.MethodDelete)
+		}
+		if len(p) == 3 {
+			return p[1] != "" && method == http.MethodPatch &&
+				(p[2] == "reassign-referral" || p[2] == "convert-to-sales-kurir-sub" || p[2] == "convert-to-sales-kurir")
+		}
+	case "manage":
+		return method == http.MethodGet && len(p) == 3 && p[1] == "products" && p[2] != ""
+	case "products":
+		if len(p) == 2 {
+			return p[1] != "" && (method == http.MethodPatch || method == http.MethodDelete)
+		}
+		if len(p) == 3 && p[1] != "" {
+			if p[2] == "variations" {
+				return method == http.MethodPost
+			}
+			if p[2] == "fees" {
+				return method == http.MethodGet || method == http.MethodPut
+			}
+			if p[2] == "permanent" {
+				return method == http.MethodDelete
+			}
+		}
+		if len(p) == 4 && p[1] != "" && p[2] == "images" {
+			return p[3] != "" && (p[3] == "order" && method == http.MethodPut ||
+				p[3] != "order" && (method == http.MethodPatch || method == http.MethodDelete))
+		}
+		if len(p) == 5 && p[1] != "" && p[2] == "variations" && p[3] != "" {
+			if method == http.MethodPatch || method == http.MethodDelete {
+				return true
+			}
+			return (method == http.MethodGet || method == http.MethodPut) && p[4] == "fees"
+		}
+	case "cms":
+		if len(p) == 3 && p[2] != "" && (p[1] == "articles" || p[1] == "pages" || p[1] == "homepage-blocks") {
+			if p[1] == "homepage-blocks" && p[2] == "reorder" {
+				return method == http.MethodPatch
+			}
+			return method == http.MethodPatch || method == http.MethodDelete
+		}
+	case "agent":
+		rest := strings.TrimPrefix(path, "/api/v1/agent/")
+		if strings.HasPrefix(rest, "payment-methods/") {
+			q := strings.Split(rest, "/")
+			return len(q) == 3 && q[1] != "" &&
+				((method == http.MethodPatch && q[2] == "toggle") || (method == http.MethodPut && q[2] == "config"))
+		}
+		if strings.HasPrefix(rest, "shipping-providers/") {
+			q := strings.Split(rest, "/")
+			if len(q) == 2 {
+				return q[1] != "" && (method == http.MethodPatch || method == http.MethodGet)
+			}
+			if len(q) == 3 {
+				return q[1] != "" &&
+					((method == http.MethodPut && (q[2] == "config" || q[2] == "couriers")) ||
+						(method == http.MethodGet && q[2] == "couriers"))
+			}
+		}
+		if strings.HasPrefix(rest, "whatsapp/events/") {
+			q := strings.Split(rest, "/")
+			if len(q) == 3 {
+				return q[1] != "" && method == http.MethodPut
+			}
+			if len(q) == 4 {
+				return q[1] != "" && q[2] == "template" && method == http.MethodDelete
+			}
+		}
+		if strings.HasPrefix(rest, "whatsapp/test-numbers/") {
+			q := strings.Split(rest, "/")
+			return len(q) == 2 && q[1] != "" && method == http.MethodDelete
 		}
 	}
 	return false

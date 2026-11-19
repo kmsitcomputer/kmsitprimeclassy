@@ -85,6 +85,11 @@ func (s *Server) routes() {
 	// Sanctum-compatible CSRF bootstrap.
 	s.mux.HandleFunc("GET /sanctum/csrf-cookie", s.handleCsrfCookie)
 
+	// Domain E route slices. Their implementations are isolated in dedicated packages and handlers.
+	s.registerDomainERoutes()
+	s.registerCMSProfileRoutes()
+	s.registerProductAdminRoutes()
+
 	// Identity.
 	s.mux.Handle("POST /api/v1/auth/login", chain(http.HandlerFunc(s.handleLogin), s.Throttle(10, time.Minute)))
 	s.mux.Handle("POST /api/v1/auth/register", chain(http.HandlerFunc(s.handleRegister), s.Throttle(5, time.Minute)))

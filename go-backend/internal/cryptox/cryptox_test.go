@@ -69,3 +69,26 @@ func TestWrongKeyIsRejected(t *testing.T) {
 		t.Fatal("a wrong APP_KEY decrypted the payload")
 	}
 }
+
+func TestEncryptArrayRoundTripsLaravelCastPayload(t *testing.T) {
+	key := strings.Repeat("k", 32)
+	want := map[string]any{"bank_name": "Example Bank", "account_number": "001234", "nested": map[string]any{"flag": true}}
+	payload, err := EncryptArray(key, want)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	got, err := DecryptArray(key, payload)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if got["bank_name"] != want["bank_name"] || got["account_number"] != want["account_number"] {
+		t.Fatalf("round trip = %#v", got)
+	}
+	payload2, err := EncryptArray(key, want)
+	if err != nil {
+		t.Fatalf("second encrypt: %v", err)
+	}
+	if payload == payload2 {
+		t.Fatal("credential encryption reused a deterministic IV")
+	}
+}

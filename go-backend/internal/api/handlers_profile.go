@@ -1,0 +1,169 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/profile"
+)
+
+type profileUpdateRequest struct {
+	Name        *string         `json:"name"`
+	Email       *string         `json:"email"`
+	Phone       *string         `json:"phone"`
+	AvatarMedia json.RawMessage `json:"avatar_media_id"`
+}
+
+func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	var body profileUpdateRequest
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	input := profile.UpdateInput{Name: body.Name, Email: body.Email, Phone: body.Phone, AvatarSet: len(body.AvatarMedia) > 0}
+	if input.AvatarSet && string(body.AvatarMedia) != "null" {
+		var id int64
+		if err := json.Unmarshal(body.AvatarMedia, &id); err != nil || id < 1 {
+			writeError(w, r, httpx.Validation(map[string][]string{"avatar_media_id": invalidField(ctx, "avatar_media_id")}))
+			return
+		}
+		input.AvatarID = &id
+	}
+	updated, err := profile.Update(ctx, s.database, user, input, clientMetaFrom(ctx))
+	if errors.Is(err, profile.ErrEmailTaken) {
+		writeError(w, r, httpx.Validation(map[string][]string{"email": uniqueField(ctx, "email")}))
+		return
+	}
+	if errors.Is(err, profile.ErrPhoneTaken) {
+		writeError(w, r, httpx.Validation(map[string][]string{"phone": uniqueField(ctx, "phone")}))
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	payload, err := updated.UserJSON(ctx, s.database, updated.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, payload, "OK", nil)
+}
+
+func (s *Server) handleProfileReferralCodeUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Code string `json:"referral_code"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	updated, err := profile.SetReferralCode(ctx, s.database, user, body.Code, clientMetaFrom(ctx))
+	if err != nil {
+		writeProfileReferralError(w, r, err)
+		return
+	}
+	payload, err := updated.UserJSON(ctx, s.database, updated.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, payload, msg(ctx, "profile.referral_code_updated"), nil)
+}
+
+func (s *Server) handleProfileReferralCodeRegenerate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	updated, err := profile.RegenerateReferralCode(ctx, s.database, user, clientMetaFrom(ctx))
+	if err != nil {
+		writeProfileReferralError(w, r, err)
+		return
+	}
+	payload, err := updated.UserJSON(ctx, s.database, updated.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, payload, msg(ctx, "profile.referral_code_updated"), nil)
+}
+
+func (s *Server) handleProfileReferralCodeDelete(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	updated, err := profile.DeleteReferralCode(ctx, s.database, user, clientMetaFrom(ctx))
+	if err != nil {
+		writeProfileReferralError(w, r, err)
+		return
+	}
+	payload, err := updated.UserJSON(ctx, s.database, updated.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, payload, msg(ctx, "profile.referral_code_updated"), nil)
+}
+
+func (s *Server) handleReferralPreview(w http.ResponseWriter, r *http.Request) {
+	result, err := profile.ReferralPreview(r.Context(), s.database, httpx.PathValue(r, "code"))
+	if errors.Is(err, profile.ErrReferralCodeNotFound) {
+		writeError(w, r, &httpx.Error{
+			Status: http.StatusUnprocessableEntity, Message: msg(r.Context(), "referral.invalid_code"),
+			FieldStrings: map[string]string{"referral_code": msg(r.Context(), "referral.code_not_found")},
+		})
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) handleEmailVerificationState(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	state, err := profile.EmailVerificationState(ctx, s.database, user.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, state, "OK", nil)
+}
+
+func writeProfileReferralError(w http.ResponseWriter, r *http.Request, err error) {
+	var apiErr *httpx.Error
+	if errors.As(err, &apiErr) && len(apiErr.Fields) > 0 {
+		fields := map[string][]string{}
+		for field := range apiErr.Fields {
+			if field == "referral_code" {
+				fields[field] = []string{msg(r.Context(), "profile.referral_code_format")}
+			} else {
+				fields[field] = invalidField(r.Context(), field)
+			}
+		}
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	writeError(w, r, err)
+}

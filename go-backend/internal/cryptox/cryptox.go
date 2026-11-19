@@ -23,12 +23,15 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -84,6 +87,54 @@ func DecryptArray(appKey, payload string) (map[string]any, error) {
 		return nil, fmt.Errorf("%w: plaintext is not a JSON object", ErrDecrypt)
 	}
 	return out, nil
+}
+
+// EncryptArray produces the Laravel encrypted:array representation. Laravel's encrypted cast encrypts the
+// JSON string without PHP serialization; preserving that exact representation lets Laravel and Go continue
+// sharing the same credential rows during the migration.
+func EncryptArray(appKey string, value map[string]any) (string, error) {
+	key, err := Key(appKey)
+	if err != nil {
+		return "", err
+	}
+	plain, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("%w: JSON encode", ErrDecrypt)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("%w: cipher", ErrDecrypt)
+	}
+	padded := pkcs7Pad(plain, aes.BlockSize)
+	iv := make([]byte, aes.BlockSize)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", fmt.Errorf("%w: IV generation", ErrDecrypt)
+	}
+	ciphertext := make([]byte, len(padded))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+
+	iv64 := base64.StdEncoding.EncodeToString(iv)
+	value64 := base64.StdEncoding.EncodeToString(ciphertext)
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(iv64))
+	mac.Write([]byte(value64))
+	envelope, err := json.Marshal(map[string]string{
+		"iv": iv64, "value": value64, "mac": hex.EncodeToString(mac.Sum(nil)), "tag": "",
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: envelope encode", ErrDecrypt)
+	}
+	return base64.StdEncoding.EncodeToString(envelope), nil
+}
+
+func pkcs7Pad(value []byte, blockSize int) []byte {
+	padding := blockSize - len(value)%blockSize
+	out := make([]byte, len(value)+padding)
+	copy(out, value)
+	for i := len(value); i < len(out); i++ {
+		out[i] = byte(padding)
+	}
+	return out
 }
 
 // decrypt verifies the MAC and returns the raw plaintext bytes.
