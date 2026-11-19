@@ -50,6 +50,9 @@ KEYS = {
     ],
     "agent": [
         "profile_updated",
+        "not_an_agent",
+        "profile_already_exists",
+        "profile_deleted",
     ],
     "address": [
         "created",
