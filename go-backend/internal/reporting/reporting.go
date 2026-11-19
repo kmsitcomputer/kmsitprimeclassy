@@ -274,7 +274,10 @@ func (s *Service) DashboardSummary(ctx context.Context, actor Actor, q url.Value
 		for role, dest := range map[string]*int{"korsal": &korsals, "sales,sales-kurir-sub": &sales, "kurir": &couriers} {
 			roles := strings.Split(role, ",")
 			in := strings.TrimRight(strings.Repeat("?,", len(roles)), ",")
-			ra := append([]any{}, roles...)
+			ra := make([]any, 0, len(roles)+len(roleArgs))
+			for _, roleSlug := range roles {
+				ra = append(ra, roleSlug)
+			}
 			for _, arg := range roleArgs {
 				ra = append(ra, arg)
 			}

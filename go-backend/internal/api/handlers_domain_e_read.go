@@ -5,17 +5,12 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/crm"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/reporting"
 )
-
-func crmActor(uID int64) crm.Actor {
-	u := UserFromIDPlaceholder
-	_ = u
-	return crm.Actor{ID: uID}
-}
 
 func reportingActor(r *http.Request) reporting.Actor {
 	u := UserFrom(r.Context())
@@ -38,7 +33,7 @@ func writeDomainReadError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-func (s *Server) crmService() *crm.Service { return crm.New(s.database) }
+func (s *Server) crmService() *crm.Service             { return crm.New(s.database) }
 func (s *Server) reportingService() *reporting.Service { return reporting.New(s.database) }
 
 func (s *Server) handleCRMCustomerIndex(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +46,15 @@ func (s *Server) handleCRMCustomerIndex(w http.ResponseWriter, r *http.Request) 
 		writeDomainReadError(w, r, err)
 		return
 	}
-	httpx.OK(w, rows.Rows, "OK", map[string]int{"current_page": rows.CurrentPage, "last_page": rows.LastPage, "total": rows.Total})
+	// Laravel answers `$query->paginate(min(per_page,100))` — a LengthAwarePaginator, whose toArray shape
+	// (including the links array) the SPA consumes directly. Replicate it, not a bare list.
+	if perPage < 1 {
+		perPage = 25
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	httpx.OK(w, crmPaginator(r, rows.Rows, rows.CurrentPage, rows.LastPage, rows.Total, perPage), "OK", nil)
 }
 
 func (s *Server) handleCRMCustomerShow(w http.ResponseWriter, r *http.Request) {
@@ -116,14 +119,102 @@ func (s *Server) handleReportTransactions(w http.ResponseWriter, r *http.Request
 	httpx.OK(w, rows, "OK", meta)
 }
 
-func (s *Server) handleDashboardSummary(w http.ResponseWriter, r *http.Request) {
-	result, err := s.reportingService().DashboardSummary(r.Context(), reportingActor(r), r.URL.Query())
-	if err != nil {
-		writeDomainReadError(w, r, err)
-		return
-	}
-	httpx.OK(w, result, "OK", nil)
-}
-
 // Keep URL query values typed consistently when report handlers add validated options.
 func queryValues(r *http.Request) url.Values { return r.URL.Query() }
+
+// crmPaginator is LengthAwarePaginator::toArray for the CRM list.
+func crmPaginator(r *http.Request, data any, currentPage, lastPage, total, perPage int) map[string]any {
+	scheme := r.URL.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	path := scheme + "://"
+	if r.URL.Host != "" {
+		path += r.URL.Host
+	} else {
+		path += r.Host
+	}
+	path += r.URL.Path
+	pageURL := func(number int) string { return path + "?page=" + strconv.Itoa(number) }
+	from := any(nil)
+	if len(toSlice(data)) > 0 {
+		from = (currentPage-1)*perPage + 1
+	}
+	to := any(nil)
+	if n := len(toSlice(data)); n > 0 {
+		to = (currentPage-1)*perPage + n
+	}
+	links := []any{
+		map[string]any{"url": pageLink(currentPage > 1, pageURL(currentPage-1)), "label": "&laquo; Previous", "active": false},
+	}
+	for number := 1; number <= lastPage; number++ {
+		links = append(links, map[string]any{"url": pageURL(number), "label": strconv.Itoa(number), "active": number == currentPage})
+	}
+	links = append(links, map[string]any{"url": pageLink(currentPage < lastPage, pageURL(currentPage+1)), "label": "Next &raquo;", "active": false})
+	var next, prev any
+	if currentPage < lastPage {
+		next = pageURL(currentPage + 1)
+	}
+	if currentPage > 1 {
+		prev = pageURL(currentPage - 1)
+	}
+	return map[string]any{
+		"current_page":   currentPage,
+		"data":           data,
+		"first_page_url": pageURL(1),
+		"from":           from,
+		"last_page":      lastPage,
+		"last_page_url":  pageURL(lastPage),
+		"links":          links,
+		"next_page_url":  next,
+		"path":           path,
+		"per_page":       perPage,
+		"prev_page_url":  prev,
+		"to":             to,
+		"total":          total,
+	}
+}
+
+func pageLink(active bool, url string) any {
+	if !active {
+		return nil
+	}
+	return url
+}
+
+// toSlice treats the CRM rows (an any) as its slice length; rows is always a JSON array here.
+func toSlice(v any) []any {
+	if slice, ok := v.([]any); ok {
+		return slice
+	}
+	return nil
+}
+
+// matchesDomainEReadRoute is the implementsRoute entry for the CRM/commission/report read surface.
+func matchesDomainEReadRoute(method, path string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	rest := strings.TrimPrefix(path, "/api/v1/")
+	parts := strings.Split(rest, "/")
+	switch parts[0] {
+	case "crm":
+		if len(parts) == 2 && parts[1] == "follow-ups" {
+			return true
+		}
+		if len(parts) == 2 && parts[1] == "customers" {
+			return true
+		}
+		if len(parts) == 3 && parts[1] == "customers" && parts[2] != "" {
+			return true
+		}
+		if len(parts) == 4 && parts[1] == "customers" && parts[2] != "" && parts[3] == "visits" {
+			return true
+		}
+	case "commissions":
+		return len(parts) == 1 || (len(parts) == 2 && parts[1] == "summary")
+	case "reports":
+		return len(parts) == 2 && parts[1] == "transactions"
+	}
+	return false
+}

@@ -42,4 +42,19 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("GET /api/v1/agent/whatsapp/test-numbers", chain(http.HandlerFunc(s.handleAgentWhatsAppTestNumbers), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("POST /api/v1/agent/whatsapp/test-numbers", chain(http.HandlerFunc(s.handleAgentWhatsAppTestNumberAdd), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("DELETE /api/v1/agent/whatsapp/test-numbers/{id}", chain(http.HandlerFunc(s.handleAgentWhatsAppTestNumberDelete), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
+
+	// CRM read surface (IMP-006 slice 1) — OD-01: agen/admin read-only, korsal downline, sales owner.
+	crmRead := "super_admin,agen,admin,korsal,sales,sales-kurir-sub"
+	s.mux.Handle("GET /api/v1/crm/customers", chain(http.HandlerFunc(s.handleCRMCustomerIndex), RequireAuth, s.RequireAgentLinked, RequireRole(crmRead)))
+	s.mux.Handle("GET /api/v1/crm/customers/{customer}", chain(http.HandlerFunc(s.handleCRMCustomerShow), RequireAuth, s.RequireAgentLinked, RequireRole(crmRead)))
+	s.mux.Handle("GET /api/v1/crm/customers/{customer}/visits", chain(http.HandlerFunc(s.handleCRMCustomerVisits), RequireAuth, s.RequireAgentLinked, RequireRole(crmRead)))
+	s.mux.Handle("GET /api/v1/crm/follow-ups", chain(http.HandlerFunc(s.handleCRMFollowUps), RequireAuth, s.RequireAgentLinked, RequireRole(crmRead)))
+
+	// Commission/fee REPORTS — CommissionController::allowedBeneficiaryRoles scopes the rows per role.
+	commissionRoles := "super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan"
+	s.mux.Handle("GET /api/v1/commissions", chain(http.HandlerFunc(s.handleCommissionIndex), RequireAuth, s.RequireAgentLinked, RequireRole(commissionRoles)))
+	s.mux.Handle("GET /api/v1/commissions/summary", chain(http.HandlerFunc(s.handleCommissionSummary), RequireAuth, s.RequireAgentLinked, RequireRole(commissionRoles)))
+
+	// Management reports — transactions is korsal-open (ReportService::scopeToActor narrows it further).
+	s.mux.Handle("GET /api/v1/reports/transactions", chain(http.HandlerFunc(s.handleReportTransactions), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,korsal")))
 }

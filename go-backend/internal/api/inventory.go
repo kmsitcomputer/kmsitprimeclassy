@@ -163,7 +163,7 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/warehouse/stock-requests/{stockRequest}/proposals":
 		return true
 	}
-	if matchesDomainERoute(method, path) {
+	if matchesDomainERoute(method, path) || matchesDomainEReadRoute(method, path) {
 		return true
 	}
 	for _, collection := range []string{"vouchers", "discounts"} {
