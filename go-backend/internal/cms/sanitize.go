@@ -2,14 +2,23 @@ package cms
 
 import (
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/microcosm-cc/bluemonday"
 )
 
 var (
-	htmlPolicyOnce sync.Once
-	htmlPolicy     *bluemonday.Policy
+	htmlPolicyOnce  sync.Once
+	htmlPolicy      *bluemonday.Policy
+	unsafeHrefAttrs = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\s+href\s*=\s*"\s*(?:javascript|vbscript|data):[^"]*"`),
+		regexp.MustCompile(`(?i)\s+href\s*=\s*'\s*(?:javascript|vbscript|data):[^']*'`),
+	}
+	textAlignStyle   = regexp.MustCompile(`(?i)text-align:\s*(left|right|center|justify)\s*;?`)
+	unsafeLinkAnchor = regexp.MustCompile(`(?i)<a\b[^>]*__primeclassy_unsafe_href__[^>]*>`)
+	unsafeMarkerAttr = regexp.MustCompile(`(?i)\s+(?:href|title)="[^"]*__primeclassy_unsafe_href__[^"]*"`)
+	unsafeNoFollow   = regexp.MustCompile(`(?i)\s+rel="nofollow"`)
 )
 
 // SanitizeHTML follows HtmlSanitizerService's allowlist. It deliberately does not
@@ -36,5 +45,25 @@ func SanitizeHTML(input string) string {
 		p.AddTargetBlankToFullyQualifiedLinks(true)
 		htmlPolicy = p
 	})
-	return htmlPolicy.Sanitize(input)
+	// HTMLPurifier drops a disallowed link target but keeps the anchor and its text.
+	// A safe temporary URL keeps bluemonday from dropping that otherwise empty anchor.
+	for _, pattern := range unsafeHrefAttrs {
+		input = pattern.ReplaceAllString(input, ` href="/__primeclassy_unsafe_href__" title="__primeclassy_unsafe_href__"`)
+	}
+	out := htmlPolicy.Sanitize(input)
+	// Restore the harmless anchor shape after bluemonday has sanitized its contents.
+	out = unsafeLinkAnchor.ReplaceAllStringFunc(out, func(anchor string) string {
+		anchor = unsafeMarkerAttr.ReplaceAllString(anchor, "")
+		anchor = unsafeNoFollow.ReplaceAllString(anchor, "")
+		return anchor
+	})
+	// Match HTMLPurifier's canonical CSS spelling (`text-align:center;`).
+	out = textAlignStyle.ReplaceAllStringFunc(out, func(value string) string {
+		parts := textAlignStyle.FindStringSubmatch(value)
+		if len(parts) != 2 {
+			return value
+		}
+		return "text-align:" + strings.ToLower(parts[1]) + ";"
+	})
+	return out
 }

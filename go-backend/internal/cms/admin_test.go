@@ -15,10 +15,18 @@ func TestSanitizeHTMLKeepsEditorMarkupAndRemovesActiveContent(t *testing.T) {
 			t.Errorf("sanitized HTML retains %q: %s", forbidden, got)
 		}
 	}
-	for _, allowed := range []string{"<h2", "text-align: center", "News", `href="https://example.test"`, "<img"} {
+	for _, allowed := range []string{"<h2", "text-align:center;", "News", `href="https://example.test"`, "<img"} {
 		if !strings.Contains(got, allowed) {
 			t.Errorf("sanitized HTML removed allowed content %q: %s", allowed, got)
 		}
+	}
+}
+
+func TestSanitizeHTMLKeepsAnchorWhenUnsafeHrefIsRemoved(t *testing.T) {
+	got := SanitizeHTML(`<p>safe <a href='javascript:alert(1)'>link</a></p>`)
+	want := `<p>safe <a>link</a></p>`
+	if got != want {
+		t.Fatalf("SanitizeHTML() = %q, want %q", got, want)
 	}
 }
 

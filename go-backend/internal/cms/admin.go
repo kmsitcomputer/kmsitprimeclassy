@@ -15,6 +15,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/asset"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 )
 
@@ -506,7 +507,11 @@ func AdminBlocks(ctx context.Context, d *db.DB) ([]map[string]any, error) {
 }
 
 func CreateBlock(ctx context.Context, d *db.DB, input BlockInput) (map[string]any, error) {
-	if input.Type == nil || !validBlockType(*input.Type) {
+	if input.Type != nil && !validBlockType(*input.Type) {
+		message := strings.ReplaceAll(i18n.Translate(i18n.Default, "cms.unknown_type"), ":type", *input.Type)
+		return nil, &httpx.Error{Status: 422, Message: message, FieldStrings: map[string]string{"type": i18n.Translate(i18n.Default, "system.field_invalid")}}
+	}
+	if input.Type == nil {
 		return nil, validation("type", "The selected type is invalid.")
 	}
 	content := cloneContent(input.Content)
