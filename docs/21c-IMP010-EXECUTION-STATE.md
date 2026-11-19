@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 145 |
-| PARTIAL (incomplete behaviour) | 47 |
+| Fully GO | 146 |
+| PARTIAL (incomplete behaviour) | 46 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -442,7 +442,11 @@ carries `actor_role`.
 
 **OWNER PAUSE — 2026-11-20:** implementation/testing stopped at the Owner's request. No Docker containers or database were stopped or removed. Exact next action on resume: inspect the `GET /api/v1/agent/whatsapp/scope` Laravel controller and Go handler, add a focused differential scenario, then continue remaining PARTIAL routes in matrix order. Do not rerun completed shipping, payment-method, store-profile, or referral-code harnesses unless a dependency changes.
 
-**RESUMED after Owner pause — WhatsApp scope selector (`tools/parity/compare_whatsapp_scope.py`, 1/1):** Agen sees itself, Admin sees its branch Agen, other tested roles are refused, client `agent_id` query values do not widen/alter scope, and application business-table state is unchanged by the read. Current matrix: **145 GO / 47 PARTIAL / 183 Laravel-only**. The next unit is `GET /api/v1/agent/whatsapp/events`: compare its Laravel/Go response and role scope against `primeclassy_testing`, then continue the remaining WhatsApp PARTIAL routes.
+**RESUMED after Owner pause — WhatsApp scope selector (`tools/parity/compare_whatsapp_scope.py`, 1/1):** Agen sees itself, Admin sees its branch Agen, other tested roles are refused, client `agent_id` query values do not widen/alter scope, and application business-table state is unchanged by the read. This supersedes the historical pause next-action below.
+
+**DONE — WhatsApp events read (`tools/parity/compare_whatsapp_events.py`, 1/1):** full event list, payload ordering/templates/variables, role gates, numeric/foreign `agent_id` selector behavior, and read-only DB state match Laravel. Differential found Go ignoring selector, the Go event order differing from Laravel, and one omitted duplicate variable in Laravel's returned array; all corrected. Scoped `go test` and `go vet` for `agentadmin`, `api`, and `i18n` pass. Matrix now **146 GO / 46 PARTIAL / 183 Laravel-only**.
+
+**EXACT NEXT ACTION:** port and differentially verify `PUT /api/v1/agent/whatsapp/events/{event}` (including validation, audit row, saved config, RBAC, invalid event, and no-change errors); then verify DELETE template reset and proceed to the next PARTIAL entry in `tools/parity/gen_matrix.py`.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

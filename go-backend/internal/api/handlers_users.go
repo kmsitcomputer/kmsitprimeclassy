@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -610,6 +611,13 @@ func (s *Server) handleAgentWhatsAppEvents(w http.ResponseWriter, r *http.Reques
 	_, agentID, ok := s.agentAdmin(w, r, true)
 	if !ok {
 		return
+	}
+	if requested := r.URL.Query().Get("agent_id"); requested != "" {
+		numericID, err := strconv.ParseFloat(requested, 64)
+		if err != nil || math.IsNaN(numericID) || math.IsInf(numericID, 0) || numericID < -9.22e18 || numericID >= 9.22e18 || int64(numericID) != agentID {
+			httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+			return
+		}
 	}
 	data, err := agentadmin.New(s.database, s.cfg.AppKey).WhatsAppEvents(r.Context(), agentID)
 	if err != nil {

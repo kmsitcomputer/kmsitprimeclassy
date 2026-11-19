@@ -169,6 +169,9 @@ KEYS = {
         "referral_code_updated",
         "referral_code_format",
     ],
+    "whatsapp": [
+        "scope_forbidden",
+    ],
     "user": [
         "created",
         "role_not_authorized",

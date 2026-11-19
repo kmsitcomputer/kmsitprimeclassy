@@ -199,7 +199,8 @@
   "validation.string": "يجب أن يكون طول :attribute بين :min و :max حرفًا.",
   "validation.unique": ":attribute مُستخدم من قبل.",
   "voucher.invalid": "messages.voucher.invalid",
-  "voucher.not_applicable": "messages.voucher.not_applicable"
+  "voucher.not_applicable": "messages.voucher.not_applicable",
+  "whatsapp.scope_forbidden": "غير مصرح لك بإدارة واتساب لهذا الوكيل."
  },
  "en": {
   "address.created": "Address saved successfully.",
@@ -376,7 +377,8 @@
   "validation.string": "The :attribute field must be between :min and :max characters.",
   "validation.unique": "The :attribute has already been taken.",
   "voucher.invalid": "messages.voucher.invalid",
-  "voucher.not_applicable": "messages.voucher.not_applicable"
+  "voucher.not_applicable": "messages.voucher.not_applicable",
+  "whatsapp.scope_forbidden": "You are not authorised to manage WhatsApp for this Agent."
  },
  "id": {
   "address.created": "Alamat berhasil disimpan.",
@@ -589,7 +591,8 @@
   "validation.string": ":attribute harus di antara :min sampai :max karakter.",
   "validation.unique": ":attribute sudah digunakan.",
   "voucher.invalid": "messages.voucher.invalid",
-  "voucher.not_applicable": "messages.voucher.not_applicable"
+  "voucher.not_applicable": "messages.voucher.not_applicable",
+  "whatsapp.scope_forbidden": "Anda tidak berwenang mengelola WhatsApp untuk Agen ini."
  },
  "zh": {
   "address.created": "地址保存成功。",
@@ -791,6 +794,7 @@
   "validation.string": ":attribute 必须介于 :min 到 :max 个字符之间。",
   "validation.unique": ":attribute 已经存在。",
   "voucher.invalid": "messages.voucher.invalid",
-  "voucher.not_applicable": "messages.voucher.not_applicable"
+  "voucher.not_applicable": "messages.voucher.not_applicable",
+  "whatsapp.scope_forbidden": "您无权管理该代理的 WhatsApp。"
  }
 }

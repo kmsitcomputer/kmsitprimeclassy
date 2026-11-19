@@ -48,7 +48,7 @@ var eventVariableOrder = func() map[string][]string {
 		"refund_completed":       append(append([]string{}, order...), "nomor_retur", "jumlah_refund", "tanggal_refund"),
 		"payment_failed":         append(append([]string{}, order...), "jumlah_diajukan", "alasan_penolakan"),
 		"return_rejected":        append(append([]string{}, order...), "nomor_retur"),
-		"payment_proof_uploaded": append(append([]string{}, order...), "nama_keuangan", "nominal_klaim", "waktu_upload", "link_verifikasi_pembayaran"),
+		"payment_proof_uploaded": append(append([]string{}, order...), "nama_keuangan", "nama_pelanggan", "nominal_klaim", "waktu_upload", "link_verifikasi_pembayaran"),
 		"refund_requested":       append(append([]string{}, order...), "nomor_refund", "jumlah_refund"),
 		"refund_approved":        append(append([]string{}, order...), "nomor_refund", "jumlah_refund"),
 		"refund_rejected":        append(append([]string{}, order...), "nomor_refund"),

@@ -741,7 +741,7 @@ func (s *Service) SaveTariff(ctx context.Context, agentID int64, v map[string]an
 }
 
 // WhatsAppEventKeys is the configurable transactional event allow-list, excluding account, OTP and recovery traffic.
-var WhatsAppEventKeys = []string{"order_created", "payment_paid", "payment_partial", "order_processed", "order_shipped", "order_delivered", "order_cancelled", "return_requested", "return_approved", "refund_completed", "payment_failed", "return_rejected", "payment_proof_uploaded", "refund_requested", "refund_approved", "refund_rejected"}
+var WhatsAppEventKeys = []string{"order_created", "payment_paid", "payment_partial", "order_processed", "order_shipped", "order_delivered", "order_cancelled", "return_requested", "return_approved", "refund_completed", "payment_proof_uploaded", "payment_failed", "return_rejected", "refund_requested", "refund_approved", "refund_rejected"}
 
 func (s *Service) WhatsAppEvents(ctx context.Context, agentID int64) ([]map[string]any, error) {
 	rows, err := s.database.QueryContext(ctx, `SELECT event,enabled,template FROM agent_whatsapp_event_settings WHERE agent_id=?`, agentID)
