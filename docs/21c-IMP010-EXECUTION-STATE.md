@@ -12,12 +12,12 @@ before touching code. Do not re-derive a completed checkpoint.
 | Metric | Value |
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
-| Served by Go | **93 (24.8%)** |
-| Fully GO | 87 |
+| Served by Go | **109 (29.1%)** |
+| Fully GO | 103 |
 | PARTIAL (incomplete behaviour) | 6 |
-| Laravel-only (Go answers 501) | **282** |
-| Go tests | **133 green** (incl. 6 media oracles), `go vet` clean, gofmt clean |
-| Cross-runtime comparison checks | **386 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle + 11 order read) |
+| Laravel-only (Go answers 501) | **266** |
+| Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
+| Cross-runtime comparison checks | **400 passing** (26 public + 24 auth + 29 inventory read + 78 inventory mutations + 17 admin config + 17 address + 21 promo + 38 checkout steps + 25 checkout quote + 43 orders + 22 warehouse requests + 20 proposals + 5 handovers + 10 order lifecycle + 11 order read + 14 item lifecycle) |
 | Laravel files modified by IMP-010 | **0** |
 | Production / remote side effects | none |
 
@@ -55,9 +55,10 @@ explicitly listed as outstanding rather than silently reduced.
 | Handover read + print | 2 | `compare_handovers.py` (5) — JSON shape (users serialize with NO hidden fields) and the A4 HTML page byte-for-byte after normalising the volatile timestamp/serial numbers |
 | Stock-request proposals | 8 | `compare_proposals.py` (20) — propose/receive/approve/reject/write-off across 20 scenarios, response + DB state |
 | Warehouse stock requests | 6 | `compare_warehouse_requests.py` (22) — transit receipt, factory_plan change, Sub adjustment both directions, idempotent re-approval, rejection, the negative-Sub guard, route gates, and 7 validation shapes; DB state compared after every scenario |
+| Item lifecycle (fulfillment / cancellation / reschedule) | 4 | `compare_fulfillment.py` (14) — reduce → increase → no-op, full reduction then refused increase, the closed transfer window, byte-exact validation sentences, the cancel-eligibility projection, the 409 stale-quantity guard, full cancellation then refusal, the pickup refusal, the Kurir-Online reschedule, the partial split, and CSRF 419. DB state compared after every scenario (items, order totals, snapshots/units/bases, reductions, obligations + ledger, adjustments, additional payments, payment transactions, stock-request demand/status, the Agent reservation, shipments, activity log) |
 | Ops (`/up`, `/healthz`, parity report) | 3 | integration tests |
 
-## 3. What remains (327 routes) — ordered, with the real obstacle for each
+## 3. What remains (266 routes) — ordered, with the real obstacle for each
 
 The order below is dependency-correct. **Start at the top of §3.1.**
 
@@ -393,39 +394,66 @@ omits both keys.
 Filters reproduced: status (canonical), payment_status (financial audience only — the reference REMOVES the
 param for operational roles), search (order_no/recipient with LIKE escaping), delivery_date, region ids, paid.
 
+## 4-10. Item lifecycle — DONE (do not re-derive)
+
+4 routes: `PATCH .../items/{item}/fulfillment`, `GET .../cancel-eligibility`,
+`POST .../cancel-undelivered`, `PATCH .../items/{item}/reschedule` (`internal/orders/fulfillment.go` +
+`financial.go`, `internal/api/handlers_orders_fulfillment.go`).
+
+**Reduce** consumes FROZEN snapshot units in consumption order (never re-derives from the current price), books the
+`order_sales_reduction` row, then the refund obligation: a `fulfillment_shortfall` basis books
+`shortfall:<item>:<from>-<to>` auto-approved; a `provisional_legacy` basis books the needs-verification variant.
+Inventory then unwinds Order → Stock Request → Sub reservation/stock, and the total is re-derived. **Increase**
+restores cancelled units first (`ORDER BY id`), reserves fresh stock only for the shortfall, and creates ONE
+`adjustment:<adjustment_id>` additional-payment obligation only when the order was fully settled — a pending
+additional payment or pending refund blocks the further adjustment (code `pending_additional_payment_...`).
+`assertQuantityAdjustable` allows only a `fulfillment_shortfall` snapshot while the order is still `diproses`.
+
+**cancel-undelivered** is REM-003 Owner Option A: it cancels part of the undelivered remainder (allowed after
+first dispatch), takes the frozen-order lock FIRST, then the Stock Request/demand rows, and treats
+`expected_quantity != fulfilled_quantity` as a **409 stale-quantity** guard. `cancel-eligibility` is the
+read-only projector: order window + stock source + item status + open delivery refusal + remaining quantity +
+pending additional payment decide `eligible`/`reason_code`; `max_quantity` is `fulfilled_quantity` only when
+eligible.
+
+**reschedule** is LOCKED to Kurir Online (`shipping_provider_code = 'openroute'`) and Self Delivery/Sub; expedition
+and pickup are refused. A partial `quantity` splits the line onto a new `OrderItem` (+ its own `Shipment`) with
+`split_from_order_item_id` lineage and a `order_item.split_for_reschedule` activity; the shipment is then
+re-homed onto the canonical shipment for that date (consolidate-into-one), and an open shortage line may stay
+`dikirim`. Splits lock the Stock Request item and reject a move larger than the unfulfilled remainder
+(`split_stock_request_locked`).
+
+Reproduced details worth keeping: the audit `snapshot.created` event (event_key `snapshot:<order>`, one per order)
+is written when the snapshot freezes — its payload `checksum` embeds the order id and therefore differs per
+runtime by construction (compare its shape, not its bytes). `remaining_active` on
+`order_item.undelivered_cancelled` is the POST-reduction fulfilled quantity. `order_item.split_for_reschedule`
+carries `actor_role`.
+
 ## 4a. Next action (resume here)
 
-**A. Item lifecycle** — `GET /orders/{order}/items/{item}/cancel-eligibility`,
-`POST /orders/{order}/items/{item}/cancel-undelivered`, `PATCH /orders/{order}/items/{item}/fulfillment`,
-`PATCH /orders/{order}/items/{item}/reschedule` (OrderFulfillmentService + OrderLineAdditionService).
+**A. Payments** (`internal/payment` package exists but is not wired to routes yet): the manual-transfer
+proof/verification surface, COD collection + proof, DP settlement, and the latest-manual-transaction rule.
+`PaymentService` is the port source. These routes gate the `diproses → dikirim` transition the lifecycle now
+enforces, so they come before the remaining order routes.
 
-**B. Payments** (`internal/payments` not started): proofs, verification, COD, DP settlement, the
-latest-manual-transaction rule. These gate the `diproses` transition the lifecycle now enforces.
+**B. The remaining order routes**: due-date, consent-context/events, refund-recipient, returns, assisted-returns,
+`payment/cod-proof` + `installment` + `settle` + `verify`, invoice PDF.
 
-**C. The remaining order routes**: due-date, consent-context/events, refund-recipient, returns, assisted-returns,
-payment/cod-proof + installment + settle + verify, invoice PDF.
+**C. Then Phase A remainder (inventory), Phase C (financial: refunds, commissions) and Phase D (remaining
+domains), exactly as ordered in §3.**
 
-**B. Sub stock-request workflow** (7 routes): `SubStockRequestService` (create/approve/execute/receive/cancel/reject
-+ index/show). Its `execute` locks the Sub Location row EXCLUSIVELY then the Sub stock rows — the exact counterpart
-of `lockSubLocationForCheckout` (SHARED first). Required evidence: a two-connection test proving checkout and
-execute cannot deadlock against each other.
-
-**C. Order lifecycle**: `GET /orders`, `GET /orders/{order}`, `PATCH /orders/{order}/status`,
-`POST /orders/{order}/cancel` (release via `inventory.ReleaseForProduct`/`ReleaseForSubStock`), item cancel and
-`PATCH .../items/{item}/fulfillment`. `internal/pricing.RecalculateTotals` already exists.
-
-**D. Financial**: payments (proofs, verification, COD, DP settlement), refunds, commissions, invoice issuance
-beyond the number allocation.
+**D. Finally non-HTTP**: jobs/queue, scheduler, installer, PDF/Excel, Google OAuth, protected media streaming,
+then the Laravel archive/removal gate (§6).
 
 **Known gaps recorded, not silently skipped:** the order-creation notification/queue side effect
 (`queue bridge outstanding`, same as registration); `OrderInitialSnapshotService` is ported but
-`FulfillmentShortageService` is not.
+`FulfillmentShortageService` is not; CMS write paths wait on the HTMLPurifier policy.
 
 **DONE, do not redo:** `PATCH /warehouse/sub-locations/{id}`, `/assign-owner`, `/deactivate`; `/addresses` (4);
 `/promo/vouchers` + `/promo/discounts` (8); `GET/POST /checkout/*`; Agent reservations; `POST /orders`;
 warehouse stock-addition-requests + sub-adjustment-requests (6); stock-request proposals (8) + the media
 pipeline; `/warehouse/stock-requests/{id}/fulfill` (fixed refusal); handover show + print (2); the Sub stock-request
-workflow (7); order lifecycle status + cancel (2); order read surface (3).
+workflow (7); order lifecycle status + cancel (2); order read surface (3); item lifecycle (4).
 
 **Trap recorded for the next run:** `DATE` columns on these models carry a `date` cast, so Eloquent serialises
 them as ISO timestamps at midnight UTC (`2026-11-01T00:00:00.000000Z`), **not** as `YYYY-MM-DD`. Rendering the

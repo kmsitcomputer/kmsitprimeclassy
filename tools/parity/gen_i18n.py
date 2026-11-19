@@ -85,6 +85,21 @@ KEYS = {
         "shortage_reason_required",
         "shortage_item_invalid",
         "shortage_item_duplicate",
+        "invalid_quantity",
+        "window_closed",
+        "adjusted",
+        "rescheduled",
+        "reschedule_courier_online_only",
+        "split_stock_request_locked",
+        "cannot_increase_cancelled",
+        "pending_refund_blocks_increase",
+        "pending_additional_payment_blocks_reduction",
+        "pending_additional_payment_blocks_increase",
+    ],
+    "cancellation": [
+        "not_eligible",
+        "stale",
+        "discrepancy_unresolved",
     ],
     "payment": [
         "method_required",
@@ -114,7 +129,7 @@ KEYS = {
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
-                   "array", "unique", "after_or_equal", "not_in"]
+                   "string", "array", "unique", "after_or_equal", "not_in"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),
                      ("min", "string"), ("between", "numeric")]
@@ -154,6 +169,15 @@ def block(src: str, name: str) -> str:
 
 
 PAIR = re.compile(r"'([a-z_0-9]+)'\s*=>\s*'((?:[^'\\]|\\.)*)'", re.S)
+# PHP also allows double-quoted strings (used for sentences that need an inline "\"..." quote). Only the
+# characters that can appear in these message files are unescaped — that is enough to keep the catalogue
+# byte-identical without pulling in a PHP lexer.
+PAIR_DQ = re.compile(r"'([a-z_0-9]+)'\s*=>\s*\"((?:[^\"\\]|\\.)*)\"", re.S)
+
+
+def unescape_double(v: str) -> str:
+    return (v.replace("\\\"", "\"").replace("\\\\", "\\")
+             .replace("\\$", "$").replace("\\n", "\n").replace("\\t", "\t"))
 
 
 def main() -> int:
@@ -166,8 +190,16 @@ def main() -> int:
         src = open(path, encoding="utf-8").read()
         out[loc] = {}
         for group, keys in KEYS.items():
-            body = block(src, group)
-            pairs = dict(PAIR.findall(body))
+            try:
+                body = block(src, group)
+            except SystemExit:
+                # A locale may omit an entire group; Laravel then falls back to the default locale, which
+                # internal/i18n mirrors. A gap in the default locale still fails loudly below.
+                body = ""
+            pairs = {k: unescape(v) for k, v in PAIR.findall(body)}
+            for dq_key, dq_value in PAIR_DQ.findall(body):
+                if dq_key not in pairs:
+                    pairs[dq_key] = unescape_double(dq_value)
             for key in keys:
                 if key not in pairs:
                     # Laravel falls back to the default locale for a missing translation, and internal/i18n does
@@ -176,9 +208,7 @@ def main() -> int:
                     if loc != "id":
                         continue
                     raise SystemExit(f"{loc}: missing key {group}.{key}")
-                # PHP single-quoted strings only escape \\ and \' — normalise to plain text.
-                value = pairs[key].replace("\\'", "'").replace("\\\\", "\\")
-                out[loc][f"{group}.{key}"] = value
+                out[loc][f"{group}.{key}"] = pairs[key]
 
     for loc in LOCALES:
         out[loc].update(RAW_KEY_FALLBACKS)

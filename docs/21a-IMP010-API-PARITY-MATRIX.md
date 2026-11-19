@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 
-## Orders — `orders` (6/25 in Go)
+## Orders — `orders` (10/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -370,10 +370,10 @@ Status legend:
 | PUT | `/api/v1/orders/{order}/due-date` | session | admin, keuangan, super_admin | LARAVEL |  |
 | GET | `/api/v1/orders/{order}/invoice` | session | — | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/items` | session | admin | LARAVEL |  |
-| GET | `/api/v1/orders/{order}/items/{item}/cancel-eligibility` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/orders/{order}/items/{item}/cancel-undelivered` | session | admin, agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/orders/{order}/items/{item}/fulfillment` | session | admin, agen, super_admin | LARAVEL |  |
-| PATCH | `/api/v1/orders/{order}/items/{item}/reschedule` | session | admin, agen, super_admin | LARAVEL |  |
+| GET | `/api/v1/orders/{order}/items/{item}/cancel-eligibility` | session | admin, agen, super_admin | **GO** | read-only projector: order window, stock source, item status, open refusal, remaining quantity and a pending additional payment decide `eligible` + `reason_code`; max_quantity is fulfilled_quantity only when eligible |
+| POST | `/api/v1/orders/{order}/items/{item}/cancel-undelivered` | session | admin, agen, super_admin | **GO** | REM-003 Owner Option A: cancels part of the undelivered/undispatched remainder (also after first dispatch); expected_quantity mismatch is a 409 stale-quantity guard; recomputes the order status forward-only |
+| PATCH | `/api/v1/orders/{order}/items/{item}/fulfillment` | session | admin, agen, super_admin | **GO** | super_admin/branch agen/admin while diproses; reduce consumes frozen snapshot units, books the sales reduction + refund obligation (or the needs_verification variant for a provisional-legacy basis), reverses inventory Order→Stock Request→stock; increase restores cancelled units first, reserves stock, then raises the total and creates ONE additional-payment obligation only when the order was fully settled |
+| PATCH | `/api/v1/orders/{order}/items/{item}/reschedule` | session | admin, agen, super_admin | **GO** | re-dates a line; LOCKED to Kurir Online + Self Delivery/Sub (expedition/pickup refused), a dikirim order only for the line with an open shortage; a partial quantity splits the line onto a new OrderItem + Shipment, and the shipment is re-homed onto the canonical shipment for the date |
 | PATCH | `/api/v1/orders/{order}/payment/cod` | session | keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/payment/cod-proof` | session | — | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/payment/installment` | session | — | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 105 (28.0%) |
-|   of which fully GO | 99 |
+| Served by Go now | 109 (29.1%) |
+|   of which fully GO | 103 |
 |   of which PARTIAL (incomplete behaviour) | 6 |
-| Still Laravel-only | 270 |
+| Still Laravel-only | 266 |
 | Areas fully ported | 12 / 45 |

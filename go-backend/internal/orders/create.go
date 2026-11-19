@@ -514,8 +514,10 @@ func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int
 		return nil, err
 	}
 
+	// Owner rule: a COD invoice is issued as soon as the order exists; transfer invoices wait for the first
+	// verified payment. syncAfterChange issues AND freezes the v1 balance snapshot, exactly like the reference.
 	if method.Type == "cod" {
-		if _, err := tx.ExecContext(ctx, `UPDATE orders SET invoice_issued_at = UTC_TIMESTAMP() WHERE id = ?`, orderID); err != nil {
+		if err := s.syncInvoiceAfterChange(ctx, tx, orderID, in.ActorID, "order_created_cod"); err != nil {
 			return nil, err
 		}
 	}

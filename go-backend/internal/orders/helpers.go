@@ -68,7 +68,7 @@ func sha256Hex(data []byte) string {
 // ulid mimics Str::ulid() closely enough for the obligation_no column (26-char Crockford base32, time-prefixed).
 // Uniqueness is enforced by the caller's obligation_key lookup, not by this format.
 func ulid() (string, error) {
-	buf := make([]byte, 10)
+	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}

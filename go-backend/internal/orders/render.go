@@ -175,6 +175,13 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 	return out, nil
 }
 
+// RenderItem renders ONE order item exactly as OrderItemResource does for a `fresh()` model: the shipment
+// relation is NOT loaded, so delivery_mode / self_delivered_by_user_id / courier / delivery_proof_url are
+// absent from the payload (they are `when(relationLoaded('shipment'))`).
+func RenderItem(item Item, viewer Viewer) map[string]any {
+	return renderItems([]Item{item}, viewer, false)[0].(map[string]any)
+}
+
 func renderItems(items []Item, viewer Viewer, withShipment bool) []any {
 	financials := viewer.seesFinancials()
 	out := make([]any, 0, len(items))

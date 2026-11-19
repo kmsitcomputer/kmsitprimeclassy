@@ -138,6 +138,10 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/orders/regions",
 		"POST /api/v1/orders",
 		"POST /api/v1/orders/{order}/cancel",
+		"PATCH /api/v1/orders/{order}/items/{item}/fulfillment",
+		"PATCH /api/v1/orders/{order}/items/{item}/reschedule",
+		"GET /api/v1/orders/{order}/items/{item}/cancel-eligibility",
+		"POST /api/v1/orders/{order}/items/{item}/cancel-undelivered",
 		"GET /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/sub-adjustment-requests",
@@ -186,6 +190,17 @@ func implementsRoute(method, path string) bool {
 			}
 			if method == http.MethodPatch && parts[1] == "status" {
 				return true
+			}
+		}
+		// /api/v1/orders/<id>/items/<item>/(fulfillment|reschedule|cancel-eligibility|cancel-undelivered).
+		if len(parts) == 4 && parts[0] != "" && parts[1] == "items" && parts[2] != "" {
+			switch parts[3] {
+			case "fulfillment", "reschedule":
+				return method == http.MethodPatch
+			case "cancel-eligibility":
+				return method == http.MethodGet
+			case "cancel-undelivered":
+				return method == http.MethodPost
 			}
 		}
 	}
