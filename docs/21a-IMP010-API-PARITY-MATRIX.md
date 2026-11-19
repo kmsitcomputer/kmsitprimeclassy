@@ -114,7 +114,7 @@ Status legend:
 | POST | `/api/v1/agent/whatsapp/reconnect` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/replace` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/scope` | session | admin, agen | **GO** | Agen self-scope, Admin branch-scope, denied roles, ignored client agent_id, and read-only DB state compared by compare_whatsapp_scope.py |
-| GET | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **PARTIAL** |  |
+| GET | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **GO** | masked numbers, max limit, Agen/Admin scope, forbidden roles and agent_id selector compared with read-only DB state by compare_whatsapp_test_numbers.py |
 | POST | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **PARTIAL** |  |
 | DELETE | `/api/v1/agent/whatsapp/test-numbers/{id}` | session | admin, agen | **PARTIAL** |  |
 | POST | `/api/v1/agent/whatsapp/test-send` | session | admin, agen | LARAVEL |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 148 |
-|   of which PARTIAL (incomplete behaviour) | 44 |
+|   of which fully GO | 149 |
+|   of which PARTIAL (incomplete behaviour) | 43 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

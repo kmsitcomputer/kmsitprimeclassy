@@ -828,6 +828,10 @@ func (s *Server) handleAgentWhatsAppTestNumbers(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
+	if !whatsAppSelectorAllowed(r, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+		return
+	}
 	data, err := agentadmin.New(s.database, s.cfg.AppKey).WhatsAppTestNumbers(r.Context(), agentID)
 	if err != nil {
 		writeAgentAdminError(w, r, err)
