@@ -166,6 +166,8 @@ KEYS = {
     "profile": [
         "current_password_incorrect",
         "password_updated",
+        "referral_code_updated",
+        "referral_code_format",
     ],
     "user": [
         "created",

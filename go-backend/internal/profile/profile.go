@@ -173,8 +173,20 @@ func SetReferralCode(ctx context.Context, d *db.DB, user *auth.User, code string
 	if !ownsReferralCode(user.Role) {
 		return nil, httpx.NewError(403, "This action is unauthorized.")
 	}
-	if code == "" || utf8.RuneCountInString(code) > 30 || !referralCodePattern.MatchString(code) {
-		return nil, httpx.Validation(map[string][]string{"referral_code": {"The referral code format is invalid."}})
+	code = strings.TrimSpace(code)
+	var failures []string
+	if code == "" {
+		failures = append(failures, "required")
+	} else {
+		if utf8.RuneCountInString(code) > 30 {
+			failures = append(failures, "max:30")
+		}
+		if !referralCodePattern.MatchString(code) {
+			failures = append(failures, "regex")
+		}
+	}
+	if len(failures) != 0 {
+		return nil, httpx.Validation(map[string][]string{"referral_code": failures})
 	}
 	return saveReferralCode(ctx, d, user, &code, "profile.referral_code_updated", meta)
 }
@@ -230,17 +242,21 @@ func saveReferralCode(ctx context.Context, d *db.DB, user *auth.User, code *stri
 			return nil, err
 		}
 		if exists {
-			return nil, httpx.Validation(map[string][]string{"referral_code": {"The referral code has already been taken."}})
+			return nil, httpx.Validation(map[string][]string{"referral_code": {"unique"}})
 		}
 	}
 	if _, err := d.ExecContext(ctx, `UPDATE users SET referral_code = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
 		nullableStringPtr(code), user.ID); err != nil {
 		if db.IsDuplicateKey(err) {
-			return nil, httpx.Validation(map[string][]string{"referral_code": {"The referral code has already been taken."}})
+			return nil, httpx.Validation(map[string][]string{"referral_code": {"unique"}})
 		}
 		return nil, err
 	}
-	properties, err := json.Marshal(map[string]any{"old": nullString(old), "new": nullableStringPtr(code)})
+	propertiesMap := map[string]any{"old": nullString(old)}
+	if event != "profile.referral_code_deleted" {
+		propertiesMap["new"] = nullableStringPtr(code)
+	}
+	properties, err := json.Marshal(propertiesMap)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/profile"
 )
 
@@ -155,11 +156,16 @@ func writeProfileReferralError(w http.ResponseWriter, r *http.Request, err error
 	var apiErr *httpx.Error
 	if errors.As(err, &apiErr) && len(apiErr.Fields) > 0 {
 		fields := map[string][]string{}
-		for field := range apiErr.Fields {
-			if field == "referral_code" {
-				fields[field] = []string{msg(r.Context(), "profile.referral_code_format")}
-			} else {
-				fields[field] = invalidField(r.Context(), field)
+		for field, rules := range apiErr.Fields {
+			for _, rule := range rules {
+				switch rule {
+				case "regex":
+					fields[field] = append(fields[field], msg(r.Context(), "profile.referral_code_format"))
+				case "max:30":
+					fields[field] = append(fields[field], i18n.ValidationMessage(LocaleFrom(r.Context()), "max.string", field, "max", "30"))
+				default:
+					fields[field] = append(fields[field], i18n.ValidationMessage(LocaleFrom(r.Context()), rule, field))
+				}
 			}
 		}
 		writeError(w, r, httpx.Validation(fields))

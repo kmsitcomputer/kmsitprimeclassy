@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 141 |
-| PARTIAL (incomplete behaviour) | 51 |
+| Fully GO | 144 |
+| PARTIAL (incomplete behaviour) | 48 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -437,6 +437,10 @@ carries `actor_role`.
 **DONE — Agent payment-method write parity (3 routes, `tools/parity/compare_agentadmin.py`, 1/1 scenario):** index/toggle/config response contracts, FormRequest-first validation, role refusals, and resulting settings/config rows pass the differential matrix (16 request comparisons). Matrix counts now **140 GO / 52 PARTIAL / 183 Laravel-only**.
 
 **DONE — Agent store-profile write parity (`tools/parity/compare_agentadmin.py`, 2/2 scenarios total):** GET/PUT response bodies and state match, including Laravel's `decimal:7` coordinates as fixed-scale strings, accumulated field validation, ignoring client-supplied `user_id`/`agent_id`, and the activity log's AgentProfile subject plus old/new projections. Go tests/vet passed for `agentadmin`, `api`, and `i18n`. Matrix counts now **141 GO / 51 PARTIAL / 183 Laravel-only**.
+
+**DONE — Profile referral-code CRUD (`tools/parity/compare_profile_referral.py`, 3/3):** update validates required/format/max/unique cases and RBAC; regenerate verifies a role-prefixed generated code and audit; delete verifies the cleared code and Laravel's old-only audit payload. Differential responses and DB state passed. Scoped `go test`/`go vet` passed for `profile`, `api`, and `i18n`. Current matrix: **144 GO / 48 PARTIAL / 183 Laravel-only**.
+
+**OWNER PAUSE — 2026-11-20:** implementation/testing stopped at the Owner's request. No Docker containers or database were stopped or removed. Exact next action on resume: inspect the `GET /api/v1/agent/whatsapp/scope` Laravel controller and Go handler, add a focused differential scenario, then continue remaining PARTIAL routes in matrix order. Do not rerun completed shipping, payment-method, store-profile, or referral-code harnesses unless a dependency changes.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

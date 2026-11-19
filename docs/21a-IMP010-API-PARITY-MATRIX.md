@@ -428,9 +428,9 @@ Status legend:
 | POST | `/api/v1/profile/email/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/email/verification/{challenge}/confirm` | session | — | LARAVEL |  |
 | PATCH | `/api/v1/profile/password` | session | — | **GO** |  |
-| DELETE | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** |  |
-| PATCH | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** |  |
-| POST | `/api/v1/profile/referral-code/regenerate` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** |  |
+| DELETE | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **GO** | response, cleared code, and old-only audit projection compared by compare_profile_referral.py |
+| PATCH | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **GO** | format/required/max/unique validation, success projection, self-scope and audit compared by compare_profile_referral.py |
+| POST | `/api/v1/profile/referral-code/regenerate` | session | agen, korsal, sales, sales-kurir-sub | **GO** | generated role prefix/code format, response, DB update and audit compared by compare_profile_referral.py |
 | GET | `/api/v1/profile/whatsapp` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/whatsapp/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/whatsapp/verification/{challenge}/confirm` | session | — | LARAVEL |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 141 |
-|   of which PARTIAL (incomplete behaviour) | 51 |
+|   of which fully GO | 144 |
+|   of which PARTIAL (incomplete behaviour) | 48 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |
