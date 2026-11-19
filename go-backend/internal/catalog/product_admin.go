@@ -95,6 +95,85 @@ type AdminList struct {
 	Total    int
 }
 
+// AttachSellableRow mirrors ProductManagementController::attachAgentAvailability → SellableStockService::
+// forTargets — the BATCH rule, which differs subtly from calculate(): targetFromRows filters rows to
+// transit+factory_plan and falls back to LEGACY when none match, so a target holding only 'sub' rows
+// still reports its legacy quantity_on_hand (35 for fixture product 1), never 0.
+func AttachSellableRow(ctx context.Context, d *db.DB, agentID int64, product map[string]any, variations []map[string]any) {
+	if product == nil {
+		return
+	}
+	hasVariations, _ := product["has_variations"].(bool)
+	var planEnabled bool
+	_ = d.QueryRowContext(ctx, `SELECT COALESCE(factory_plan_enabled, 0) FROM warehouse_settings WHERE agent_id = ?`, agentID).Scan(&planEnabled)
+	if !hasVariations {
+		pid := int64Value(product["id"])
+		available := forTargetsAvailable(ctx, d, agentID, &pid, nil, planEnabled)
+		product["stock"] = map[string]any{"available": available, "in_stock": available > 0, "login_to_view": false}
+		product["agent_available_quantity"] = available
+		return
+	}
+	for _, variation := range variations {
+		vid := int64Value(variation["id"])
+		available := forTargetsAvailable(ctx, d, agentID, nil, &vid, planEnabled)
+		variation["stock"] = map[string]any{"available": available, "in_stock": available > 0, "login_to_view": false}
+		variation["agent_available_quantity"] = available
+	}
+}
+
+// forTargetsAvailable is SellableStockService::targetFromRows.
+func forTargetsAvailable(ctx context.Context, d *db.DB, agentID int64, productID, variationID *int64, planEnabled bool) int {
+	clause, args := "1 = 1", []any{}
+	if productID != nil {
+		clause, args = "product_id = ? AND product_variation_id IS NULL", []any{*productID}
+	} else if variationID != nil {
+		clause, args = "product_variation_id = ? AND product_id IS NULL", []any{*variationID}
+	}
+	var base int
+	err := d.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN stock_type = 'transit' THEN quantity ELSE 0 END), 0)
+			+ CASE WHEN ? THEN COALESCE(SUM(CASE WHEN stock_type = 'factory_plan' THEN quantity ELSE 0 END), 0) ELSE 0 END
+		FROM warehouse_stocks WHERE agent_id = ? AND stock_type IN ('transit','factory_plan') AND `+clause,
+		append([]any{planEnabled, agentID}, args...)...).Scan(&base)
+	if err != nil {
+		return 0
+	}
+	var reserved, legacy int
+	rest := append([]any{agentID}, args...)
+	if productID != nil {
+		_ = d.QueryRowContext(ctx, `SELECT COALESCE((SELECT quantity_reserved FROM product_stocks
+				WHERE agent_id = ? AND product_id = ?), 0),
+			COALESCE((SELECT quantity_on_hand FROM product_stocks WHERE agent_id = ? AND product_id = ?), 0)`,
+			agentID, *productID, agentID, *productID).Scan(&reserved, &legacy)
+		_ = rest
+	} else if variationID != nil {
+		_ = d.QueryRowContext(ctx, `SELECT COALESCE((SELECT quantity_reserved FROM product_variation_stocks
+				WHERE agent_id = ? AND product_variation_id = ?), 0),
+			COALESCE((SELECT quantity_on_hand FROM product_variation_stocks WHERE agent_id = ? AND product_variation_id = ?), 0)`,
+			agentID, *variationID, agentID, *variationID).Scan(&reserved, &legacy)
+	}
+	// rows.isEmpty() → legacy fallback, exactly like targetFromRows.
+	var rowCount int
+	_ = d.QueryRowContext(ctx, `SELECT COUNT(*) FROM warehouse_stocks WHERE agent_id = ?
+		AND stock_type IN ('transit','factory_plan') AND `+clause, append([]any{agentID}, args...)...).Scan(&rowCount)
+	if rowCount == 0 {
+		if legacy-reserved > 0 {
+			return legacy - reserved
+		}
+		return 0
+	}
+	if base-reserved > 0 {
+		return base - reserved
+	}
+	return 0
+}
+
+func int64Value(v any) int64 {
+	if n, ok := v.(int64); ok {
+		return n
+	}
+	return 0
+}
+
 func ProductAdminList(ctx context.Context, d *db.DB, q AdminListQuery) (*AdminList, error) {
 	if q.Page < 1 {
 		q.Page = 1
@@ -761,7 +840,7 @@ func ProductVariationAdminByID(ctx context.Context, d *db.DB, productID, variati
 		return nil, err
 	}
 	return map[string]any{"id": id, "sku": sku, "label": label, "price": price, "weight_grams": weight,
-		"is_active": active, "attributes": attrs}, nil
+		"is_active": active, "attributes": attributesJSON(attrs)}, nil
 }
 
 func GetProductFees(ctx context.Context, d *db.DB, productID int64, variationID *int64) (map[string]float64, error) {
@@ -1317,9 +1396,18 @@ func loadAllAdminVariations(ctx context.Context, d *db.DB, productID int64) ([]m
 			return nil, err
 		}
 		out = append(out, map[string]any{"id": r.id, "sku": r.sku, "label": label, "price": r.price,
-			"weight_grams": r.weight, "is_active": r.active, "attributes": attrs})
+			"weight_grams": r.weight, "is_active": r.active, "attributes": attributesJSON(attrs)})
 	}
 	return out, nil
+}
+
+// attributesJSON shapes the attributes projection the PHP way: a non-empty map of name=>value, an
+// EMPTY LIST when the variation has no compositions (mapWithKeys returns []).
+func attributesJSON(attrs map[string]string) any {
+	if len(attrs) == 0 {
+		return []any{}
+	}
+	return attrs
 }
 
 func variationAttributes(ctx context.Context, q interface {

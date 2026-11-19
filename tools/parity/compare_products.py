@@ -20,6 +20,7 @@ from compare_fulfillment import (LARAVEL, GO, AGEN, ADMIN, SUPER, KONSUMEN, SALE
 
 ADMIN2 = "admin@imp010.test"
 SLUG_RE = re.compile(r"^(.+)-[0-9a-f]{13}$")
+_IMG_RE = re.compile(r"/storage/products/[A-Za-z0-9]{27,}\.png")
 MULTIPART_BOUNDARY = "----pcproduct"
 
 
@@ -29,6 +30,8 @@ def scrub(value):
         for k, v in value.items():
             if k == "slug" and isinstance(v, str) and SLUG_RE.match(v):
                 out[k] = "<slug>"
+            elif k == "url" and isinstance(v, str):
+                out[k] = _IMG_RE.sub("/storage/products/<file>.png", v)
             else:
                 out[k] = scrub(v)
         return out
@@ -87,6 +90,18 @@ def state():
         "skus": rows("SELECT sku, owner_type FROM catalog_skus ORDER BY sku"),
         "stocks": rows("SELECT product_id, quantity_on_hand, quantity_reserved FROM product_stocks ORDER BY id"),
         "vstocks": rows("SELECT product_variation_id, quantity_on_hand, quantity_reserved FROM product_variation_stocks ORDER BY id"),
+        "images": rows("SELECT product_id, product_variation_id IS NOT NULL, is_primary, sort_order "
+                       "FROM product_images ORDER BY id"),
+        # id/parent-id columns are row-id artefacts across the two runs (shared database, auto-increment);
+        # the SHAPE (how many attributes/options/compositions each variation owns) is the assertion.
+        "attributes": rows("SELECT name, (SELECT COUNT(*) FROM product_variation_attribute_options o "
+                           "WHERE o.product_variation_attribute_id = a.id) FROM product_variation_attributes a ORDER BY name"),
+        "options": rows("SELECT value FROM product_variation_attribute_options ORDER BY value"),
+        "compositions": rows("SELECT (SELECT v.sku FROM product_variations v WHERE v.id = c.product_variation_id), "
+                             "(SELECT a.name FROM product_variation_attributes a WHERE a.id = c.product_variation_attribute_id), "
+                             "(SELECT o.value FROM product_variation_attribute_options o "
+                             " WHERE o.id = c.product_variation_attribute_option_id) "
+                             "FROM product_variation_compositions c ORDER BY c.id"),
         "activity": rows("SELECT event, subject_type, IFNULL(description,'-'), IFNULL(properties,'') FROM activity_logs "
                          "WHERE event LIKE 'product.%' OR event LIKE 'catalog.%' ORDER BY id"),
     }
@@ -198,6 +213,48 @@ def main():
         return out
 
     scenario("product + variation fees", fees_matrix)
+
+
+    def variations_and_images(base):
+        from compare_payments import multipart
+        import struct, zlib
+        raw = b"".join(b"\x00" + b"\xff\x00\x00" * 8 for _ in range(8))
+
+        def chunk(kind, data):
+            body = kind + data
+            return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+        c = client_for(base, AGEN)
+        out = [
+            c.call("POST", "/api/v1/products/2/variations", {"sku": "VAR-A1", "price": 50000,
+                                                             "weight_grams": 250, "attributes": ["500 g"]}),
+            c.call("POST", "/api/v1/products/2/variations", {"sku": "VAR-A1", "price": 1, "weight_grams": 1,
+                                                             "attributes": ["x"]}),
+            c.call("POST", "/api/v1/products/2/variations", {"sku": "SKU-LUMPUR", "price": 1, "weight_grams": 1,
+                                                             "attributes": ["x"]}),
+            c.call("POST", "/api/v1/products/2/variations", {"sku": "VAR-B", "price": 1, "weight_grams": 1}),
+            c.call("POST", "/api/v1/products/1/variations", {"sku": "VAR-C", "price": 1, "weight_grams": 1,
+                                                             "attributes": ["x"]}),
+            multipart(c, "POST", "/api/v1/products/1/images", {"is_primary": "1", "sort_order": "2"},
+                      {"image": ("u.png", png)}),
+            multipart(c, "POST", "/api/v1/products/1/images", {"product_variation_id": "999"},
+                      {"image": ("u.png", png)}),
+            c.call("PATCH", "/api/v1/products/1/images/999", {"is_primary": True}),
+            c.call("DELETE", "/api/v1/products/1/images/999"),
+        ]
+        return out
+
+    scenario("variations with attributes + image gallery rules", variations_and_images)
+
+    def manage_list(base):
+        c = client_for(base, AGEN)
+        return [c.call("GET", "/api/v1/manage/products"),
+                c.call("GET", "/api/v1/manage/products/1"),
+                c.call("GET", "/api/v1/manage/products/2"),
+                client_for(base, SALES).call("GET", "/api/v1/manage/products")]
+
+    scenario("manage/products list + detail reads", manage_list)
 
     failed = [r for r in f.results if not r[1]]
     print(f"{len(f.results) - len(failed)} passed, {len(failed)} failed")

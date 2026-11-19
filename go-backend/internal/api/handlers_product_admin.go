@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -67,6 +68,21 @@ func decodeProductAdmin(r *http.Request) (map[string]json.RawMessage, productAdm
 	raw := map[string]json.RawMessage{}
 	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		return nil, productAdminPayload{}, err
+	}
+	// StoreProductVariationRequest::attributes is validated as `array|min:1` with `attributes.*` strings —
+	// a JSON LIST is legal: PHP's foreach then names each attribute by its numeric index. Normalise a list
+	// to {"0": v, "1": v, ...} so the map-based flow below sees exactly what Laravel stores.
+	if list, ok := raw["attributes"]; ok && len(list) > 0 && list[0] == '[' {
+		var values []json.RawMessage
+		if json.Unmarshal(list, &values) == nil {
+			normalised := map[string]json.RawMessage{}
+			for i, value := range values {
+				normalised[strconv.Itoa(i)] = value
+			}
+			if encoded, err := json.Marshal(normalised); err == nil {
+				raw["attributes"] = encoded
+			}
+		}
 	}
 	var p productAdminPayload
 	b, err := json.Marshal(raw)
@@ -161,6 +177,13 @@ func (s *Server) handleManageProducts(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		meta["status_filter"] = "all"
 	}
+	// attachAgentAvailability: the viewer's own agent availability + sellable stock per target.
+	if u := UserFrom(ctx); u != nil && u.AgentID != nil {
+		for _, item := range list.Items {
+			variations, _ := item["variations"].([]map[string]any)
+			catalog.AttachSellableRow(ctx, s.database, *u.AgentID, item, variations)
+		}
+	}
 	httpx.OK(w, list.Items, "OK", meta)
 }
 
@@ -173,6 +196,10 @@ func (s *Server) handleManageProduct(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeProductAdminError(w, r, err)
 		return
+	}
+	if u := UserFrom(r.Context()); u != nil && u.AgentID != nil {
+		variations, _ := row["variations"].([]map[string]any)
+		catalog.AttachSellableRow(r.Context(), s.database, *u.AgentID, row, variations)
 	}
 	httpx.OK(w, row, "OK", nil)
 }
@@ -306,8 +333,22 @@ func (s *Server) handleVariationCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	// Route-model binding for {product} happens BEFORE FormRequest validation in Laravel — a missing
 	// product answers 404 even with an invalid body.
+	var hasVariations bool
+	var productName string
+	// COUNT(*) over an empty set has no row to drive has_variations; select through scalar subqueries so a
+	// missing product still yields one row with COALESCEd placeholders (then the 404 binding fires).
 	var exists int
-	if err := s.database.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM products WHERE id = ? AND deleted_at IS NULL", productID).Scan(&exists); err != nil {
+	err := s.database.QueryRowContext(r.Context(), `SELECT
+			(SELECT COUNT(*) FROM products WHERE id = ? AND deleted_at IS NULL),
+			COALESCE((SELECT has_variations FROM products WHERE id = ? AND deleted_at IS NULL), 0),
+			COALESCE((SELECT name FROM products WHERE id = ? AND deleted_at IS NULL), '')`,
+		productID, productID, productID).
+		Scan(&exists, &hasVariations, &productName)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, r, notFoundError(r.Context()))
+		return
+	}
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -323,6 +364,12 @@ func (s *Server) handleVariationCreate(w http.ResponseWriter, r *http.Request) {
 	fields := validateVariationAdmin(r, raw, p, true)
 	if len(fields) > 0 {
 		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	if !hasVariations {
+		// ProductVariationService::create — the service-level refusal with the product name interpolated.
+		writeError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity,
+			Message: message(r.Context(), "product.variation_not_enabled", "name", productName)})
 		return
 	}
 	row, err := catalog.CreateProductVariationAdmin(r.Context(), s.database, productID, catalog.VariationAdminInput{
