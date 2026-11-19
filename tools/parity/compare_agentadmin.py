@@ -32,14 +32,14 @@ def scrub(value):
     return value
 
 
-def scenario(name, run):
+def scenario(name, run, state_reader=state):
     out = {}
     for label, base in (("L", LARAVEL), ("G", GO)):
         reset()
         # reset() clears order-scoped tables only; the agent-admin rows below are NOT in its CLEAR list.
         db("DELETE FROM agent_payment_gateway_configs")
         db("DELETE FROM agent_payment_method_settings")
-        out[label] = (run(base), state())
+        out[label] = (run(base), state_reader())
     pairs_l, db_l = out["L"]
     pairs_g, db_g = out["G"]
     st_l, bodies_l = [p[0] for p in pairs_l], [p[1] for p in pairs_l]
@@ -88,6 +88,44 @@ def main():
         return res
 
     scenario("agent payment-method matrix (RBAC + validation + config)", payment_method_matrix)
+
+    def profile_state():
+        return {
+            "profile": rows("SELECT store_name,address,IFNULL(phone,'-'),CAST(latitude AS CHAR),CAST(longitude AS CHAR) "
+                             "FROM agent_profiles WHERE user_id=10"),
+            "audit": rows("SELECT causer_id,subject_type,subject_id,event, "
+                          "JSON_UNQUOTE(JSON_EXTRACT(properties,'$.old.store_name')), "
+                          "JSON_UNQUOTE(JSON_EXTRACT(properties,'$.old.address')), "
+                          "JSON_UNQUOTE(JSON_EXTRACT(properties,'$.old.phone')), "
+                          "JSON_UNQUOTE(JSON_EXTRACT(properties,'$.new.store_name')), "
+                          "JSON_UNQUOTE(JSON_EXTRACT(properties,'$.new.address')), "
+                          "JSON_UNQUOTE(JSON_EXTRACT(properties,'$.new.phone')) "
+                          "FROM activity_logs WHERE event='agent_profile.self_updated' ORDER BY id"),
+        }
+
+    def store_profile_matrix(base):
+        # Restore the exact starting profile before each runtime so the audit's `old` projection is comparable.
+        db("UPDATE agent_profiles SET store_name='Toko Prime Classy Imp010',address='Jl. Uji 1, Bandung', "
+           "phone='081100000010',latitude=-6.9,longitude=107.6 WHERE user_id=10")
+        c = client_for(base, AGEN)
+        return [
+            c.call("GET", "/api/v1/agent/store-profile"),
+            c.call("PUT", "/api/v1/agent/store-profile", {
+                "store_name": "", "address": "", "phone": "1" * 21,
+                "latitude": 91, "longitude": None,
+            }),
+            c.call("PUT", "/api/v1/agent/store-profile", {
+                "store_name": "Toko Parity", "address": "Jl. Parity 10",
+                "phone": "081234567890", "latitude": -6.91, "longitude": 107.61,
+                "user_id": 11, "agent_id": 11,
+            }),
+            c.call("GET", "/api/v1/agent/store-profile"),
+            client_for(base, ADMIN).call("PUT", "/api/v1/agent/store-profile", {
+                "store_name": "Toko Admin", "address": "Jl. lain", "latitude": -6.9, "longitude": 107.6,
+            }),
+        ]
+
+    scenario("agent store-profile matrix (validation + audit + owner scope)", store_profile_matrix, profile_state)
 
     failed = [r for r in f.results if not r[1]]
     print(f"{len(f.results) - len(failed)} passed, {len(failed)} failed")

@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 140 |
-| PARTIAL (incomplete behaviour) | 52 |
+| Fully GO | 141 |
+| PARTIAL (incomplete behaviour) | 51 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -435,6 +435,8 @@ carries `actor_role`.
 **DONE — Agent shipping administration parity (7 routes covered, `tools/parity/compare_shipping_admin.py`, 1/1 scenario):** shipping provider index/toggle/config, supported couriers, and tariff routes compare response bodies and resulting DB rows. The initial failure exposed the stale `go run` build cache; after a clean container cache rebuild, the live source still needed fixes: toggle now uses a five-field response type (avoids serializing zero-valued projection fields); shipping success messages use the Laravel i18n keys; `{config:{}}` accumulates the root and nested required errors; failed KMSIT endpoint vetting reproduces Laravel's 422 envelope without weakening the endpoint guard; non-RajaOngkir courier paths return Laravel's generic 404. Verified with `/healthz` and `PYTHONPATH=tools/parity python3 tools/parity/compare_shipping_admin.py` — **1 passed, 0 failed**. Runtime remained `pc_go_imp010`, bound to this worktree; only the isolated `primeclassy_testing` database was touched.
 
 **DONE — Agent payment-method write parity (3 routes, `tools/parity/compare_agentadmin.py`, 1/1 scenario):** index/toggle/config response contracts, FormRequest-first validation, role refusals, and resulting settings/config rows pass the differential matrix (16 request comparisons). Matrix counts now **140 GO / 52 PARTIAL / 183 Laravel-only**.
+
+**DONE — Agent store-profile write parity (`tools/parity/compare_agentadmin.py`, 2/2 scenarios total):** GET/PUT response bodies and state match, including Laravel's `decimal:7` coordinates as fixed-scale strings, accumulated field validation, ignoring client-supplied `user_id`/`agent_id`, and the activity log's AgentProfile subject plus old/new projections. Go tests/vet passed for `agentadmin`, `api`, and `i18n`. Matrix counts now **141 GO / 51 PARTIAL / 183 Laravel-only**.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.

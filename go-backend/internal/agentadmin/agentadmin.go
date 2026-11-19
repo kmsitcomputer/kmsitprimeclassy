@@ -58,6 +58,14 @@ func ResolveAgent(actor *auth.User, allowAdmin bool) (int64, error) {
 }
 
 type StoreProfile struct {
+	StoreName string  `json:"store_name"`
+	Address   string  `json:"address"`
+	Phone     *string `json:"phone"`
+	Latitude  *string `json:"latitude"`
+	Longitude *string `json:"longitude"`
+}
+
+type StoreProfileInput struct {
 	StoreName string   `json:"store_name"`
 	Address   string   `json:"address"`
 	Phone     *string  `json:"phone"`
@@ -68,8 +76,8 @@ type StoreProfile struct {
 func (s *Service) StoreProfile(ctx context.Context, agentID int64) (*StoreProfile, error) {
 	var out StoreProfile
 	var phone sql.NullString
-	var lat, lng sql.NullFloat64
-	err := s.database.QueryRowContext(ctx, `SELECT store_name,address,phone,latitude,longitude FROM agent_profiles WHERE user_id=?`, agentID).
+	var lat, lng sql.NullString
+	err := s.database.QueryRowContext(ctx, `SELECT store_name,address,phone,CAST(latitude AS CHAR),CAST(longitude AS CHAR) FROM agent_profiles WHERE user_id=?`, agentID).
 		Scan(&out.StoreName, &out.Address, &phone, &lat, &lng)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -81,19 +89,39 @@ func (s *Service) StoreProfile(ctx context.Context, agentID int64) (*StoreProfil
 		out.Phone = &phone.String
 	}
 	if lat.Valid {
-		out.Latitude = &lat.Float64
+		out.Latitude = &lat.String
 	}
 	if lng.Valid {
-		out.Longitude = &lng.Float64
+		out.Longitude = &lng.String
 	}
 	return &out, nil
 }
 
-func (s *Service) UpdateStoreProfile(ctx context.Context, agentID int64, p StoreProfile) error {
-	if strings.TrimSpace(p.StoreName) == "" || len(p.StoreName) > 150 || strings.TrimSpace(p.Address) == "" ||
-		p.Latitude == nil || p.Longitude == nil || math.Abs(*p.Latitude) > 90 || math.Abs(*p.Longitude) > 180 ||
-		(p.Phone != nil && len(*p.Phone) > 20) {
-		return &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"profile": {"Profil toko tidak valid."}}}
+func (s *Service) UpdateStoreProfile(ctx context.Context, agentID int64, p StoreProfileInput) error {
+	fields := make(map[string][]string)
+	required := func(field string, missing bool) {
+		if missing {
+			fields[field] = []string{i18n.ValidationMessage(i18n.Default, "required", field)}
+		}
+	}
+	required("store_name", strings.TrimSpace(p.StoreName) == "")
+	required("address", strings.TrimSpace(p.Address) == "")
+	required("latitude", p.Latitude == nil)
+	required("longitude", p.Longitude == nil)
+	if len([]rune(p.StoreName)) > 150 {
+		fields["store_name"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "store_name", "max", "150")}
+	}
+	if p.Phone != nil && len([]rune(*p.Phone)) > 20 {
+		fields["phone"] = []string{i18n.ValidationMessage(i18n.Default, "max.string", "phone", "max", "20")}
+	}
+	if p.Latitude != nil && (math.IsNaN(*p.Latitude) || math.Abs(*p.Latitude) > 90) {
+		fields["latitude"] = []string{i18n.ValidationMessage(i18n.Default, "between.numeric", "latitude", "min", "-90", "max", "90")}
+	}
+	if p.Longitude != nil && (math.IsNaN(*p.Longitude) || math.Abs(*p.Longitude) > 180) {
+		fields["longitude"] = []string{i18n.ValidationMessage(i18n.Default, "between.numeric", "longitude", "min", "-180", "max", "180")}
+	}
+	if len(fields) != 0 {
+		return &Error{Status: 422, Message: i18n.Translate(i18n.Default, "system.validation_failed"), Fields: fields}
 	}
 	_, err := s.database.ExecContext(ctx, `INSERT INTO agent_profiles (user_id,store_name,address,phone,latitude,longitude,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))

@@ -100,7 +100,7 @@ Status legend:
 | GET | `/api/v1/agent/shipping-tariff` | session | agen | **GO** |  |
 | PUT | `/api/v1/agent/shipping-tariff` | session | agen | **GO** | pricing validation, Laravel response message, audit properties and resulting tariff row compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/store-profile` | session | agen | **GO** |  |
-| PUT | `/api/v1/agent/store-profile` | session | agen | **PARTIAL** |  |
+| PUT | `/api/v1/agent/store-profile` | session | agen | **GO** | Laravel validation messages, decimal:7 response strings, ignored client ownership fields, activity old/new projection and owner-only scope compared by compare_agentadmin.py |
 | GET | `/api/v1/agent/whatsapp` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/device` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **PARTIAL** |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 140 |
-|   of which PARTIAL (incomplete behaviour) | 52 |
+|   of which fully GO | 141 |
+|   of which PARTIAL (incomplete behaviour) | 51 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

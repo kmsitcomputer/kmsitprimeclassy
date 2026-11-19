@@ -48,6 +48,9 @@ KEYS = {
     "settings": [
         "updated",
     ],
+    "agent": [
+        "profile_updated",
+    ],
     "address": [
         "created",
         "updated",

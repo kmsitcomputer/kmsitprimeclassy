@@ -46,7 +46,7 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/agent/payment-methods/{method}/toggle"): "role gates, toggle response shape, and resulting setting rows compared by compare_agentadmin.py",
     ("PUT", "/api/v1/agent/payment-methods/{method}/config"): "FormRequest validation order, localized messages, encrypted config writes, and RBAC compared by compare_agentadmin.py",
     ("GET", "/api/v1/agent/store-profile"): "",
-    ("PUT", "/api/v1/agent/store-profile"): "",
+    ("PUT", "/api/v1/agent/store-profile"): "Laravel validation messages, decimal:7 response strings, ignored client ownership fields, activity old/new projection and owner-only scope compared by compare_agentadmin.py",
     ("GET", "/api/v1/agent/shipping-tariff"): "",
     ("PUT", "/api/v1/agent/shipping-tariff"): "pricing validation, Laravel response message, audit properties and resulting tariff row compared by compare_shipping_admin.py",
     ("GET", "/api/v1/agent/shipping-providers"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("PUT", "/api/v1/agent/store-profile"): "served; write contract probe pending",
     ("GET", "/api/v1/agent/whatsapp/scope"): "served; contract probe pending",
     ("GET", "/api/v1/agent/whatsapp/events"): "served; contract probe pending",
     ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "served; write contract probe pending",

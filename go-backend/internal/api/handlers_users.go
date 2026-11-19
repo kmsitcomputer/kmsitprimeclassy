@@ -52,6 +52,21 @@ func (s *Server) recordAgentAudit(r *http.Request, actor *auth.User, agentID int
 	return err
 }
 
+func (s *Server) recordAgentProfileAudit(r *http.Request, actor *auth.User, agentID int64, old, current any) error {
+	var profileID int64
+	if err := s.database.QueryRowContext(r.Context(), `SELECT id FROM agent_profiles WHERE user_id=?`, agentID).Scan(&profileID); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(map[string]any{"old": old, "new": current})
+	if err != nil {
+		return err
+	}
+	_, err = s.database.ExecContext(r.Context(), `INSERT INTO activity_logs
+		(causer_id,subject_type,subject_id,event,properties,created_at)
+		VALUES (?,'App\\Models\\AgentProfile',?,'agent_profile.self_updated',?,UTC_TIMESTAMP(6))`, actor.ID, profileID, raw)
+	return err
+}
+
 func userData(r *http.Request, s *Server, actor *auth.User, u *auth.User) (map[string]any, error) {
 	return u.UserJSON(r.Context(), s.database, actor.ID)
 }
@@ -331,25 +346,31 @@ func (s *Server) handleAgentStoreProfileUpdate(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	var body agentadmin.StoreProfile
+	var body agentadmin.StoreProfileInput
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	if err := agentadmin.New(s.database, s.cfg.AppKey).UpdateStoreProfile(r.Context(), agentID, body); err != nil {
-		writeAgentAdminError(w, r, err)
-		return
-	}
-	if err := s.recordAgentAudit(r, actor, agentID, "agent_profile.self_updated", map[string]any{"new": body}); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	data, err := agentadmin.New(s.database, s.cfg.AppKey).StoreProfile(r.Context(), agentID)
+	svc := agentadmin.New(s.database, s.cfg.AppKey)
+	before, err := svc.StoreProfile(r.Context(), agentID)
 	if err != nil {
 		writeAgentAdminError(w, r, err)
 		return
 	}
-	httpx.OK(w, data, "Profil toko berhasil diperbarui.", nil)
+	if err := svc.UpdateStoreProfile(r.Context(), agentID, body); err != nil {
+		writeAgentAdminError(w, r, err)
+		return
+	}
+	data, err := svc.StoreProfile(r.Context(), agentID)
+	if err != nil {
+		writeAgentAdminError(w, r, err)
+		return
+	}
+	if err := s.recordAgentProfileAudit(r, actor, agentID, before, data); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, data, msg(r.Context(), "agent.profile_updated"), nil)
 }
 
 func (s *Server) handleAgentPaymentMethods(w http.ResponseWriter, r *http.Request) {
