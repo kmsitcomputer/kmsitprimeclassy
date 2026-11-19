@@ -499,6 +499,14 @@ would delete — solved with a sentinel href the pre-strip plants and the post-p
 stripped, table/iframe/script unwrapped, `<figure>` unwrapped to the inner `<img>`). The legacy regexp
 sanitizer and its duplicates were removed; bluemonday allowlist unchanged (same CKEditor vocabulary).
 
+**DONE — CMS article write surface (Phase 1C continued):** compare_cms.py matrix passes (14-call
+scenario: index, empty payload, OBJECT-form translations `{"1":{...}}`, LIST form, type in:article,news,
+distinct language_id flagging EVERY duplicate, exists:languages, unique slug, nested raw-path sentences
+("translations.1.language_id wajib diisi.") vs top-level attribute names ("tipe wajib diisi."),
+HTMLPurifier on body, PATCH type change, delete + replay 404, agen 403). Key finding: Laravel does NOT
+humanise NESTED validation paths but DOES humanise top-level fields via validation.attributes. Note: the
+cms fixture article id/shape seeded identically per run (cms_articles/cms_articles_translations).
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 
