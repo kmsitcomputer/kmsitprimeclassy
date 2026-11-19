@@ -121,6 +121,70 @@ func AttachSellableRow(ctx context.Context, d *db.DB, agentID int64, product map
 	}
 }
 
+// AttachPublicAvailability mirrors ProductController's optional authenticated stock projection. Agent
+// availability is resolved from the viewer's own agent. When an owned Sub location is selected, Laravel
+// replaces only stock.available with Sub sellable stock and keeps agent_available_quantity as the Agent
+// projection, so this helper preserves both values.
+func AttachPublicAvailability(ctx context.Context, d *db.DB, agentID int64, subLocationID *int64, product map[string]any) error {
+	variations, _ := product["variations"].([]map[string]any)
+	AttachSellableRow(ctx, d, agentID, product, variations)
+	if subLocationID == nil {
+		return nil
+	}
+	hasVariations, _ := product["has_variations"].(bool)
+	if !hasVariations {
+		id := int64Value(product["id"])
+		available, err := subCatalogAvailable(ctx, d, *subLocationID, &id, nil)
+		if err != nil {
+			return err
+		}
+		setCatalogStock(product, available)
+		return nil
+	}
+	for _, variation := range variations {
+		id := int64Value(variation["id"])
+		available, err := subCatalogAvailable(ctx, d, *subLocationID, nil, &id)
+		if err != nil {
+			return err
+		}
+		setCatalogStock(variation, available)
+	}
+	return nil
+}
+
+func subCatalogAvailable(ctx context.Context, d *db.DB, subLocationID int64, productID, variationID *int64) (int, error) {
+	clause, args := "product_id = ? AND product_variation_id IS NULL", []any{}
+	if variationID != nil {
+		clause, args = "product_variation_id = ?", []any{*variationID}
+	} else {
+		args = []any{*productID}
+	}
+	var physical, reserved int
+	queryArgs := []any{subLocationID}
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, subLocationID)
+	queryArgs = append(queryArgs, args...)
+	if err := d.QueryRowContext(ctx, `SELECT COALESCE((SELECT quantity FROM warehouse_stocks
+		WHERE stock_type = 'sub' AND sub_location_id = ? AND `+clause+` ORDER BY id ASC LIMIT 1), 0),
+		COALESCE((SELECT SUM(quantity) FROM sub_stock_reservations
+		WHERE status = 'active' AND sub_location_id = ? AND `+clause+`), 0)`,
+		queryArgs...).Scan(&physical, &reserved); err != nil {
+		return 0, err
+	}
+	return maxInt(physical-reserved, 0), nil
+}
+
+func setCatalogStock(target map[string]any, available int) {
+	target["stock"] = map[string]any{"available": available, "in_stock": available > 0, "login_to_view": false}
+}
+
+func maxInt(value, floor int) int {
+	if value < floor {
+		return floor
+	}
+	return value
+}
+
 // forTargetsAvailable is SellableStockService::targetFromRows.
 func forTargetsAvailable(ctx context.Context, d *db.DB, agentID int64, productID, variationID *int64, planEnabled bool) int {
 	clause, args := "1 = 1", []any{}

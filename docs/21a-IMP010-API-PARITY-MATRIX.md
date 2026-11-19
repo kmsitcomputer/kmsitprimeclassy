@@ -328,8 +328,8 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/manage/products` | session | admin, agen, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/manage/products/{product}` | session | admin, agen, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/manage/products` | session | admin, agen, super_admin | **GO** | status/category/search/pagination filters, RBAC and per-agent availability compared by compare_products.py |
+| GET | `/api/v1/manage/products/{product}` | session | admin, agen, super_admin | **GO** | simple/variation detail, stock projection, missing ID and RBAC compared by compare_products.py |
 
 ## Media — `media` (0/3 in Go)
 
@@ -401,23 +401,23 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/products` | public | — | **PARTIAL** | anonymous exact; authenticated agent/Sub availability (stock) not ported |
-| POST | `/api/v1/products` | session | admin, agen, super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/products/{id}/permanent` | session | agen, super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/products/{product}` | session | agen, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/products/{product}` | session | admin, agen, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/products/{product}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PUT | `/api/v1/products/{product}/fees` | session | agen, super_admin | **PARTIAL** |  |
-| POST | `/api/v1/products/{product}/images` | session | admin, agen, super_admin | **PARTIAL** |  |
-| PUT | `/api/v1/products/{product}/images/order` | session | admin, agen, super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | **PARTIAL** |  |
-| POST | `/api/v1/products/{product}/variations` | session | admin, agen, super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/products/{product}/variations/{variation}` | session | agen, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/products/{product}/variations/{variation}` | session | admin, agen, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PUT | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/products/{slug}` | public | — | **PARTIAL** | anonymous exact; authenticated agent/Sub availability (stock) not ported |
+| GET | `/api/v1/products` | public | — | **GO** | anonymous and authenticated Agent/Sub stock projections, source authorization and filters compared by compare_products.py |
+| POST | `/api/v1/products` | session | admin, agen, super_admin | **GO** | store validation, SKU uniqueness, sanitizer, variation mode, response and persisted rows compared by compare_products.py |
+| DELETE | `/api/v1/products/{id}/permanent` | session | agen, super_admin | **GO** | confirmation, guarded references and hard-delete behavior compared by compare_products.py |
+| DELETE | `/api/v1/products/{product}` | session | agen, super_admin | **GO** | soft-delete behavior, authorization and resulting product state compared by compare_products.py |
+| PATCH | `/api/v1/products/{product}` | session | admin, agen, super_admin | **GO** | partial updates, immutable variation mode, validation, sanitization, audit and persisted rows compared by compare_products.py |
+| GET | `/api/v1/products/{product}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | **GO** | role-scoped fee projection and response compared by compare_products.py |
+| PUT | `/api/v1/products/{product}/fees` | session | agen, super_admin | **GO** | fee validation, authorization and persisted fee rows compared by compare_products.py |
+| POST | `/api/v1/products/{product}/images` | session | admin, agen, super_admin | **GO** | multipart upload, gallery scope, primary image and stored file compared by compare_products.py |
+| PUT | `/api/v1/products/{product}/images/order` | session | admin, agen, super_admin | **GO** | exact gallery membership, response order and persisted sort_order compared by compare_products.py |
+| DELETE | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | **GO** | primary promotion, row removal and uploaded-file cleanup compared by compare_products.py |
+| PATCH | `/api/v1/products/{product}/images/{image}` | session | admin, agen, super_admin | **GO** | primary promotion limited to the image gallery compared by compare_products.py |
+| POST | `/api/v1/products/{product}/variations` | session | admin, agen, super_admin | **GO** | variation rules, SKU uniqueness, composition attributes and resulting rows compared by compare_products.py |
+| DELETE | `/api/v1/products/{product}/variations/{variation}` | session | agen, super_admin | **GO** | variation deletion and persisted rows compared by compare_products.py |
+| PATCH | `/api/v1/products/{product}/variations/{variation}` | session | admin, agen, super_admin | **GO** | partial variation update and persisted values compared by compare_products.py |
+| GET | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, korsal, sales, sales-kurir-sub, super_admin | **GO** | variation fee projection and authorization compared by compare_products.py |
+| PUT | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, super_admin | **GO** | variation fee validation, authorization and persisted fee rows compared by compare_products.py |
+| GET | `/api/v1/products/{slug}` | public | — | **GO** | anonymous and authenticated Agent/Sub stock projections, source authorization, and missing slug compared by compare_products.py |
 
 ## Profile — `profile` (6/11 in Go)
 
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 157 |
-|   of which PARTIAL (incomplete behaviour) | 35 |
+|   of which fully GO | 176 |
+|   of which PARTIAL (incomplete behaviour) | 16 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

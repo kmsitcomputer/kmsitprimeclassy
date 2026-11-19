@@ -1,10 +1,6 @@
-// Package catalog is the public product/category read model.
-//
-// Scope note (IMP-010 checkpoint C): this package implements the ANONYMOUS public catalog exactly as
-// ProductController::index/show does for a visitor without a session. The agent/Sub availability attachment
-// (AttachesAgentAvailability → WarehouseStockService::sellableForTargets) belongs to the inventory domain and
-// is NOT ported here; the parity matrix marks that specific behaviour as outstanding so nobody mistakes the
-// absence of `stock`/`agent_available_quantity` for parity.
+// Package catalog is the public product/category read model and product-management domain. Public reads can
+// attach the viewer's own Agent availability, or replace the stock projection with their owned Sub location's
+// sellable quantity when the request explicitly selects that source.
 package catalog
 
 import (

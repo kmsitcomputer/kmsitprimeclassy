@@ -13,15 +13,18 @@ purged and restored), comparing status, body (slug uniqid suffix scrubbed) and D
 import json
 import re
 import sys
+from pathlib import Path
 
 import compare_fulfillment as f
 from compare_fulfillment import (LARAVEL, GO, AGEN, ADMIN, SUPER, KONSUMEN, SALES, check, client_for, db,
                                  diff, norm_body, reset, rows, seed_full)
 
 ADMIN2 = "admin@imp010.test"
+SUB = "sub@imp010.test"
 SLUG_RE = re.compile(r"^(.+)-[0-9a-f]{13}$")
 _IMG_RE = re.compile(r"/storage/products/[A-Za-z0-9]{27,}\.png")
 MULTIPART_BOUNDARY = "----pcproduct"
+REPO = Path(__file__).resolve().parents[2]
 
 
 def scrub(value):
@@ -132,12 +135,54 @@ def scenario(name, run):
     check(name, True)
 
 
+def public_stock_availability(base):
+    agent = client_for(base, AGEN)
+    sub = client_for(base, SUB)
+    anonymous = f.Client(base)
+    return [
+        anonymous.call("GET", "/api/v1/products?per_page=100&sort=price_asc"),
+        anonymous.call("GET", "/api/v1/products/kue-lumpur"),
+        anonymous.call("GET", "/api/v1/products/kue-coklat"),
+        agent.call("GET", "/api/v1/products?per_page=100&sort=price_asc"),
+        agent.call("GET", "/api/v1/products/kue-lumpur"),
+        agent.call("GET", "/api/v1/products/kue-coklat"),
+        sub.call("GET", "/api/v1/products?per_page=100&stock_source=agent&sort=price_asc"),
+        sub.call("GET", "/api/v1/products?per_page=100&stock_source=sub&sort=price_asc"),
+        sub.call("GET", "/api/v1/products/kue-lumpur?stock_source=sub&sub_location_id=1"),
+        agent.call("GET", "/api/v1/products?stock_source=sub"),
+        sub.call("GET", "/api/v1/products?stock_source=sub&sub_location_id=9999"),
+        sub.call("GET", "/api/v1/products?stock_source=agent&sub_location_id=1"),
+        sub.call("GET", "/api/v1/products?stock_source=invalid"),
+        anonymous.call("GET", "/api/v1/products?stock_source=sub"),
+        anonymous.call("GET", "/api/v1/products/tidak-ada?stock_source=invalid"),
+    ]
+
+
+def verify_image_file(base, response, expected):
+    body = response[1] or {}
+    url = (((body.get("data") or {}).get("url")) if isinstance(body, dict) else None)
+    if not url or "/storage/" not in url:
+        raise RuntimeError(f"image response did not include a storage URL: {response}")
+    relative = url.split("/storage/", 1)[1]
+    app = "backend" if base == LARAVEL else "go-backend"
+    exists = (REPO / app / "storage" / "app" / "public" / relative).is_file()
+    if exists != expected:
+        raise RuntimeError(f"{app} image file {relative} exists={exists}, expected={expected}")
+    return (200, {"file_exists": exists})
+
+
 SIMPLE = {"name": "Produk Uji", "sku": "SKU-UJI-1", "has_variations": False, "base_price": 45000,
           "weight_grams": 300, "category_id": 2, "status": "active"}
 
 
 def main():
     seed_full()
+
+    if "--public-stock-only" in sys.argv:
+        scenario("public product reads + Agent/Sub stock and source authorization", public_stock_availability)
+        failed = [r for r in f.results if not r[1]]
+        print(f"{len(f.results) - len(failed)} passed, {len(failed)} failed")
+        return 0 if not failed else 1
 
     def store_validation(base):
         c = client_for(base, AGEN)
@@ -243,6 +288,25 @@ def main():
             c.call("PATCH", "/api/v1/products/1/images/999", {"is_primary": True}),
             c.call("DELETE", "/api/v1/products/1/images/999"),
         ]
+        out.append(c.call("PATCH", "/api/v1/products/2/variations/1",
+                          {"price": 51000, "weight_grams": 260, "is_active": True}))
+        out.append(c.call("DELETE", "/api/v1/products/2/variations/2"))
+
+        image_one = multipart(c, "POST", "/api/v1/products/1/images", {"is_primary": "1", "sort_order": "2"},
+                              {"image": ("one.png", png)})
+        image_two = multipart(c, "POST", "/api/v1/products/1/images", {"sort_order": "1"},
+                              {"image": ("two.png", png)})
+        out.extend([image_one, image_two])
+        one_id = (image_one[1].get("data") or {}).get("id")
+        two_id = (image_two[1].get("data") or {}).get("id")
+        if image_one[0] == 201 and image_two[0] == 201 and one_id and two_id:
+            out.append(verify_image_file(base, image_two, True))
+            out.append(c.call("PATCH", f"/api/v1/products/1/images/{two_id}", {"is_primary": True}))
+            out.append(c.call("PUT", "/api/v1/products/1/images/order", {"ids": [two_id, one_id]}))
+            out.append(c.call("DELETE", f"/api/v1/products/1/images/{two_id}"))
+            out.append(verify_image_file(base, image_two, False))
+            out.append(c.call("DELETE", f"/api/v1/products/1/images/{one_id}"))
+            out.append(verify_image_file(base, image_one, False))
         return out
 
     scenario("variations with attributes + image gallery rules", variations_and_images)
@@ -250,11 +314,18 @@ def main():
     def manage_list(base):
         c = client_for(base, AGEN)
         return [c.call("GET", "/api/v1/manage/products"),
+                c.call("GET", "/api/v1/manage/products?status=active&per_page=1&page=2"),
+                c.call("GET", "/api/v1/manage/products?status=all&category_id=2&search=SKU-LUMPUR"),
+                c.call("GET", "/api/v1/manage/products?category_id=999"),
+                c.call("GET", "/api/v1/manage/products?status=invalid"),
                 c.call("GET", "/api/v1/manage/products/1"),
                 c.call("GET", "/api/v1/manage/products/2"),
+                c.call("GET", "/api/v1/manage/products/999999"),
                 client_for(base, SALES).call("GET", "/api/v1/manage/products")]
 
     scenario("manage/products list + detail reads", manage_list)
+
+    scenario("public product reads + Agent/Sub stock and source authorization", public_stock_availability)
 
     failed = [r for r in f.results if not r[1]]
     print(f"{len(f.results) - len(failed)} passed, {len(failed)} failed")

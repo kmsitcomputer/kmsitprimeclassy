@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,31 +11,16 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/cms"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/inventory"
 	"github.com/kmsitcomputer/primeclassy-go/internal/site"
 )
 
 // ---- catalog ---------------------------------------------------------------------------------------
 
-// handleProducts mirrors Catalog\ProductController::index for an ANONYMOUS visitor.
-//
-// The `stock_source`/`sub_location_id` validation is reproduced because it runs before the query in Laravel:
-// an invalid value is a 422 even for a public request, and the SPA relies on that.
+// handleProducts mirrors Catalog\ProductController::index for anonymous and authenticated visitors,
+// including the optional Agent/Sub availability projection.
 func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	stockSource := httpx.QueryString(r, "stock_source")
-	if stockSource != "" && stockSource != "agent" && stockSource != "sub" {
-		writeError(w, r, httpx.Validation(map[string][]string{"stock_source": invalidChoice(ctx, "stock_source")}))
-		return
-	}
-	if stockSource == "sub" || httpx.QueryString(r, "sub_location_id") != "" {
-		// Selecting a Sub stock source needs an authenticated actor (StockSourceResolver); the anonymous
-		// catalog cannot honour it, and Laravel refuses exactly the same way.
-		if UserFrom(ctx) == nil {
-			writeError(w, r, httpx.NewError(http.StatusForbidden, "Login diperlukan untuk memilih sumber stok."))
-			return
-		}
-	}
-
 	query := catalog.Query{
 		Search:   httpx.QueryString(r, "search"),
 		Category: httpx.QueryString(r, "category"),
@@ -69,6 +55,10 @@ func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if err := s.attachProductAvailability(ctx, r, result.Items); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	httpx.OK(w, result.Items, "OK", httpx.NewMeta(result.Page, result.LastPage, result.Total))
 }
 
@@ -89,7 +79,70 @@ func (s *Server) handleProductDetail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if err := s.attachProductAvailability(ctx, r, []map[string]any{product}); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	httpx.OK(w, product, "OK", nil)
+}
+
+func catalogSubLocation(ctx context.Context, d *db.DB, ownerID int64, agentID *int64) (*inventory.SubLocationRef, error) {
+	if agentID == nil {
+		return nil, inventory.ErrNotFound
+	}
+	return inventory.SubLocationForOwner(ctx, d, *agentID, ownerID)
+}
+
+func (s *Server) attachProductAvailability(ctx context.Context, r *http.Request, products []map[string]any) error {
+	stockSource := httpx.QueryString(r, "stock_source")
+	if stockSource != "" && stockSource != "agent" && stockSource != "sub" {
+		return httpx.Validation(map[string][]string{"stock_source": invalidChoice(ctx, "stock_source")})
+	}
+	var requestedSubLocationID *int64
+	if rawSubLocationID := httpx.QueryString(r, "sub_location_id"); rawSubLocationID != "" {
+		id, err := strconv.ParseInt(rawSubLocationID, 10, 64)
+		if err != nil {
+			return httpx.Validation(map[string][]string{"sub_location_id": notInteger(ctx, "sub_location_id")})
+		}
+		requestedSubLocationID = &id
+	}
+	u := UserFrom(ctx)
+	var subLocationID *int64
+	if stockSource == "sub" || requestedSubLocationID != nil {
+		if u == nil {
+			return httpx.NewError(http.StatusForbidden, "Login diperlukan untuk memilih sumber stok.")
+		}
+		if stockSource != "sub" {
+			return &httpx.Error{Status: http.StatusUnprocessableEntity,
+				Message:      "sub_location_id hanya berlaku untuk sumber stok Sub.",
+				FieldStrings: map[string]string{"sub_location_id": "Tidak valid untuk sumber stok Agent."}}
+		}
+		if !u.IsRole("sales-kurir-sub") {
+			return httpx.NewError(http.StatusForbidden, "Hanya Sales-Kurir-Sub yang dapat memakai stok Sub.")
+		}
+		location, err := catalogSubLocation(ctx, s.database, u.ID, u.AgentID)
+		if err != nil {
+			if errors.Is(err, inventory.ErrNotFound) {
+				return &httpx.Error{Status: http.StatusUnprocessableEntity,
+					Message:      "Anda belum memiliki Sub Location aktif.",
+					FieldStrings: map[string]string{"stock_source": "Sub Location tidak tersedia."}}
+			}
+			return err
+		}
+		if requestedSubLocationID != nil && *requestedSubLocationID != location.ID {
+			return httpx.NewError(http.StatusForbidden, "Sub Location bukan milik Anda.")
+		}
+		subLocationID = &location.ID
+	}
+	if u == nil || u.AgentID == nil {
+		return nil
+	}
+	for _, product := range products {
+		if err := catalog.AttachPublicAvailability(ctx, s.database, *u.AgentID, subLocationID, product); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // handleCategories mirrors ProductCategoryController::index.
