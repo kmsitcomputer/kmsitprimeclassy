@@ -46,6 +46,7 @@ func decodeHomepageBlockMultipart(r *http.Request) (cms.BlockInput, cms.BlockUpl
 	}
 	input := cms.BlockInput{}
 	uploads := cms.BlockUploads{SlideImages: map[string]map[string]*media.Upload{}}
+	_, input.ContentSet = root["content"]
 	if value, ok := root["type"].(string); ok {
 		input.Type = &value
 	}
@@ -53,7 +54,10 @@ func decodeHomepageBlockMultipart(r *http.Request) (cms.BlockInput, cms.BlockUpl
 		normalizeHomepageFormContent(root["type"], value)
 		input.Content = value
 	}
-	if value, ok := root["sort_order"].(string); ok {
+	if _, exists := root["sort_order"]; exists && root["sort_order"] == nil {
+		sortOrder := 0
+		input.SortOrder = &sortOrder
+	} else if value, ok := root["sort_order"].(string); ok {
 		if n, err := strconv.Atoi(value); err == nil {
 			input.SortOrder = &n
 			if n < 0 {
@@ -82,11 +86,21 @@ func decodeHomepageBlockMultipart(r *http.Request) (cms.BlockInput, cms.BlockUpl
 	} else if _, ok := root["is_active"]; ok {
 		errs.add("is_active", vmsg(r.Context(), "boolean", "is_active"))
 	}
+	_, input.StartsAtSet = root["starts_at"]
+	_, input.EndsAtSet = root["ends_at"]
 	if value, ok := root["starts_at"].(string); ok {
 		input.StartsAt = &value
 	}
 	if value, ok := root["ends_at"].(string); ok {
 		input.EndsAt = &value
+	}
+	if value, exists := root["remove_image"]; exists {
+		if text, ok := value.(string); ok && (text == "0" || text == "1") {
+			remove := text == "1"
+			input.RemoveImage = &remove
+		} else {
+			errs.add("remove_image", vmsg(r.Context(), "boolean", "remove_image"))
+		}
 	}
 	starts, startsOK := parseHomepageFormDate(input.StartsAt)
 	ends, endsOK := parseHomepageFormDate(input.EndsAt)

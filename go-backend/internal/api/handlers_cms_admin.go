@@ -31,6 +31,7 @@ func (s *Server) registerCMSProfileRoutes() {
 
 	s.mux.Handle("GET /api/v1/cms/homepage-blocks", chain(http.HandlerFunc(s.handleCMSBlockIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/cms/homepage-blocks", chain(http.HandlerFunc(s.handleCMSBlockStore), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("POST /api/v1/cms/homepage-blocks/{block}", chain(http.HandlerFunc(s.handleCMSBlockUpdateMethodOverride), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PATCH /api/v1/cms/homepage-blocks/reorder", chain(http.HandlerFunc(s.handleCMSBlockReorder), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PATCH /api/v1/cms/homepage-blocks/{block}", chain(http.HandlerFunc(s.handleCMSBlockUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PATCH /api/v1/cms/homepage-blocks/{block}/toggle", chain(http.HandlerFunc(s.handleCMSBlockToggle), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
@@ -432,21 +433,32 @@ func mergeValidationErrors(first, second error) error {
 }
 
 func decodeCMSBlockJSON(r *http.Request) (cms.BlockInput, error) {
+	return decodeCMSBlockFields(r, true)
+}
+
+func decodeCMSBlockUpdateJSON(r *http.Request) (cms.BlockInput, error) {
+	return decodeCMSBlockFields(r, false)
+}
+
+func decodeCMSBlockFields(r *http.Request, requireType bool) (cms.BlockInput, error) {
 	raw := map[string]json.RawMessage{}
 	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		return cms.BlockInput{}, err
 	}
 	input := cms.BlockInput{}
 	errs := fieldErrors{}
-	typeRaw, typePresent := raw["type"]
-	if !typePresent || string(typeRaw) == "null" || string(typeRaw) == `""` {
-		errs.add("type", vmsg(r.Context(), "required", "type"))
-	} else if json.Unmarshal(typeRaw, new(string)) != nil {
-		errs.add("type", vmsg(r.Context(), "string", "type"), vmsg(r.Context(), "in", "type"))
-	} else {
-		var value string
-		_ = json.Unmarshal(typeRaw, &value)
-		input.Type = &value
+	_, input.ContentSet = raw["content"]
+	if requireType {
+		typeRaw, typePresent := raw["type"]
+		if !typePresent || string(typeRaw) == "null" || string(typeRaw) == `""` {
+			errs.add("type", vmsg(r.Context(), "required", "type"))
+		} else if json.Unmarshal(typeRaw, new(string)) != nil {
+			errs.add("type", vmsg(r.Context(), "string", "type"), vmsg(r.Context(), "in", "type"))
+		} else {
+			var value string
+			_ = json.Unmarshal(typeRaw, &value)
+			input.Type = &value
+		}
 	}
 	if contentRaw, present := raw["content"]; present && string(contentRaw) != "null" {
 		trimmed := strings.TrimSpace(string(contentRaw))
@@ -526,6 +538,11 @@ func decodeCMSBlockJSON(r *http.Request) (cms.BlockInput, error) {
 	}
 	decodeDate := func(key string, target **string) {
 		value, present := raw[key]
+		if key == "starts_at" {
+			input.StartsAtSet = present
+		} else if key == "ends_at" {
+			input.EndsAtSet = present
+		}
 		if !present || string(value) == "null" || string(value) == `""` {
 			return
 		}
@@ -549,6 +566,43 @@ func decodeCMSBlockJSON(r *http.Request) (cms.BlockInput, error) {
 			errs.add("ends_at", vmsg(r.Context(), "after_or_equal", "ends_at", "date", i18n.AttributeName(LocaleFrom(r.Context()), "starts_at")))
 		}
 	}
+	if !requireType {
+		if value, present := raw["remove_image"]; present {
+			var decoded any
+			if err := json.Unmarshal(value, &decoded); err == nil {
+				switch candidate := decoded.(type) {
+				case bool:
+					input.RemoveImage = &candidate
+				case json.Number:
+					if candidate == "0" || candidate == "1" {
+						remove := candidate == "1"
+						input.RemoveImage = &remove
+					} else {
+						errs.add("remove_image", vmsg(r.Context(), "boolean", "remove_image"))
+					}
+				case float64:
+					numeric := strings.TrimSpace(string(value))
+					if numeric == "0" || numeric == "1" {
+						remove := numeric == "1"
+						input.RemoveImage = &remove
+					} else {
+						errs.add("remove_image", vmsg(r.Context(), "boolean", "remove_image"))
+					}
+				case string:
+					if candidate == "0" || candidate == "1" {
+						remove := candidate == "1"
+						input.RemoveImage = &remove
+					} else {
+						errs.add("remove_image", vmsg(r.Context(), "boolean", "remove_image"))
+					}
+				default:
+					errs.add("remove_image", vmsg(r.Context(), "boolean", "remove_image"))
+				}
+			} else {
+				errs.add("remove_image", vmsg(r.Context(), "boolean", "remove_image"))
+			}
+		}
+	}
 	if err := errs.fail(r.Context()); err != nil {
 		return input, err
 	}
@@ -564,11 +618,53 @@ func (s *Server) handleCMSBlockUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input cms.BlockInput
-	if err := httpx.DecodeJSON(r, &input); err != nil {
+	var uploads cms.BlockUploads
+	var decodeErr error
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		input, uploads, decodeErr = decodeHomepageBlockMultipart(r)
+	} else {
+		input, decodeErr = decodeCMSBlockUpdateJSON(r)
+	}
+	blockType, _, err := cms.HomepageBlockContent(r.Context(), s.database, id)
+	if errors.Is(err, cms.ErrAdminContentNotFound) {
+		writeError(w, r, notFoundError(r.Context()))
+		return
+	}
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	result, err := cms.UpdateBlock(r.Context(), s.database, id, input)
+	if input.Content != nil {
+		normalizeHomepageFormContent(blockType, input.Content)
+	}
+	typ := blockType
+	contentErr := validateHomepageBlockContentUpdate(r.Context(), s.database, &typ, input.Content)
+	if err := mergeValidationErrors(decodeErr, contentErr); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fileErrors := fieldErrors{}
+	validateHomepageBlockUpload(r.Context(), fileErrors, "image", uploads.Image)
+	if blockType == "banner_slider" && len(uploads.SlideImages) > 10 {
+		fileErrors.add("slide_images", vmsg(r.Context(), "max.array", "slide_images", "max", "10"))
+	}
+	for key, fields := range uploads.SlideImages {
+		for slot, file := range fields {
+			validateHomepageBlockUpload(r.Context(), fileErrors, "slide_images."+key+"."+slot, file)
+		}
+	}
+	if err := fileErrors.fail(r.Context()); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if input.ContentSet && input.Content == nil {
+		// Laravel accepts nullable content during FormRequest validation, then its typed service call
+		// raises a TypeError when the controller passes null. Match the 500 status without copying the
+		// debug-only file/line details exposed by the local reference environment.
+		writeError(w, r, httpx.NewError(http.StatusInternalServerError, msg(r.Context(), "system.server_error")))
+		return
+	}
+	result, err := cms.UpdateBlockWithUploads(r.Context(), s.database, id, input, uploads)
 	if errors.Is(err, cms.ErrAdminContentNotFound) {
 		writeError(w, r, notFoundError(r.Context()))
 		return
@@ -578,6 +674,14 @@ func (s *Server) handleCMSBlockUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) handleCMSBlockUpdateMethodOverride(w http.ResponseWriter, r *http.Request) {
+	if r.FormValue("_method") != http.MethodPatch {
+		writeError(w, r, httpx.NewError(http.StatusMethodNotAllowed, "Method Not Allowed"))
+		return
+	}
+	s.handleCMSBlockUpdate(w, r)
 }
 
 func (s *Server) handleCMSBlockToggle(w http.ResponseWriter, r *http.Request) {
