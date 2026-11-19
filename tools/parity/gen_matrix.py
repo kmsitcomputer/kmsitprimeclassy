@@ -54,7 +54,7 @@ IMPLEMENTED = {
     ("PUT", "/api/v1/agent/shipping-providers/{provider}/config"): "provider-specific validation, SSRF refusal, encrypted config side effect and localized response compared by compare_shipping_admin.py",
     ("GET", "/api/v1/agent/shipping-providers/{provider}/couriers"): "",
     ("PUT", "/api/v1/agent/shipping-providers/{provider}/couriers"): "supported-courier validation, response, and encrypted config side effect compared by compare_shipping_admin.py",
-    ("GET", "/api/v1/agent/whatsapp/scope"): "",
+    ("GET", "/api/v1/agent/whatsapp/scope"): "Agen self-scope, Admin branch-scope, denied roles, ignored client agent_id, and read-only DB state compared by compare_whatsapp_scope.py",
     ("GET", "/api/v1/agent/whatsapp/events"): "",
     ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "",
     ("DELETE", "/api/v1/agent/whatsapp/events/{event}/template"): "",
@@ -237,7 +237,6 @@ IMPLEMENTED = {
 GAPS = {
     # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
     # differentially verified; every write path still needs its contract comparison.
-    ("GET", "/api/v1/agent/whatsapp/scope"): "served; contract probe pending",
     ("GET", "/api/v1/agent/whatsapp/events"): "served; contract probe pending",
     ("PUT", "/api/v1/agent/whatsapp/events/{event}"): "served; write contract probe pending",
     ("DELETE", "/api/v1/agent/whatsapp/events/{event}/template"): "served; write contract probe pending",

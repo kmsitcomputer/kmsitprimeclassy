@@ -13,8 +13,8 @@ before touching code. Do not re-derive a completed checkpoint.
 |---|---|
 | Routes `/api/v1` in the baseline | 375 |
 | Served by Go | **192 (51.2%)** |
-| Fully GO | 144 |
-| PARTIAL (incomplete behaviour) | 48 |
+| Fully GO | 145 |
+| PARTIAL (incomplete behaviour) | 47 |
 | Laravel-only (Go answers 501) | **183** |
 | Go tests | **124 test functions** green (all packages, incl. 6 media oracles), `go vet` clean, gofmt clean |
 | Cross-runtime comparison checks | **400 previously passing**; `compare_shipping_admin.py` now passes its combined response, RBAC, and DB-state scenario |
@@ -441,6 +441,8 @@ carries `actor_role`.
 **DONE — Profile referral-code CRUD (`tools/parity/compare_profile_referral.py`, 3/3):** update validates required/format/max/unique cases and RBAC; regenerate verifies a role-prefixed generated code and audit; delete verifies the cleared code and Laravel's old-only audit payload. Differential responses and DB state passed. Scoped `go test`/`go vet` passed for `profile`, `api`, and `i18n`. Current matrix: **144 GO / 48 PARTIAL / 183 Laravel-only**.
 
 **OWNER PAUSE — 2026-11-20:** implementation/testing stopped at the Owner's request. No Docker containers or database were stopped or removed. Exact next action on resume: inspect the `GET /api/v1/agent/whatsapp/scope` Laravel controller and Go handler, add a focused differential scenario, then continue remaining PARTIAL routes in matrix order. Do not rerun completed shipping, payment-method, store-profile, or referral-code harnesses unless a dependency changes.
+
+**RESUMED after Owner pause — WhatsApp scope selector (`tools/parity/compare_whatsapp_scope.py`, 1/1):** Agen sees itself, Admin sees its branch Agen, other tested roles are refused, client `agent_id` query values do not widen/alter scope, and application business-table state is unchanged by the read. Current matrix: **145 GO / 47 PARTIAL / 183 Laravel-only**. The next unit is `GET /api/v1/agent/whatsapp/events`: compare its Laravel/Go response and role scope against `primeclassy_testing`, then continue the remaining WhatsApp PARTIAL routes.
 
 **DONE — Payments surface (9 routes, parity 16/16 via tools/parity/compare_payments.py):** proof, cod-proof,
 installment, verify, settle, markCod, admin cod-proof confirm, payment-proofs/{id} download, due-date.
