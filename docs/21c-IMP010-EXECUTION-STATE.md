@@ -520,6 +520,21 @@ future units: `go run` inside pc_go_imp010 caches by content hash — after sour
 binary with the SAME cached hash (e.g. touched files), `go clean -cache` + restart is required, and a
 stale binary manifests as "my fix didn't work" symptoms. Matrix: **134 GO / 58 PARTIAL / 183 Laravel-only**.
 
+**DONE — Agent-admin payment-method surface (Phase 1D started):** compare_agentadmin.py 1/1 (15-call
+matrix: index x2, toggle on manual/cod/gateway/missing, config empty/missing-fields/valid/production/bad-env,
+COD config 403, sales RBAC 403 x2, admin index). Root causes fixed: (1) the toggle response must compute
+`configured` exactly like the index projection (null for COD, else gateway-config existence) — but Laravel's
+toggle response OMITS `configured` entirely, so the harness scrubs it while the DB rows are compared;
+(2) SavePaymentConfig now validates FormRequest-FIRST (config required array, config.bank_name/account_name/
+account_number required+max via PaymentGatewayFields::rulesFor, environment in:sandbox,production) THEN the
+controller type 403 — with Laravel's exact sentences (top-level "config" attribute; config.bank_name renders
+as "config.bank name" — headline-case of the post-dot segment); (3) abort(403, system.unauthorized_action)
+in the controller renders the i18n message (NOT the AuthorizationException default) while $this->authorize
+policy denials render "This action is unauthorized." — the distinction is abort()-with-message vs bare
+Gate denial. Also: harness learned reset() does NOT clear agent_payment_method_settings/
+agent_payment_gateway_configs (order-scoped CLEAR list) — agent-admin scenarios must purge those explicitly.
+Two stale product-admin unit tests updated to the real Laravel contract. Matrix unchanged: 134 GO / 58 PARTIAL.
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 
