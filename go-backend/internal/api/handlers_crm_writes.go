@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -692,4 +694,267 @@ func (s *Server) handleCRMUnlink(w http.ResponseWriter, r *http.Request) {
 	_ = s.writeActivityLogWithDescription(ctx, u.ID, `App\Models\CrmCustomer`, id, "crm.customer.unlinked", *reason,
 		map[string]any{"konsumen_user_id": konsumenID, "event_id": eventID})
 	httpx.OK(w, row, msg(ctx, "crm.unlinked"), nil)
+}
+
+// ---------------- CRM consent endpoints ----------------
+
+func (s *Server) handleCRMConsentOtp(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, ok := pathID(w, r, "customer")
+	if !ok {
+		return
+	}
+	if _, _, berr := s.crmService().BindingCustomer(ctx, crmActorFrom(r), id); berr != nil {
+		s.writeCRMError(w, r, berr)
+		return
+	}
+	actor := crmActorFrom(r)
+	if actor.Role != "sales" && actor.Role != "sales-kurir-sub" && actor.Role != "korsal" {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	body, err := crmBody(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	loc := LocaleFrom(ctx)
+	fields := map[string][]string{}
+	purpose := ""
+	if raw, ok := body["purpose"]; !ok {
+		fields["purpose"] = []string{i18n.ValidationMessage(loc, "required", "purpose")}
+	} else if json.Unmarshal(raw, &purpose) != nil || purpose != "assisted_return" {
+		fields["purpose"] = []string{i18n.ValidationMessage(loc, "in", "purpose")}
+	}
+	channel := "email"
+	if raw, ok := body["channel"]; ok && string(raw) != "null" {
+		var cv string
+		if json.Unmarshal(raw, &cv) != nil || (cv != "email" && cv != "whatsapp") {
+			fields["channel"] = []string{i18n.ValidationMessage(loc, "in", "channel")}
+		} else {
+			channel = cv
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	ch, err := s.crmService().IssueConsentOtp(ctx, actor, id, purpose, channel)
+	if err != nil {
+		s.writeCRMError(w, r, err)
+		return
+	}
+	httpx.Created(w, ch, msg(ctx, "consent.otp_sent"))
+}
+
+// handleCRMCaptureConsent parses multipart/form-data (the evidence upload), validates like
+// captureConsent's $request->validate, then runs ConsentService::captureForCrm.
+func (s *Server) handleCRMCaptureConsent(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, ok := pathID(w, r, "customer")
+	if !ok {
+		return
+	}
+	actor := crmActorFrom(r)
+	if actor.Role != "sales" && actor.Role != "sales-kurir-sub" && actor.Role != "korsal" {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	if _, _, berr := s.crmService().BindingCustomer(ctx, actor, id); berr != nil {
+		s.writeCRMError(w, r, berr)
+		return
+	}
+	// multipart (or JSON for the no-file edge: Laravel requires the file, so JSON always fails)
+	var form map[string]string
+	var evidence []byte
+	var evidenceExt string
+	ct := r.Header.Get("Content-Type")
+	loc := LocaleFrom(ctx)
+	fields := map[string][]string{}
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		form = map[string]string{}
+		for k, vs := range r.MultipartForm.Value {
+			if len(vs) > 0 {
+				form[k] = vs[0]
+			}
+		}
+		if r.MultipartForm.File != nil {
+			if fhs, ok := r.MultipartForm.File["evidence"]; ok && len(fhs) > 0 {
+				fh := fhs[0]
+				file, oerr := fh.Open()
+				if oerr != nil {
+					writeError(w, r, oerr)
+					return
+				}
+				defer file.Close()
+				evidence, _ = io.ReadAll(file)
+				n := strings.ToLower(fh.Filename)
+				switch {
+				case strings.HasSuffix(n, ".jpg"), strings.HasSuffix(n, ".jpeg"):
+					evidenceExt = ".jpg"
+				case strings.HasSuffix(n, ".png"):
+					evidenceExt = ".png"
+				case strings.HasSuffix(n, ".webp"):
+					evidenceExt = ".webp"
+				default:
+					evidenceExt = ""
+				}
+				// image + mimes: sniff the bytes too
+				if !isImageBytes(evidence) {
+					fields["evidence"] = []string{i18n.ValidationMessage(loc, "mimes", "evidence", "values", "jpg,jpeg,png,webp")}
+				}
+				if len(evidence) > 4096*1024 {
+					fields["evidence"] = []string{i18n.ValidationMessage(loc, "max.file", "evidence", "max", "4096")}
+				}
+			}
+		}
+	}
+	str := func(k string) string { return form[k] }
+	// required fields
+	if _, ok := form["otp_challenge_id"]; !ok {
+		fields["otp_challenge_id"] = []string{i18n.ValidationMessage(loc, "required", "otp challenge id")}
+	}
+	if _, ok := form["order_id"]; !ok {
+		fields["order_id"] = []string{i18n.ValidationMessage(loc, "required", "order id")}
+	}
+	if p, ok := form["purpose"]; !ok {
+		fields["purpose"] = []string{i18n.ValidationMessage(loc, "required", "purpose")}
+	} else if p != "assisted_return" {
+		fields["purpose"] = []string{i18n.ValidationMessage(loc, "in", "purpose")}
+	}
+	if evidence == nil {
+		fields["evidence"] = []string{i18n.ValidationMessage(loc, "required", "evidence")}
+	}
+	note := str("note")
+	if _, ok := form["note"]; !ok {
+		fields["note"] = []string{i18n.ValidationMessage(loc, "required", "note")}
+	} else if len(note) > 1000 {
+		fields["note"] = []string{i18n.ValidationMessage(loc, "max.string", "note", "max", "1000")}
+	}
+	// scope: required array min:1, per-item order_item_id required integer + quantity required integer min:1
+	type scopeLine struct {
+		ItemID int64
+		Qty    int64
+	}
+	var scope []scopeLine
+	scopePresent := false
+	scopeIsArray := false
+	if raw, ok := form["scope"]; ok {
+		scopePresent = true
+		var parsed []scopeLine
+		if json.Unmarshal([]byte(raw), &parsed) == nil {
+			scope = parsed
+			scopeIsArray = true
+		}
+	} else {
+		// Laravel-style nested multipart keys: scope[0][order_item_id], scope[0][quantity], ...
+		idx := map[int]*scopeLine{}
+		maxIdx := -1
+		re := regexp.MustCompile(`^scope\[(\d+)\]\[(order_item_id|quantity)\]$`)
+		for k, v := range form {
+			if m := re.FindStringSubmatch(k); m != nil {
+				scopePresent = true
+				scopeIsArray = true
+				i, _ := strconv.Atoi(m[1])
+				if i > maxIdx {
+					maxIdx = i
+				}
+				ln := idx[i]
+				if ln == nil {
+					ln = &scopeLine{}
+					idx[i] = ln
+				}
+				if m[2] == "order_item_id" {
+					if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+						ln.ItemID = n
+					} else {
+						ln.ItemID = -1
+					}
+				} else {
+					if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+						ln.Qty = n
+					} else {
+						ln.Qty = -1
+					}
+				}
+			}
+		}
+		for i := 0; i <= maxIdx; i++ {
+			if ln := idx[i]; ln != nil {
+				scope = append(scope, *ln)
+			}
+		}
+	}
+	if !scopePresent {
+		fields["scope"] = []string{i18n.ValidationMessage(loc, "required", "scope")}
+	} else if !scopeIsArray {
+		fields["scope"] = []string{i18n.ValidationMessage(loc, "array", "scope")}
+	} else if len(scope) < 1 {
+		fields["scope"] = append(fields["scope"], i18n.ValidationMessage(loc, "min.array", "scope", "min", "1"))
+	}
+	consentKey := str("consent_key")
+	if len(consentKey) > 100 {
+		fields["consent_key"] = []string{i18n.ValidationMessage(loc, "max.string", "consent key", "max", "100")}
+	}
+	var challengeID, orderID int64
+	if _, ok := form["otp_challenge_id"]; ok && fields["otp_challenge_id"] == nil {
+		cid, perr := strconv.ParseInt(str("otp_challenge_id"), 10, 64)
+		if perr != nil {
+			fields["otp_challenge_id"] = []string{i18n.ValidationMessage(loc, "integer", "otp challenge id")}
+		} else {
+			challengeID = cid
+			var n int
+			_ = s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM identity_otp_challenges WHERE id=?`, cid).Scan(&n)
+			if n == 0 {
+				fields["otp_challenge_id"] = []string{i18n.ValidationMessage(loc, "exists", "otp challenge id")}
+			}
+		}
+	}
+	if _, ok := form["order_id"]; ok && fields["order_id"] == nil {
+		oid, perr := strconv.ParseInt(str("order_id"), 10, 64)
+		if perr != nil {
+			fields["order_id"] = []string{i18n.ValidationMessage(loc, "integer", "order id")}
+		} else {
+			orderID = oid
+			var n int
+			_ = s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE id=?`, oid).Scan(&n)
+			if n == 0 {
+				fields["order_id"] = []string{i18n.ValidationMessage(loc, "exists", "order id")}
+			}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	pairs := make([][2]int, 0, len(scope))
+	for _, sl := range scope {
+		pairs = append(pairs, [2]int{int(sl.ItemID), int(sl.Qty)})
+	}
+	event, err := s.crmService().CaptureConsent(ctx, actor, id, orderID, challengeID, str("purpose"),
+		pairs, evidence, evidenceExt, note, consentKey, s.cfg.StorageRoot)
+	if err != nil {
+		s.writeCRMError(w, r, err)
+		return
+	}
+	httpx.Created(w, event, msg(ctx, "consent.captured"))
+}
+
+func isImageBytes(b []byte) bool {
+	if len(b) < 12 {
+		return false
+	}
+	switch {
+	case b[0] == 0xFF && b[1] == 0xD8:
+		return true
+	case b[0] == 0x89 && b[1] == 'P':
+		return true
+	case string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return true
+	}
+	return false
 }

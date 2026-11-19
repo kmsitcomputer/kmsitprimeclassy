@@ -82,8 +82,6 @@ Consent	POST	`/api/v1/consent/otp/{challenge}/verify`	agen, korsal, sales, sales
 CRM	POST	`/api/v1/crm/customers`	korsal, sales, sales-kurir-sub
 CRM	PATCH	`/api/v1/crm/customers/{customer}`	korsal, sales, sales-kurir-sub
 CRM	POST	`/api/v1/crm/customers/{customer}/archive`	korsal, sales, sales-kurir-sub
-CRM	POST	`/api/v1/crm/customers/{customer}/consent-events`	korsal, sales, sales-kurir-sub
-CRM	POST	`/api/v1/crm/customers/{customer}/consent-otp`	korsal, sales, sales-kurir-sub
 CRM	POST	`/api/v1/crm/customers/{customer}/link`	korsal, sales, sales-kurir-sub
 CRM	POST	`/api/v1/crm/customers/{customer}/link-otp`	korsal, sales, sales-kurir-sub
 CRM	POST	`/api/v1/crm/customers/{customer}/orders`	agen, korsal, sales, sales-kurir-sub

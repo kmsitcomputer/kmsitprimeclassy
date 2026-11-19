@@ -38,6 +38,9 @@ type Config struct {
 	// MediaRoot is the `public` disk root (Laravel: storage/app/public via MEDIA_DISK=public). Empty
 	// leaves the internal/media package default, which is the relative path the container layout uses.
 	MediaRoot string
+	// StorageRoot is the private local disk root (Laravel: storage/app). Consent evidence
+	// lands under consent/evidence relative to it.
+	StorageRoot string
 
 	// AppKey is Laravel's APP_KEY. The Go service needs it ONLY to READ values Laravel encrypted (the
 	// agent shipping-provider credentials). It is never used to encrypt anything Go owns.
@@ -232,16 +235,17 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	cfg := Config{
-		Env:       env,
-		AppKey:    getenv("APP_KEY"),
-		HTTPAddr:  defaultStr(getenv("HTTP_ADDR"), ":8081"),
-		PublicURL: strings.TrimRight(strings.TrimSpace(getenv("APP_URL")), "/"),
-		MediaRoot: strings.TrimSpace(getenv("MEDIA_ROOT")),
-		DB:        db,
-		Session:   sess,
-		HTTP:      httpCfg,
-		Log:       logCfg,
-		Shipping:  shippingCfg,
+		Env:         env,
+		AppKey:      getenv("APP_KEY"),
+		HTTPAddr:    defaultStr(getenv("HTTP_ADDR"), ":8081"),
+		PublicURL:   strings.TrimRight(strings.TrimSpace(getenv("APP_URL")), "/"),
+		MediaRoot:   strings.TrimSpace(getenv("MEDIA_ROOT")),
+		StorageRoot: strings.TrimSpace(getenv("STORAGE_ROOT")),
+		DB:          db,
+		Session:     sess,
+		HTTP:        httpCfg,
+		Log:         logCfg,
+		Shipping:    shippingCfg,
 	}
 
 	if len(errs) > 0 {

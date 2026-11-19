@@ -62,6 +62,8 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/link-otp", chain(http.HandlerFunc(s.handleCRMLinkOtp), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/link", chain(http.HandlerFunc(s.handleCRMLink), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/unlink", chain(http.HandlerFunc(s.handleCRMUnlink), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/consent-otp", chain(http.HandlerFunc(s.handleCRMConsentOtp), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/consent-events", chain(http.HandlerFunc(s.handleCRMCaptureConsent), RequireAuth, s.RequireAgentLinked))
 
 	// Commission/fee REPORTS — CommissionController::allowedBeneficiaryRoles scopes the rows per role.
 	commissionRoles := "super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan"

@@ -2,11 +2,24 @@ package crm
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 // Unit 2 — CRM linking (OD-03/OD-04/CI-05): link a CRM customer to a konsumen ACCOUNT only after an
 // OTP challenge bound to that account was verified, inside one Agent, never by contact matching.
@@ -412,4 +425,277 @@ func (s *Service) lastEventID(ctx context.Context, customerID int64) int64 {
 	var id int64
 	_ = s.database.QueryRowContext(ctx, `SELECT id FROM crm_customer_link_events WHERE crm_customer_id=? ORDER BY id DESC LIMIT 1`, customerID).Scan(&id)
 	return id
+}
+
+// ---------------- CRM-origin consent (REM-005 / CI-01..CI-04) ----------------
+
+// IssueConsentOtp ports OtpChallengeService::issue for a consent purpose on a CRM customer: the OTP
+// goes to the VERIFIED email of the LINKED konsumen account (OD-03) — no other channel, no bypass.
+func (s *Service) IssueConsentOtp(ctx context.Context, actor Actor, customerID int64, purpose, channel string) (map[string]any, error) {
+	var ownerID, agentID int64
+	var err error
+	ownerID, agentID, err = s.BindingCustomer(ctx, actor, customerID)
+	if err != nil {
+		return nil, err
+	}
+	// canCaptureCrm: only the owning seller (CI-03)
+	if !(actor.Role == "sales" || actor.Role == "sales-kurir-sub" || actor.Role == "korsal") ||
+		ownerID != actor.ID || actor.AgentID == nil || *actor.AgentID != agentID {
+		return nil, ErrCannotRead
+	}
+	var linked sql.NullInt64
+	if err := s.database.QueryRowContext(ctx, `SELECT linked_konsumen_id FROM crm_customers WHERE id=?`, customerID).Scan(&linked); err != nil {
+		return nil, err
+	}
+	if !linked.Valid {
+		return nil, ErrConsentChannelUnavailable
+	}
+	var roleSlug string
+	var subjectAgent sql.NullInt64
+	var subjectEmail sql.NullString
+	var verified sql.NullTime
+	if err := s.database.QueryRowContext(ctx, `SELECT r.slug, u.agent_id, u.email, u.email_verified_at
+		FROM users u JOIN roles r ON u.role_id=r.id WHERE u.id=? AND u.deleted_at IS NULL`, linked.Int64).
+		Scan(&roleSlug, &subjectAgent, &subjectEmail, &verified); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrConsentChannelUnavailable
+		}
+		return nil, err
+	}
+	if roleSlug != "konsumen" || !subjectAgent.Valid || subjectAgent.Int64 != agentID {
+		return nil, ErrConsentChannelUnavailable
+	}
+	var msisdn string
+	policy := map[string]int{"ttl": otpTTLMinutes, "max": otpMaxAttempts, "limit": otpIssueLimit, "window": otpIssueWindowM}
+	if channel == "whatsapp" {
+		usable, uerr := s.whatsappUsable(ctx, subjectAgent.Int64)
+		if uerr != nil {
+			return nil, uerr
+		}
+		if !usable {
+			return nil, ErrOtpUnavailable
+		}
+		msisdn, err = s.provenMsisdn(ctx, linked.Int64)
+		if err != nil {
+			return nil, err
+		}
+		if msisdn == "" {
+			return nil, ErrNumberNotVerified
+		}
+	} else if !subjectEmail.Valid || subjectEmail.String == "" || !verified.Valid {
+		return nil, ErrEmailNotVerified
+	}
+	var challengeID int64
+	var expiresAt time.Time
+	purpose = strings.ToLower(purpose)
+	xerr := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM identity_otp_challenges
+			WHERE subject_user_id=? AND purpose=? AND created_at > ?`, linked.Int64, purpose,
+			time.Now().UTC().Add(-time.Duration(policy["window"])*time.Minute)).Scan(&n); err != nil {
+			return err
+		}
+		if n >= policy["limit"] {
+			return ErrOtpRateLimited
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE identity_otp_challenges SET invalidated_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6)
+			WHERE subject_user_id=? AND purpose=? AND consumed_at IS NULL AND invalidated_at IS NULL`, linked.Int64, purpose); err != nil {
+			return err
+		}
+		sent := sentTo(channel, subjectEmail, msisdn)
+		res, err := tx.ExecContext(ctx, `INSERT INTO identity_otp_challenges
+			(agent_id, subject_user_id, crm_customer_id, created_by, purpose, code_hash, sent_to_email, attempts, max_attempts, expires_at, created_at, updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
+			subjectAgent.Int64, linked.Int64, customerID, actor.ID, purpose, strings.Repeat("0", 64),
+			sent, 0, policy["max"], time.Now().UTC().Add(time.Duration(policy["ttl"])*time.Minute).Format("2006-01-02 15:04:05"))
+		if err != nil {
+			return err
+		}
+		challengeID, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT expires_at FROM identity_otp_challenges WHERE id=?`, challengeID).Scan(&expiresAt)
+	})
+	if xerr != nil {
+		return nil, xerr
+	}
+	return map[string]any{"challenge_id": challengeID, "expires_at": isoMicro(expiresAt), "max_attempts": policy["max"]}, nil
+}
+
+var ErrConsentChannelUnavailable = errors.New("crm.consent_channel_unavailable")
+var ErrOrderMismatch = errors.New("consent.order_mismatch")
+var ErrScopeInvalid = errors.New("consent.scope_invalid")
+var ErrKeyConflict = errors.New("consent.key_conflict")
+
+// CaptureConsent ports ConsentService::captureForCrm. evidence is the raw upload bytes + extension.
+func (s *Service) CaptureConsent(ctx context.Context, actor Actor, customerID, orderID, challengeID int64,
+	purpose string, scope [][2]int, evidence []byte, evidenceExt, note, consentKey string, storageRoot string) (map[string]any, error) {
+	var ownerID, agentID int64
+	var err error
+	ownerID, agentID, err = s.BindingCustomer(ctx, actor, customerID)
+	if err != nil {
+		return nil, err
+	}
+	if !(actor.Role == "sales" || actor.Role == "sales-kurir-sub" || actor.Role == "korsal") ||
+		ownerID != actor.ID || actor.AgentID == nil || *actor.AgentID != agentID {
+		return nil, ErrCannotRead
+	}
+	// order binding (agent-scoped findOrFail): a foreign-agent order is a binding miss
+	var ordAgent int64
+	var ordCrm sql.NullInt64
+	q := `SELECT agent_id, crm_customer_id FROM orders WHERE id=?`
+	args := []any{orderID}
+	if actor.Role != "super_admin" {
+		q += ` AND agent_id=?`
+		args = append(args, agentID)
+	}
+	if err := s.database.QueryRowContext(ctx, q, args...).Scan(&ordAgent, &ordCrm); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if !ordCrm.Valid || ordCrm.Int64 != customerID || ordAgent != agentID {
+		return nil, ErrOrderMismatch
+	}
+	if consentKey != "" {
+		var exActor, exCust int64
+		cnum := 0
+		err := s.database.QueryRowContext(ctx, `SELECT actor_id, crm_customer_id FROM consent_events WHERE consent_key=?`, consentKey).
+			Scan(&exActor, &exCust)
+		if err == nil {
+			if exActor != actor.ID || exCust != customerID {
+				return nil, ErrKeyConflict
+			}
+			return s.consentEvent(ctx, int64(cnum))
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+	// validateScope: each line must be an order item of this order, qty 1..(fulfilled - returned), unique
+	seen := map[int64]bool{}
+	norm := make([]map[string]any, 0, len(scope))
+	for _, line := range scope {
+		var fulfilled, returned int64
+		var itemID int64
+		itemID, fulfilled, returned = 0, 0, 0
+		row := s.database.QueryRowContext(ctx, `SELECT id, fulfilled_quantity, returned_quantity FROM order_items
+			WHERE order_id=? AND id=?`, orderID, line[0])
+		var fid, rid int64
+		if err := row.Scan(&itemID, &fid, &rid); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrScopeInvalid
+			}
+			return nil, err
+		}
+		fulfilled, returned = fid, rid
+		qty := int64(line[1])
+		if qty < 1 || qty > fulfilled-returned || seen[itemID] {
+			return nil, ErrScopeInvalid
+		}
+		seen[itemID] = true
+		norm = append(norm, map[string]any{"order_item_id": itemID, "quantity": qty})
+	}
+	if len(norm) == 0 {
+		return nil, ErrScopeInvalid
+	}
+	var eventID int64
+	xerr := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var linked sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT linked_konsumen_id FROM crm_customers WHERE id=? FOR UPDATE`, customerID).Scan(&linked); err != nil {
+			return err
+		}
+		var purpose2, sentTo2 string
+		var chCust, chSubject, chCreator sql.NullInt64
+		var verified, consumed, invalidated sql.NullTime
+		var konsumenID int64
+		if !linked.Valid {
+			return ErrConsentChannelUnavailable
+		}
+		konsumenID = linked.Int64
+		var hasEmail int
+		if err := tx.QueryRowContext(ctx, `SELECT (email IS NOT NULL AND email <> '' AND email_verified_at IS NOT NULL) FROM users WHERE id=?`, konsumenID).Scan(&hasEmail); err != nil {
+			return err
+		}
+		if hasEmail == 0 {
+			return ErrConsentChannelUnavailable
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT purpose, crm_customer_id, subject_user_id, created_by, verified_at, consumed_at, invalidated_at, sent_to_email
+			FROM identity_otp_challenges WHERE id=? FOR UPDATE`, challengeID).
+			Scan(&purpose2, &chCust, &chSubject, &chCreator, &verified, &consumed, &invalidated, &sentTo2); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrChallengeNotUsable
+			}
+			return err
+		}
+		valid := purpose2 == purpose && chCust.Valid && chCust.Int64 == customerID &&
+			chSubject.Valid && chSubject.Int64 == konsumenID && chCreator.Valid && chCreator.Int64 == actor.ID &&
+			verified.Valid && !consumed.Valid && !invalidated.Valid &&
+			time.Now().UTC().Sub(verified.Time) <= linkWindowMin*time.Minute
+		if !valid {
+			return ErrChallengeNotUsable
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE identity_otp_challenges SET consumed_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6) WHERE id=?`, challengeID); err != nil {
+			return err
+		}
+		// store the evidence file on the private local disk (path shape mirrors Laravel's store())
+		fileName := fmt.Sprintf("%s%s", randomHex(16), evidenceExt)
+		rel := fmt.Sprintf("consent/evidence/%s", fileName)
+		if storageRoot != "" {
+			full := filepath.Join(storageRoot, rel)
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(full, evidence, 0o644); err != nil {
+				return err
+			}
+		}
+		hash := sha256.Sum256(evidence)
+		scopeJSON, _ := json.Marshal(norm)
+		now := time.Now().UTC().Format("2006-01-02 15:04:05")
+		res, err := tx.ExecContext(ctx, `INSERT INTO consent_events
+			(agent_id, subject_user_id, crm_customer_id, order_id, event_type, purpose, scope, evidence_path, evidence_sha256, note,
+			 otp_challenge_id, actor_id, consent_key, policy_version, occurred_at, created_at, updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			agentID, konsumenID, customerID, orderID, "captured", purpose, string(scopeJSON), rel, hex.EncodeToString(hash[:]), note,
+			challengeID, actor.ID, nullableString(sql.NullString{String: consentKey, Valid: consentKey != ""}), "consent-v1", now, now, now)
+		if err != nil {
+			return err
+		}
+		eventID, err = res.LastInsertId()
+		return err
+	})
+	if xerr != nil {
+		return nil, xerr
+	}
+	return s.consentEvent(ctx, eventID)
+}
+
+// consentEvent serializes a ConsentEvent the way ConsentEventResource does.
+func (s *Service) consentEvent(ctx context.Context, id int64) (map[string]any, error) {
+	var rootEvent, crmCust, returnID sql.NullInt64
+	var subjectUser, orderID, actorID int64
+	var eventType, purpose, policyVersion string
+	var scope, note, evidencePath, evidenceHash, consentKey sql.NullString
+	var occurred time.Time
+	err := s.database.QueryRowContext(ctx, `SELECT id, root_event_id, event_type, purpose, subject_user_id, crm_customer_id,
+		order_id, return_id, scope, evidence_path, evidence_sha256, note, actor_id, policy_version, occurred_at, consent_key
+		FROM consent_events WHERE id=?`, id).
+		Scan(&id, &rootEvent, &eventType, &purpose, &subjectUser, &crmCust, &orderID, &returnID, &scope,
+			&evidencePath, &evidenceHash, &note, &actorID, &policyVersion, &occurred, &consentKey)
+	if err != nil {
+		return nil, err
+	}
+	var scopeVal any
+	if scope.Valid && scope.String != "" {
+		_ = json.Unmarshal([]byte(scope.String), &scopeVal)
+	}
+	return map[string]any{
+		"id": id, "root_event_id": nullableInt(rootEvent), "event_type": eventType, "purpose": purpose,
+		"subject_user_id": subjectUser, "crm_customer_id": nullableInt(crmCust), "order_id": orderID,
+		"return_id": nullableInt(returnID), "scope": scopeVal, "has_evidence": evidencePath.Valid,
+		"evidence_sha256": nullableString(evidenceHash), "note": nullableString(note), "actor_id": actorID,
+		"policy_version": policyVersion, "occurred_at": isoMicro(occurred),
+	}, nil
 }
