@@ -119,7 +119,6 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		"cancellation_reason":    nullableString(order.CancellationReason),
 		// G17: which authoritative origin owns the transaction. A CRM order is a different shape (staff-facing).
 		"buyer_origin": buyerOrigin(order.CrmCustomerID != nil),
-		"crm_customer": crmCustomer(order),
 		// `couriers` is ONE entry per DISTINCT courier actually assigned (never a placeholder block).
 		"couriers":                couriersFor(order.Shipments),
 		"items":                   renderItems(order.Items, viewer, order.LoadItemShipment),
@@ -138,6 +137,11 @@ func Render(ctx context.Context, s *Service, order *Order, viewer Viewer) (map[s
 		return nil, err
 	}
 	out["viewer_can_download_invoice"] = canDownload
+
+	// `crm_customer` is `when(isCrmOrigin(), ...)`: ABSENT for an account-origin order.
+	if order.CrmCustomerID != nil {
+		out["crm_customer"] = crmCustomer(order)
+	}
 
 	// `agent_id` is branch ROUTING data, exposed only to the courier-assignment roles.
 	if viewer.hasRole("super_admin", "agen", "admin", "koordinator-kurir") {
@@ -335,7 +339,7 @@ func renderBankVerification(v *BankTransferVerification, fallbackAmount float64)
 		"submitted_by":             v.SubmittedBy,
 		"paid_by":                  nullableString(v.PaidByRole),
 		"submitted_at":             renderTimePtr(v.SubmittedAt),
-		"verified_by":              v.VerifiedBy,
+		"verified_by":              v.VerifiedByUser,
 		"verified_at":              renderTimePtr(v.VerifiedAt),
 	}
 }

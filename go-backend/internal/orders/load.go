@@ -254,7 +254,8 @@ func (s *Service) loadKonsumenUser(userID *int64) (*map[string]any, error) {
 		`SELECT name, phone FROM users WHERE id = ?`, *userID).Scan(&name, &phone); err != nil {
 		return nil, err
 	}
-	out := map[string]any{"id": *userID, "name": nullableStringRow(name), "phone": nullableStringRow(phone)}
+	// OrderResource renders the konsumen as {name, phone} ONLY — the id is internal.
+	out := map[string]any{"name": nullableStringRow(name), "phone": nullableStringRow(phone)}
 	return &out, nil
 }
 

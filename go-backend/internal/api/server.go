@@ -67,7 +67,7 @@ func New(cfg config.Config, database *db.DB, opts Options) *Server {
 		AccessLog,
 		CORS(stateful),
 		s.LoadSession,
-		ValidateCSRF,
+		ValidateCSRF(stateful),
 	)
 	return s
 }

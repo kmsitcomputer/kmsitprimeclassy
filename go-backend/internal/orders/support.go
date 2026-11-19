@@ -558,8 +558,10 @@ func (s *Service) initiatePayment(ctx context.Context, tx *sql.Tx, orderID, agen
 		if cerr != nil {
 			return 0, cerr
 		}
+		// Laravel's initiateDownPayment: the DP prefix and an explicit `note` marker on the instructions.
 		payload = config
-		reference = s.manualReference()
+		payload["note"] = "down_payment"
+		reference = s.prefixedReference("DP-")
 	case method.Type == "cod":
 		payload = map[string]any{"note": "cash_on_delivery"}
 	case method.Type == "manual":
@@ -640,6 +642,14 @@ func (s *Service) activePaymentConfig(ctx context.Context, agentID int64, method
 		"account_name":   decoded["account_name"],
 		"account_number": decoded["account_number"],
 	}, nil
+}
+
+func (s *Service) prefixedReference(prefix string) string {
+	value, err := randomAlphaNumeric(10)
+	if err != nil {
+		return prefix + "0000000000"
+	}
+	return prefix + strings.ToUpper(value)
 }
 
 func (s *Service) manualReference() string {

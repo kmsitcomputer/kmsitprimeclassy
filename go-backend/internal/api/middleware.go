@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -317,25 +318,69 @@ func (s *Server) LoadSession(next http.Handler) http.Handler {
 //
 // The install endpoints are exempt exactly like bootstrap/app.php does for `api/v1/install/*`: the
 // installer runs before any session exists and is sealed by `not.installed` + super-admin checks.
-func ValidateCSRF(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/install/") {
+func ValidateCSRF(statefulDomains []string) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/v1/install/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !implementsRoute(r.Method, r.URL.Path) {
+				// Not served by this build: no side effect can happen, so a CSRF check would only mask the real
+				// answer (501 not-implemented / 404 unknown) behind a 419.
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Sanctum's EnsureFrontendRequestsAreStateful: CSRF is enforced ONLY for first-party frontend
+			// requests — a request carrying an Origin/Referer on a stateful domain. A bare request (no
+			// Origin at all) skips the stateful middleware stack entirely, so Laravel answers with the
+			// auth failure (401), never a token mismatch.
+			if !isStatefulRequest(r, statefulDomains) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if err := auth.ValidateCSRF(r, SessionFrom(r.Context())); err != nil {
+				// Laravel's TokenMismatchException message, rendered through the same envelope.
+				httpx.Failure(w, 419, "CSRF token mismatch.", nil)
+				return
+			}
 			next.ServeHTTP(w, r)
-			return
+		})
+	}
+}
+
+// isStatefulRequest mirrors Sanctum's fromFrontend: the Origin (fallback Referer) host[:port] must be
+// listed in SANCTUM_STATEFUL_DOMAINS.
+func isStatefulRequest(r *http.Request, domains []string) bool {
+	source := r.Header.Get("Origin")
+	if source == "" {
+		source = r.Header.Get("Referer")
+	}
+	if source == "" {
+		return false
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host, port := parsed.Hostname(), parsed.Port()
+	for _, domain := range domains {
+		domain = strings.TrimSpace(domain)
+		if domain == "" {
+			continue
 		}
-		if !implementsRoute(r.Method, r.URL.Path) {
-			// Not served by this build: no side effect can happen, so a CSRF check would only mask the real
-			// answer (501 not-implemented / 404 unknown) behind a 419.
-			next.ServeHTTP(w, r)
-			return
+		if dHost, dPort, splitErr := net.SplitHostPort(domain); splitErr == nil {
+			if dHost == host && dPort == port {
+				return true
+			}
+			continue
 		}
-		if err := auth.ValidateCSRF(r, SessionFrom(r.Context())); err != nil {
-			// Laravel's TokenMismatchException message, rendered through the same envelope.
-			httpx.Failure(w, 419, "CSRF token mismatch.", nil)
-			return
+		// Bare-host entry: matches any port on that host.
+		if domain == host {
+			return true
 		}
-		next.ServeHTTP(w, r)
-	})
+	}
+	return false
 }
 
 // RequireAuth rejects anonymous requests with the 401 envelope.

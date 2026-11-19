@@ -81,11 +81,14 @@ type CodPaymentProof struct {
 
 // paidOrder is the locked financial boundary of an order.
 type paidOrder struct {
-	ID              int64
-	Status          string
-	PaymentStatus   string
-	Total           float64
-	Paid            float64
+	ID            int64
+	Status        string
+	PaymentStatus string
+	Total         float64
+	Paid          float64
+	// StoredRemaining is the persisted remaining_amount column (the audit rows report THAT, not a recomputation:
+	// it is 0 for an order that never had a money event).
+	StoredRemaining float64
 	GrossReceived   float64
 	KonsumenID      *int64
 	AgentID         int64
@@ -98,18 +101,18 @@ type paidOrder struct {
 
 func (s *Service) lockOrderForPayment(ctx context.Context, tx *sql.Tx, orderID int64) (*paidOrder, error) {
 	var (
-		o                  paidOrder
-		total, paid, gross string
-		konsumen           sql.NullInt64
-		methodID           sql.NullInt64
-		code, ptype        sql.NullString
+		o                                   paidOrder
+		total, paid, gross, storedRemaining string
+		konsumen                            sql.NullInt64
+		methodID                            sql.NullInt64
+		code, ptype                         sql.NullString
 	)
 	err := tx.QueryRowContext(ctx, `SELECT o.id, o.status, o.payment_status,
 			CAST(o.total_amount AS CHAR), CAST(o.paid_amount AS CHAR), CAST(o.gross_received_amount AS CHAR),
-			o.konsumen_id, o.agent_id, o.payment_method_id, pm.code, pm.type
+			CAST(o.remaining_amount AS CHAR), o.konsumen_id, o.agent_id, o.payment_method_id, pm.code, pm.type
 		FROM orders o LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
 		WHERE o.id = ? FOR UPDATE`, orderID).
-		Scan(&o.ID, &o.Status, &o.PaymentStatus, &total, &paid, &gross, &konsumen, &o.AgentID,
+		Scan(&o.ID, &o.Status, &o.PaymentStatus, &total, &paid, &gross, &storedRemaining, &konsumen, &o.AgentID,
 			&methodID, &code, &ptype)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrOrderNotFound
@@ -120,6 +123,7 @@ func (s *Service) lockOrderForPayment(ctx context.Context, tx *sql.Tx, orderID i
 	o.Total = parseString(total)
 	o.Paid = parseString(paid)
 	o.GrossReceived = parseString(gross)
+	o.StoredRemaining = parseString(storedRemaining)
 	o.KonsumenID = nullIntPtr(konsumen)
 	o.PaymentMethodID = nullIntPtr(methodID)
 	o.PaymentCode = nullStringPtr(code)
@@ -785,7 +789,7 @@ func (s *Service) VerifyBankTransfer(ctx context.Context, in VerifyBankTransferI
 				"amount_adjustment_reason": adjustment,
 				"channel":                  verification.Channel,
 				"paid_amount":              after.Paid,
-				"remaining_amount":         after.Remaining(),
+				"remaining_amount":         after.StoredRemaining,
 			}, s.IP, s.UserAgent); err != nil {
 			return err
 		}
@@ -1776,19 +1780,24 @@ func (s *Service) bankTransferConfig(ctx context.Context, q querier, agentID int
 	err = q.QueryRowContext(ctx, `SELECT config FROM agent_payment_gateway_configs
 		WHERE agent_id = ? AND payment_method_id = ? AND environment = ?`, agentID, methodID, environment).
 		Scan(&configRaw)
+	var methodName string
+	_ = q.QueryRowContext(ctx, `SELECT name FROM payment_methods WHERE id = ?`, methodID).Scan(&methodName)
+	notConfigured := &Problem{Status: 422, Message: s.Messages("payment.method_not_configured", "name", methodName)}
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil, &Problem{Status: 422,
-			Message: s.Messages("payment.method_not_configured", "name", "Transfer Bank"),
-			Fields:  map[string]string{"payment_method": s.Messages("payment.method_not_configured", "name", "Transfer Bank")}}
+		return 0, nil, notConfigured
 	}
 	if err != nil {
 		return 0, nil, err
 	}
-	config := map[string]any{}
-	if configRaw.Valid && strings.TrimSpace(configRaw.String) != "" {
-		_ = json.Unmarshal([]byte(configRaw.String), &config)
+	// The column is Laravel `encrypted:array`; an undecryptable value is the same "not configured" answer.
+	decoded, derr := decryptJSON(s.AppKey, configRaw.String)
+	if derr != nil {
+		return 0, nil, notConfigured
 	}
-	return methodID, config, nil
+	return methodID, map[string]any{
+		"bank_name": decoded["bank_name"], "account_name": decoded["account_name"],
+		"account_number": decoded["account_number"],
+	}, nil
 }
 
 // PaymentResponseMode picks which verification relation the controller eager loaded on paymentTransactions.

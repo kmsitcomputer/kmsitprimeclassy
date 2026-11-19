@@ -281,7 +281,6 @@ func (s *Server) handlePaymentMarkCod(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	loaded.LoadPaymentTransactions = false // markCod's controller load set has no paymentTransactions relation
 	rendered, err := orders.Render(ctx, service, loaded, viewerOf(actor))
 	if err != nil {
 		writeError(w, r, err)
@@ -498,7 +497,9 @@ func (s *Server) handlePaymentProofFile(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", http.DetectContentType(content))
 	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
-	w.Header().Set("Cache-Control", "private, no-store")
+	// PreventApiResponseCaching (appended globally) rewrites the controller's own header, so this is what the
+	// reference actually answers with.
+	w.Header().Set("Cache-Control", "must-revalidate, no-cache, no-store, private")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
