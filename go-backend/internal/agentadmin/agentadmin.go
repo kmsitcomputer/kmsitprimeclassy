@@ -845,11 +845,18 @@ func (s *Service) UpdateWhatsAppEvent(ctx context.Context, actorID, agentID int6
 
 func (s *Service) ResetWhatsAppTemplate(ctx context.Context, actorID, agentID int64, event string) (map[string]any, error) {
 	if !contains(WhatsAppEventKeys, event) {
-		return nil, fail(422, "Event WhatsApp tidak dapat dikonfigurasi.")
+		message := i18n.Translate(i18n.Default, "whatsapp.event_not_configurable")
+		return nil, &Error{Status: 422, Message: message, Fields: map[string][]string{"event": {message}}}
 	}
-	_, err := s.database.ExecContext(ctx, `UPDATE agent_whatsapp_event_settings SET template=NULL,updated_by=?,updated_at=UTC_TIMESTAMP(6) WHERE agent_id=? AND event=?`, actorID, agentID, event)
-	if err != nil {
+	var template sql.NullString
+	err := s.database.QueryRowContext(ctx, `SELECT template FROM agent_whatsapp_event_settings WHERE agent_id=? AND event=?`, agentID, event).Scan(&template)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
+	}
+	if err == nil && template.Valid {
+		if _, err := s.database.ExecContext(ctx, `UPDATE agent_whatsapp_event_settings SET template=NULL,updated_by=?,updated_at=UTC_TIMESTAMP(6) WHERE agent_id=? AND event=?`, actorID, agentID, event); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := s.WhatsAppEvents(ctx, agentID)
 	if err != nil {

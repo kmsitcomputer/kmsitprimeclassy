@@ -106,7 +106,7 @@ Status legend:
 | GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **GO** | RBAC, agent_id selector, event ordering and full payload compared with database read-only evidence by compare_whatsapp_events.py |
 | PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **GO** | boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py |
 | POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | LARAVEL |  |
-| DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **PARTIAL** |  |
+| DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **GO** | idempotent reset, no-op persistence, event validation, branch scope and conditional AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_resets.py |
 | POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/messages` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/pair/code` | session | admin, agen | LARAVEL |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 192 (51.2%) |
-|   of which fully GO | 147 |
-|   of which PARTIAL (incomplete behaviour) | 45 |
+|   of which fully GO | 148 |
+|   of which PARTIAL (incomplete behaviour) | 44 |
 | Still Laravel-only | 183 |
 | Areas fully ported | 20 / 45 |

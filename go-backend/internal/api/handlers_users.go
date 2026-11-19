@@ -74,6 +74,21 @@ func (s *Server) recordAgentWhatsAppEventAudit(r *http.Request, actor *auth.User
 	return err
 }
 
+func (s *Server) recordAgentWhatsAppTemplateResetAudit(r *http.Request, actor *auth.User, agentID, subjectID int64, event string) error {
+	properties, err := json.Marshal(map[string]any{"event": event, "actor_id": actor.ID, "target_agent_id": agentID})
+	if err != nil {
+		return err
+	}
+	userAgent := r.UserAgent()
+	if len(userAgent) > 500 {
+		userAgent = userAgent[:500]
+	}
+	_, err = s.database.ExecContext(r.Context(), `INSERT INTO activity_logs
+		(causer_id,subject_type,subject_id,event,properties,ip_address,user_agent,created_at)
+		VALUES (?,'App\\Models\\AgentWhatsAppEventSetting',?,?,?,?,?,UTC_TIMESTAMP(6))`, actor.ID, subjectID, "whatsapp.agent_event.template_reset", properties, clientIP(r), userAgent)
+	return err
+}
+
 func (s *Server) recordAgentProfileAudit(r *http.Request, actor *auth.User, agentID int64, old, current any) error {
 	var profileID int64
 	if err := s.database.QueryRowContext(r.Context(), `SELECT id FROM agent_profiles WHERE user_id=?`, agentID).Scan(&profileID); err != nil {
@@ -783,16 +798,29 @@ func (s *Server) handleAgentWhatsAppTemplateReset(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	data, err := agentadmin.New(s.database, s.cfg.AppKey).ResetWhatsAppTemplate(r.Context(), actor.ID, agentID, httpx.PathValue(r, "event"))
+	if !whatsAppSelectorAllowed(r, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+		return
+	}
+	event := httpx.PathValue(r, "event")
+	var subjectID int64
+	var oldTemplate sql.NullString
+	if err := s.database.QueryRowContext(r.Context(), `SELECT id,template FROM agent_whatsapp_event_settings WHERE agent_id=? AND event=?`, agentID, event).Scan(&subjectID, &oldTemplate); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeAgentAdminError(w, r, err)
+		return
+	}
+	data, err := agentadmin.New(s.database, s.cfg.AppKey).ResetWhatsAppTemplate(r.Context(), actor.ID, agentID, event)
 	if err != nil {
 		writeAgentAdminError(w, r, err)
 		return
 	}
-	if err := s.recordAgentAudit(r, actor, agentID, "whatsapp.agent_event.template_reset", map[string]any{"event": httpx.PathValue(r, "event")}); err != nil {
-		writeError(w, r, err)
-		return
+	if oldTemplate.Valid {
+		if err := s.recordAgentWhatsAppTemplateResetAudit(r, actor, agentID, subjectID, event); err != nil {
+			writeError(w, r, err)
+			return
+		}
 	}
-	httpx.OK(w, data, "Konfigurasi WhatsApp tersimpan.", nil)
+	httpx.OK(w, data, msg(r.Context(), "whatsapp.saved"), nil)
 }
 
 func (s *Server) handleAgentWhatsAppTestNumbers(w http.ResponseWriter, r *http.Request) {
