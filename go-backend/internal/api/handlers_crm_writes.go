@@ -525,3 +525,171 @@ func (s *Server) crmBindingPrecheck(w http.ResponseWriter, r *http.Request, id i
 	_ = ownerID
 	return true
 }
+
+// ---------------- CRM linking (CrmAssistedController) ----------------
+
+func (s *Server) handleCRMLinkCandidates(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Laravel route gate role:sales,sales-kurir-sub,korsal
+	actor := crmActorFrom(r)
+	if actor.Role != "sales" && actor.Role != "sales-kurir-sub" && actor.Role != "korsal" {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	rows, err := s.crmService().LinkCandidates(ctx, actor)
+	if err != nil {
+		s.writeCRMError(w, r, err)
+		return
+	}
+	httpx.OK(w, rows, "OK", nil)
+}
+
+func (s *Server) handleCRMLinkOtp(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, ok := pathID(w, r, "customer")
+	if !ok {
+		return
+	}
+	// binding before role gate (Laravel middleware priority)
+	if _, _, berr := s.crmService().BindingCustomer(ctx, crmActorFrom(r), id); berr != nil {
+		s.writeCRMError(w, r, berr)
+		return
+	}
+	actor := crmActorFrom(r)
+	if actor.Role != "sales" && actor.Role != "sales-kurir-sub" && actor.Role != "korsal" {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	body, err := crmBody(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	konsumenID, present, bad := crmInt(body, "konsumen_id")
+	fields := map[string][]string{}
+	loc := LocaleFrom(ctx)
+	if !present {
+		fields["konsumen_id"] = []string{i18n.ValidationMessage(loc, "required", "konsumen_id")}
+	} else if bad {
+		fields["konsumen_id"] = []string{i18n.ValidationMessage(loc, "integer", "konsumen_id")}
+	}
+	channel := "email"
+	if raw, ok := body["channel"]; ok && string(raw) != "null" {
+		var cv string
+		if json.Unmarshal(raw, &cv) != nil || (cv != "email" && cv != "whatsapp") {
+			fields["channel"] = []string{i18n.ValidationMessage(loc, "in", "channel")}
+		} else {
+			channel = cv
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	ch, err := s.crmService().IssueLinkOtp(ctx, actor, id, int64(*konsumenID), channel)
+	if err != nil {
+		s.writeCRMError(w, r, err)
+		return
+	}
+	httpx.Created(w, ch, msg(ctx, "consent.otp_sent"))
+}
+
+func (s *Server) handleCRMLink(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, ok := pathID(w, r, "customer")
+	if !ok {
+		return
+	}
+	if _, _, berr := s.crmService().BindingCustomer(ctx, crmActorFrom(r), id); berr != nil {
+		s.writeCRMError(w, r, berr)
+		return
+	}
+	actor := crmActorFrom(r)
+	if actor.Role != "sales" && actor.Role != "sales-kurir-sub" && actor.Role != "korsal" {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	body, err := crmBody(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	loc := LocaleFrom(ctx)
+	fields := map[string][]string{}
+	konsumenID, present, bad := crmInt(body, "konsumen_id")
+	if !present {
+		fields["konsumen_id"] = []string{i18n.ValidationMessage(loc, "required", "konsumen_id")}
+	} else if bad {
+		fields["konsumen_id"] = []string{i18n.ValidationMessage(loc, "integer", "konsumen_id")}
+	}
+	challengeID, presentC, badC := crmInt(body, "otp_challenge_id")
+	if !presentC {
+		fields["otp_challenge_id"] = []string{i18n.ValidationMessage(loc, "required", "otp challenge id")}
+	} else if badC {
+		fields["otp_challenge_id"] = []string{i18n.ValidationMessage(loc, "integer", "otp challenge id")}
+	} else {
+		var n int
+		_ = s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM identity_otp_challenges WHERE id=?`, *challengeID).Scan(&n)
+		if n == 0 {
+			fields["otp_challenge_id"] = []string{i18n.ValidationMessage(loc, "exists", "otp challenge id")}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	row, err := s.crmService().Link(ctx, actor, id, int64(*konsumenID), int64(*challengeID))
+	if err != nil {
+		s.writeCRMError(w, r, err)
+		return
+	}
+	u := UserFrom(ctx)
+	var eventID int64
+	_ = s.database.QueryRowContext(ctx, `SELECT id FROM crm_customer_link_events WHERE crm_customer_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&eventID)
+	_ = s.writeActivityLog(ctx, u.ID, `App\Models\CrmCustomer`, id, "crm.customer.linked", map[string]any{"konsumen_user_id": int64(*konsumenID), "event_id": eventID})
+	httpx.OK(w, row, msg(ctx, "crm.linked"), nil)
+}
+
+func (s *Server) handleCRMUnlink(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, ok := pathID(w, r, "customer")
+	if !ok {
+		return
+	}
+	if _, _, berr := s.crmService().BindingCustomer(ctx, crmActorFrom(r), id); berr != nil {
+		s.writeCRMError(w, r, berr)
+		return
+	}
+	actor := crmActorFrom(r)
+	if actor.Role != "sales" && actor.Role != "sales-kurir-sub" && actor.Role != "korsal" &&
+		actor.Role != "agen" && actor.Role != "admin" {
+		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(ctx, "system.unauthorized_action")))
+		return
+	}
+	body, err := crmBody(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	loc := LocaleFrom(ctx)
+	reason, present, bad := crmString(body, "reason")
+	fields := map[string][]string{}
+	if !present || (present && bad) {
+		fields["reason"] = []string{i18n.ValidationMessage(loc, "required", "reason")}
+	} else if len(*reason) > 1000 {
+		fields["reason"] = []string{i18n.ValidationMessage(loc, "max.string", "reason", "max", "1000")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	row, konsumenID, eventID, err := s.crmService().Unlink(ctx, actor, id, *reason)
+	if err != nil {
+		s.writeCRMError(w, r, err)
+		return
+	}
+	u := UserFrom(ctx)
+	_ = s.writeActivityLogWithDescription(ctx, u.ID, `App\Models\CrmCustomer`, id, "crm.customer.unlinked", *reason,
+		map[string]any{"konsumen_user_id": konsumenID, "event_id": eventID})
+	httpx.OK(w, row, msg(ctx, "crm.unlinked"), nil)
+}

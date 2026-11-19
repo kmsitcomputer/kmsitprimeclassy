@@ -101,7 +101,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/reports/payment-status",
 		"GET /api/v1/reports/sales",
 		"GET /api/v1/admin/audit-logs",
-		"POST /api/v1/crm/customers":
+		"POST /api/v1/crm/customers",
+		"GET /api/v1/crm/link-candidates":
 		return true
 	}
 	// CRM write routes with path parameters (binding-style: any last segment shape is the route).
@@ -610,6 +611,23 @@ func (s *Server) writeActivityLog(ctx context.Context, causerID int64, subjectTy
 		(causer_id, subject_type, subject_id, event, description, properties, created_at)
 		VALUES (?, ?, ?, ?, NULL, ?, UTC_TIMESTAMP(6))`,
 		causerID, subjectType, subjectID, event, payload)
+	return err
+}
+
+// writeActivityLogWithDescription ports ActivityLogger::log with a non-null description (unlink).
+func (s *Server) writeActivityLogWithDescription(ctx context.Context, causerID int64, subjectType string, subjectID int64, event, description string, props map[string]any) error {
+	var payload any
+	if len(props) > 0 {
+		buf, err := json.Marshal(props)
+		if err != nil {
+			return err
+		}
+		payload = string(buf)
+	}
+	_, err := s.database.ExecContext(ctx, `INSERT INTO activity_logs
+		(causer_id, subject_type, subject_id, event, description, properties, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
+		causerID, subjectType, subjectID, event, description, payload)
 	return err
 }
 

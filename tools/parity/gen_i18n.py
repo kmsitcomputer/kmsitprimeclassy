@@ -109,6 +109,10 @@ KEYS = {
         "not_crm_order",
         "migration_pending",
     ],
+    "whatsapp": [
+        "otp_unavailable",
+        "number_not_verified",
+    ],
     "consent": [
         "otp_sent",
         "captured",

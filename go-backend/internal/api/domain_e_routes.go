@@ -58,6 +58,10 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/archive", chain(http.HandlerFunc(s.handleCRMCustomerArchive), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/visits", chain(http.HandlerFunc(s.handleCRMVisitStore), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("PATCH /api/v1/crm/visits/{visit}", chain(http.HandlerFunc(s.handleCRMVisitUpdate), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("GET /api/v1/crm/link-candidates", chain(http.HandlerFunc(s.handleCRMLinkCandidates), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/link-otp", chain(http.HandlerFunc(s.handleCRMLinkOtp), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/link", chain(http.HandlerFunc(s.handleCRMLink), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/unlink", chain(http.HandlerFunc(s.handleCRMUnlink), RequireAuth, s.RequireAgentLinked))
 
 	// Commission/fee REPORTS — CommissionController::allowedBeneficiaryRoles scopes the rows per role.
 	commissionRoles := "super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan"
