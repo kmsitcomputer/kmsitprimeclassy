@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
@@ -37,6 +39,15 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("GET /api/v1/media", chain(http.HandlerFunc(s.handleMediaIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/media", chain(http.HandlerFunc(s.handleMediaStore), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("DELETE /api/v1/media/{media}", chain(http.HandlerFunc(s.handleMediaDestroy), RequireAuth, s.RequireAgentLinked))
+
+	// Admin agents (Kontak Agen) — every route sits inside the super_admin admin group; the controller
+	// Gate::authorize('manage-system-config') is the same super_admin check.
+	adminAgents := RequireRole("super_admin")
+	s.mux.Handle("GET /api/v1/admin/agents", chain(http.HandlerFunc(s.handleAdminAgentsIndex), RequireAuth, s.RequireAgentLinked, adminAgents))
+	s.mux.Handle("POST /api/v1/admin/agents", chain(http.HandlerFunc(s.handleAdminAgentsStore), RequireAuth, s.RequireAgentLinked, adminAgents))
+	s.mux.Handle("PATCH /api/v1/admin/agents/{agentProfile}", chain(http.HandlerFunc(s.handleAdminAgentsUpdate), RequireAuth, s.RequireAgentLinked, adminAgents))
+	s.mux.Handle("DELETE /api/v1/admin/agents/{agentProfile}", chain(http.HandlerFunc(s.handleAdminAgentsDestroy), RequireAuth, s.RequireAgentLinked, adminAgents))
+	s.mux.Handle("PATCH /api/v1/admin/agents/{agent}/toggle-status", chain(http.HandlerFunc(s.handleAdminAgentsToggleStatus), RequireAuth, s.RequireAgentLinked, adminAgents))
 }
 
 // matchesGLMLaravelOnlyRoute is consulted by implementsRoute (inventory.go) so the 501-vs-404
@@ -48,7 +59,15 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/notifications/admin/unread-count",
 		"POST /api/v1/notifications/admin/read-all",
 		"GET /api/v1/media",
-		"POST /api/v1/media":
+		"POST /api/v1/media",
+		"GET /api/v1/admin/agents",
+		"POST /api/v1/admin/agents":
+		return true
+	}
+	// PATCH/DELETE /api/v1/admin/agents/{id}[...] — route model binding: any shape of the last
+	// segments is the route; a missing row is a 404 (binding miss), a non-numeric segment also 404s.
+	if strings.HasPrefix(path, "/api/v1/admin/agents/") && len(path) > len("/api/v1/admin/agents/") &&
+		(method == http.MethodPatch || method == http.MethodDelete) {
 		return true
 	}
 	// DELETE /api/v1/media/{media} — Laravel route model binding: any last segment is the route; a
@@ -445,6 +464,476 @@ func (s *Server) handleMediaDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = os.Remove(filepath.Join(media.Root, filepath.FromSlash(path)))
 	httpx.OK(w, nil, msg(ctx, "media.deleted"), nil)
+}
+
+// ---- GLM admin agents (Laravel-only slice) --------------------------------------------------------
+
+// agentDirectoryRow renders Laravel's AgentDirectoryResource for one user row.
+func agentDirectoryRow(userID int64, name, email, phone, referralCode, status string, profile *map[string]any) map[string]any {
+	row := map[string]any{
+		"user_id":       userID,
+		"name":          name,
+		"email":         email,
+		"phone":         nil,
+		"referral_code": nil,
+		"status":        status,
+		"profile":       nil,
+	}
+	if phone != "" {
+		row["phone"] = phone
+	}
+	if referralCode != "" {
+		row["referral_code"] = referralCode
+	}
+	if profile != nil {
+		row["profile"] = *profile
+	}
+	return row
+}
+
+// scanAgentDirectoryRows runs the shared admin-directory query and renders the resource rows.
+func (s *Server) scanAgentDirectoryRows(ctx context.Context, query string, args ...any) ([]any, error) {
+	rows, err := s.database.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []any{}
+	for rows.Next() {
+		var userID int64
+		var name, email, status string
+		var phone, referralCode sql.NullString
+		var pID sql.NullInt64
+		var pStore, pAddress, pPhone sql.NullString
+		var pLat, pLon sql.NullString
+		if err := rows.Scan(&userID, &name, &email, &phone, &referralCode, &status,
+			&pID, &pStore, &pAddress, &pPhone, &pLat, &pLon); err != nil {
+			return nil, err
+		}
+		var profile *map[string]any
+		if pID.Valid {
+			profile = &map[string]any{
+				"id":         pID.Int64,
+				"store_name": pStore.String,
+				"address":    pAddress.String,
+				"phone":      nil,
+				"latitude":   pLat.String,
+				"longitude":  pLon.String,
+			}
+			if pPhone.Valid {
+				(*profile)["phone"] = pPhone.String
+			}
+		}
+		items = append(items, agentDirectoryRow(userID, name, email, phone.String, referralCode.String, status, profile))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const agentDirectoryQuery = `SELECT u.id,u.name,u.email,u.phone,u.referral_code,u.status,
+	p.id,p.store_name,p.address,p.phone,p.latitude,p.longitude
+	FROM users u JOIN roles r ON u.role_id=r.id AND r.slug='agen'
+	LEFT JOIN agent_profiles p ON p.user_id=u.id
+	WHERE u.deleted_at IS NULL `
+
+func (s *Server) handleAdminAgentsIndex(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Laravel orders by name only (ties undefined — D-1 class: the harness compares the SET).
+	items, err := s.scanAgentDirectoryRows(ctx, agentDirectoryQuery+`ORDER BY u.name`)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, items, "OK", nil)
+}
+
+func (s *Server) writeActivityLog(ctx context.Context, causerID int64, subjectType string, subjectID int64, event string, props map[string]any) error {
+	var payload any
+	if len(props) > 0 {
+		buf, err := json.Marshal(props)
+		if err != nil {
+			return err
+		}
+		payload = string(buf)
+	}
+	_, err := s.database.ExecContext(ctx, `INSERT INTO activity_logs
+		(causer_id, subject_type, subject_id, event, description, properties, created_at)
+		VALUES (?, ?, ?, ?, NULL, ?, UTC_TIMESTAMP(6))`,
+		causerID, subjectType, subjectID, event, payload)
+	return err
+}
+
+// agentProfileStoreValidate ports StoreAgentProfileRequest::rules (authorize() is true → pure validation).
+func agentProfileStoreValidate(ctx context.Context, d *db.DB, body map[string]json.RawMessage) (userID int64, storeName, address string, phone *string, lat, lon *float64, fields map[string][]string) {
+	fields = map[string][]string{}
+	locale := LocaleFrom(ctx)
+	str := func(key string) (string, bool) {
+		raw, ok := body[key]
+		if !ok {
+			return "", false
+		}
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return "", false
+		}
+		return v, true
+	}
+	// user_id: required integer exists
+	rawUID, ok := body["user_id"]
+	if !ok {
+		fields["user_id"] = []string{i18n.ValidationMessage(locale, "required", "user_id")}
+	} else if err := json.Unmarshal(rawUID, &userID); err != nil {
+		fields["user_id"] = []string{i18n.ValidationMessage(locale, "integer", "user_id")}
+	} else {
+		var n int
+		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id=?`, userID).Scan(&n); err != nil || n == 0 {
+			fields["user_id"] = []string{i18n.ValidationMessage(locale, "exists", "user_id")}
+		}
+	}
+	// store_name: required string max:150
+	v, ok := str("store_name")
+	switch {
+	case !ok:
+		fields["store_name"] = []string{i18n.ValidationMessage(locale, "required", "store_name")}
+	case len(v) > 150:
+		fields["store_name"] = []string{i18n.ValidationMessage(locale, "max.string", "store_name", "max", "150")}
+	default:
+		storeName = v
+	}
+	// address: required string
+	v, ok = str("address")
+	if !ok {
+		fields["address"] = []string{i18n.ValidationMessage(locale, "required", "address")}
+	} else {
+		address = v
+	}
+	// phone: nullable string max:20
+	if raw, present := body["phone"]; present && string(raw) != "null" {
+		var p string
+		if err := json.Unmarshal(raw, &p); err == nil {
+			if len(p) > 20 {
+				fields["phone"] = []string{i18n.ValidationMessage(locale, "max.string", "phone", "max", "20")}
+			} else {
+				phone = &p
+			}
+		}
+	}
+	// latitude/longitude: required numeric between
+	coord := func(key string, min, max float64) *float64 {
+		raw, ok := body[key]
+		if !ok {
+			fields[key] = []string{i18n.ValidationMessage(locale, "required", key)}
+			return nil
+		}
+		var f float64
+		if err := json.Unmarshal(raw, &f); err != nil {
+			fields[key] = []string{i18n.ValidationMessage(locale, "numeric", key)}
+			return nil
+		}
+		if f < min || f > max {
+			fields[key] = []string{i18n.ValidationMessage(locale, "between.numeric", key, "min", strconv.FormatFloat(min, 'f', -1, 64), "max", strconv.FormatFloat(max, 'f', -1, 64))}
+			return nil
+		}
+		return &f
+	}
+	lat = coord("latitude", -90, 90)
+	lon = coord("longitude", -180, 180)
+	return userID, storeName, address, phone, lat, lon, fields
+}
+
+func (s *Server) handleAdminAgentsStore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	// Laravel: FormRequest validation (authorize() true) runs during injection, BEFORE the controller
+	// body's Gate::authorize — so an invalid payload is a 422 even for an unauthorized role, while the
+	// route middleware role:super_admin already refused non-super_admin callers with 403 earlier.
+	userID, storeName, address, phone, lat, lon, fields := agentProfileStoreValidate(ctx, s.database, body)
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	u := UserFrom(ctx)
+	var roleSlug string
+	var status string
+	qerr := s.database.QueryRowContext(ctx,
+		`SELECT r.slug,u.status FROM users u JOIN roles r ON u.role_id=r.id WHERE u.id=? AND u.deleted_at IS NULL`, userID).
+		Scan(&roleSlug, &status)
+	if qerr != nil {
+		// Validation's exists:users already covers missing ids; a race lands here as the 404 findOrFail renders.
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.not_found")))
+		return
+	}
+	if roleSlug != "agen" {
+		writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity, msg(ctx, "agent.not_an_agent")))
+		return
+	}
+	var exists int
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_profiles WHERE user_id=?`, userID).Scan(&exists); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if exists > 0 {
+		writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity, msg(ctx, "agent.profile_already_exists")))
+		return
+	}
+	var profileID int64
+	var phoneArg any
+	if phone != nil {
+		phoneArg = *phone
+	}
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `INSERT INTO agent_profiles (user_id,store_name,address,phone,latitude,longitude,created_at,updated_at)
+			VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
+			userID, storeName, address, phoneArg, *lat, *lon)
+		if err != nil {
+			return err
+		}
+		profileID, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		return s.writeActivityLog(ctx, u.ID, `App\Models\AgentProfile`, profileID, "agent_profile.created",
+			map[string]any{"agent_user_id": userID, "actor_role": u.Role})
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	items, err := s.scanAgentDirectoryRows(ctx, agentDirectoryQuery+` AND u.id=?`, userID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.Created(w, items[0], "Created")
+}
+
+// agentProfileUpdateValidate ports UpdateAgentProfileRequest::rules (sometimes → ABSENT keys skip).
+func agentProfileUpdateValidate(ctx context.Context, body map[string]json.RawMessage) (storeName, address string, phone *string, lat, lon *float64, set map[string]bool, fields map[string][]string) {
+	fields = map[string][]string{}
+	set = map[string]bool{}
+	locale := LocaleFrom(ctx)
+	// store_name: sometimes|string|max:150 ; address: sometimes|string
+	for _, key := range []string{"store_name", "address"} {
+		raw, ok := body[key]
+		if !ok {
+			continue
+		}
+		set[key] = true
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			fields[key] = []string{i18n.ValidationMessage(locale, "string", key)}
+			continue
+		}
+		if key == "store_name" && len(v) > 150 {
+			fields["store_name"] = []string{i18n.ValidationMessage(locale, "max.string", "store_name", "max", "150")}
+			continue
+		}
+		if key == "store_name" {
+			storeName = v
+		} else {
+			address = v
+		}
+	}
+	// phone: sometimes|nullable|string|max:20
+	if raw, ok := body["phone"]; ok {
+		set["phone"] = true
+		if string(raw) != "null" {
+			var p string
+			if err := json.Unmarshal(raw, &p); err != nil {
+				fields["phone"] = []string{i18n.ValidationMessage(locale, "string", "phone")}
+			} else if len(p) > 20 {
+				fields["phone"] = []string{i18n.ValidationMessage(locale, "max.string", "phone", "max", "20")}
+			} else {
+				phone = &p
+			}
+		}
+	}
+	// latitude/longitude: sometimes|numeric|between
+	coord := func(key string, min, max float64) {
+		raw, ok := body[key]
+		if !ok {
+			return
+		}
+		set[key] = true
+		var f float64
+		if err := json.Unmarshal(raw, &f); err != nil {
+			fields[key] = []string{i18n.ValidationMessage(locale, "numeric", key)}
+			return
+		}
+		if f < min || f > max {
+			fields[key] = []string{i18n.ValidationMessage(locale, "between.numeric", key, "min", strconv.FormatFloat(min, 'f', -1, 64), "max", strconv.FormatFloat(max, 'f', -1, 64))}
+			return
+		}
+		if key == "latitude" {
+			lat = &f
+		} else {
+			lon = &f
+		}
+	}
+	coord("latitude", -90, 90)
+	coord("longitude", -180, 180)
+	return storeName, address, phone, lat, lon, set, fields
+}
+
+func (s *Server) handleAdminAgentsUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "agentProfile"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	var body map[string]json.RawMessage
+	if derr := httpx.DecodeJSON(r, &body); derr != nil {
+		writeError(w, r, derr)
+		return
+	}
+	storeName, address, phone, lat, lon, set, fields := agentProfileUpdateValidate(ctx, body)
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	u := UserFrom(ctx)
+	// Laravel: route-model binding FIRST (404 for a missing profile), then Gate, then validation.
+	var pUserID int64
+	qerr := s.database.QueryRowContext(ctx, `SELECT user_id FROM agent_profiles WHERE id=?`, id).Scan(&pUserID)
+	if qerr != nil {
+		// Verified: the implicit route-model binding miss escapes as NotFoundHttpException, so the LOCALIZED
+		// endpoint_not_found renders (not the manual-find not_found other endpoints use).
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	err = s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var oldStore, oldAddress, oldPhone, oldLat, oldLon sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT store_name,address,phone,latitude,longitude FROM agent_profiles WHERE id=? FOR UPDATE`, id).
+			Scan(&oldStore, &oldAddress, &oldPhone, &oldLat, &oldLon); err != nil {
+			return err
+		}
+		newStore, newAddress := oldStore.String, oldAddress.String
+		var newPhone *string
+		if oldPhone.Valid {
+			v := oldPhone.String
+			newPhone = &v
+		}
+		newLat, newLon := oldLat.String, oldLon.String
+		if set["store_name"] {
+			newStore = storeName
+		}
+		if set["address"] {
+			newAddress = address
+		}
+		if set["phone"] {
+			newPhone = phone
+		}
+		if set["latitude"] {
+			newLat = strconv.FormatFloat(*lat, 'f', 7, 64)
+		}
+		if set["longitude"] {
+			newLon = strconv.FormatFloat(*lon, 'f', 7, 64)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_profiles SET store_name=?,address=?,phone=?,latitude=?,longitude=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`,
+			newStore, newAddress, newPhone, newLat, newLon, id); err != nil {
+			return err
+		}
+		old := map[string]any{"store_name": oldStore.String, "address": oldAddress.String, "latitude": oldLat.String, "longitude": oldLon.String, "phone": nil}
+		if oldPhone.Valid {
+			old["phone"] = oldPhone.String
+		}
+		new := map[string]any{"store_name": newStore, "address": newAddress, "latitude": newLat, "longitude": newLon, "phone": nil}
+		if newPhone != nil {
+			new["phone"] = *newPhone
+		}
+		return s.writeActivityLog(ctx, u.ID, `App\Models\AgentProfile`, id, "agent_profile.updated",
+			map[string]any{"actor_role": u.Role, "old": old, "new": new})
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	items, err := s.scanAgentDirectoryRows(ctx, agentDirectoryQuery+` AND p.id=?`, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, items[0], "OK", nil)
+}
+
+func (s *Server) handleAdminAgentsDestroy(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "agentProfile"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	u := UserFrom(ctx)
+	var pUserID int64
+	qerr := s.database.QueryRowContext(ctx, `SELECT user_id FROM agent_profiles WHERE id=?`, id).Scan(&pUserID)
+	if qerr != nil {
+		// Verified: the implicit route-model binding miss escapes as NotFoundHttpException, so the LOCALIZED
+		// endpoint_not_found renders (not the manual-find not_found other endpoints use).
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	err = s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_profiles WHERE id=?`, id); err != nil {
+			return err
+		}
+		// Laravel: ActivityLogger::log(..., $request->user(), ...) — the SUBJECT is the acting user here.
+		return s.writeActivityLog(ctx, u.ID, `App\Models\User`, u.ID, "agent_profile.deleted",
+			map[string]any{"agent_user_id": pUserID, "actor_role": u.Role})
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, nil, msg(ctx, "agent.profile_deleted"), nil)
+}
+
+func (s *Server) handleAdminAgentsToggleStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "agent"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	u := UserFrom(ctx)
+	var roleSlug, status string
+	qerr := s.database.QueryRowContext(ctx,
+		`SELECT r.slug,u.status FROM users u JOIN roles r ON u.role_id=r.id WHERE u.id=? AND u.deleted_at IS NULL`, id).
+		Scan(&roleSlug, &status)
+	if qerr != nil {
+		// Verified: the user route-model binding miss renders the LOCALIZED endpoint_not_found → localized not_found.
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	if roleSlug != "agen" {
+		writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity, msg(ctx, "agent.not_an_agent")))
+		return
+	}
+	newStatus := "inactive"
+	if status != "active" {
+		newStatus = "active"
+	}
+	if _, err := s.database.ExecContext(ctx, `UPDATE users SET status=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, newStatus, id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := s.writeActivityLog(ctx, u.ID, `App\Models\User`, id, "agent.status_changed",
+		map[string]any{"status": newStatus, "actor_role": u.Role}); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	items, err := s.scanAgentDirectoryRows(ctx, agentDirectoryQuery+` AND u.id=?`, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, items[0], "OK", nil)
 }
 
 func (s *Server) handleNotificationsAdminMarkRead(w http.ResponseWriter, r *http.Request) {

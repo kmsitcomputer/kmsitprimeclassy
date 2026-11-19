@@ -53,16 +53,47 @@ New GLM-owned files: `go-backend/internal/api/glm_laravel_only_routes.go`, `tool
 
 ## Remaining GLM inventory
 
-176 Laravel-only endpoints (see `tools/parity-glm/laravel_only_inventory.tsv`, committed as the baseline
-inventory). Candidate next domains by
-independence: Reporting reads (16), admin agents CRUD (5), audit-logs (1), regions import/export (2).
+171 Laravel-only endpoints (see `tools/parity-glm/laravel_only_inventory.tsv`, committed as the baseline
+inventory). Candidate next domains by independence: Reporting reads (16), audit-logs (1),
+regions import/export (2), Integrations Google Sheets (7), Installer (7).
 
 ## EXACT NEXT ACTION
 
-Implement the **admin agents CRUD** domain (5 Laravel-only routes: GET/POST `/admin/agents`,
-PATCH/DELETE `/admin/agents/{agentProfile}`, PATCH `/admin/agents/{agent}/toggle-status`): read the Laravel
-AgentAdminController/policies, port with the GLM slice pattern, add `tools/parity-glm/compare_admin_agents.py`,
-run against the GLM isolated environment, commit. Then continue with Reporting reads.
+Implement the **Reporting reads** domain (16 Laravel-only GET `/api/v1/reports/*` routes) or, if the shared
+`reporting` service needs a large surface first, the small **audit-logs** (1) + **regions import/export** (2)
+units: read the Laravel controllers/services, port with the GLM slice pattern, add the matching
+`tools/parity-glm/compare_*.py` harnesses, run against the GLM isolated environment, commit.
+
+### Admin agents (Kontak Agen) — 5 Laravel-only routes (AgentContactController) — commit <this>
+
+| Route | Status |
+|---|---|
+| GET `/api/v1/admin/agents` | **GO (GLM)** |
+| POST `/api/v1/admin/agents` | **GO (GLM)** |
+| PATCH `/api/v1/admin/agents/{agentProfile}` | **GO (GLM)** |
+| DELETE `/api/v1/admin/agents/{agentProfile}` | **GO (GLM)** |
+| PATCH `/api/v1/admin/agents/{agent}/toggle-status` | **GO (GLM)** |
+
+Evidence: `tools/parity-glm/compare_admin_agents.py` — **107 passed, 0 failed** (RBAC 4 roles × 5 routes,
+directory projection incl. decimal:7 string lat/long and profile:null for a profile-less agen, accumulated
+store validation (required/integer/exists/max.string/between/numeric), not_an_agent + profile_already_exists
+422s, store→201 Created, update old/new activity properties, delete with SUBJECT=acting-user, toggle status
+flip both directions, DB state for agent_profiles/users.status/activity_logs). Regression: notifications 97
+PASS, media 73 PASS. Scoped `go test ./internal/api ./internal/i18n` green, `go vet` clean, gofmt clean,
+`git diff --check` clean.
+
+Verified Laravel behaviours worth knowing for integration:
+- All five routes sit inside the super_admin admin group (route gate + redundant Gate).
+- FormRequest validation (authorize=true) runs BEFORE the controller body — 422 beats the Gate; route
+  middleware 403 beats both.
+- An implicit route-model binding miss (numeric-but-missing `{agentProfile}`/`{agent}`) escapes as
+  NotFoundHttpException → **localized `system.endpoint_not_found`** — unlike the manual-find
+  `system.not_found` used by notifications/media (evidence: harness u_404/del_404/t_404 vs media unknown404).
+- Activity logs: store/delete/toggle write properties in Laravel insertion order; content-equality is what
+  the harness asserts (JSON key order is irrelevant to consumers).
+- Update activity `old`/`new` carry decimal:7 STRINGS and phone as nullable.
+- Shared-file changes for THIS unit: none beyond the GLM slice; `tools/parity/gen_i18n.py` +catalog keys
+  (`agent.not_an_agent/profile_already_exists/profile_deleted`) → catalog.json regenerated.
 
 ### Generic media — 3 Laravel-only routes (MediaController) — commit <this>
 
