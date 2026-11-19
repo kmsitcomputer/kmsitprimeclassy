@@ -100,7 +100,16 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/reports/network-transactions",
 		"GET /api/v1/reports/payment-status",
 		"GET /api/v1/reports/sales",
-		"GET /api/v1/admin/audit-logs":
+		"GET /api/v1/admin/audit-logs",
+		"POST /api/v1/crm/customers":
+		return true
+	}
+	// CRM write routes with path parameters (binding-style: any last segment shape is the route).
+	if strings.HasPrefix(path, "/api/v1/crm/customers/") && len(path) > len("/api/v1/crm/customers/") &&
+		(method == http.MethodPatch || method == http.MethodPost) {
+		return true
+	}
+	if method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/crm/visits/") && len(path) > len("/api/v1/crm/visits/") {
 		return true
 	}
 	// PATCH/DELETE /api/v1/admin/agents/{id}[...] — route model binding: any shape of the last
