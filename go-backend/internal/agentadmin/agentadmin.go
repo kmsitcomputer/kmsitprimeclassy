@@ -16,6 +16,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/cryptox"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 )
 
 type Error struct {
@@ -45,7 +46,7 @@ func New(database *db.DB, appKey string, trustedHosts ...[]string) *Service {
 // management allow the branch's Agen or Admin, with the branch id derived from the authenticated identity.
 func ResolveAgent(actor *auth.User, allowAdmin bool) (int64, error) {
 	if actor == nil || actor.AgentID == nil {
-		return 0, fail(403, "Aksi tidak diizinkan.")
+		return 0, fail(403, "Anda tidak memiliki akses untuk melakukan aksi ini.")
 	}
 	if actor.IsRole(auth.RoleAgen) && *actor.AgentID == actor.ID {
 		return actor.ID, nil
@@ -53,7 +54,7 @@ func ResolveAgent(actor *auth.User, allowAdmin bool) (int64, error) {
 	if allowAdmin && actor.IsRole(auth.RoleAdmin) {
 		return *actor.AgentID, nil
 	}
-	return 0, fail(403, "Aksi tidak diizinkan.")
+	return 0, fail(403, "Anda tidak memiliki akses untuk melakukan aksi ini.")
 }
 
 type StoreProfile struct {
@@ -146,7 +147,7 @@ func (s *Service) TogglePaymentMethod(ctx context.Context, agentID, methodID int
 			return err
 		}
 		if m.Type != "manual" && m.Type != "cod" {
-			return fail(403, "Aksi tidak diizinkan.")
+			return fail(403, i18n.Translate(i18n.Default, "system.unauthorized_action"))
 		}
 		var current bool
 		err := tx.QueryRowContext(ctx, `SELECT is_active FROM agent_payment_method_settings WHERE agent_id=? AND payment_method_id=?`, agentID, methodID).Scan(&current)
@@ -156,10 +157,24 @@ func (s *Service) TogglePaymentMethod(ctx context.Context, agentID, methodID int
 			return err
 		}
 		m.Active = !current
-		_, err = tx.ExecContext(ctx, `INSERT INTO agent_payment_method_settings (agent_id,payment_method_id,is_active,created_at,updated_at)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_payment_method_settings (agent_id,payment_method_id,is_active,created_at,updated_at)
 			VALUES (?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE is_active=VALUES(is_active),updated_at=UTC_TIMESTAMP(6)`,
-			agentID, methodID, m.Active)
-		return err
+			agentID, methodID, m.Active); err != nil {
+			return err
+		}
+		// Laravel's toggle response computes `configured` exactly like the index projection:
+		// null for COD, otherwise whether a gateway-config row exists for this agent+method.
+		if m.Type == "cod" {
+			m.Configured = nil
+		} else {
+			var cfg bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_payment_gateway_configs
+				WHERE agent_id=? AND payment_method_id=?)`, agentID, methodID).Scan(&cfg); err != nil {
+				return err
+			}
+			m.Configured = &cfg
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -172,22 +187,37 @@ func (s *Service) SavePaymentConfig(ctx context.Context, agentID, methodID int64
 	if err := s.database.QueryRowContext(ctx, `SELECT code,type FROM payment_methods WHERE id=?`, methodID).Scan(&code, &methodType); err != nil {
 		return err
 	}
+	// Laravel ordering: the FormRequest validates FIRST (config required array + config.* rules +
+	// environment in:sandbox,production), THEN the controller's type check 403s a non-manual method.
+	// Sentences: top-level names go through validation.attributes ("config" -> "config");
+	// config.bank_name renders as "config.bank name" (headline-case of the post-dot segment).
+	fields := map[string][]string{}
+	if environment != "" && environment != "sandbox" && environment != "production" {
+		fields["environment"] = []string{i18n.ValidationMessage(i18n.Default, "in", "environment")}
+	}
+	if len(config) == 0 {
+		fields["config"] = []string{i18n.ValidationMessage(i18n.Default, "required", "config")}
+	}
+	// PaymentGatewayFields::rulesFor(bank_transfer) — the only method with a field contract.
+	for field, maxLen := range map[string]int{"bank_name": 60, "account_name": 100, "account_number": 40} {
+		value, hasValue := config[field].(string)
+		path := "config." + field
+		if !hasValue || strings.TrimSpace(value) == "" {
+			fields[path] = append(fields[path], i18n.ValidationMessage(i18n.Default, "required", path))
+		} else if len([]rune(value)) > maxLen {
+			fields[path] = append(fields[path], i18n.ValidationMessage(i18n.Default, "max.string", path, "max", fmt.Sprint(maxLen)))
+		}
+	}
+	if len(fields) > 0 {
+		return &Error{Status: 422, Message: i18n.Translate(i18n.Default, "system.validation_failed"), Fields: fields}
+	}
 	if methodType != "manual" || code != "bank_transfer" {
-		return fail(403, "Aksi tidak diizinkan.")
+		return fail(403, i18n.Translate(i18n.Default, "system.unauthorized_action"))
 	}
 	if environment == "" {
 		_ = s.database.QueryRowContext(ctx, `SELECT active_environment FROM agent_payment_method_settings WHERE agent_id=? AND payment_method_id=?`, agentID, methodID).Scan(&environment)
 		if environment == "" {
 			environment = "sandbox"
-		}
-	}
-	if environment != "sandbox" && environment != "production" {
-		return fail(422, "Lingkungan pembayaran tidak valid.")
-	}
-	for field, maxLen := range map[string]int{"bank_name": 60, "account_name": 100, "account_number": 40} {
-		value, ok := config[field].(string)
-		if !ok || strings.TrimSpace(value) == "" || len(value) > maxLen {
-			return &Error{Status: 422, Message: "Data yang diberikan tidak valid.", Fields: map[string][]string{"config." + field: {"Data konfigurasi tidak valid."}}}
 		}
 	}
 	ciphertext, err := cryptox.EncryptArray(s.appKey, config)

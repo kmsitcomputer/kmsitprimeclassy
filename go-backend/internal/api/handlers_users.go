@@ -383,7 +383,7 @@ func (s *Server) handleAgentPaymentMethodToggle(w http.ResponseWriter, r *http.R
 		writeError(w, r, err)
 		return
 	}
-	httpx.OK(w, data, "Pengaturan metode pembayaran diperbarui.", nil)
+	httpx.OK(w, data, msg(r.Context(), "payment.gateway_toggled"), nil)
 }
 
 func (s *Server) handleAgentPaymentMethodConfig(w http.ResponseWriter, r *http.Request) {
@@ -415,7 +415,7 @@ func (s *Server) handleAgentPaymentMethodConfig(w http.ResponseWriter, r *http.R
 		writeError(w, r, err)
 		return
 	}
-	httpx.OK(w, map[string]bool{"configured": true}, "Konfigurasi pembayaran tersimpan.", nil)
+	httpx.OK(w, map[string]bool{"configured": true}, msg(r.Context(), "payment.gateway_config_saved"), nil)
 }
 
 func (s *Server) handleAgentShippingProviders(w http.ResponseWriter, r *http.Request) {
