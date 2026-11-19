@@ -23,6 +23,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/config"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
+	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/orders"
 )
 
@@ -59,6 +60,8 @@ func run() error {
 	auth.SetPublicBaseURL(cfg.PublicURL)
 	asset.SetBase(cfg.PublicURL)
 	orders.SetPublicBase(cfg.PublicURL)
+	media.SetRoot(cfg.MediaRoot)
+	media.SetRoot(cfg.MediaRoot)
 
 	server := api.New(cfg, database, api.Options{
 		InstallLockPath: installLockPath(),

@@ -25,7 +25,9 @@ func crmActorFrom(r *http.Request) crm.Actor {
 func writeDomainReadError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, crm.ErrNotFound):
-		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(r.Context(), "system.not_found")))
+		// Route-model binding miss (missing id / foreign-agent row) renders the endpoint-not-found
+		// answer, verified against the reference (GLM, 2026-11-20).
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(r.Context(), "system.endpoint_not_found")))
 	case errors.Is(err, crm.ErrForbidden), errors.Is(err, reporting.ErrForbidden):
 		writeError(w, r, httpx.NewError(http.StatusForbidden, msg(r.Context(), "system.unauthorized_action")))
 	default:

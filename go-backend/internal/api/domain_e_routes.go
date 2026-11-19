@@ -50,6 +50,21 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("GET /api/v1/crm/customers/{customer}/visits", chain(http.HandlerFunc(s.handleCRMCustomerVisits), RequireAuth, s.RequireAgentLinked, RequireRole(crmRead)))
 	s.mux.Handle("GET /api/v1/crm/follow-ups", chain(http.HandlerFunc(s.handleCRMFollowUps), RequireAuth, s.RequireAgentLinked, RequireRole(crmRead)))
 
+	// CRM write surface (IMP-006 slice 1 + GLM inventory) — Laravel runs route-model binding (404
+	// endpoint_not_found) BEFORE the role middleware (403), so the role gate is enforced in-handler
+	// after the binding precheck, not here.
+	s.mux.Handle("POST /api/v1/crm/customers", chain(http.HandlerFunc(s.handleCRMCustomerStore), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("PATCH /api/v1/crm/customers/{customer}", chain(http.HandlerFunc(s.handleCRMCustomerUpdate), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/archive", chain(http.HandlerFunc(s.handleCRMCustomerArchive), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/visits", chain(http.HandlerFunc(s.handleCRMVisitStore), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("PATCH /api/v1/crm/visits/{visit}", chain(http.HandlerFunc(s.handleCRMVisitUpdate), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("GET /api/v1/crm/link-candidates", chain(http.HandlerFunc(s.handleCRMLinkCandidates), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/link-otp", chain(http.HandlerFunc(s.handleCRMLinkOtp), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/link", chain(http.HandlerFunc(s.handleCRMLink), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/unlink", chain(http.HandlerFunc(s.handleCRMUnlink), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/consent-otp", chain(http.HandlerFunc(s.handleCRMConsentOtp), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/consent-events", chain(http.HandlerFunc(s.handleCRMCaptureConsent), RequireAuth, s.RequireAgentLinked))
+
 	// Commission/fee REPORTS — CommissionController::allowedBeneficiaryRoles scopes the rows per role.
 	commissionRoles := "super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan"
 	s.mux.Handle("GET /api/v1/commissions", chain(http.HandlerFunc(s.handleCommissionIndex), RequireAuth, s.RequireAgentLinked, RequireRole(commissionRoles)))

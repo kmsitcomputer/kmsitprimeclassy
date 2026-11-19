@@ -136,16 +136,19 @@ func (s *Service) Visits(ctx context.Context, actor Actor, customerID int64) ([]
 	data := make([]map[string]any, 0)
 	for rows.Next() {
 		var id, agentID, customer, userID int64
-		var visitDate, status string
+		var visitDate time.Time
+		var status string
 		var prospect sql.NullInt64
-		var note, nextDate sql.NullString
+		var note sql.NullString
+		var nextDate sql.NullTime
 		var created, updated time.Time
 		if err := rows.Scan(&id, &agentID, &customer, &userID, &visitDate, &status, &prospect, &note, &nextDate, &created, &updated); err != nil {
 			return nil, err
 		}
 		data = append(data, map[string]any{"id": id, "agent_id": agentID, "crm_customer_id": customer,
-			"user_id": userID, "visit_date": visitDate, "status": status, "prospect_percent": nullableInt(prospect),
-			"note": nullableString(note), "plan_next_date": nullableString(nextDate), "created_at": created, "updated_at": updated})
+			"user_id": userID, "visit_date": isoMicro(visitDate), "status": status, "prospect_percent": nullableInt(prospect),
+			"note": nullableString(note), "plan_next_date": nullTimeMicro(nextDate),
+			"created_at": isoMicro(created), "updated_at": isoMicro(updated)})
 	}
 	return data, rows.Err()
 }
@@ -173,16 +176,19 @@ func (s *Service) FollowUps(ctx context.Context, actor Actor, until string) ([]m
 	data := make([]map[string]any, 0)
 	for rows.Next() {
 		var id, agentID, customerID, userID, ownerID int64
-		var visitDate, status, nextDate string
+		var visitDate time.Time
+		var status string
 		var prospect sql.NullInt64
 		var note, name, phone sql.NullString
+		var nextDate sql.NullTime
 		var created, updated time.Time
 		if err := rows.Scan(&id, &agentID, &customerID, &userID, &visitDate, &status, &prospect, &note, &nextDate, &created, &updated, &name, &phone, &ownerID); err != nil {
 			return nil, err
 		}
 		data = append(data, map[string]any{"id": id, "agent_id": agentID, "crm_customer_id": customerID,
-			"user_id": userID, "visit_date": visitDate, "status": status, "prospect_percent": nullableInt(prospect),
-			"note": nullableString(note), "plan_next_date": nextDate, "created_at": created, "updated_at": updated,
+			"user_id": userID, "visit_date": isoMicro(visitDate), "status": status, "prospect_percent": nullableInt(prospect),
+			"note": nullableString(note), "plan_next_date": nullTimeMicro(nextDate),
+			"created_at": isoMicro(created), "updated_at": isoMicro(updated),
 			"customer": map[string]any{"id": customerID, "name": nullableString(name), "phone": nullableString(phone), "owner_user_id": ownerID}})
 	}
 	return data, rows.Err()
@@ -191,7 +197,8 @@ func (s *Service) FollowUps(ctx context.Context, actor Actor, until string) ([]m
 func scanCustomer(scan func(...any) error) (map[string]any, error) {
 	var id, agentID, ownerID int64
 	var name string
-	var phone, email, kind, relation, address, note, archived sql.NullString
+	var phone, email, kind, relation, address, note sql.NullString
+	var archived sql.NullTime
 	var prospect, linked sql.NullInt64
 	var created, updated time.Time
 	var ownerName string
@@ -202,7 +209,7 @@ func scanCustomer(scan func(...any) error) (map[string]any, error) {
 	return map[string]any{"id": id, "agent_id": agentID, "owner_user_id": ownerID, "name": name,
 		"phone": nullableString(phone), "email": nullableString(email), "customer_type": nullableString(kind),
 		"relation": nullableString(relation), "address": nullableString(address), "prospect_percent": nullableInt(prospect),
-		"note": nullableString(note), "archived_at": nullableString(archived), "created_at": created, "updated_at": updated,
+		"note": nullableString(note), "archived_at": nullTimeMicro(archived), "created_at": isoMicro(created), "updated_at": isoMicro(updated),
 		"linked_konsumen_id": nullableInt(linked), "owner": map[string]any{"id": ownerID, "name": ownerName}}, nil
 }
 
