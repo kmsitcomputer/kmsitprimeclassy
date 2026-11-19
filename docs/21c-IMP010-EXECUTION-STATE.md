@@ -479,6 +479,17 @@ korsal ApiException WITH field error. Fixture note: seed has NO korsal — compa
 both runtimes (id 20), and purges scenario-created @x.test users between L/G runs (SHARED database).
 Matrix: **130 GO / 62 PARTIAL / 183 Laravel-only**.
 
+**DONE — Phase 1B product administration (first sweep):** tools/parity/compare_products.py 6/6 —
+store validation (required_if/prohibited_if evaluate ONLY when has_variations is PRESENT; sentences via
+attributes 'status varian'), GlobalSku literal 'SKU sudah digunakan pada katalog.', uniqid()-shaped slug
+(13 hex), soft/hard delete (guarded 409 with errors {references:{table:count}} from the live-schema blocker
+scan), audits product.created/updated/deleted/hard_deleted with old/new projections and PHP-style
+slash-escaped JSON, binding-first 404s (missing product before validation), {variation} bound by ID ALONE
+on fee routes (mismatched product/variation still resolves — Laravel quirk), FeeResource key shapes
+(agent_fee/sales_fee/courier_fee, agent+courier super_admin/agen only), confirm `accepted` sentence.
+REMAINING in products: images (multipart create/reorder/delete), variation attributes, manage/products
+list read, catalog_skus edge cases — harness scenarios 7+ to be added next.
+
 **A. The remaining order routes**: consent-context/events, refund-recipient, returns, assisted-returns, invoice
 PDF (due-date is DONE with payments).
 
