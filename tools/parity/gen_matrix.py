@@ -267,6 +267,11 @@ IMPLEMENTED = {
     ("POST", "/api/v1/crm/customers/{customer}/unlink"): "CRM linking: unlink scope + event + audit; 26/0 compared by compare_crm_link.py",
     ("POST", "/api/v1/crm/customers/{customer}/consent-otp"): "CRM consent: channel gates (unlinked 409, unverified email 422, whatsapp 409), challenge row; 17/0 compared by compare_crm_consent.py",
     ("POST", "/api/v1/crm/customers/{customer}/consent-events"): "CRM consent: multipart evidence capture, real evidence file + hash, key idempotency, consumed challenge 422; 17/0 compared by compare_crm_consent.py",
+    # --- GLM Phase 5b: dispatch workspace reads (internal/dispatch, tools/parity/compare_dispatch.py)
+    ("GET", "/api/v1/dispatch/couriers"): "branch active couriers, for_returns narrows to kurir, super_admin agent_id gate; compared by compare_dispatch.py",
+    ("GET", "/api/v1/dispatch/regions"): "cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py",
+    ("GET", "/api/v1/dispatch/expeditions"): "expedition shipments + four readiness gates; koordinator-kurir only; compared by compare_dispatch.py",
+    ("GET", "/api/v1/dispatch/refusals"): "open refusals branch projection + status filter; koordinator-kurir only; compared by compare_dispatch.py",
 }
 
 

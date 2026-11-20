@@ -255,18 +255,18 @@ Status legend:
 | POST | `/api/v1/delivery-refusals/{refusal}/hand-back` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 | POST | `/api/v1/delivery-refusals/{refusal}/receive` | session | koordinator-kurir | LARAVEL |  |
 
-## Dispatch — `dispatch` (0/9 in Go)
+## Dispatch — `dispatch` (4/9 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/dispatch` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
-| GET | `/api/v1/dispatch/couriers` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
-| GET | `/api/v1/dispatch/expeditions` | session | koordinator-kurir | LARAVEL |  |
+| GET | `/api/v1/dispatch/couriers` | session | admin, agen, koordinator-kurir, super_admin | **GO** | branch active couriers, for_returns narrows to kurir, super_admin agent_id gate; compared by compare_dispatch.py |
+| GET | `/api/v1/dispatch/expeditions` | session | koordinator-kurir | **GO** | expedition shipments + four readiness gates; koordinator-kurir only; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/history` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
 | POST | `/api/v1/dispatch/order-items/{orderItem}/split-batch` | session | koordinator-kurir | LARAVEL |  |
 | POST | `/api/v1/dispatch/orders/{order}/request-fulfillment` | session | koordinator-kurir | LARAVEL |  |
-| GET | `/api/v1/dispatch/refusals` | session | koordinator-kurir | LARAVEL |  |
-| GET | `/api/v1/dispatch/regions` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
+| GET | `/api/v1/dispatch/refusals` | session | koordinator-kurir | **GO** | open refusals branch projection + status filter; koordinator-kurir only; compared by compare_dispatch.py |
+| GET | `/api/v1/dispatch/regions` | session | admin, agen, koordinator-kurir, super_admin | **GO** | cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/returns` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
 
 ## Integrations — Google Sheets — `google-sheets` (0/7 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 232 (61.9%) |
-|   of which fully GO | 232 |
+| Served by Go now | 236 (62.9%) |
+|   of which fully GO | 236 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 143 |
+| Still Laravel-only | 139 |
 | Areas fully ported | 23 / 45 |

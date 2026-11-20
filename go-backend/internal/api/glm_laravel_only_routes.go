@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
+	"github.com/kmsitcomputer/primeclassy-go/internal/dispatch"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
@@ -49,6 +50,15 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("DELETE /api/v1/admin/agents/{agentProfile}", chain(http.HandlerFunc(s.handleAdminAgentsDestroy), RequireAuth, s.RequireAgentLinked, adminAgents))
 	s.mux.Handle("PATCH /api/v1/admin/agents/{agent}/toggle-status", chain(http.HandlerFunc(s.handleAdminAgentsToggleStatus), RequireAuth, s.RequireAgentLinked, adminAgents))
 
+	// Dispatch workspace reads — verified Laravel role split (api_v1.php:316-349):
+	//   couriers/regions: super_admin,agen,admin,koordinator-kurir
+	//   expeditions + refusals: koordinator-kurir ONLY (api_v1.php:320-321)
+	dispatchStaff := RequireRole("super_admin,agen,admin,koordinator-kurir")
+	s.mux.Handle("GET /api/v1/dispatch/couriers", chain(http.HandlerFunc(s.handleDispatchCouriers), RequireAuth, s.RequireAgentLinked, dispatchStaff))
+	s.mux.Handle("GET /api/v1/dispatch/regions", chain(http.HandlerFunc(s.handleDispatchRegions), RequireAuth, s.RequireAgentLinked, dispatchStaff))
+	s.mux.Handle("GET /api/v1/dispatch/expeditions", chain(http.HandlerFunc(s.handleDispatchExpeditions), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
+	s.mux.Handle("GET /api/v1/dispatch/refusals", chain(http.HandlerFunc(s.handleDispatchRefusals), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
+
 	// Management reports (ReportController) — read-only, role-gated per route below.
 	// Each route mirrors its Laravel route/middleware gate exactly (see backend/routes/api_v1.php).
 	s.mux.Handle("GET /api/v1/reports/cancellations-refunds", chain(http.HandlerFunc(s.handleReportCancellationsRefunds), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
@@ -84,6 +94,10 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/media",
 		"GET /api/v1/admin/agents",
 		"POST /api/v1/admin/agents",
+		"GET /api/v1/dispatch/couriers",
+		"GET /api/v1/dispatch/regions",
+		"GET /api/v1/dispatch/expeditions",
+		"GET /api/v1/dispatch/refusals",
 		"GET /api/v1/reports/cancellations-refunds",
 		"GET /api/v1/reports/couriers",
 		"GET /api/v1/reports/couriers-per-agent",
@@ -1000,6 +1014,67 @@ func (s *Server) handleAdminAgentsToggleStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 	httpx.OK(w, items[0], "OK", nil)
+}
+
+// ---- GLM dispatch (Laravel-only slice) ------------------------------------------------------------
+
+func dispatchActor(r *http.Request) dispatch.Actor {
+	u := UserFrom(r.Context())
+	return dispatch.Actor{ID: u.ID, Role: u.Role, AgentID: derefInt(u.AgentID), IsSuper: u.Role == "super_admin"}
+}
+
+func derefInt(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func (s *Server) handleDispatchCouriers(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.dispatchService().Couriers(r.Context(), dispatchActor(r), r.URL.Query())
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, rows, "OK", nil)
+}
+
+func (s *Server) handleDispatchExpeditions(w http.ResponseWriter, r *http.Request) {
+	result, err := s.dispatchService().Expeditions(r.Context(), dispatchActor(r), r.URL.Query())
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, result["data"], "OK", result["meta"])
+}
+
+func (s *Server) handleDispatchRefusals(w http.ResponseWriter, r *http.Request) {
+	result, err := s.dispatchService().Refusals(r.Context(), dispatchActor(r), r.URL.Query())
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, result["data"], "OK", result["meta"])
+}
+
+func (s *Server) handleDispatchRegions(w http.ResponseWriter, r *http.Request) {
+	result, err := s.dispatchService().Regions(r.Context(), dispatchActor(r), r.URL.Query())
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) dispatchService() *dispatch.Service { return dispatch.New(s.database) }
+
+func writeDispatchError(w http.ResponseWriter, r *http.Request, err error) {
+	var de *dispatch.DomainError
+	if errors.As(err, &de) {
+		writeError(w, r, httpx.NewError(de.Status, de.Message))
+		return
+	}
+	writeError(w, r, err)
 }
 
 func (s *Server) handleNotificationsAdminMarkRead(w http.ResponseWriter, r *http.Request) {
