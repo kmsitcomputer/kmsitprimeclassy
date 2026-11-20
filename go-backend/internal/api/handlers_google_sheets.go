@@ -1,16 +1,22 @@
 package api
 
 import (
+	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 )
 
 // The definitions and catalog are the serialized DatasetRegistry contract from Laravel.
@@ -190,7 +196,7 @@ func googleSheetsCredentialInfo(configuredPath, storageRoot string) map[string]a
 		if storageRoot != "" {
 			path = filepath.Join(storageRoot, "private/google/service-account.json")
 		} else {
-			path = "backend/storage/app/private/google/service-account.json"
+			path = "/app/storage/app/private/google/service-account.json"
 		}
 	}
 	info := map[string]any{"resolved_path": path, "file_found": false, "readable": false, "json_valid": false, "type": nil, "project_id": nil, "client_email": nil, "private_key_present": false}
@@ -218,4 +224,175 @@ func googleSheetsCredentialInfo(configuredPath, storageRoot string) map[string]a
 		info["private_key_present"] = strings.TrimSpace(private) != ""
 	}
 	return info
+}
+
+func (s *Server) handleGoogleSheetsConnection(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	if actor == nil {
+		writeError(w, r, unauthorizedError(r.Context()))
+		return
+	}
+	var request struct {
+		DestinationID json.RawMessage `json:"destination_id"`
+	}
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	rawID := strings.TrimSpace(string(request.DestinationID))
+	if rawID == "" || rawID == "null" || rawID == `""` {
+		writeError(w, r, httpx.Validation(map[string][]string{"destination_id": {i18n.ValidationMessage(LocaleFrom(r.Context()), "required", "destination_id")}}))
+		return
+	}
+	id, err := strconv.ParseInt(strings.Trim(rawID, `"`), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.Validation(map[string][]string{"destination_id": {i18n.ValidationMessage(LocaleFrom(r.Context()), "integer", "destination_id")}}))
+		return
+	}
+	var spreadsheet string
+	var agentID sql.NullInt64
+	if err = s.database.QueryRowContext(r.Context(), `SELECT spreadsheet_id,agent_id FROM sheets_destinations WHERE id=?`, id).Scan(&spreadsheet, &agentID); err == sql.ErrNoRows {
+		writeError(w, r, httpx.Validation(map[string][]string{"destination_id": {i18n.ValidationMessage(LocaleFrom(r.Context()), "exists", "destination_id")}}))
+		return
+	} else if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !actor.IsRole(auth.RoleSuperAdmin) && (actor.AgentID == nil || !agentID.Valid || agentID.Int64 != *actor.AgentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "system.forbidden"), nil)
+		return
+	}
+	credential := googleSheetsCredentialInfo(s.cfg.GoogleSheets.CredentialsPath, s.cfg.StorageRoot)
+	meta, apiErr := s.googleSheetsMetadata(r, spreadsheet)
+	now := time.Now().UTC()
+	if apiErr != nil {
+		_, updateErr := s.database.ExecContext(r.Context(), `UPDATE sheets_destinations SET connection_status='failed',last_tested_at=?,last_error_code=? WHERE id=?`, now, apiErr.Code, id)
+		if updateErr != nil {
+			writeError(w, r, updateErr)
+			return
+		}
+		credentialFields := map[string]any{}
+		for _, key := range []string{"resolved_path", "file_found", "readable", "json_valid", "type", "project_id", "client_email", "private_key_present"} {
+			credentialFields[key] = credential[key]
+		}
+		httpx.Failure(w, http.StatusUnprocessableEntity, apiErr.Message, map[string]any{"code": []string{apiErr.Code}, "credential": []map[string]any{credentialFields}})
+		return
+	}
+	_, err = s.database.ExecContext(r.Context(), `UPDATE sheets_destinations SET spreadsheet_title=?,connection_status='connected',last_tested_at=?,last_error_code=NULL WHERE id=?`, meta.Title, now, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, map[string]any{"status": "connected", "spreadsheet_title": meta.Title, "spreadsheet_id": spreadsheet, "service_account_email": credential["client_email"], "last_tested_at": now}, "OK", nil)
+}
+
+func (s *Server) handleGoogleSheetsDestination(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	if actor == nil {
+		writeError(w, r, unauthorizedError(r.Context()))
+		return
+	}
+	var request struct {
+		SpreadsheetID json.RawMessage `json:"spreadsheet_id"`
+		AgentID       json.RawMessage `json:"agent_id"`
+	}
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	idText := strings.TrimSpace(laravelStringInput(request.SpreadsheetID))
+	if match := googleSpreadsheetURL.FindStringSubmatch(idText); len(match) > 1 {
+		idText = match[1]
+	}
+	fields := map[string][]string{}
+	if idText == "" || string(request.SpreadsheetID) == "null" {
+		fields["spreadsheet_id"] = []string{i18n.ValidationMessage(LocaleFrom(r.Context()), "required", "spreadsheet_id")}
+	} else {
+		if utf8.RuneCountInString(idText) > 150 {
+			fields["spreadsheet_id"] = append(fields["spreadsheet_id"], i18n.ValidationMessage(LocaleFrom(r.Context()), "max.string", "spreadsheet_id", "max", "150"))
+		}
+		if !googleSpreadsheetID.MatchString(idText) {
+			fields["spreadsheet_id"] = append(fields["spreadsheet_id"], i18n.ValidationMessage(LocaleFrom(r.Context()), "regex", "spreadsheet_id"))
+		}
+		var exists int
+		if err := s.database.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM sheets_destinations WHERE spreadsheet_id=?)`, idText).Scan(&exists); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		if exists != 0 {
+			fields["spreadsheet_id"] = append(fields["spreadsheet_id"], i18n.ValidationMessage(LocaleFrom(r.Context()), "unique", "spreadsheet_id"))
+		}
+	}
+	var selectedAgent *int64
+	if string(request.AgentID) != "" && string(request.AgentID) != "null" && string(request.AgentID) != `""` {
+		n, err := strconv.ParseInt(strings.Trim(strings.TrimSpace(string(request.AgentID)), `"`), 10, 64)
+		if err != nil {
+			fields["agent_id"] = []string{i18n.ValidationMessage(LocaleFrom(r.Context()), "integer", "agent_id")}
+		} else {
+			var role string
+			err = s.database.QueryRowContext(r.Context(), `SELECT rl.slug FROM users u JOIN roles rl ON rl.id=u.role_id WHERE u.id=? AND u.deleted_at IS NULL`, n).Scan(&role)
+			if err != nil || role != auth.RoleAgen {
+				fields["agent_id"] = []string{i18n.ValidationMessage(LocaleFrom(r.Context()), "exists", "agent_id")}
+			} else {
+				selectedAgent = &n
+			}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	if !actor.IsRole(auth.RoleSuperAdmin) {
+		selectedAgent = actor.AgentID
+	}
+	var agent any
+	if selectedAgent != nil {
+		agent = *selectedAgent
+	}
+	result, err := s.database.ExecContext(r.Context(), `INSERT INTO sheets_destinations(spreadsheet_id,agent_id,created_at,updated_at) VALUES(?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, idText, agent)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	newID, err := result.LastInsertId()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	rows, err := s.queryMaps(r, `SELECT id,spreadsheet_id,agent_id,created_at,updated_at FROM sheets_destinations WHERE id=?`, newID)
+	if err != nil || len(rows) == 0 {
+		if err != nil {
+			writeError(w, r, err)
+		} else {
+			writeError(w, r, fmt.Errorf("created destination missing"))
+		}
+		return
+	}
+	rows[0]["id"] = numericValue(rows[0]["id"])
+	rows[0]["agent_id"] = numericValue(rows[0]["agent_id"])
+	if actor.IsRole(auth.RoleSuperAdmin) && len(request.AgentID) == 0 {
+		delete(rows[0], "agent_id")
+	}
+	httpx.Created(w, rows[0], "Created")
+}
+
+var googleSpreadsheetID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var googleSpreadsheetURL = regexp.MustCompile(`docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)`)
+
+func laravelStringInput(raw json.RawMessage) string {
+	value := strings.TrimSpace(string(raw))
+	switch {
+	case value == "", value == "null", value == "false":
+		return ""
+	case value == "true":
+		return "1"
+	case strings.HasPrefix(value, `"`):
+		var decoded string
+		if json.Unmarshal(raw, &decoded) == nil {
+			return decoded
+		}
+	case strings.HasPrefix(value, "{") || strings.HasPrefix(value, "["):
+		return "Array"
+	}
+	return value
 }

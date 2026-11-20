@@ -60,7 +60,6 @@ type GoogleSheetsConfig struct {
 	CredentialsPath string
 	Timeout         time.Duration
 	MaxRows         int
-	APIBaseURL      string
 }
 
 // DBConfig describes the MySQL/MariaDB connection.
@@ -230,13 +229,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	googleSheetsCfg := GoogleSheetsConfig{
 		Enabled:         defaultBool(getenv("GOOGLE_SHEETS_ENABLED"), true),
-		CredentialsPath: strings.TrimSpace(getenv("GOOGLE_SHEETS_CREDENTIALS_PATH")),
+		CredentialsPath: defaultStr(getenv("GOOGLE_SHEETS_CREDENTIALS_PATH"), "/app/storage/app/private/google/service-account.json"),
 		Timeout:         defaultDuration(getenv("GOOGLE_SHEETS_TIMEOUT"), 30*time.Second),
 		MaxRows:         defaultInt(getenv("GOOGLE_SHEETS_MAX_ROWS"), 10000),
-		APIBaseURL:      strings.TrimRight(defaultStr(getenv("GOOGLE_SHEETS_API_BASE_URL"), "https://sheets.googleapis.com/v4"), "/"),
-	}
-	if googleSheetsCfg.CredentialsPath == "" && strings.TrimSpace(getenv("STORAGE_ROOT")) != "" {
-		googleSheetsCfg.CredentialsPath = strings.TrimRight(strings.TrimSpace(getenv("STORAGE_ROOT")), "/") + "/private/google/service-account.json"
 	}
 
 	logCfg := LogConfig{

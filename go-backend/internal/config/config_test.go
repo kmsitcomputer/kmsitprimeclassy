@@ -34,6 +34,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Session.Lifetime != 120*time.Minute {
 		t.Errorf("default lifetime = %v", cfg.Session.Lifetime)
 	}
+	if !cfg.GoogleSheets.Enabled || cfg.GoogleSheets.CredentialsPath != "/app/storage/app/private/google/service-account.json" || cfg.GoogleSheets.Timeout != 30*time.Second || cfg.GoogleSheets.MaxRows != 10000 {
+		t.Errorf("unexpected Google Sheets defaults: %+v", cfg.GoogleSheets)
+	}
 	if !cfg.Session.Secure {
 		// local defaults to insecure cookies so http://localhost works; this asserts the documented rule.
 		t.Log("local env allows non-secure cookies (expected false)")

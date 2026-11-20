@@ -49,6 +49,8 @@ IMPLEMENTED = {
     ("POST", "/api/v1/agent/whatsapp/pair/qr"): "QR pairing with server-fetched allow-listed PNG path, data URI response and pairing state audit; compare_agent_whatsapp_status.py",
     ("POST", "/api/v1/agent/whatsapp/test-send"): "Allow-listed Agent test message with per-Agent limits, paired-device enforcement, sanitized payload, durable ledger, delivery attempt and audit; compare_agent_whatsapp_status.py",
     ("GET", "/api/v1/google-sheets"): "Role-scoped destination/config/log dashboard, Admin commission redaction, and DatasetRegistry catalog; compare_google_sheets_index.py",
+    ("POST", "/api/v1/google-sheets/connection"): "Service-account token, spreadsheet metadata probe, branch scope and durable connection status/error update; compare_google_sheets_connection.py",
+    ("POST", "/api/v1/google-sheets/destinations"): "Spreadsheet URL/ID normalization, uniqueness, Agent selection validation and caller-bound scope; compare_google_sheets_destinations.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve"): "Finance/Owner exits A/B with historical-owner enforcement, evidence, idempotent no-op, state audit and branch authorization; compare_admin_refund_needs_verification.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/deferred/request"): "Finance deferred materialization request, Order/obligation locks, idempotent event key and available-entitlement snapshot; compare_admin_refund_deferred.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/deferred/materialize"): "Owner-only deferred entitlement materialization with replay-first idempotency, cash cap, child approval, parent balance update and append-only audit; compare_admin_refund_deferred.py",

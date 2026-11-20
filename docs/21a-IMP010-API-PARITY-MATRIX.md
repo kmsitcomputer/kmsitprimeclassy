@@ -269,7 +269,7 @@ Status legend:
 | GET | `/api/v1/dispatch/regions` | session | admin, agen, koordinator-kurir, super_admin | **GO** | cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/returns` | session | admin, agen, koordinator-kurir, super_admin | **GO** | Operational pickup queue, same-Agent and Super Admin agent_id validation, pending/approved return items whose order item is pengembalian, courier projection and capped pagination; compare_dispatch_returns.py |
 
-## Integrations — Google Sheets — `google-sheets` (1/7 in Go)
+## Integrations — Google Sheets — `google-sheets` (3/7 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -278,8 +278,8 @@ Status legend:
 | DELETE | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | LARAVEL |  |
 | PUT | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | LARAVEL |  |
 | POST | `/api/v1/google-sheets/configs/{config}/sync` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/google-sheets/connection` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/google-sheets/destinations` | session | admin, agen, super_admin | LARAVEL |  |
+| POST | `/api/v1/google-sheets/connection` | session | admin, agen, super_admin | **GO** | Service-account token, spreadsheet metadata probe, branch scope and durable connection status/error update; compare_google_sheets_connection.py |
+| POST | `/api/v1/google-sheets/destinations` | session | admin, agen, super_admin | **GO** | Spreadsheet URL/ID normalization, uniqueness, Agent selection validation and caller-bound scope; compare_google_sheets_destinations.py |
 
 ## CMS — homepage — `homepage` (1/1 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 348 (92.8%) |
-|   of which fully GO | 348 |
+| Served by Go now | 350 (93.3%) |
+|   of which fully GO | 350 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 27 |
+| Still Laravel-only | 25 |
 | Areas fully ported | 38 / 45 |
