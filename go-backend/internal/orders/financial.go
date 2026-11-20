@@ -296,7 +296,7 @@ func (s *Service) availableUnits(ctx context.Context, tx *sql.Tx, snapshotID int
 // provisional-legacy basis consumes nothing and reports zero, so the caller creates a needs_verification
 // obligation instead of an auto-refund.
 func (s *Service) consumeUnits(ctx context.Context, tx *sql.Tx, snapshotID int64, provenance string,
-	itemID int64, quantity int) (int64, bool, error) {
+	itemID int64, quantity int, consumedByType string) (int64, bool, error) {
 
 	if quantity < 1 {
 		return 0, false, &Problem{Status: 422, Message: "Jumlah unit yang dikonsumsi tidak valid.",
@@ -354,9 +354,9 @@ func (s *Service) consumeUnits(ctx context.Context, tx *sql.Tx, snapshotID int64
 	for _, u := range units {
 		sequence++
 		res, err := tx.ExecContext(ctx, `UPDATE order_financial_snapshot_units
-			SET consumed_at = UTC_TIMESTAMP(), consumed_by_type = 'fulfillment_shortfall', consumed_by_id = ?,
+			SET consumed_at = UTC_TIMESTAMP(), consumed_by_type = ?, consumed_by_id = ?,
 				consumption_seq = ?, updated_at = UTC_TIMESTAMP()
-			WHERE id = ? AND consumed_at IS NULL`, itemID, sequence, u.ID)
+			WHERE id = ? AND consumed_at IS NULL`, consumedByType, itemID, sequence, u.ID)
 		if err != nil {
 			return 0, false, err
 		}

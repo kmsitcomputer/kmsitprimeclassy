@@ -69,6 +69,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/orders/{order}/returns", chain(http.HandlerFunc(s.handleReturnRequestStore), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen")))
 	s.mux.Handle("GET /api/v1/admin/returns", chain(http.HandlerFunc(s.handleAdminReturnsIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("GET /api/v1/admin/returns/{return}", chain(http.HandlerFunc(s.handleAdminReturnsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("PATCH /api/v1/admin/returns/{return}/review", chain(http.HandlerFunc(s.handleAdminReturnReview), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 
 	// Commission/fee REPORTS — CommissionController::allowedBeneficiaryRoles scopes the rows per role.
 	commissionRoles := "super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan"

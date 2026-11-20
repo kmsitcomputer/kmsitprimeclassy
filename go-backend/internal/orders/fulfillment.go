@@ -589,7 +589,7 @@ func (s *Service) reduceFulfillment(ctx context.Context, tx *sql.Tx, orderID, ag
 		consumed         bool
 	)
 	if available >= quantityReduced {
-		consumptionCents, consumed, err = s.consumeUnits(ctx, tx, snapshotID, provenance, item.ID, quantityReduced)
+		consumptionCents, consumed, err = s.consumeUnits(ctx, tx, snapshotID, provenance, item.ID, quantityReduced, triggerFulfillmentShortfall)
 		if err != nil {
 			return err
 		}

@@ -24,6 +24,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/return-items/{returnItem}/receipt-allocations"): "Admin own-Agent/Super Admin; approved inspected return only, exact quantity allocation across same-item receipts, capacity locks, one-shot identical replay, conflict on changed replay, audit; compare_return_receipt_allocations.py",
     ("GET", "/api/v1/admin/returns"): "Admin/Agen branch-scoped, Super Admin optional agent_id, status list filter, latest-first pagination, full ReturnRequestResource + pagination meta; compare_admin_returns.py",
     ("GET", "/api/v1/admin/returns/{return}"): "Super Admin or same-Agent Admin/Agen branch authorization; complete ReturnRequestResource, 404 for missing model and 403 for foreign branch; compare_admin_return_show.py",
+    ("PATCH", "/api/v1/admin/returns/{return}/review"): "Admin/Agen branch scope, Laravel validation and localized responses, order-first review transaction, return state reversal/approval, frozen financial units, refund obligations and audit; compare_return_review.py",
     ("POST", "/api/v1/orders/{order}/items"): "Admin-only SC-03; order-first locking, Agent reservation, canonical shipment grouping, Stock Request reopen/reconcile, additional-payment ledger and replay/conflict; compare_order_line_addition.py",
     ("GET", "/api/v1/install/status"): "",
     ("GET", "/api/v1/settings"): "",

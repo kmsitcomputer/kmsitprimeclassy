@@ -144,6 +144,7 @@ func TestKnownAndUnknownRouteDiscrimination(t *testing.T) {
 		{http.MethodPost, "/api/v1/return-items/1/receipt-allocations", true, true},
 		{http.MethodGet, "/api/v1/admin/returns", true, true},
 		{http.MethodGet, "/api/v1/admin/returns/1", true, true},
+		{http.MethodPatch, "/api/v1/admin/returns/1/review", true, true},
 		{http.MethodPost, "/api/v1/admin/refund-attempts/{attempt}/initiate", true, false},
 		{http.MethodGet, "/api/v1/reports/finance-summary", true, true}, // GLM: implemented \- verified 150/150 (docs/21e)
 		{http.MethodGet, "/api/v1/nope", false, false},
