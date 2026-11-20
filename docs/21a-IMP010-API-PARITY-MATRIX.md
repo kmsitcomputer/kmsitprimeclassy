@@ -17,11 +17,11 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (19/59 in Go)
+## Admin operations — `admin` (20/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/admin/additional-payments` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/additional-payments` | session | admin, agen, keuangan, super_admin | **GO** | Branch-scoped operational/finance oversight list, current buyer/requester names, manual payment instructions, latest-first pagination; compare_admin_additional_payments.py |
 | PATCH | `/api/v1/admin/additional-payments/{payment}/status` | session | keuangan, super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/agents` | session | super_admin | **GO** | AgentDirectoryResource projection ordered by name (set-compared), soft-delete excluded; 107/0 compared by compare_admin_agents.py |
 | POST | `/api/v1/admin/agents` | session | super_admin | **GO** | accumulated store validation, not_an_agent / profile_already_exists 422s, 201 + directory resource, agent_profile.created audit; 107/0 compared by compare_admin_agents.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 287 (76.5%) |
-|   of which fully GO | 287 |
+| Served by Go now | 288 (76.8%) |
+|   of which fully GO | 288 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 88 |
+| Still Laravel-only | 87 |
 | Areas fully ported | 33 / 45 |
