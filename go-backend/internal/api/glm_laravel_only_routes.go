@@ -76,6 +76,7 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/shipments/{shipment}/expedition-handover", chain(http.HandlerFunc(s.handleExpeditionHandoverSpoofed), RequireAuth, s.RequireAgentLinked, koordGate))
 	receiptGate := RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/receipt", chain(http.HandlerFunc(s.handleShipmentReceipt), RequireAuth, s.RequireAgentLinked, receiptGate))
+	s.mux.Handle("POST /api/v1/shipments/{shipment}/items/{orderItem}/refuse", chain(http.HandlerFunc(s.handleShipmentItemRefuse), RequireAuth, s.RequireAgentLinked, shipGate))
 	dvGate := RequireRole("super_admin,admin")
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerifications), RequireAuth, s.RequireAgentLinked, dvGate))
 	s.mux.Handle("POST /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerificationStore), RequireAuth, s.RequireAgentLinked, dvGate))
@@ -159,6 +160,7 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/orders/{order}/consent-context",
 		"POST /api/v1/dispatch/orders/{order}/request-fulfillment",
 		"POST /api/v1/shipments/{shipment}/delivery-verifications",
+		"POST /api/v1/shipments/{shipment}/items/{orderItem}/refuse",
 		"GET /api/v1/shipments/{shipment}/receipt",
 		"GET /api/v1/shipments/{shipment}/eligible-couriers",
 		"PATCH /api/v1/shipments/{shipment}/status",
@@ -1575,6 +1577,52 @@ func (s *Server) handleConsentVerifyOtp(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpx.OK(w, result, "Kode terverifikasi.", nil)
+}
+
+func (s *Server) handleShipmentItemRefuse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shipmentID, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	itemID, err := strconv.ParseInt(httpx.PathValue(r, "orderItem"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Reason   *string `json:"reason"`
+		Quantity *int64  `json:"quantity"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	fields := fieldErrors{}
+	if body.Reason == nil || *body.Reason == "" {
+		fields.add("reason", i18n.ValidationMessage(LocaleFrom(ctx), "required", "reason"))
+	} else if len([]rune(*body.Reason)) > 255 {
+		fields.add("reason", i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "reason", "max", "255"))
+	}
+	if body.Quantity != nil && *body.Quantity < 1 {
+		fields.add("quantity", i18n.ValidationMessage(LocaleFrom(ctx), "min.numeric", "quantity", "min", "1"))
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(map[string][]string(fields)))
+		return
+	}
+	reason := ""
+	if body.Reason != nil {
+		reason = *body.Reason
+	}
+	var quantity sql.NullInt64
+	if body.Quantity != nil {
+		quantity = sql.NullInt64{Int64: *body.Quantity, Valid: true}
+	}
+	result, aerr := s.dispatchService().RecordItemRefusal(ctx, dispatchActor(r), shipmentID, itemID, reason, quantity)
+	if aerr != nil {
+		writeDispatchError(w, r, aerr)
+		return
+	}
+	httpx.Created(w, result, "Created")
 }
 
 func (s *Server) handleDeliveryVerifications(w http.ResponseWriter, r *http.Request) {

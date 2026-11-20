@@ -294,6 +294,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/consent-events/{consentEvent}/reinstate"): "authorized review reinstate (agen/admin/super_admin, allowed-from disputed); compared by compare_consent.py (26/0)",
     ("GET", "/api/v1/orders/{order}/consent-events"): "consent history per order (order view policy), ConsentEventResource; compared by compare_consent.py (26/0)",
     ("GET", "/api/v1/orders/{order}/consent-context"): "capture panel context (subject id only to capturing actor; CRM mode + channel availability); compared by compare_consent.py (26/0)",
+    ("POST", "/api/v1/shipments/{shipment}/items/{orderItem}/refuse"): "courier on-the-spot refusal: executor gates (policy-vs-service denial split), not_in_delivery, already_open, partial-refusal unit carving (fees/subtotals, stock-request demand move, sibling item), audit; compared by compare_item_refuse.py (15/0)",
 }
 
 

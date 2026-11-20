@@ -6,7 +6,203 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 )
+
+// RecordItemRefusal ports DeliveryRefusalService::record (the courier's on-the-spot
+// refusal of an item out for delivery, incl. partial-refusal unit carving).
+func (s *Service) RecordItemRefusal(ctx context.Context, a Actor, shipmentID, orderItemID int64,
+	reason string, quantity sql.NullInt64) (map[string]any, error) {
+	var refusalID, refusalQty int64
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderID, agentID int64
+		var orderStatus, shipStatus, mode string
+		var shipSelf sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT o.id, o.agent_id, o.status, sh.status, sh.delivery_mode,
+			sh.self_delivered_by_user_id FROM shipments sh JOIN orders o ON o.id = sh.order_id
+			WHERE sh.id = ? FOR UPDATE`, shipmentID).Scan(&orderID, &agentID, &orderStatus, &shipStatus, &mode, &shipSelf); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		var itemOrder, itemShipment int64
+		var itemStatus, stockSource string
+		var fulfilled int64
+		if err := tx.QueryRowContext(ctx, `SELECT order_id, shipment_id, status, stock_source, fulfilled_quantity
+			FROM order_items WHERE id = ? FOR UPDATE`, orderItemID).Scan(&itemOrder, &itemShipment, &itemStatus, &stockSource, &fulfilled); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		if itemShipment != shipmentID || itemOrder != orderID {
+			return &DomainError{Status: 404, Message: "Anda tidak memiliki akses untuk melakukan aksi ini."}
+		}
+		if shipSelf.Valid || stockSource == "sub" {
+			return &DomainError{Status: 422, Message: "Penolakan tidak berlaku untuk pengiriman ini."}
+		}
+		// Executor: the shipment courier's user must be this active actor.
+		var courierID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT courier_id FROM shipments WHERE id = ?`, shipmentID).Scan(&courierID); err != nil {
+			return err
+		}
+		isExecutor := false
+		if courierID.Valid {
+			var cUser sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT user_id FROM couriers WHERE id = ?`, courierID.Int64).Scan(&cUser); err == nil {
+				isExecutor = cUser.Valid && cUser.Int64 == a.ID
+			}
+		}
+		if !isExecutor || a.Status != "active" {
+			// The controller authorize() runs first: a policy denial renders the
+			// AuthorizationException text; the service executor check (403 not_your_delivery)
+			// only fires for roles the policy let through.
+			if a.Role == "koordinator-kurir" {
+				return &DomainError{Status: 403, Message: "This action is unauthorized."}
+			}
+			return &DomainError{Status: 403, Message: "Order ini sudah ditugaskan ke kurir lain."}
+		}
+		if itemStatus != "dikirim" {
+			return &DomainError{Status: 422, Message: "Item belum dalam pengiriman."}
+		}
+		var open bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_refusals WHERE order_item_id = ?
+			AND status IN ('with_courier','handed_back','received') FOR UPDATE)`, orderItemID).Scan(&open); err != nil {
+			return err
+		}
+		if open {
+			return &DomainError{Status: 422, Message: "Sudah ada penolakan terbuka untuk item ini."}
+		}
+		refusedQty := fulfilled
+		if quantity.Valid {
+			if quantity.Int64 < 1 || quantity.Int64 > refusedQty {
+				return &DomainError{Status: 422, Message: "Jumlah pemenuhan tidak valid."}
+			}
+			if quantity.Int64 < refusedQty {
+				newItemID, serr := s.splitOutRefusedUnits(ctx, tx, orderID, orderItemID, quantity.Int64, a.ID)
+				if serr != nil {
+					return serr
+				}
+				orderItemID = newItemID
+				refusedQty = quantity.Int64
+			}
+		}
+		res, ierr := tx.ExecContext(ctx, `INSERT INTO delivery_refusals (agent_id, order_id, order_item_id,
+			shipment_id, quantity, reason, status, recorded_by, recorded_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'with_courier', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+			agentID, orderID, orderItemID, shipmentID, refusedQty, reason, a.ID)
+		if ierr != nil {
+			return ierr
+		}
+		newID, lerr := res.LastInsertId()
+		if lerr != nil {
+			return lerr
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\DeliveryRefusal', ?, 'delivery_refusal.recorded', ?, ?, UTC_TIMESTAMP(6))`,
+			a.ID, newID, reason, mustJSON(map[string]any{"order_id": orderID, "order_item_id": orderItemID,
+				"quantity": refusedQty})); err != nil {
+			return err
+		}
+		refusalID = newID
+		refusalQty = refusedQty
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": refusalID, "status": "with_courier", "quantity": refusalQty,
+		"order_item_id": orderItemID}, nil
+}
+
+// splitOutRefusedUnits ports DeliveryRefusalService::splitOutRefusedUnits: carve refused
+// units into a sibling item on the SAME shipment, apportioning money/fees and warehouse demand.
+func (s *Service) splitOutRefusedUnits(ctx context.Context, tx *sql.Tx, orderID, itemID, qty int64, actorID int64) (int64, error) {
+	var srID int64
+	var srItemID sql.NullInt64
+	var demandFulfilled, demandRequested int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM stock_requests WHERE order_id = ? FOR UPDATE`, orderID).Scan(&srID)
+	if err == nil {
+		serr := tx.QueryRowContext(ctx, `SELECT id, requested_qty, fulfilled_qty FROM stock_request_items
+			WHERE stock_request_id = ? AND order_item_id = ? FOR UPDATE`, srID, itemID).
+			Scan(&srItemID, &demandRequested, &demandFulfilled)
+		if serr == nil && (demandFulfilled < qty || demandRequested < qty) {
+			return 0, &DomainError{Status: 422, Message: "Status stok tidak konsisten dengan pemecahan penolakan."}
+		}
+	} else if err != sql.ErrNoRows {
+		return 0, err
+	}
+	var orderIDv, shipID int64
+	var productID, variationID, subLocID sql.NullInt64
+	var stockSource string
+	var pname, vlabel, sku sql.NullString
+	var unitPrice, subtotal, courierFee string
+	var fulfilled int64
+	var reqDate sql.NullString
+	var status string
+	var handedOver sql.NullTime
+	if err := tx.QueryRowContext(ctx, `SELECT order_id, shipment_id, product_id, product_variation_id,
+		stock_source, sub_location_id, product_name_snapshot, variation_label_snapshot, sku_snapshot,
+		CAST(unit_price_snapshot AS CHAR), CAST(subtotal_snapshot AS CHAR), CAST(courier_fee_amount AS CHAR),
+		fulfilled_quantity, requested_delivery_date, status, handed_over_at FROM order_items WHERE id = ?`, itemID).
+		Scan(&orderIDv, &shipID, &productID, &variationID, &stockSource, &subLocID, &pname, &vlabel,
+			&sku, &unitPrice, &subtotal, &courierFee, &fulfilled, &reqDate, &status, &handedOver); err != nil {
+		return 0, err
+	}
+	up, _ := strconv.ParseFloat(unitPrice, 64)
+	cf, _ := strconv.ParseFloat(courierFee, 64)
+	sub, _ := strconv.ParseFloat(subtotal, 64)
+	perUnitFee := 0.0
+	if fulfilled > 0 {
+		perUnitFee = cf / float64(fulfilled)
+	}
+	movedFee := math.Round(perUnitFee*float64(qty)*100) / 100
+	movedSubtotal := math.Round(up*float64(qty)*100) / 100
+	retainedFee := math.Round((cf-movedFee)*100) / 100
+	retainedSubtotal := math.Round((sub-movedSubtotal)*100) / 100
+	res, ierr := tx.ExecContext(ctx, `INSERT INTO order_items (order_id, shipment_id, split_from_order_item_id,
+		product_id, product_variation_id, stock_source, sub_location_id, product_name_snapshot,
+		variation_label_snapshot, sku_snapshot, unit_price_snapshot, agent_fee_amount, sales_fee_amount,
+		courier_fee_amount, subtotal_snapshot, original_quantity, fulfilled_quantity, requested_delivery_date,
+		status, handed_over_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+		orderIDv, shipID, itemID, productID, variationID, stockSource, subLocID, pname, vlabel, sku,
+		unitPrice, movedFee, movedSubtotal, qty, qty, nullStrPtr(reqDate.String), status, handedOver)
+	if ierr != nil {
+		return 0, ierr
+	}
+	childID, lerr := res.LastInsertId()
+	if lerr != nil {
+		return 0, lerr
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE order_items SET original_quantity = original_quantity - ?,
+		fulfilled_quantity = fulfilled_quantity - ?, subtotal_snapshot = ?, courier_fee_amount = ?,
+		updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, qty, qty, retainedSubtotal, retainedFee, itemID); err != nil {
+		return 0, err
+	}
+	if srItemID.Valid {
+		if _, err := tx.ExecContext(ctx, `UPDATE stock_request_items SET requested_qty = requested_qty - ?,
+			fulfilled_qty = fulfilled_qty - ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, qty, qty, srItemID.Int64); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO stock_request_items (stock_request_id, order_item_id,
+			product_id, product_variation_id, sku_snapshot, requested_qty, fulfilled_qty, remaining_qty,
+			created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+			srID, childID, productID, variationID, sku, qty, qty); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+		description, properties, created_at)
+		VALUES (?, 'App\\Models\\OrderItem', ?, 'order_item.split_for_refusal', NULL, ?, UTC_TIMESTAMP(6))`,
+		actorID, childID, mustJSON(map[string]any{"order_id": orderIDv, "from_order_item_id": itemID, "quantity": qty})); err != nil {
+		return 0, err
+	}
+	return childID, nil
+}
 
 // HandBack ports DeliveryRefusalService::handBack — courier → koordinator custody transfer.
 func (s *Service) HandBack(ctx context.Context, a Actor, refusalID int64) (map[string]any, error) {
