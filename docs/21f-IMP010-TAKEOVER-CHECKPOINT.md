@@ -1,6 +1,7 @@
-# 21f — IMP-010 GLM TAKEOVER CHECKPOINT (Phase 0–4 complete)
+# 21f — IMP-010 GLM TAKEOVER CHECKPOINT (Phase 0–5a complete)
 
-Status: Phase 0–4 DONE, Phase 5 in progress. This is the resumable state; read BEFORE touching code.
+Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. Next: Phase 5b — 143 Laravel-only routes.
+
 
 ## Position (all verified, 2026-11-20)
 
@@ -27,13 +28,31 @@ Status: Phase 0–4 DONE, Phase 5 in progress. This is the resumable state; read
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (Phase 5 continues)
+## EXACT NEXT ACTION (Phase 5b — 143 Laravel-only routes)
 
-1. Port the 3 remaining PARTIAL routes (small): sub-stock/my reserved derivation; opnames pending_catalog_change publication; register queue bridge (may need the jobs worker — verify scope first).
-2. Then the 143 Laravel-only routes from `tools/parity-glm/laravel_only_inventory.tsv` (STALE — regenerate it from the matrix before use). Domain order suggestion: Dispatch (9), Shipments (9), kurir (6), order-items (2), invoices (2), consent (6), dashboard (2), catalog reads (4), checkout (2), auth register bits, profile whatsapp/email 5, google-sheets (7), install (7), admin remainder (~40: integrations SMTP/WhatsApp/google-auth, agents CRUD remainder, regions export/import, refunds obligations/attempts ~14, returns, delivery-refusals, orders remainder incl. assisted-returns/invoice/items/receipts/refund-recipient, CRM assisted-order).
-3. Environment: canonical containers pc_laravel_imp010:8899 + pc_go_imp010:8082, DB `primeclassy_testing` (korsal user 20 seeded by compare_users.py — CRM harnesses depend on it). GLM env (8898/8083, `primeclassy_testing_glm`) still up as a second runtime.
-4. Harness pattern: `tools/parity/compare_partials_glm.py` (compare_fulfillment helpers; remember tuple-vs-list in normalizers).
-5. After all routes GO: regenerate matrix → Phase 6 checks → Phase 7 retirement gates (compare backups vs canonical, then remove `primeclassy-imp010-glm` worktree + `imp010/glm-laravel-only` + `imp010/integration` branch) → Phase 8 final report. Do NOT delete the canonical worktree or the copilot worktree without its own gate check.
+Regenerate `tools/parity-glm/laravel_only_inventory.tsv` from the CURRENT matrix (the committed TSV is stale —
+13 routes were verified and 13 PARTIALs closed since). Domain order (dependency-aware, per §3 of the mandate):
+1. **Dispatch** (9: penugasan/kurir assignment) + **Shipping & delivery** (9: shipment status/courier/expedition-handover/verifications/refuse) + **Courier** kurir (6: dashboard/returns confirm/pickup) + **delivery-refusals** (3) — these share the shipments domain.
+2. **Orders remainder** (8: assisted-returns, consent-context/events, invoice, items, refund-recipient, returns) + **order-items** (2 receipts) + **consent-events** (4) + **consent** (2) — REM-005 consent chain.
+3. **Invoices** (2), **dashboard** (2), **catalog** (3 + bestsellers 1), **checkout** (2).
+4. **Admin operations** (~51: integrations SMTP/WhatsApp, agents CRUD remainder, audit-logs DONE, regions export/import, refunds obligations/attempts ~14, returns, returns-items 2, google-auth).
+5. **Google Sheets** (7), **Installer** (7), **Profile** whatsapp/email (5), **Identity** (google-auth bits).
+
+Environment: pc_laravel_imp010:8899 + pc_go_imp010:8082, DB `primeclassy_testing` (korsal user 20 seeded by
+compare_users.py). Harness pattern: tools/parity/compare_partials_final.py + compare_partials_glm.py (remember
+the tuple-vs-list normalizer; OPN- numbers and random suffixes must be scrubbed).
+
+Phase 5a fixes landed (`5948405`):
+- auth.Register → RegistrationNotifier port: waMsisdn + wa.enabled-gated whatsapp_messages ledger enqueue
+  (idempotency key txn:account_registered:user:{id}, max_attempts clamped 1–5, after-commit, never fails signup).
+- ApproveOpname → REM-01/D-07 catalog publication loop: reads pending_catalog_change + catalog_published_at,
+  calls catalog.PublishCatalogChange (column-whitelisted UPDATE; attributes rewrite via replaceVariationAttributes),
+  stamps catalog_published_at, all inside the approve transaction (rollback-safe).
+- CreateOpname → LoadOpnameStoreResponse: the store response shape is `$opname->load('items')` — scalar-only
+  opname (no status/approved/rejected) + scalar items (no product/variation) + intOrZero for the integer cast.
+- Harness: tools/parity/compare_partials_final.py — 12/12 PASS.
+
+Phase 6 verification gate and Phase 7 retirement remain gated on 375/375.
 
 ## Known gotchas
 
