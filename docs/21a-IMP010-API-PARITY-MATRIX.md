@@ -39,7 +39,7 @@ Status legend:
 | GET | `/api/v1/admin/integrations/whatsapp` | session | super_admin | **GO** | Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py |
 | PUT | `/api/v1/admin/integrations/whatsapp` | session | super_admin | **GO** | Validated GOWA config, encrypted write-only password, normalized test-number allow-list, rate/OTP/event settings and redacted before/after audit; compare_admin_whatsapp_update.py |
 | GET | `/api/v1/admin/integrations/whatsapp/messages` | session | super_admin | **GO** | filtered Super Admin WhatsApp message ledger, masked recipients, retry flags and pagination; compare_admin_whatsapp_messages.py |
-| POST | `/api/v1/admin/integrations/whatsapp/messages/{message}/retry` | session | super_admin | **PARTIAL** | Super Admin failed/unknown message retry, duplicate-risk gate, durable audit and gateway-disabled skip behavior; compare_admin_whatsapp_retry.py |
+| POST | `/api/v1/admin/integrations/whatsapp/messages/{message}/retry` | session | super_admin | **GO** | Super Admin failed/unknown retry, duplicate-risk gate, CAS, durable audit, Laravel-compatible primeclassy-notify database job containing only message ID, and gateway-disabled skip; compare_admin_whatsapp_retry.py + jobs payload test |
 | DELETE | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | idempotent Super Admin global template reset to Laravel default with before/after audit; compare_admin_whatsapp_templates.py |
 | PUT | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py |
 | POST | `/api/v1/admin/integrations/whatsapp/templates/{event}/preview` | session | super_admin | **GO** | Super Admin global template preview, token validation and optional-line rendering; compare_admin_whatsapp_preview.py |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 317 (84.5%) |
-|   of which fully GO | 316 |
-|   of which PARTIAL (incomplete behaviour) | 1 |
+|   of which fully GO | 317 |
+|   of which PARTIAL (incomplete behaviour) | 0 |
 | Still Laravel-only | 58 |
 | Areas fully ported | 34 / 45 |

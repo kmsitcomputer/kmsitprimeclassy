@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/admininfra"
+	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
+	"github.com/kmsitcomputer/primeclassy-go/internal/jobs"
 )
 
 func (s *Server) handleAdminWhatsAppMessageRetry(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +92,26 @@ func (s *Server) handleAdminWhatsAppMessageRetry(w http.ResponseWriter, r *http.
 			writeError(w, r, err)
 			return
 		}
+	} else if purpose == "test" {
+		var phone, text string
+		if err = s.database.QueryRowContext(ctx, `SELECT recipient_phone,COALESCE(secret_body,body,'') FROM whatsapp_messages WHERE id=?`, id).Scan(&phone, &text); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		outcome, sendErr := admininfra.New(s.database, s.cfg.AppKey).SendWhatsAppText(ctx, phone, text)
+		if sendErr != nil {
+			writeError(w, r, sendErr)
+			return
+		}
+		maxAttempts, _ := item["max_attempts"].(int)
+		err = applyAdminWhatsAppRetryOutcome(ctx, s.database, id, 1, maxAttempts, config, outcome)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+	} else if err = jobs.EnqueueWhatsApp(ctx, s.database, id); err != nil {
+		writeError(w, r, err)
+		return
 	}
 	item, err = loadWhatsAppMessage(ctx, s.database.DB, id)
 	if err != nil {
@@ -98,6 +121,44 @@ func (s *Server) handleAdminWhatsAppMessageRetry(w http.ResponseWriter, r *http.
 	item["can_retry"] = (item["status"] == "failed" || item["status"] == "unknown") && item["purpose"] != "otp"
 	item["needs_duplicate_risk_confirmation"] = item["status"] == "unknown"
 	httpx.OK(w, item, i18n.Translate(locale, "whatsapp.retry_queued"), nil)
+}
+
+func applyAdminWhatsAppRetryOutcome(ctx context.Context, database *db.DB, id int64, attempts, maxAttempts int, settings map[string]any, outcome map[string]any) error {
+	state, _ := outcome["outcome"].(string)
+	class, _ := outcome["error_class"].(string)
+	message, _ := outcome["error_message"].(string)
+	switch state {
+	case "sent":
+		_, err := database.ExecContext(ctx, `UPDATE whatsapp_messages SET status='sent',attempts=?,last_attempt_at=UTC_TIMESTAMP(6),provider_message_id=?,sent_at=UTC_TIMESTAMP(6),error_class=NULL,error_message=NULL,secret_body=NULL,next_attempt_at=NULL,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='queued'`, attempts, nullableDBValue(anyString(outcome["provider_message_id"])), id)
+		return err
+	case "failed", "unknown":
+		_, err := database.ExecContext(ctx, `UPDATE whatsapp_messages SET status=?,attempts=?,last_attempt_at=UTC_TIMESTAMP(6),error_class=?,error_message=?,secret_body=NULL,next_attempt_at=NULL,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='queued'`, state, attempts, class, message, id)
+		return err
+	case "retry":
+		if attempts >= maxAttempts {
+			_, err := database.ExecContext(ctx, `UPDATE whatsapp_messages SET status='failed',attempts=?,last_attempt_at=UTC_TIMESTAMP(6),error_class=?,error_message=?,secret_body=NULL,next_attempt_at=NULL,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='queued'`, attempts, "retries_exhausted:"+class, message, id)
+			return err
+		}
+		backoff := 60
+		if value, ok := settings["backoff_seconds"].(int); ok && value > 0 {
+			backoff = value
+		}
+		due := time.Now().Add(time.Duration(backoff*attempts) * time.Second)
+		if _, err := database.ExecContext(ctx, `UPDATE whatsapp_messages SET status='queued',attempts=?,last_attempt_at=UTC_TIMESTAMP(6),error_class=?,error_message=?,next_attempt_at=?,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='queued'`, attempts, class, message, due.UTC(), id); err != nil {
+			return err
+		}
+		return jobs.EnqueueWhatsAppAt(ctx, database, id, due)
+	default:
+		_, err := database.ExecContext(ctx, `UPDATE whatsapp_messages SET status='unknown',attempts=?,last_attempt_at=UTC_TIMESTAMP(6),error_class='unexpected_response',error_message='Unexpected provider response.',secret_body=NULL,next_attempt_at=NULL,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='queued'`, attempts, id)
+		return err
+	}
+}
+
+func nullableDBValue(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func loadWhatsAppMessage(ctx context.Context, db *sql.DB, id int64) (map[string]any, error) {

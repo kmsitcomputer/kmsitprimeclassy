@@ -33,7 +33,7 @@ IMPLEMENTED = {
     ("PUT", "/api/v1/agent/google-auth"): "Agent/Admin own-branch config validation, encrypted secret preserve/clear, scoped audit; compare_google_auth_settings.py",
     ("GET", "/api/v1/admin/integrations/whatsapp"): "Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py",
     ("GET", "/api/v1/admin/integrations/whatsapp/messages"): "filtered Super Admin WhatsApp message ledger, masked recipients, retry flags and pagination; compare_admin_whatsapp_messages.py",
-    ("POST", "/api/v1/admin/integrations/whatsapp/messages/{message}/retry"): "Super Admin failed/unknown message retry, duplicate-risk gate, durable audit and gateway-disabled skip behavior; compare_admin_whatsapp_retry.py",
+    ("POST", "/api/v1/admin/integrations/whatsapp/messages/{message}/retry"): "Super Admin failed/unknown retry, duplicate-risk gate, CAS, durable audit, Laravel-compatible primeclassy-notify database job containing only message ID, and gateway-disabled skip; compare_admin_whatsapp_retry.py + jobs payload test",
     ("POST", "/api/v1/admin/integrations/whatsapp/test-message"): "Super Admin allow-listed test send, normalized destination, safe template cleaning, synchronous GOWA delivery and ledger result; compare_admin_whatsapp_test_message.py uses a local stub",
     ("POST", "/api/v1/admin/integrations/whatsapp/test-connection"): "read-only authenticated GOWA status/device probe with state audit; compare_admin_whatsapp_test_connection.py uses a local stub",
     ("PUT", "/api/v1/admin/integrations/whatsapp/templates/{event}"): "Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py",
@@ -361,9 +361,7 @@ IMPLEMENTED = {
 # every annotated route PARTIAL made the status column meaningless and produced two different published counts
 # (the matrix said 31 PARTIAL while the execution state said 6). Anything here must name the missing behaviour
 # in its note.
-GAPS = {
-    ("POST", "/api/v1/admin/integrations/whatsapp/messages/{message}/retry"): "retry only updates the message ledger; it does not enqueue the Laravel-compatible SendWhatsAppMessageJob or run the configured-gateway delivery path",
-}
+GAPS = {}
 
 AREA_TITLES = OrderedDict([
     ("auth", "Identity & session"),
