@@ -59,17 +59,19 @@ type Input struct {
 	Lines       []Line
 	Destination Destination
 
-	PaymentMethodCode string
-	DeliveryDate      *string
-	IdempotencyKey    string
-	ShippingMethod    *string
-	DPAmount          *float64
-	Courier           *string
-	Service           *string
-	StockSource       *string
-	SubLocationID     *int64
-	VoucherCode       *string
-	CRM               *CrmOrigin
+	PaymentMethodCode       string
+	DeliveryDate            *string
+	IdempotencyKey          string
+	ShippingMethod          *string
+	DPAmount                *float64
+	Courier                 *string
+	Service                 *string
+	StockSource             *string
+	SubLocationID           *int64
+	VoucherCode             *string
+	CRM                     *CrmOrigin
+	OrderItemIdempotencyKey string
+	OrderItemFingerprint    string
 }
 
 // CrmOrigin is the persisted buyer and owning seller attribution for an assisted CRM order.
@@ -723,6 +725,7 @@ func (s *Service) priceAndReserveLine(ctx context.Context, tx *sql.Tx, quoter *c
 		SKU: skuOf(resolved), UnitPrice: unitPrice,
 		AgentFee: agentFee, SalesFee: salesFee, CourierFee: courierFee, Subtotal: lineSubtotal,
 		Quantity: qty, RequestedDate: requestedDate, Status: initialItemStatus,
+		IdempotencyKey: in.OrderItemIdempotencyKey, RequestFingerprint: in.OrderItemFingerprint,
 	})
 	if err != nil {
 		return 0, 0, err

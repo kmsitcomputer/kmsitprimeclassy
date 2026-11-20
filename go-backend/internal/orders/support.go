@@ -485,22 +485,24 @@ func recordCommission(ctx context.Context, tx *sql.Tx, orderID, itemID, agentID,
 
 // orderItemInput is one order_items insert.
 type orderItemInput struct {
-	OrderID        int64
-	ProductID      int64
-	VariationID    *int64
-	StockSource    string
-	SubLocationID  *int64
-	ProductName    string
-	VariationLabel *string
-	SKU            *string
-	UnitPrice      float64
-	AgentFee       float64
-	SalesFee       float64
-	CourierFee     float64
-	Subtotal       float64
-	Quantity       int
-	RequestedDate  *string
-	Status         string
+	OrderID            int64
+	ProductID          int64
+	VariationID        *int64
+	StockSource        string
+	SubLocationID      *int64
+	ProductName        string
+	VariationLabel     *string
+	SKU                *string
+	UnitPrice          float64
+	AgentFee           float64
+	SalesFee           float64
+	CourierFee         float64
+	Subtotal           float64
+	Quantity           int
+	RequestedDate      *string
+	Status             string
+	IdempotencyKey     string
+	RequestFingerprint string
 }
 
 func insertOrderItem(ctx context.Context, tx *sql.Tx, in orderItemInput) (int64, error) {
@@ -508,12 +510,12 @@ func insertOrderItem(ctx context.Context, tx *sql.Tx, in orderItemInput) (int64,
 		(order_id, product_id, product_variation_id, stock_source, sub_location_id,
 		 product_name_snapshot, variation_label_snapshot, sku_snapshot,
 		 unit_price_snapshot, agent_fee_amount, sales_fee_amount, courier_fee_amount, subtotal_snapshot,
-		 original_quantity, fulfilled_quantity, requested_delivery_date, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+			 original_quantity, fulfilled_quantity, requested_delivery_date, status, idempotency_key, request_fingerprint, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
 		in.OrderID, in.ProductID, nullableInt(in.VariationID), in.StockSource, nullableInt(in.SubLocationID),
 		in.ProductName, nullableString(in.VariationLabel), nullableString(in.SKU),
 		in.UnitPrice, in.AgentFee, in.SalesFee, in.CourierFee, in.Subtotal,
-		in.Quantity, in.Quantity, nullableString(in.RequestedDate), in.Status)
+		in.Quantity, in.Quantity, nullableString(in.RequestedDate), in.Status, nullIfEmpty(in.IdempotencyKey), nullIfEmpty(in.RequestFingerprint))
 	if err != nil {
 		return 0, err
 	}

@@ -19,6 +19,7 @@ ROUTES = os.path.join(ROOT, "go-backend", "internal", "api", "parity_routes.json
 # Endpoints the Go service serves. Anything absent is NOT PORTED.
 IMPLEMENTED = {
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",
+    ("POST", "/api/v1/orders/{order}/items"): "Admin-only SC-03; order-first locking, Agent reservation, canonical shipment grouping, Stock Request reopen/reconcile, additional-payment ledger and replay/conflict; compare_order_line_addition.py",
     ("GET", "/api/v1/install/status"): "",
     ("GET", "/api/v1/settings"): "",
     ("GET", "/api/v1/languages"): "",

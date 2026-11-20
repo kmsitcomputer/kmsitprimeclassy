@@ -141,6 +141,7 @@ func implementsRoute(method, path string) bool {
 		"GET /api/v1/orders/regions",
 		"POST /api/v1/orders",
 		"POST /api/v1/orders/{order}/cancel",
+		"POST /api/v1/orders/{order}/items",
 		"PATCH /api/v1/orders/{order}/items/{item}/fulfillment",
 		"PATCH /api/v1/orders/{order}/items/{item}/reschedule",
 		"GET /api/v1/orders/{order}/items/{item}/cancel-eligibility",
@@ -218,6 +219,9 @@ func implementsRoute(method, path string) bool {
 			return true
 		}
 		if len(parts) == 2 {
+			if method == http.MethodPost && parts[1] == "items" {
+				return true
+			}
 			if method == http.MethodPost && parts[1] == "cancel" {
 				return true
 			}

@@ -76,6 +76,13 @@ KEYS = {
         "status_endpoint_required",
         "payment_not_verified",
         "sub_item_requires_owner_shipment",
+        "line_added",
+        "line_addition_sub_not_supported",
+        "line_addition_stock_request_unavailable",
+        "line_idempotency_conflict",
+        "idempotency_key_too_long",
+        "line_addition_executor_assigned",
+        "line_addition_date_in_past",
     ],
     "courier": [
         "assigned",
@@ -259,7 +266,7 @@ KEYS = {
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
                    "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes",
-                   "image", "file", "required_if", "before_or_equal", "email", "confirmed", "prohibited_if",
+                   "image", "file", "required_if", "before_or_equal", "email", "confirmed", "prohibited", "prohibited_if",
                    "prohibited_if_accepted", "prohibited_if_declined", "accepted", "distinct", "regex"]
 # Nested variants: "rule.kind" (e.g. max.string).
 VALIDATION_NESTED = [("max", "string"), ("max", "numeric"), ("max", "array"), ("min", "numeric"),

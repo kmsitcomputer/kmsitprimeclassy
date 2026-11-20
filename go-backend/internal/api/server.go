@@ -129,6 +129,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/orders/{order}", chain(http.HandlerFunc(s.handleOrderShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,keuangan,konsumen,sales,sales-kurir-sub,korsal,gudang,koordinator-kurir")))
 	s.mux.Handle("PATCH /api/v1/orders/{order}/status", chain(http.HandlerFunc(s.handleOrderUpdateStatus), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("POST /api/v1/orders/{order}/cancel", chain(http.HandlerFunc(s.handleOrderCancel), RequireAuth, s.RequireAgentLinked, RequireRole("konsumen,agen,korsal,sales,sales-kurir-sub,super_admin")))
+	s.mux.Handle("POST /api/v1/orders/{order}/items", chain(http.HandlerFunc(s.handleOrderLineAddition), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
 	s.mux.Handle("PATCH /api/v1/orders/{order}/items/{item}/fulfillment", chain(http.HandlerFunc(s.handleOrderItemAdjust), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("PATCH /api/v1/orders/{order}/items/{item}/reschedule", chain(http.HandlerFunc(s.handleOrderItemReschedule), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("GET /api/v1/orders/{order}/items/{item}/cancel-eligibility", chain(http.HandlerFunc(s.handleOrderItemCancelEligibility), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))

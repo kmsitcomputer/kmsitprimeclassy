@@ -14,6 +14,7 @@ package orders
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -556,6 +557,21 @@ func (s *Service) paymentSummary(ctx context.Context, order *Order) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	var pendingAdditionalRaw string
+	var latestAdditional sql.NullString
+	if err = s.Database.QueryRowContext(ctx, `SELECT
+		CAST(COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) AS CHAR),
+		(SELECT status FROM order_additional_payments WHERE order_id=? ORDER BY id DESC LIMIT 1)
+		FROM order_additional_payments WHERE order_id=?`, order.ID, order.ID).Scan(&pendingAdditionalRaw, &latestAdditional); err != nil {
+		return nil, err
+	}
+	pendingAdditional := parseDecimalString(pendingAdditionalRaw)
+	var latestAdditionalStatus any
+	if pendingAdditional > 0 {
+		latestAdditionalStatus = "pending"
+	} else if latestAdditional.Valid {
+		latestAdditionalStatus = latestAdditional.String
+	}
 
 	overpaid := order.PaidAmount - order.Total
 	if overpaid < 0 {
@@ -576,8 +592,8 @@ func (s *Service) paymentSummary(ctx context.Context, order *Order) (map[string]
 		"is_fully_paid":               order.PaymentStatus == "paid" && order.RemainingAmount <= 0,
 		"pending_verification_status": nil,
 		"has_pending_proof":           false,
-		"additional_payment_amount":   0.0,
-		"additional_payment_status":   nil,
+		"additional_payment_amount":   pendingAdditional,
+		"additional_payment_status":   latestAdditionalStatus,
 		"refund_amount":               0.0,
 		"refund_status":               nil,
 	}, nil
