@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (48/59 in Go)
+## Admin operations — `admin` (49/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -61,7 +61,7 @@ Status legend:
 | POST | `/api/v1/admin/refund-attempts/{attempt}/initiate` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/reconcile` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/unknown` | session | agen, keuangan, super_admin | LARAVEL |  |
-| POST | `/api/v1/admin/refund-obligations/{obligation}/approve` | session | agen, keuangan, super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/refund-obligations/{obligation}/approve` | session | agen, keuangan, super_admin | **GO** | Branch owner/Super Admin pending-only approval, owner authorization, idempotent approved replay and unique append-only ledger event; compare_admin_refund_obligation_approve.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/attempts` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/materialize` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/request` | session | agen, keuangan, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 320 (85.3%) |
-|   of which fully GO | 320 |
+| Served by Go now | 321 (85.6%) |
+|   of which fully GO | 321 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 55 |
+| Still Laravel-only | 54 |
 | Areas fully ported | 34 / 45 |

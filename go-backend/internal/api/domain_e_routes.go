@@ -22,6 +22,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("PATCH /api/v1/admin/order-refunds/{adjustment}/status", chain(http.HandlerFunc(s.handleAdminOrderRefundStatus), RequireAuth, s.RequireAgentLinked, RequireRole("keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/order-sales-reductions/{reduction}/reinstate", chain(http.HandlerFunc(s.handleAdminOrderSalesReductionReinstate), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/orders/{order}/cancellation/finalize", chain(http.HandlerFunc(s.handleAdminCancellationFinalize), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
+	s.mux.Handle("POST /api/v1/admin/refund-obligations/{obligation}/approve", chain(http.HandlerFunc(s.handleAdminRefundObligationApprove), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("GET /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/admin/integrations/smtp/test-connection", chain(http.HandlerFunc(s.handleAdminSMTPTestConnection), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin"), s.Throttle(6, time.Minute)))
