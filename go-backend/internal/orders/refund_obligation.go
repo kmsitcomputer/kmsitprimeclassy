@@ -249,3 +249,49 @@ func (s *Service) MarkRefundAttemptUnknown(ctx context.Context, attemptID, actor
 		return err
 	})
 }
+
+func (s *Service) MarkRefundAttemptFailed(ctx context.Context, attemptID, actorID int64, code, message string) error {
+	var obligationID, orderID int64
+	if err := s.Database.QueryRowContext(ctx, `SELECT a.obligation_id,o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, attemptID).Scan(&obligationID, &orderID); err != nil {
+		return err
+	}
+	changed := false
+	err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var lockedOrder int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&lockedOrder); err != nil {
+			return err
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM refund_attempts WHERE id=? FOR UPDATE`, attemptID).Scan(&status); err != nil {
+			return err
+		}
+		if status == "failed" {
+			return nil
+		}
+		if status != "processing" {
+			return &Problem{Status: 422, Message: "Attempt tidak berada pada status processing.", Errors: map[string]any{"code": "invalid_attempt_state"}}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE refund_attempts SET status='failed',failure_code=?,failure_message=?,finished_at=UTC_TIMESTAMP(6),updated_at=UTC_TIMESTAMP(6) WHERE id=?`, code, message, attemptID); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"failure_code": code})
+		if _, err := tx.ExecContext(ctx, `INSERT INTO refund_ledger_events(order_id,obligation_id,attempt_id,event_type,event_key,actor_type,actor_id,payload,occurred_at,created_at,updated_at) VALUES (?,?,?,'attempt.failed',?,'user',?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE id=id`, orderID, obligationID, attemptID, fmt.Sprintf("attempt_failed:%d", attemptID), actorID, string(payload)); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if changed {
+		var orderStatus, cancellationStatus string
+		if err := s.Database.QueryRowContext(ctx, `SELECT status,cancellation_financial_status FROM orders WHERE id=?`, orderID).Scan(&orderStatus, &cancellationStatus); err != nil {
+			return err
+		}
+		if orderStatus == "dibatalkan" && cancellationStatus == "pending_reconciliation" {
+			return s.FinalizeCancellation(ctx, orderID, actorID)
+		}
+	}
+	return nil
+}

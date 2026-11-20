@@ -27,6 +27,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/initiate", chain(http.HandlerFunc(s.handleAdminRefundAttemptInitiate), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/cancel", chain(http.HandlerFunc(s.handleAdminRefundAttemptCancel), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/unknown", chain(http.HandlerFunc(s.handleAdminRefundAttemptUnknown), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
+	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/fail", chain(http.HandlerFunc(s.handleAdminRefundAttemptFail), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("GET /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/admin/integrations/smtp/test-connection", chain(http.HandlerFunc(s.handleAdminSMTPTestConnection), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin"), s.Throttle(6, time.Minute)))

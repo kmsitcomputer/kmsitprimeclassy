@@ -350,6 +350,58 @@ func (s *Server) handleAdminRefundAttemptUnknown(w http.ResponseWriter, r *http.
 	s.writeRefundAttempt(w, r, attemptID)
 }
 
+func (s *Server) handleAdminRefundAttemptFail(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	attemptID, ok := pathID(w, r, "attempt")
+	if !ok {
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	var code, message string
+	for _, field := range []string{"code", "message"} {
+		value, exists := body[field]
+		if !exists || string(value) == "null" || string(value) == `""` {
+			fields[field] = []string{i18n.ValidationMessage(locale, "required", field)}
+			continue
+		}
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			fields[field] = []string{i18n.ValidationMessage(locale, "string", field)}
+			continue
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			fields[field] = []string{i18n.ValidationMessage(locale, "required", field)}
+		} else if utf8.RuneCountInString(text) > map[string]int{"code": 60, "message": 255}[field] {
+			fields[field] = []string{i18n.ValidationMessage(locale, "max.string", field, "max", strconv.Itoa(map[string]int{"code": 60, "message": 255}[field]))}
+		} else if field == "code" {
+			code = text
+		} else {
+			message = text
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	_, actorID, accessErr := s.refundAttemptAccess(ctx, attemptID, locale)
+	if accessErr != nil {
+		writeError(w, r, accessErr)
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	if err := service.MarkRefundAttemptFailed(ctx, attemptID, actorID, code, message); err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	s.writeRefundAttempt(w, r, attemptID)
+}
+
 func (s *Server) refundAttemptAccess(ctx context.Context, id int64, locale string) (int64, int64, *httpx.Error) {
 	var orderID int64
 	if err := s.database.QueryRowContext(ctx, `SELECT o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, id).Scan(&orderID); err != nil {
