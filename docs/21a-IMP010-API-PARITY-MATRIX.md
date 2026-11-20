@@ -255,7 +255,7 @@ Status legend:
 | POST | `/api/v1/delivery-refusals/{refusal}/hand-back` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | executor custody transfer, idempotent replay, audit; compared by compare_refusals.py (14/0) |
 | POST | `/api/v1/delivery-refusals/{refusal}/receive` | session | koordinator-kurir | **GO** | koordinator receipt, state machine handed_back→received, audit; compared by compare_refusals.py (14/0) |
 
-## Dispatch — `dispatch` (6/9 in Go)
+## Dispatch — `dispatch` (7/9 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -267,7 +267,7 @@ Status legend:
 | POST | `/api/v1/dispatch/orders/{order}/request-fulfillment` | session | koordinator-kurir | **GO** | REM-001 coordinator fulfillment request: warehouse-scope gate, outstanding gate, coordinator_* columns, audit, StockRequestResource projection; compared by compare_dispatch_writes.py (19/0) |
 | GET | `/api/v1/dispatch/refusals` | session | koordinator-kurir | **GO** | open refusals branch projection + status filter; koordinator-kurir only; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/regions` | session | admin, agen, koordinator-kurir, super_admin | **GO** | cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py |
-| GET | `/api/v1/dispatch/returns` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
+| GET | `/api/v1/dispatch/returns` | session | admin, agen, koordinator-kurir, super_admin | **GO** | Operational pickup queue, same-Agent and Super Admin agent_id validation, pending/approved return items whose order item is pengembalian, courier projection and capped pagination; compare_dispatch_returns.py |
 
 ## Integrations — Google Sheets — `google-sheets` (0/7 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 283 (75.5%) |
-|   of which fully GO | 283 |
+| Served by Go now | 284 (75.7%) |
+|   of which fully GO | 284 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 92 |
+| Still Laravel-only | 91 |
 | Areas fully ported | 32 / 45 |
