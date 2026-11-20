@@ -107,6 +107,11 @@ KEYS = {
         "test_subject",
         "test_body",
     ],
+    "region": [
+        "imported",
+        "invalid_csv",
+        "invalid_row",
+    ],
     "media": [
         "unknown_collection",
         "upload_failed",

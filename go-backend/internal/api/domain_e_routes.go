@@ -23,6 +23,8 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("PUT /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/admin/integrations/smtp/test-connection", chain(http.HandlerFunc(s.handleAdminSMTPTestConnection), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin"), s.Throttle(6, time.Minute)))
 	s.mux.Handle("POST /api/v1/admin/integrations/smtp/test-email", chain(http.HandlerFunc(s.handleAdminSMTPTestEmail), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin"), s.Throttle(6, time.Minute)))
+	s.mux.Handle("GET /api/v1/admin/regions/export", chain(http.HandlerFunc(s.handleAdminRegionExport), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("POST /api/v1/admin/regions/import", chain(http.HandlerFunc(s.handleAdminRegionImport), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/shipping-couriers", chain(http.HandlerFunc(s.handleAdminShippingCouriers), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))

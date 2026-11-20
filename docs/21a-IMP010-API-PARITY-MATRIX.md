@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (43/59 in Go)
+## Admin operations — `admin` (45/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -66,8 +66,8 @@ Status legend:
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/materialize` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/request` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve` | session | agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/regions/export` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/admin/regions/import` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/regions/export` | session | super_admin | **GO** | Super Admin four-level joined reference export with Laravel CSV quoting, filename and UTF-8 content type; compare_admin_regions_csv.py |
+| POST | `/api/v1/admin/regions/import` | session | super_admin | **GO** | Super Admin multipart CSV import, validated hierarchy rows, one transaction, exact upsert counts and audit; compare_admin_regions_csv.py |
 | PATCH | `/api/v1/admin/return-items/{item}/refund` | session | keuangan, super_admin | **GO** | Keuangan/Super Admin and same-Agent gates, approved/full-paid/CRM-recipient checks, idempotent legacy refund attempt and payout, paid balance/invoice reversal, refund completion, Sales-only fee adjustment and audit; compare_return_item_refund.py |
 | GET | `/api/v1/admin/returns` | session | admin, agen, super_admin | **GO** | Admin/Agen branch-scoped, Super Admin optional agent_id, status list filter, latest-first pagination, full ReturnRequestResource + pagination meta; compare_admin_returns.py |
 | GET | `/api/v1/admin/returns/{return}` | session | admin, agen, super_admin | **GO** | Super Admin or same-Agent Admin/Agen branch authorization; complete ReturnRequestResource, 404 for missing model and 403 for foreign branch; compare_admin_return_show.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 315 (84.0%) |
-|   of which fully GO | 314 |
+| Served by Go now | 317 (84.5%) |
+|   of which fully GO | 316 |
 |   of which PARTIAL (incomplete behaviour) | 1 |
-| Still Laravel-only | 60 |
+| Still Laravel-only | 58 |
 | Areas fully ported | 34 / 45 |
