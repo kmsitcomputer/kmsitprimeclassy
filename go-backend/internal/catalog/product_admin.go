@@ -1230,6 +1230,60 @@ func sameIDs(a, b []int64) bool {
 
 func mediaPublicRoot() string { return media.Root }
 
+// PublishCatalogChange applies one withheld catalogue change (CatalogImportService::applyChange) —
+// the approval-time publisher REM-01/D-07 relies on. `changes` maps JSON keys to columns ('price'
+// is the import plan's name for products.base_price); `attributes` (nullable) rewrites a variant's
+// composition through the same firstOrCreate + duplicate-composition guard the PATCH endpoint uses.
+func PublishCatalogChange(ctx context.Context, tx *sql.Tx, kind string, id int64, changes map[string]any, attributes map[string]string) error {
+	if len(changes) == 0 && attributes == nil {
+		return nil
+	}
+	table := "product_variations"
+	if kind == "product" {
+		table = "products"
+	}
+	// Column whitelist: these are the only keys the import planner can stage. Anything else is a bug
+	// and must fail loudly rather than write an unknown column.
+	allowed := map[string]bool{
+		"base_price": true, "price": true, "status": true, "is_active": true,
+		"weight_grams": true, "sku": true,
+	}
+	sets := make([]string, 0, len(changes))
+	args := make([]any, 0, len(changes)+1)
+	for k, v := range changes {
+		col := k
+		if kind == "product" && k == "price" {
+			col = "base_price"
+		}
+		if !allowed[col] {
+			return fmt.Errorf("publish: unsupported catalog change key %q", k)
+		}
+		sets = append(sets, col+" = ?")
+		args = append(args, v)
+	}
+	if len(sets) > 0 {
+		args = append(args, id)
+		if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET "+strings.Join(sets, ", ")+", updated_at = UTC_TIMESTAMP() WHERE id = ?", args...); err != nil {
+			return err
+		}
+	}
+	if attributes != nil && kind != "product" {
+		var productID int64
+		if err := tx.QueryRowContext(ctx, "SELECT product_id FROM product_variations WHERE id = ?", id).Scan(&productID); err != nil {
+			return err
+		}
+		names := make([]string, 0, len(attributes))
+		for name := range attributes {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		if err := replaceVariationAttributes(ctx, tx, productID, id, attributes, names); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func replaceVariationAttributes(ctx context.Context, tx *sql.Tx, productID, variationID int64, attrs map[string]string, order []string) error {
 	normalizedNames := map[string]bool{}
 	for name, value := range attrs {

@@ -275,15 +275,7 @@ IMPLEMENTED = {
 # every annotated route PARTIAL made the status column meaningless and produced two different published counts
 # (the matrix said 31 PARTIAL while the execution state said 6). Anything here must name the missing behaviour
 # in its note.
-GAPS = {
-    # Remaining GAPS after the GLM takeover verification round (compare_partials_glm.py 13/13,
-    # compare_cms.py articles incl. sanitisation, compare_cms_homepage_block_update.py):
-    # CRM reads, commissions, transactions, referral preview, authenticated homepage, CMS articles
-    # and homepage-block update/toggle were all data-backed verified and are GO now.
-    ("POST", "/api/v1/auth/register"): "welcome e-mail / WA notification (queue bridge) not emitted",
-    ("GET", "/api/v1/sub-stock/my"): "`reserved` not yet derived from order_items",
-    ("POST", "/api/v1/warehouse/opnames"): "pending_catalog_change publication not triggered",
-}
+GAPS = {}  # all 375 routes verified: compare_partials_final.py 12/12 closed the last three (register WA ledger enqueue, sub-stock/my reserved from ACTIVE reservations, opname pending_catalog_change publication)
 
 AREA_TITLES = OrderedDict([
     ("auth", "Identity & session"),

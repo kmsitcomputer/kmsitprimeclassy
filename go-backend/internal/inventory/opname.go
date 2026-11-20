@@ -19,11 +19,13 @@ package inventory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/kmsitcomputer/primeclassy-go/internal/catalog"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 )
 
@@ -139,7 +141,7 @@ func CreateOpname(ctx context.Context, d *db.DB, actor Actor, opnameType string,
 	if err != nil {
 		return nil, err
 	}
-	return LoadOpname(ctx, d, actor, opnameID)
+	return LoadOpnameStoreResponse(ctx, d, actor, opnameID)
 }
 
 type snapshot struct {
@@ -452,6 +454,38 @@ func ApproveOpname(ctx context.Context, d *db.DB, actor Actor, opnameID int64) (
 			}
 		}
 
+		// REM-01 / D-07: a withheld catalogue change is published by THIS commit, never earlier, and
+		// never if anything above threw (stale 409, Sub floor …) — the transaction rolls both back.
+		// StockOpnameService::approve, second pass over the (unlocked-order) items.
+		for _, item := range items {
+			if !item.PendingCatalogChange.Valid || item.PendingCatalogChange.String == "" || item.CatalogPublishedAt.Valid {
+				continue
+			}
+			var change struct {
+				Kind       string          `json:"kind"`
+				ID         int64           `json:"id"`
+				Changes    map[string]any  `json:"changes"`
+				Attributes *map[string]any `json:"attributes"`
+			}
+			if err := json.Unmarshal([]byte(item.PendingCatalogChange.String), &change); err != nil {
+				return err
+			}
+			var attrs map[string]string
+			if change.Attributes != nil {
+				attrs = map[string]string{}
+				for name, value := range *change.Attributes {
+					attrs[name] = fmt.Sprintf("%v", value)
+				}
+			}
+			if err := catalog.PublishCatalogChange(ctx, tx, change.Kind, change.ID, change.Changes, attrs); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE stock_opname_items
+				SET catalog_published_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, item.ID); err != nil {
+				return err
+			}
+		}
+
 		_, err = tx.ExecContext(ctx, `UPDATE stock_opnames
 			SET status = 'approved', approved_by = ?, approved_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
 			WHERE id = ?`, actor.ID, opnameID)
@@ -534,6 +568,10 @@ type OpnameItem struct {
 	CountedQuantity     *int64
 	SystemStockID       *int64
 	SystemStockRevision *int64
+	// PendingCatalogChange is the withheld catalog change (REM-01/D-07): staged by the catalogue
+	// import, published by THIS approve commit, never earlier and never on rollback.
+	PendingCatalogChange sql.NullString
+	CatalogPublishedAt   sql.NullTime
 }
 
 // lockOpname locks one opname row and applies the tenant rule (another network is a 404).
@@ -562,7 +600,8 @@ func lockOpname(ctx context.Context, tx *sql.Tx, actor Actor, id int64) (*Opname
 
 func opnameItemsTx(ctx context.Context, tx *sql.Tx, opnameID int64) ([]OpnameItem, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, product_id, product_variation_id, sub_location_id,
-			system_quantity, counted_quantity, system_stock_id, system_stock_revision
+			system_quantity, counted_quantity, system_stock_id, system_stock_revision,
+			pending_catalog_change, catalog_published_at
 		FROM stock_opname_items WHERE stock_opname_id = ? ORDER BY id ASC`, opnameID)
 	if err != nil {
 		return nil, err
@@ -574,8 +613,11 @@ func opnameItemsTx(ctx context.Context, tx *sql.Tx, opnameID int64) ([]OpnameIte
 			it                            OpnameItem
 			pid, vid, subID, stockID, rev sql.NullInt64
 			counted                       sql.NullInt64
+			pendingChange                 sql.NullString
+			catalogPublished              sql.NullTime
 		)
-		if err := rows.Scan(&it.ID, &pid, &vid, &subID, &it.SystemQuantity, &counted, &stockID, &rev); err != nil {
+		if err := rows.Scan(&it.ID, &pid, &vid, &subID, &it.SystemQuantity, &counted, &stockID, &rev,
+			&pendingChange, &catalogPublished); err != nil {
 			return nil, err
 		}
 		it.ProductID = nullInt64Ptr(pid)
@@ -584,6 +626,8 @@ func opnameItemsTx(ctx context.Context, tx *sql.Tx, opnameID int64) ([]OpnameIte
 		it.CountedQuantity = nullInt64Ptr(counted)
 		it.SystemStockID = nullInt64Ptr(stockID)
 		it.SystemStockRevision = nullInt64Ptr(rev)
+		it.PendingCatalogChange = pendingChange
+		it.CatalogPublishedAt = catalogPublished
 		out = append(out, it)
 	}
 	return out, rows.Err()
@@ -640,6 +684,121 @@ func LoadOpname(ctx context.Context, d *db.DB, actor Actor, id int64) (map[strin
 		"updated_at":       formatMySQLString(updatedAt),
 		"items":            items,
 	}, nil
+}
+
+// LoadOpnameStoreResponse renders the POST /warehouse/opnames response shape: StockOpnameService::create
+// returns `$opname->load('items')` ONLY — scalar opname columns (no status/approved/rejected keys: a fresh
+// model carries only its persisted attributes) and scalar items (no nested product/variation relations).
+func LoadOpnameStoreResponse(ctx context.Context, d *db.DB, actor Actor, id int64) (map[string]any, error) {
+	var (
+		op                   Opname
+		stockType, notes     sql.NullString
+		subLocation          sql.NullInt64
+		createdAt, updatedAt sql.NullString
+	)
+	err := d.QueryRowContext(ctx, `SELECT id, agent_id, opname_number, opname_type, stock_type,
+			sub_location_id, notes, created_by, CAST(created_at AS CHAR), CAST(updated_at AS CHAR)
+		FROM stock_opnames WHERE id = ? AND agent_id = ?`, id, actor.AgentID).
+		Scan(&op.ID, &op.AgentID, &op.OpnameNumber, &op.OpnameType, &stockType, &subLocation,
+			&notes, &op.CreatedBy, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	items, err := opnameItemsScalarJSON(ctx, d, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"id":              op.ID,
+		"agent_id":        op.AgentID,
+		"opname_number":   op.OpnameNumber,
+		"opname_type":     op.OpnameType,
+		"stock_type":      nullStr(stockType),
+		"sub_location_id": nullIntPtr(subLocation),
+		"notes":           nullStr(notes),
+		"created_by":      op.CreatedBy,
+		"created_at":      formatMySQLString(createdAt),
+		"updated_at":      formatMySQLString(updatedAt),
+		"items":           items,
+	}, nil
+}
+
+// opnameItemsScalarJSON renders the items as the plain model attributes — no nested relations.
+func opnameItemsScalarJSON(ctx context.Context, d *db.DB, opnameID int64) ([]map[string]any, error) {
+	rows, err := d.QueryContext(ctx, `SELECT id, stock_opname_id, product_id, product_variation_id,
+			sub_location_id, system_quantity, counted_quantity, difference, adjusted_quantity,
+			import_row_key, import_fingerprint, import_target_quantity, pending_catalog_change,
+			CAST(catalog_published_at AS CHAR), CAST(created_at AS CHAR), CAST(updated_at AS CHAR),
+			system_stock_id, system_stock_revision
+		FROM stock_opname_items WHERE stock_opname_id = ? ORDER BY id ASC`, opnameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var (
+			id, opID, systemQty int64
+			pid, vid, subID     sql.NullInt64
+			counted, diff, adj  sql.NullInt64
+			rowKey, fingerprint sql.NullString
+			targetQty           sql.NullInt64
+			pendingChange       sql.NullString
+			published, created  sql.NullString
+			updated             sql.NullString
+			stockID, revision   sql.NullInt64
+		)
+		if err := rows.Scan(&id, &opID, &pid, &vid, &subID, &systemQty, &counted, &diff, &adj,
+			&rowKey, &fingerprint, &targetQty, &pendingChange, &published, &created, &updated,
+			&stockID, &revision); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id":                     id,
+			"stock_opname_id":        opID,
+			"product_id":             nullIntPtr(pid),
+			"product_variation_id":   nullIntPtr(vid),
+			"sub_location_id":        nullIntPtr(subID),
+			"system_quantity":        systemQty,
+			"counted_quantity":       nullIntPtr(counted),
+			"difference":             nullIntPtr(diff),
+			"adjusted_quantity":      nullIntPtr(adj),
+			"import_row_key":         nullStr(rowKey),
+			"import_fingerprint":     nullStr(fingerprint),
+			"import_target_quantity": nullIntPtr(targetQty),
+			"pending_catalog_change": jsonRawOrNull(pendingChange),
+			"catalog_published_at":   formatMySQLString(published),
+			"created_at":             formatMySQLString(created),
+			"updated_at":             formatMySQLString(updated),
+			"system_stock_id":        nullIntPtr(stockID),
+			"system_stock_revision":  intOrZero(revision),
+		})
+	}
+	return out, rows.Err()
+}
+
+// jsonRawOrNull decodes a JSON column so the response embeds the ARRAY/OBJECT Laravel's array cast
+// emits, or null when the column is empty.
+func jsonRawOrNull(v sql.NullString) any {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(v.String), &parsed); err != nil {
+		return nil
+	}
+	return parsed
+}
+
+// intOrZero ports Laravel's `integer` cast: a NULL column serialises as 0, never as null.
+func intOrZero(v sql.NullInt64) any {
+	if v.Valid {
+		return v.Int64
+	}
+	return 0
 }
 
 // opnameItemsJSON renders the items with the nested product and variation (with compositions) relations.

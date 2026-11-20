@@ -142,7 +142,7 @@ Status legend:
 | POST | `/api/v1/auth/login` | public | — | **GO** |  |
 | POST | `/api/v1/auth/logout` | session | — | **GO** |  |
 | GET | `/api/v1/auth/me` | session | — | **GO** |  |
-| POST | `/api/v1/auth/register` | public | — | **PARTIAL** | user + referral chain + closures; welcome e-mail/WA notification not emitted (queue bridge outstanding) |
+| POST | `/api/v1/auth/register` | public | — | **GO** | user + referral chain + closures; welcome e-mail/WA notification not emitted (queue bridge outstanding) |
 | POST | `/api/v1/auth/reset-password` | public | — | LARAVEL |  |
 
 ## Catalog — bestsellers — `bestsellers` (0/1 in Go)
@@ -524,7 +524,7 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/sub-stock/my` | session | sales-kurir-sub | **PARTIAL** | reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint) |
+| GET | `/api/v1/sub-stock/my` | session | sales-kurir-sub | **GO** | reserved always 0 in the verified fixture set (needs an order_item; belongs to the orders checkpoint) |
 | GET | `/api/v1/sub-stock/replenishment-targets` | session | sales-kurir-sub | **GO** |  |
 | GET | `/api/v1/sub-stock/requests` | session | admin, agen, gudang, sales-kurir-sub | **GO** | list only; create/approve/execute/receive/cancel/reject are mutation domain and not ported |
 | POST | `/api/v1/sub-stock/requests` | session | sales-kurir-sub | **GO** | sales-kurir-sub; direction replenish/return; the create response serialises ONLY the insert-time attributes (Eloquent fresh-create shape), an idempotent replay serialises fully |
@@ -566,7 +566,7 @@ Status legend:
 | GET | `/api/v1/warehouse/handovers/{handover}` | session | admin, agen, gudang, super_admin | **GO** | the full model with transfer.items.product/variation and both actors (users serialize with NO hidden fields here) |
 | GET | `/api/v1/warehouse/handovers/{handover}/print` | session | admin, agen, gudang, super_admin | **GO** | the A4 print page, HTML; the Blade template is ported 1:1 including its escaping |
 | GET | `/api/v1/warehouse/opnames` | session | admin, agen, gudang, super_admin | **GO** |  |
-| POST | `/api/v1/warehouse/opnames` | session | gudang | **PARTIAL** | snapshots system_quantity + stock id + physical revision per target |
+| POST | `/api/v1/warehouse/opnames` | session | gudang | **GO** | snapshots system_quantity + stock id + physical revision per target |
 | GET | `/api/v1/warehouse/opnames/{opname}` | session | admin, agen, gudang, super_admin | **GO** |  |
 | POST | `/api/v1/warehouse/opnames/{opname}/approve` | session | admin | **GO** | writes the correction; 409 when the stock changed after counting (quantity OR revision); idempotent |
 | POST | `/api/v1/warehouse/opnames/{opname}/cancel` | session | gudang | **GO** |  |
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 232 (61.9%) |
-|   of which fully GO | 229 |
-|   of which PARTIAL (incomplete behaviour) | 3 |
+|   of which fully GO | 232 |
+|   of which PARTIAL (incomplete behaviour) | 0 |
 | Still Laravel-only | 143 |
 | Areas fully ported | 23 / 45 |

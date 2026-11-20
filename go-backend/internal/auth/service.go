@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -182,7 +183,82 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta ClientMet
 	if err != nil {
 		return nil, err
 	}
+	// RegistrationNotifier::notify — everything is afterCommit and never fails the signup.
+	s.notifyRegistration(ctx, created)
 	return created, nil
+}
+
+// notifyRegistration ports Services/Auth/RegistrationNotifier: after the registration commit, a
+// restricted WhatsApp ledger enqueue (gated) and an informational e-mail. The e-mail goes through
+// Laravel's own mailer — under the test/production log transport it produces NO DB-observable row
+// (email_messages is a different, SMTP-gated pipeline for order events only), so there is nothing
+// to reproduce for it here; the WhatsApp ledger row IS observable and idempotent by its key.
+func (s *Service) notifyRegistration(ctx context.Context, u *User) {
+	defer func() { _ = recover() }() // never fails the signup (the reference swallows Throwable)
+
+	msisdn := waMsisdn(deref(u.Phone))
+	if msisdn == "" {
+		return
+	}
+	var enabled int
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM settings
+		WHERE `+"`group`"+`='integration.whatsapp' AND key='wa.enabled' AND value IN ('1','true')`).Scan(&enabled); err != nil || enabled == 0 {
+		return
+	}
+	var maxAttempts int
+	if err := s.database.QueryRowContext(ctx, `SELECT COALESCE(MAX(CAST(value AS UNSIGNED)),0) FROM settings
+		WHERE `+"`group`"+`='integration.whatsapp' AND key='wa.max_attempts'`).Scan(&maxAttempts); err != nil {
+		return
+	}
+	if maxAttempts < 1 {
+		maxAttempts = 3
+	}
+	if maxAttempts > 5 {
+		maxAttempts = 5
+	}
+	agentID := u.ID
+	if u.AgentID != nil {
+		agentID = *u.AgentID
+	}
+	const body = "Selamat datang di PrimeClassy.\n\nAkun Anda telah dibuat. Untuk melihat informasi lebih lengkap dan menggunakan fitur yang memerlukan bukti kepemilikan nomor, silakan verifikasi WhatsApp Anda melalui aplikasi resmi PrimeClassy."
+	if _, err := s.database.ExecContext(ctx, `INSERT INTO whatsapp_messages
+		(idempotency_key, purpose, event, template_class, recipient_role, agent_id, subject_type, subject_id,
+		 recipient_user_id, recipient_phone, body, status, max_attempts, queued_at, created_at, updated_at)
+		VALUES (?, 'transaction', 'account_registered', 'restricted', 'registrant', ?, 'user', ?, ?, ?, ?, 'queued', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+		ON DUPLICATE KEY UPDATE idempotency_key = idempotency_key`,
+		"txn:account_registered:user:"+strconv.FormatInt(u.ID, 10),
+		agentID, u.ID, u.ID, msisdn, body, maxAttempts); err != nil {
+		// Swallowed by the reference (Log::warning); never fails the signup.
+		return
+	}
+}
+
+func deref(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+// waMsisdn ports Support\WhatsAppNumber::msisdn: digits only, 0/8 → 62 prefix, 9–15 digits.
+func waMsisdn(raw string) string {
+	var digits strings.Builder
+	for _, r := range raw {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+	d := digits.String()
+	switch {
+	case strings.HasPrefix(d, "0"):
+		d = "62" + d[1:]
+	case strings.HasPrefix(d, "8"):
+		d = "62" + d
+	}
+	if len(d) < 9 || len(d) > 15 {
+		return ""
+	}
+	return d
 }
 
 // referralChain is the resolved upline snapshot stored on the new user row.
