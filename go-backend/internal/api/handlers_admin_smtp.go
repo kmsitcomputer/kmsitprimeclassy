@@ -14,6 +14,42 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 )
 
+func (s *Server) handleAdminSMTPTestConnection(w http.ResponseWriter, r *http.Request) {
+	ok, detail, err := admininfra.New(s.database, s.cfg.AppKey).CheckSMTP(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if detail == "config_incomplete" {
+		detail = i18n.Translate(LocaleFrom(r.Context()), "smtp.config_incomplete")
+	}
+	httpx.OK(w, map[string]any{"ok": ok, "detail": blankSMTPDetail(detail)}, "OK", nil)
+}
+
+func (s *Server) handleAdminSMTPTestEmail(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	if actor.Email == nil || strings.TrimSpace(*actor.Email) == "" {
+		httpx.OK(w, map[string]any{"ok": false, "detail": i18n.Translate(LocaleFrom(r.Context()), "smtp.config_incomplete")}, "OK", nil)
+		return
+	}
+	ok, detail, err := admininfra.New(s.database, s.cfg.AppKey).SendSMTPTest(r.Context(), *actor.Email, i18n.Translate(LocaleFrom(r.Context()), "smtp.test_subject"), i18n.Translate(LocaleFrom(r.Context()), "smtp.test_body"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if detail == "config_incomplete" {
+		detail = i18n.Translate(LocaleFrom(r.Context()), "smtp.config_incomplete")
+	}
+	httpx.OK(w, map[string]any{"ok": ok, "detail": blankSMTPDetail(detail)}, "OK", nil)
+}
+
+func blankSMTPDetail(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 func (s *Server) handleAdminSMTPSettingsShow(w http.ResponseWriter, r *http.Request) {
 	data, err := admininfra.New(s.database, s.cfg.AppKey).Snapshot(r.Context(), "smtp")
 	if err != nil {
@@ -53,7 +89,7 @@ func (s *Server) handleAdminSMTPSettingsUpdate(w http.ResponseWriter, r *http.Re
 		name     string
 		max      int
 		nullable bool
-	}{{"host", 190, false}, {"encryption", 3, false}, {"username", 190, true}, {"password", 300, true}, {"from_address", 190, false}, {"from_name", 100, true}} {
+	}{{"host", 190, false}, {"encryption", 4, false}, {"username", 190, true}, {"password", 300, true}, {"from_address", 190, false}, {"from_name", 100, true}} {
 		v, ok := raw[spec.name]
 		if !ok {
 			continue

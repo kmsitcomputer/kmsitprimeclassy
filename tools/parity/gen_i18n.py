@@ -104,6 +104,8 @@ KEYS = {
     "smtp": [
         "saved",
         "config_incomplete",
+        "test_subject",
+        "test_body",
     ],
     "media": [
         "unknown_collection",

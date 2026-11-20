@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (41/59 in Go)
+## Admin operations — `admin` (43/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -34,8 +34,8 @@ Status legend:
 | PUT | `/api/v1/admin/google-auth` | session | super_admin | **GO** | Global Google OAuth config validation, Laravel-compatible secret preservation/clear, encrypted storage, audit; compare_google_auth_settings.py |
 | GET | `/api/v1/admin/integrations/smtp` | session | super_admin | **GO** | Super Admin SMTP snapshot with write-only password state and active environment/dashboard source; compare_admin_smtp_settings.py |
 | PUT | `/api/v1/admin/integrations/smtp` | session | super_admin | **GO** | validated SMTP config, encrypted write-only secret preserve/clear, completeness guard and redacted audit; compare_admin_smtp_update.py |
-| POST | `/api/v1/admin/integrations/smtp/test-connection` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/admin/integrations/smtp/test-email` | session | super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/integrations/smtp/test-connection` | session | super_admin | **GO** | global saved SMTP connect, encryption/auth negotiation and sanitized status only; compare_admin_smtp_test.py against a local SMTP server |
+| POST | `/api/v1/admin/integrations/smtp/test-email` | session | super_admin | **GO** | global SMTP test mail sent exclusively to the authenticated Super Admin address; compare_admin_smtp_test.py captures recipient using local SMTP server |
 | GET | `/api/v1/admin/integrations/whatsapp` | session | super_admin | **GO** | Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py |
 | PUT | `/api/v1/admin/integrations/whatsapp` | session | super_admin | **GO** | Validated GOWA config, encrypted write-only password, normalized test-number allow-list, rate/OTP/event settings and redacted before/after audit; compare_admin_whatsapp_update.py |
 | GET | `/api/v1/admin/integrations/whatsapp/messages` | session | super_admin | **GO** | filtered Super Admin WhatsApp message ledger, masked recipients, retry flags and pagination; compare_admin_whatsapp_messages.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 313 (83.5%) |
-|   of which fully GO | 312 |
+| Served by Go now | 315 (84.0%) |
+|   of which fully GO | 314 |
 |   of which PARTIAL (incomplete behaviour) | 1 |
-| Still Laravel-only | 62 |
+| Still Laravel-only | 60 |
 | Areas fully ported | 34 / 45 |

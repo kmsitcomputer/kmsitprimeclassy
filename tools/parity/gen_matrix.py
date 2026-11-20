@@ -42,6 +42,8 @@ IMPLEMENTED = {
     ("POST", "/api/v1/agent/whatsapp/events/{event}/preview"): "Agen/Admin branch-authorized template preview with shared validation and sample rendering; compare_admin_whatsapp_preview.py",
     ("GET", "/api/v1/admin/integrations/smtp"): "Super Admin SMTP snapshot with write-only password state and active environment/dashboard source; compare_admin_smtp_settings.py",
     ("PUT", "/api/v1/admin/integrations/smtp"): "validated SMTP config, encrypted write-only secret preserve/clear, completeness guard and redacted audit; compare_admin_smtp_update.py",
+    ("POST", "/api/v1/admin/integrations/smtp/test-connection"): "global saved SMTP connect, encryption/auth negotiation and sanitized status only; compare_admin_smtp_test.py against a local SMTP server",
+    ("POST", "/api/v1/admin/integrations/smtp/test-email"): "global SMTP test mail sent exclusively to the authenticated Super Admin address; compare_admin_smtp_test.py captures recipient using local SMTP server",
     ("GET", "/api/v1/admin/orders/{order}/refunds"): "Order-scoped refund obligations, attempts, payouts, children, reductions and integer-cent financial metrics; compare_admin_order_refund_ledger.py",
     ("PUT", "/api/v1/admin/integrations/whatsapp"): "Validated GOWA config, encrypted write-only password, normalized test-number allow-list, rate/OTP/event settings and redacted before/after audit; compare_admin_whatsapp_update.py",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",
