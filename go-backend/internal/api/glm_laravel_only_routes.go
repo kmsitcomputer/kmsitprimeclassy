@@ -95,6 +95,11 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("PATCH /api/v1/kurir/returns/{item}/confirm", chain(http.HandlerFunc(s.handleKurirConfirmReturn), RequireAuth, s.RequireAgentLinked, kurirGate))
 	s.mux.Handle("GET /api/v1/kurir/reports/delivered", chain(http.HandlerFunc(s.handleKurirDeliveredReport), RequireAuth, s.RequireAgentLinked, kurirGate))
 
+	// G17-D4 refund-recipient evidence (CRM-origin orders).
+	recipientGate := RequireRole("sales,sales-kurir-sub,korsal,agen,admin,keuangan,super_admin")
+	s.mux.Handle("GET /api/v1/orders/{order}/refund-recipient", chain(http.HandlerFunc(s.handleOrderRecipientIndex), RequireAuth, s.RequireAgentLinked, recipientGate))
+	s.mux.Handle("POST /api/v1/orders/{order}/refund-recipient", chain(http.HandlerFunc(s.handleOrderRecipientStore), RequireAuth, s.RequireAgentLinked, recipientGate))
+
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
 	consentCaptureGate := RequireRole("sales,sales-kurir-sub,korsal,agen")
@@ -166,6 +171,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"PATCH /api/v1/kurir/returns/{item}/pickup",
 		"PATCH /api/v1/kurir/returns/{item}/confirm",
 		"GET /api/v1/kurir/reports/delivered",
+		"GET /api/v1/orders/{order}/refund-recipient",
+		"POST /api/v1/orders/{order}/refund-recipient",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",

@@ -301,6 +301,8 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/kurir/returns/{item}/pickup"): "physical pickup claim: same-branch + assignment gates, condition_note, audit; pickup_scheduled_for Carbon datetime; compared by compare_kurir.py (17/0)",
     ("PATCH", "/api/v1/kurir/returns/{item}/confirm"): "pengembalian → kembali (received) or → terkirim with return rejected/not_required and returned_quantity reversal; audit; compared by compare_kurir.py (17/0)",
     ("GET", "/api/v1/kurir/reports/delivered"): "delivered report (terkirim items on own shipments, from/to date filters, own courier commission sum as fee_amount); compared by compare_kurir.py (17/0)",
+    ("GET", "/api/v1/orders/{order}/refund-recipient"): "G17-D4 refund-recipient evidence index (destination full only for keuangan/super_admin, masked tail otherwise); compared by compare_recipient.py (13/0)",
+    ("POST", "/api/v1/orders/{order}/refund-recipient"): "append-only recipient record: CRM-origin gate, canRecord authority, method validation, destination required for bank/ewallet, authorization (consent or evidence) gate, consent/return binding, supersedes chain, audit; compared by compare_recipient.py (13/0)",
 }
 
 
