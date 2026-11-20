@@ -88,6 +88,9 @@ KEYS = {
         "assigned",
     ],
     "return": [
+        "item_not_delivered",
+        "invalid_quantity",
+        "requested",
         "sub_location_unavailable",
     ],
     "shipping": [

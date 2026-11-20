@@ -235,7 +235,7 @@ def main():
                 failures.append(f"{base}: returned evidence file not found at {evidence_relative}")
                 captured.append(None)
             else:
-                captured.append((normalize(data), state(return_id, order_id, item_id, evidence)))
+                captured.append((normalize(data), state(return_id, order_id, item_id, evidence), body.get("message")))
             if quota_results and not quota_results[0][1].get("errors", {}).get("items"):
                 failures.append(f"{base}: concurrent quota rejection omitted item errors: {quota_results[0]}")
             # A child dispute invalidates future assisted returns; append-only root/child chain is synthetic.
@@ -254,6 +254,9 @@ def main():
             checks += 1
             if captured[0][1] != captured[1][1]:
                 failures.append("persisted state mismatch: " + json.dumps(captured[0][1], sort_keys=True) + " vs " + json.dumps(captured[1][1], sort_keys=True))
+            checks += 1
+            if captured[0][2] != captured[1][2]:
+                failures.append(f"success message mismatch: {captured[0][2]!r} vs {captured[1][2]!r}")
         for case, outcomes in contract_cases.items():
             checks += 1
             if len(outcomes) == 2 and outcomes[0] != outcomes[1]:
