@@ -307,16 +307,16 @@ Status legend:
 | GET | `/api/v1/invoice/config` | session | agen, super_admin | LARAVEL |  |
 | PUT | `/api/v1/invoice/config` | session | agen, super_admin | LARAVEL |  |
 
-## Courier — `kurir` (0/6 in Go)
+## Courier — `kurir` (6/6 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/kurir/orders` | session | koordinator-kurir, kurir, sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/kurir/reports/delivered` | session | kurir | LARAVEL |  |
-| GET | `/api/v1/kurir/returns` | session | kurir | LARAVEL |  |
-| GET | `/api/v1/kurir/returns/pickup-today` | session | kurir | LARAVEL |  |
-| PATCH | `/api/v1/kurir/returns/{item}/confirm` | session | kurir | LARAVEL |  |
-| PATCH | `/api/v1/kurir/returns/{item}/pickup` | session | kurir | LARAVEL |  |
+| GET | `/api/v1/kurir/orders` | session | koordinator-kurir, kurir, sales-kurir-sub | **GO** | assignment-only delivery queue (kurir/koordinator own profile standard shipments; SKS own self_sub creator-only + assigned standard), CourierOrderResource projection; compared by compare_kurir.py (17/0) |
+| GET | `/api/v1/kurir/reports/delivered` | session | kurir | **GO** | delivered report (terkirim items on own shipments, from/to date filters, own courier commission sum as fee_amount); compared by compare_kurir.py (17/0) |
+| GET | `/api/v1/kurir/returns` | session | kurir | **GO** | assignment-only return queue (return_items.courier_id = own profile, pengembalian items); compared by compare_kurir.py (17/0) |
+| GET | `/api/v1/kurir/returns/pickup-today` | session | kurir | **GO** | WIB business-date scheduled pickup count (branch + assignment gates); compared by compare_kurir.py (17/0) |
+| PATCH | `/api/v1/kurir/returns/{item}/confirm` | session | kurir | **GO** | pengembalian → kembali (received) or → terkirim with return rejected/not_required and returned_quantity reversal; audit; compared by compare_kurir.py (17/0) |
+| PATCH | `/api/v1/kurir/returns/{item}/pickup` | session | kurir | **GO** | physical pickup claim: same-branch + assignment gates, condition_note, audit; pickup_scheduled_for Carbon datetime; compared by compare_kurir.py (17/0) |
 
 ## Site configuration — languages — `languages` (1/1 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 259 (69.1%) |
-|   of which fully GO | 259 |
+| Served by Go now | 265 (70.7%) |
+|   of which fully GO | 265 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 116 |
-| Areas fully ported | 27 / 45 |
+| Still Laravel-only | 110 |
+| Areas fully ported | 28 / 45 |

@@ -295,6 +295,12 @@ IMPLEMENTED = {
     ("GET", "/api/v1/orders/{order}/consent-events"): "consent history per order (order view policy), ConsentEventResource; compared by compare_consent.py (26/0)",
     ("GET", "/api/v1/orders/{order}/consent-context"): "capture panel context (subject id only to capturing actor; CRM mode + channel availability); compared by compare_consent.py (26/0)",
     ("POST", "/api/v1/shipments/{shipment}/items/{orderItem}/refuse"): "courier on-the-spot refusal: executor gates (policy-vs-service denial split), not_in_delivery, already_open, partial-refusal unit carving (fees/subtotals, stock-request demand move, sibling item), audit; compared by compare_item_refuse.py (15/0)",
+    ("GET", "/api/v1/kurir/orders"): "assignment-only delivery queue (kurir/koordinator own profile standard shipments; SKS own self_sub creator-only + assigned standard), CourierOrderResource projection; compared by compare_kurir.py (17/0)",
+    ("GET", "/api/v1/kurir/returns"): "assignment-only return queue (return_items.courier_id = own profile, pengembalian items); compared by compare_kurir.py (17/0)",
+    ("GET", "/api/v1/kurir/returns/pickup-today"): "WIB business-date scheduled pickup count (branch + assignment gates); compared by compare_kurir.py (17/0)",
+    ("PATCH", "/api/v1/kurir/returns/{item}/pickup"): "physical pickup claim: same-branch + assignment gates, condition_note, audit; pickup_scheduled_for Carbon datetime; compared by compare_kurir.py (17/0)",
+    ("PATCH", "/api/v1/kurir/returns/{item}/confirm"): "pengembalian → kembali (received) or → terkirim with return rejected/not_required and returned_quantity reversal; audit; compared by compare_kurir.py (17/0)",
+    ("GET", "/api/v1/kurir/reports/delivered"): "delivered report (terkirim items on own shipments, from/to date filters, own courier commission sum as fee_amount); compared by compare_kurir.py (17/0)",
 }
 
 

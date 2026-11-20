@@ -85,6 +85,16 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	retGate := RequireRole("super_admin,agen,admin,koordinator-kurir")
 	s.mux.Handle("PATCH /api/v1/return-items/{item}/courier", chain(http.HandlerFunc(s.handleReturnItemAssignCourier), RequireAuth, s.RequireAgentLinked, retGate))
 
+	// Kurir's own dashboard surfaces (assignment-only; scoped to own branch + own Courier profile).
+	kurirAllGate := RequireRole("kurir,sales-kurir-sub,koordinator-kurir")
+	s.mux.Handle("GET /api/v1/kurir/orders", chain(http.HandlerFunc(s.handleKurirOrders), RequireAuth, s.RequireAgentLinked, kurirAllGate))
+	kurirGate := RequireRole("kurir")
+	s.mux.Handle("GET /api/v1/kurir/returns", chain(http.HandlerFunc(s.handleKurirReturns), RequireAuth, s.RequireAgentLinked, kurirGate))
+	s.mux.Handle("GET /api/v1/kurir/returns/pickup-today", chain(http.HandlerFunc(s.handleKurirPickupToday), RequireAuth, s.RequireAgentLinked, kurirGate))
+	s.mux.Handle("PATCH /api/v1/kurir/returns/{item}/pickup", chain(http.HandlerFunc(s.handleKurirPickupReturn), RequireAuth, s.RequireAgentLinked, kurirGate))
+	s.mux.Handle("PATCH /api/v1/kurir/returns/{item}/confirm", chain(http.HandlerFunc(s.handleKurirConfirmReturn), RequireAuth, s.RequireAgentLinked, kurirGate))
+	s.mux.Handle("GET /api/v1/kurir/reports/delivered", chain(http.HandlerFunc(s.handleKurirDeliveredReport), RequireAuth, s.RequireAgentLinked, kurirGate))
+
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
 	consentCaptureGate := RequireRole("sales,sales-kurir-sub,korsal,agen")
@@ -150,6 +160,12 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/shipments/{shipment}/delivery-verifications",
 		"POST /api/v1/dispatch/order-items/{orderItem}/split-batch",
 		"PATCH /api/v1/return-items/{item}/courier",
+		"GET /api/v1/kurir/orders",
+		"GET /api/v1/kurir/returns",
+		"GET /api/v1/kurir/returns/pickup-today",
+		"PATCH /api/v1/kurir/returns/{item}/pickup",
+		"PATCH /api/v1/kurir/returns/{item}/confirm",
+		"GET /api/v1/kurir/reports/delivered",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",
