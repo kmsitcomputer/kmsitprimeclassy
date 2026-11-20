@@ -10,6 +10,8 @@ import (
 // registerDomainERoutes installs the Domain E route slice. It is intentionally kept out of server.go so
 // the shared router file remains untouched while parallel domain work is in flight.
 func (s *Server) registerDomainERoutes() {
+	s.mux.Handle("GET /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("PUT /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/shipping-couriers", chain(http.HandlerFunc(s.handleAdminShippingCouriers), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/admin/shipping-couriers", chain(http.HandlerFunc(s.handleAdminShippingCouriersStore), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PATCH /api/v1/admin/shipping-couriers/{shippingCourier}/toggle", chain(http.HandlerFunc(s.handleAdminShippingCourierToggle), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
@@ -32,6 +34,8 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("PATCH /api/v1/users/{user}/convert-to-sales-kurir", chain(http.HandlerFunc(s.handleUsersConvertToSalesKurirSub), RequireAuth, s.RequireAgentLinked, RequireRole(auth.RoleAgen)))
 
 	agentAccount := "agen,admin"
+	s.mux.Handle("GET /api/v1/agent/google-auth", chain(http.HandlerFunc(s.handleAgentGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
+	s.mux.Handle("PUT /api/v1/agent/google-auth", chain(http.HandlerFunc(s.handleAgentGoogleAuthUpdate), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("GET /api/v1/agent/payment-methods", chain(http.HandlerFunc(s.handleAgentPaymentMethods), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("PATCH /api/v1/agent/payment-methods/{method}/toggle", chain(http.HandlerFunc(s.handleAgentPaymentMethodToggle), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("PUT /api/v1/agent/payment-methods/{method}/config", chain(http.HandlerFunc(s.handleAgentPaymentMethodConfig), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))

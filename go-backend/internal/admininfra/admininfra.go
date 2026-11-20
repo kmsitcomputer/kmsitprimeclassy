@@ -310,7 +310,7 @@ func (s *Service) GoogleAuth(ctx context.Context, agentID *int64) (map[string]an
 	var enabled bool
 	var clientID, cipher, redirect, frontend sql.NullString
 	err := s.database.QueryRowContext(ctx, query, args...).Scan(&enabled, &clientID, &cipher, &redirect, &frontend)
-	if errors.Is(err, sql.ErrNoRows) && agentID == nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return map[string]any{"is_enabled": false, "client_id": nil, "redirect_uri": nil, "frontend_url": nil, "has_secret": false}, nil
 	}
 	if err != nil && !db.IsMissingSchema(err) {
@@ -357,38 +357,44 @@ func (s *Service) SaveGoogleAuth(ctx context.Context, agentID *int64, input map[
 		return v
 	}
 	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var query string
-		args := []any{enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url")}
-		if clear || ciphertext != nil {
-			args = append(args, ciphertext)
-			query = `UPDATE ` + table + ` SET is_enabled=?,client_id=?,redirect_uri=?,frontend_url=?,client_secret=?,updated_at=UTC_TIMESTAMP(6) WHERE ` + keyCol + `=?`
-		} else {
-			query = `UPDATE ` + table + ` SET is_enabled=?,client_id=?,redirect_uri=?,frontend_url=?,updated_at=UTC_TIMESTAMP(6) WHERE ` + keyCol + `=?`
-		}
-		args = append(args, scope)
-		res, err := tx.ExecContext(ctx, query, args...)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 && agentID != nil {
-			if clear || ciphertext != nil {
-				_, err = tx.ExecContext(ctx, `INSERT INTO `+table+` (agent_id,is_enabled,client_id,redirect_uri,frontend_url,client_secret,created_at,updated_at)
-					VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, scope, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"), ciphertext)
-			} else {
-				_, err = tx.ExecContext(ctx, `INSERT INTO `+table+` (agent_id,is_enabled,client_id,redirect_uri,frontend_url,created_at,updated_at)
-					VALUES (?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, scope, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"))
+		var err error
+		var exists bool
+		if agentID == nil {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM google_auth_settings WHERE id=?)`, scope).Scan(&exists); err != nil {
+				return err
 			}
+		} else if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_google_auth_configs WHERE agent_id=?)`, scope).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			if agentID == nil {
+				if clear || ciphertext != nil {
+					_, err = tx.ExecContext(ctx, `INSERT INTO google_auth_settings (id,is_enabled,client_id,redirect_uri,frontend_url,client_secret,created_at,updated_at) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, scope, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"), ciphertext)
+				} else {
+					_, err = tx.ExecContext(ctx, `INSERT INTO google_auth_settings (id,is_enabled,client_id,redirect_uri,frontend_url,created_at,updated_at) VALUES (?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, scope, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"))
+				}
+			} else if clear || ciphertext != nil {
+				_, err = tx.ExecContext(ctx, `INSERT INTO agent_google_auth_configs (agent_id,is_enabled,client_id,redirect_uri,frontend_url,client_secret,created_at,updated_at) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, scope, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"), ciphertext)
+			} else {
+				_, err = tx.ExecContext(ctx, `INSERT INTO agent_google_auth_configs (agent_id,is_enabled,client_id,redirect_uri,frontend_url,created_at,updated_at) VALUES (?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, scope, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"))
+			}
+			return err
+		}
+		if clear || ciphertext != nil {
+			_, err = tx.ExecContext(ctx, `UPDATE `+table+` SET is_enabled=?,client_id=?,redirect_uri=?,frontend_url=?,client_secret=?,updated_at=UTC_TIMESTAMP(6) WHERE `+keyCol+`=?`, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"), ciphertext, scope)
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE `+table+` SET is_enabled=?,client_id=?,redirect_uri=?,frontend_url=?,updated_at=UTC_TIMESTAMP(6) WHERE `+keyCol+`=?`, enabled, getText("client_id"), getText("redirect_uri"), getText("frontend_url"), scope)
 		}
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	return s.GoogleAuth(ctx, agentID)
+	updated, err := s.GoogleAuth(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"has_secret": updated["has_secret"]}, nil
 }
 
 func (s *Service) ShippingProviders(ctx context.Context) ([]map[string]any, error) {

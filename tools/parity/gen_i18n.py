@@ -97,6 +97,10 @@ KEYS = {
         "method_not_available",
         "provider_toggled",
     ],
+    "google": [
+        "settings_updated",
+        "agent_settings_updated",
+    ],
     "media": [
         "unknown_collection",
         "upload_failed",
@@ -272,7 +276,7 @@ KEYS = {
 # Laravel ships these rules in lang/<locale>/validation.php. The Go service reproduces the exact sentences for
 # the rules it enforces, so a 422 body is identical across runtimes.
 VALIDATION_KEYS = ["in", "exists", "required", "required_with", "required_without", "integer", "date",
-                   "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes",
+                   "string", "array", "unique", "after_or_equal", "not_in", "boolean", "numeric", "mimes", "url",
                    "image", "file", "required_if", "before_or_equal", "email", "confirmed", "prohibited", "prohibited_if",
                    "prohibited_if_accepted", "prohibited_if_declined", "accepted", "distinct", "regex"]
 # Nested variants: "rule.kind" (e.g. max.string).

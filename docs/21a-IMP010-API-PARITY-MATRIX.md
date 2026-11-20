@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (27/59 in Go)
+## Admin operations — `admin` (29/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -30,8 +30,8 @@ Status legend:
 | PATCH | `/api/v1/admin/agents/{agent}/toggle-status` | session | super_admin | **GO** | active<->inactive flip both directions, not_an_agent 422, binding-miss 404, status audit; 107/0 compared by compare_admin_agents.py |
 | GET | `/api/v1/admin/audit-logs` | session | super_admin | **GO** | super_admin paged audit trail compared by compare_reports.py (GLM reporting slice, 150/150) |
 | PATCH | `/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm` | session | keuangan, super_admin | **GO** | keuangan/super_admin; confirm settles the real collection |
-| GET | `/api/v1/admin/google-auth` | session | super_admin | LARAVEL |  |
-| PUT | `/api/v1/admin/google-auth` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/google-auth` | session | super_admin | **GO** | Super Admin global Google OAuth settings; secret is never returned; compare_google_auth_settings.py |
+| PUT | `/api/v1/admin/google-auth` | session | super_admin | **GO** | Global Google OAuth config validation, Laravel-compatible secret preservation/clear, encrypted storage, audit; compare_google_auth_settings.py |
 | GET | `/api/v1/admin/integrations/smtp` | session | super_admin | LARAVEL |  |
 | PUT | `/api/v1/admin/integrations/smtp` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/smtp/test-connection` | session | super_admin | LARAVEL |  |
@@ -81,12 +81,12 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
-## agent — `agent` (19/33 in Go)
+## agent — `agent` (21/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/agent/google-auth` | session | admin, agen | LARAVEL |  |
-| PUT | `/api/v1/agent/google-auth` | session | admin, agen | LARAVEL |  |
+| GET | `/api/v1/agent/google-auth` | session | admin, agen | **GO** | Agent/Admin own-branch Google OAuth config; no cross-branch identifier accepted, secret masked; compare_google_auth_settings.py |
+| PUT | `/api/v1/agent/google-auth` | session | admin, agen | **GO** | Agent/Admin own-branch config validation, encrypted secret preserve/clear, scoped audit; compare_google_auth_settings.py |
 | GET | `/api/v1/agent/payment-methods` | session | admin, agen | **GO** |  |
 | PUT | `/api/v1/agent/payment-methods/{method}/config` | session | admin, agen | **GO** | FormRequest validation order, localized messages, encrypted config writes, and RBAC compared by compare_agentadmin.py |
 | PATCH | `/api/v1/agent/payment-methods/{method}/toggle` | session | admin, agen | **GO** | role gates, toggle response shape, and resulting setting rows compared by compare_agentadmin.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 296 (78.9%) |
-|   of which fully GO | 296 |
+| Served by Go now | 300 (80.0%) |
+|   of which fully GO | 300 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 79 |
+| Still Laravel-only | 75 |
 | Areas fully ported | 34 / 45 |
