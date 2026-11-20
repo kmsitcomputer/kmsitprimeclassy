@@ -28,30 +28,26 @@ Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. 
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (Phase 5b — 139 Laravel-only routes, resumed after `f09d819`)
+## EXACT NEXT ACTION (Phase 5b — 136 Laravel-only routes, resumed after `e5c82d3`)
 
-Progress this session: 3 PARTIAL closed (`5948405`, 12/12) + dispatch reads (4 routes, `f09d819`, 31/31).
-Regenerate the Laravel-only inventory from the CURRENT matrix before each domain (stale TSVs are dangerous).
-Verified environment facts: orders/order_items/delivery_refusals have NO deleted_at column; couriers.type
-enum('internal','external'); DeliveryRefusal::OPEN_STATUSES = ['with_courier','handed_back','received'];
-courier fixtures need type='internal'. Harness: tools/parity/compare_dispatch.py (pattern reuse).
+Progress: 3 PARTIAL closed (`5948405`, 12/12) + dispatch reads (4, `f09d819`, 31/31) + refusal writes
+(3, `e5c82d3`, 14/14). Verified facts: activity_logs has NO updated_at; delivery_refusals has NO
+product/sub columns (JOIN order_items instead); shipments.status enum('pending','picked_up','in_transit',
+'delivered','failed'); hand-back route gate = super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir;
+Dispose source columns come from order_items JOIN. Bash heredoc eats backticks — write SQL via editor.
 
-Domain order (dependency-aware):
-1. **Shipping & delivery** (9: shipment status/items status/refuse/receipt/expedition-handover/courier assign/eligible-couriers/delivery-verifications GET+POST) + **delivery-refusals** writes (3: receive/dispose/hand-back) — same shipments domain, ShipmentPolicy executor rules.
-2. **Courier** kurir (6: orders, reports/delivered, returns, returns/pickup-today, returns/{item}/confirm, returns/{item}/pickup).
-3. **Dispatch writes** (2: split-batch, request-fulfillment) + **return-items courier assign** (1).
-4. **Orders remainder** (8: assisted-returns, consent-context, consent-events, invoice, items, refund-recipient GET+POST, returns) + **order-items receipts** (2).
-5. **consent-events** (4) + **consent** (2) — REM-005 chain.
-6. **Invoices** (2), **dashboard** (2), **catalog** (3), **bestsellers** (1), **checkout** (2: courier-options, geocode).
-7. **Admin operations** (~47 remaining: integrations SMTP 4, WhatsApp admin 10, google-auth 2, agents CRUD remaining 0 (done), audit-logs done, regions export/import 2, refunds obligations/attempts ~14, returns 2, return-items 1, others).
-8. **Google Sheets** (7), **Installer** (7), **Profile** whatsapp/email (5).
+Domain order:
+1. Shipping & delivery (9) + Courier kurir (6) + Dispatch writes (2) + return-items courier (1).
+2. Orders remainder (8) + order-items receipts (2) + consent chain (6).
+3. Invoices (2), dashboard (2), catalog (3), bestsellers (1), checkout (2).
+4. Admin ops (~45): SMTP 4, WhatsApp admin 10, google-auth 2, regions export/import 2, refunds ~14, returns 3.
+5. Google Sheets (7), Installer (7), Profile whatsapp/email (5).
 
-Each domain: inspect Laravel controller/service/policy → implement (prefer a new internal/<domain> package
-following internal/dispatch) → wire routes into the GLM slice + matchesGLMLaravelOnlyRoute + gen_matrix
-IMPLEMENTED dict → write compare_<domain>.py (RBAC matrix + data-backed + DB state) → run against
-pc_laravel_imp010:8899 / pc_go_imp010:8082 / primeclassy_testing (restart pc_go_imp010 after code changes;
-NEVER run two harnesses concurrently) → scoped go test/vet → commit → regenerate matrix.
+Per-domain loop: inspect Laravel -> implement -> wire GLM slice + matches + gen_matrix IMPLEMENTED ->
+compare_<domain>.py (RBAC + data-backed + DB state) -> run vs 8899/8082 (restart pc_go_imp010 after
+code changes; never two harnesses concurrently) -> go test/vet -> commit -> regenerate matrix.
 
+Phase 6 (final gate) -> Phase 7 (retirement) -> Phase 8 (final report) remain.
 Phase 6 (final verification gate) then Phase 7 (retirement gates) then Phase 8 (final report) remain.
 
 Phase 5a fixes landed (`5948405`):
