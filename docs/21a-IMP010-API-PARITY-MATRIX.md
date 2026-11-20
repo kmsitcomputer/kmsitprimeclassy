@@ -81,7 +81,7 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
-## agent — `agent` (22/33 in Go)
+## agent — `agent` (23/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -108,7 +108,7 @@ Status legend:
 | POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | **GO** | Agen/Admin branch-authorized template preview with shared validation and sample rendering; compare_admin_whatsapp_preview.py |
 | DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **GO** | idempotent reset, no-op persistence, event validation, branch scope and conditional AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_resets.py |
 | POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | LARAVEL |  |
-| GET | `/api/v1/agent/whatsapp/messages` | session | admin, agen | LARAVEL |  |
+| GET | `/api/v1/agent/whatsapp/messages` | session | admin, agen | **GO** | One branch Agent's latest 50 delivery rows, masked destination and no message body; compare_agent_whatsapp_messages.py |
 | POST | `/api/v1/agent/whatsapp/pair/code` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/pair/qr` | session | admin, agen | LARAVEL |  |
 | POST | `/api/v1/agent/whatsapp/reconnect` | session | admin, agen | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 337 (89.9%) |
-|   of which fully GO | 337 |
+| Served by Go now | 338 (90.1%) |
+|   of which fully GO | 338 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 38 |
+| Still Laravel-only | 37 |
 | Areas fully ported | 38 / 45 |

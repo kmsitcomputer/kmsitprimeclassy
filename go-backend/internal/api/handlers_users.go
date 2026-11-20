@@ -677,6 +677,50 @@ func (s *Server) handleAgentWhatsAppEvents(w http.ResponseWriter, r *http.Reques
 	httpx.OK(w, data, "OK", nil)
 }
 
+func (s *Server) handleAgentWhatsAppMessages(w http.ResponseWriter, r *http.Request) {
+	_, agentID, ok := s.agentAdmin(w, r, true)
+	if !ok {
+		return
+	}
+	if !whatsAppSelectorAllowed(r, agentID) {
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "whatsapp.scope_forbidden"), nil)
+		return
+	}
+	rows, err := s.database.QueryContext(r.Context(), `SELECT id,purpose,event,status,recipient_phone,attempts,skip_reason,error_class,created_at,sent_at FROM whatsapp_messages WHERE agent_id=? ORDER BY id DESC LIMIT 50`, agentID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	data := make([]map[string]any, 0)
+	for rows.Next() {
+		var id int64
+		var purpose, status string
+		var event, phone, skip, errorClass sql.NullString
+		var attempts int
+		var created sql.NullTime
+		var sent sql.NullTime
+		if err := rows.Scan(&id, &purpose, &event, &status, &phone, &attempts, &skip, &errorClass, &created, &sent); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		var sentAt any
+		if sent.Valid {
+			sentAt = additionalPaymentTimestamp(sent)
+		}
+		var recipient any
+		if phone.Valid && phone.String != "" {
+			recipient = agentadmin.MaskWhatsAppNumber(phone.String)
+		}
+		data = append(data, map[string]any{"id": id, "purpose": purpose, "event": nullStringValue(event), "status": status, "recipient": recipient, "attempts": attempts, "skip_reason": nullStringValue(skip), "error_class": nullStringValue(errorClass), "created_at": additionalPaymentTimestamp(created), "sent_at": sentAt})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, data, "OK", nil)
+}
+
 func (s *Server) handleAgentWhatsAppEventUpdate(w http.ResponseWriter, r *http.Request) {
 	actor, agentID, ok := s.agentAdmin(w, r, true)
 	if !ok {
