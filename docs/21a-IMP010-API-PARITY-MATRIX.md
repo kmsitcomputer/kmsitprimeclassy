@@ -17,12 +17,12 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (21/59 in Go)
+## Admin operations — `admin` (22/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/admin/additional-payments` | session | admin, agen, keuangan, super_admin | **GO** | Branch-scoped operational/finance oversight list, current buyer/requester names, manual payment instructions, latest-first pagination; compare_admin_additional_payments.py |
-| PATCH | `/api/v1/admin/additional-payments/{payment}/status` | session | keuangan, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/admin/additional-payments/{payment}/status` | session | keuangan, super_admin | **GO** | Keuangan/Super Admin pending-only settlement; proof→order→transaction lock order, transfer verification, COD and transfer balances, invoice snapshots, audit and stale replay; compare_admin_additional_payment_status.py |
 | GET | `/api/v1/admin/agents` | session | super_admin | **GO** | AgentDirectoryResource projection ordered by name (set-compared), soft-delete excluded; 107/0 compared by compare_admin_agents.py |
 | POST | `/api/v1/admin/agents` | session | super_admin | **GO** | accumulated store validation, not_an_agent / profile_already_exists 422s, 201 + directory resource, agent_profile.created audit; 107/0 compared by compare_admin_agents.py |
 | DELETE | `/api/v1/admin/agents/{agentProfile}` | session | super_admin | **GO** | profile delete with SUBJECT=acting-user audit and localized response; 107/0 compared by compare_admin_agents.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 290 (77.3%) |
-|   of which fully GO | 290 |
+| Served by Go now | 291 (77.6%) |
+|   of which fully GO | 291 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 85 |
+| Still Laravel-only | 84 |
 | Areas fully ported | 34 / 45 |

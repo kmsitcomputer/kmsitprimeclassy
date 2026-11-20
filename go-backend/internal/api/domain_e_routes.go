@@ -14,6 +14,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("GET /api/v1/dispatch", chain(http.HandlerFunc(s.handleDispatchQueue), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,koordinator-kurir")))
 	s.mux.Handle("GET /api/v1/admin/additional-payments", chain(http.HandlerFunc(s.handleAdminAdditionalPaymentsIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,keuangan")))
 	s.mux.Handle("GET /api/v1/admin/order-refunds", chain(http.HandlerFunc(s.handleAdminOrderRefundsIndex), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,keuangan")))
+	s.mux.Handle("PATCH /api/v1/admin/additional-payments/{payment}/status", chain(http.HandlerFunc(s.handleAdminAdditionalPaymentStatus), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,keuangan")))
 	userRosterRoles := "super_admin,agen,korsal,sales,sales-kurir-sub,admin,keuangan,kurir,koordinator-kurir"
 	userCreateRoles := "super_admin,agen,korsal,koordinator-kurir"
 	s.mux.Handle("POST /api/v1/users", chain(http.HandlerFunc(s.handleUsersStore), RequireAuth, s.RequireAgentLinked, RequireRole(userCreateRoles)))
