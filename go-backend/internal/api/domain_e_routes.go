@@ -10,6 +10,8 @@ import (
 // registerDomainERoutes installs the Domain E route slice. It is intentionally kept out of server.go so
 // the shared router file remains untouched while parallel domain work is in flight.
 func (s *Server) registerDomainERoutes() {
+	googleSheetsRoles := "super_admin,agen,admin"
+	s.mux.Handle("GET /api/v1/google-sheets", chain(http.HandlerFunc(s.handleGoogleSheetsIndex), RequireAuth, s.RequireAgentLinked, RequireRole(googleSheetsRoles)))
 	s.mux.HandleFunc("GET /api/v1/bestsellers", s.handleBestsellers)
 	s.mux.Handle("GET /api/v1/catalog/export", chain(http.HandlerFunc(s.handleCatalogExport), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("GET /api/v1/dashboard/kpis", chain(http.HandlerFunc(s.handleDashboardKPIs), RequireAuth, s.RequireAgentLinked, RequireRole("agen,korsal,sales,sales-kurir-sub,gudang,kurir")))

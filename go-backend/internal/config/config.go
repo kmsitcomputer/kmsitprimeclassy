@@ -46,11 +46,21 @@ type Config struct {
 	// agent shipping-provider credentials). It is never used to encrypt anything Go owns.
 	AppKey string
 
-	DB       DBConfig
-	Session  SessionConfig
-	HTTP     HTTPConfig
-	Log      LogConfig
-	Shipping ShippingConfig
+	DB           DBConfig
+	Session      SessionConfig
+	HTTP         HTTPConfig
+	Log          LogConfig
+	Shipping     ShippingConfig
+	GoogleSheets GoogleSheetsConfig
+}
+
+// GoogleSheetsConfig mirrors backend/config/google_sheets.php.
+type GoogleSheetsConfig struct {
+	Enabled         bool
+	CredentialsPath string
+	Timeout         time.Duration
+	MaxRows         int
+	APIBaseURL      string
 }
 
 // DBConfig describes the MySQL/MariaDB connection.
@@ -218,6 +228,16 @@ func Load(getenv func(string) string) (Config, error) {
 		KmsitTrustedHosts: splitList(getenv("KMSIT_TRUSTED_HOSTS")),
 		RajaOngkirBaseURL: strings.TrimRight(defaultStr(getenv("RAJAONGKIR_BASE_URL"), "https://rajaongkir.komerce.id/api/v1"), "/"),
 	}
+	googleSheetsCfg := GoogleSheetsConfig{
+		Enabled:         defaultBool(getenv("GOOGLE_SHEETS_ENABLED"), true),
+		CredentialsPath: strings.TrimSpace(getenv("GOOGLE_SHEETS_CREDENTIALS_PATH")),
+		Timeout:         defaultDuration(getenv("GOOGLE_SHEETS_TIMEOUT"), 30*time.Second),
+		MaxRows:         defaultInt(getenv("GOOGLE_SHEETS_MAX_ROWS"), 10000),
+		APIBaseURL:      strings.TrimRight(defaultStr(getenv("GOOGLE_SHEETS_API_BASE_URL"), "https://sheets.googleapis.com/v4"), "/"),
+	}
+	if googleSheetsCfg.CredentialsPath == "" && strings.TrimSpace(getenv("STORAGE_ROOT")) != "" {
+		googleSheetsCfg.CredentialsPath = strings.TrimRight(strings.TrimSpace(getenv("STORAGE_ROOT")), "/") + "/private/google/service-account.json"
+	}
 
 	logCfg := LogConfig{
 		Level:  strings.ToLower(defaultStr(getenv("LOG_LEVEL"), "info")),
@@ -235,17 +255,18 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	cfg := Config{
-		Env:         env,
-		AppKey:      getenv("APP_KEY"),
-		HTTPAddr:    defaultStr(getenv("HTTP_ADDR"), ":8081"),
-		PublicURL:   strings.TrimRight(strings.TrimSpace(getenv("APP_URL")), "/"),
-		MediaRoot:   strings.TrimSpace(getenv("MEDIA_ROOT")),
-		StorageRoot: strings.TrimSpace(getenv("STORAGE_ROOT")),
-		DB:          db,
-		Session:     sess,
-		HTTP:        httpCfg,
-		Log:         logCfg,
-		Shipping:    shippingCfg,
+		Env:          env,
+		AppKey:       getenv("APP_KEY"),
+		HTTPAddr:     defaultStr(getenv("HTTP_ADDR"), ":8081"),
+		PublicURL:    strings.TrimRight(strings.TrimSpace(getenv("APP_URL")), "/"),
+		MediaRoot:    strings.TrimSpace(getenv("MEDIA_ROOT")),
+		StorageRoot:  strings.TrimSpace(getenv("STORAGE_ROOT")),
+		DB:           db,
+		Session:      sess,
+		HTTP:         httpCfg,
+		Log:          logCfg,
+		Shipping:     shippingCfg,
+		GoogleSheets: googleSheetsCfg,
 	}
 
 	if len(errs) > 0 {

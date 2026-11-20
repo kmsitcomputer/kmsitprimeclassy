@@ -269,11 +269,11 @@ Status legend:
 | GET | `/api/v1/dispatch/regions` | session | admin, agen, koordinator-kurir, super_admin | **GO** | cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/returns` | session | admin, agen, koordinator-kurir, super_admin | **GO** | Operational pickup queue, same-Agent and Super Admin agent_id validation, pending/approved return items whose order item is pengembalian, courier projection and capped pagination; compare_dispatch_returns.py |
 
-## Integrations — Google Sheets — `google-sheets` (0/7 in Go)
+## Integrations — Google Sheets — `google-sheets` (1/7 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/google-sheets` | session | admin, agen, super_admin | LARAVEL |  |
+| GET | `/api/v1/google-sheets` | session | admin, agen, super_admin | **GO** | Role-scoped destination/config/log dashboard, Admin commission redaction, and DatasetRegistry catalog; compare_google_sheets_index.py |
 | POST | `/api/v1/google-sheets/configs` | session | admin, agen, super_admin | LARAVEL |  |
 | DELETE | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | LARAVEL |  |
 | PUT | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 347 (92.5%) |
-|   of which fully GO | 347 |
+| Served by Go now | 348 (92.8%) |
+|   of which fully GO | 348 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 28 |
+| Still Laravel-only | 27 |
 | Areas fully ported | 38 / 45 |
