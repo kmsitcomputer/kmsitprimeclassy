@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (38/59 in Go)
+## Admin operations — `admin` (39/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -43,7 +43,7 @@ Status legend:
 | DELETE | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | idempotent Super Admin global template reset to Laravel default with before/after audit; compare_admin_whatsapp_templates.py |
 | PUT | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py |
 | POST | `/api/v1/admin/integrations/whatsapp/templates/{event}/preview` | session | super_admin | **GO** | Super Admin global template preview, token validation and optional-line rendering; compare_admin_whatsapp_preview.py |
-| POST | `/api/v1/admin/integrations/whatsapp/test-connection` | session | super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/integrations/whatsapp/test-connection` | session | super_admin | **GO** | read-only authenticated GOWA status/device probe with state audit; compare_admin_whatsapp_test_connection.py uses a local stub |
 | POST | `/api/v1/admin/integrations/whatsapp/test-message` | session | super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/languages` | session | super_admin | **GO** | admin listing: every language, active or not |
 | POST | `/api/v1/admin/languages` | session | super_admin | **GO** |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 310 (82.7%) |
-|   of which fully GO | 310 |
+| Served by Go now | 311 (82.9%) |
+|   of which fully GO | 311 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 65 |
+| Still Laravel-only | 64 |
 | Areas fully ported | 34 / 45 |

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -127,6 +128,91 @@ func (s *Service) Snapshot(ctx context.Context, integration string) (map[string]
 	}
 	out["limits"] = map[string]int{"per_recipient_per_hour": intDefault(get("rate.recipient_hour", "6"), 6), "global_per_minute": intDefault(get("rate.global_minute", "20"), 20)}
 	return out, nil
+}
+
+// WhatsAppStatus probes only the configured GOWA status and device-list endpoints; it never sends a message.
+func (s *Service) WhatsAppStatus(ctx context.Context) (map[string]any, error) {
+	base := map[string]any{"state": "not_configured", "reachable": false, "connected": false, "logged_in": false, "devices": 0, "device_id": nil, "detail": nil}
+	settings, err := s.settings(ctx, "integration.whatsapp")
+	if err != nil {
+		return nil, err
+	}
+	url, user, cipher := settings["wa.base_url"], settings["wa.username"], settings["wa.password"]
+	if url == "" || user == "" || cipher == "" {
+		return base, nil
+	}
+	password, err := cryptox.DecryptString(s.appKey, cipher)
+	if err != nil || password == "" {
+		return base, nil
+	}
+	timeout := intDefault(settings["wa.timeout"], 10)
+	if timeout < 2 {
+		timeout = 2
+	}
+	if timeout > 30 {
+		timeout = 30
+	}
+	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	probe := func(path string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(url, "/")+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.SetBasicAuth(user, password)
+		req.Header.Set("Accept", "application/json")
+		return client.Do(req)
+	}
+	res, err := probe("/app/status")
+	if err != nil {
+		base["state"] = "unreachable"
+		base["detail"] = "Connection to WhatsApp gateway failed."
+		return base, nil
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
+		base["state"] = "unauthorized"
+		base["reachable"] = true
+		base["detail"] = fmt.Sprintf("HTTP %d", res.StatusCode)
+		return base, nil
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		base["state"] = "error"
+		base["reachable"] = true
+		base["detail"] = fmt.Sprintf("HTTP %d", res.StatusCode)
+		return base, nil
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		base["state"] = "error"
+		base["reachable"] = true
+		base["detail"] = "Invalid gateway response."
+		return base, nil
+	}
+	results, _ := payload["results"].(map[string]any)
+	connected, _ := results["is_connected"].(bool)
+	logged, _ := results["is_logged_in"].(bool)
+	state := "disconnected"
+	if connected && logged {
+		state = "connected"
+	}
+	var deviceID any
+	if value, ok := results["device_id"]; ok && value != nil {
+		deviceID = fmt.Sprint(value)
+	}
+	devices := 0
+	if deviceRes, e := probe("/app/devices"); e == nil {
+		if deviceRes.StatusCode >= 200 && deviceRes.StatusCode < 300 {
+			var body map[string]any
+			if json.NewDecoder(deviceRes.Body).Decode(&body) == nil {
+				if list, ok := body["results"].([]any); ok {
+					devices = len(list)
+				}
+			}
+		}
+		deviceRes.Body.Close()
+	}
+	base["state"], base["reachable"], base["connected"], base["logged_in"], base["devices"], base["device_id"], base["detail"] = state, true, connected, logged, devices, deviceID, nil
+	return base, nil
 }
 
 func rawBool(values map[string]string, key string, fallback bool) bool {

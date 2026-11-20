@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/admininfra"
@@ -19,6 +20,40 @@ func (s *Server) handleAdminWhatsAppSettingsShow(w http.ResponseWriter, r *http.
 		return
 	}
 	httpx.OK(w, data, "OK", nil)
+}
+
+func (s *Server) handleAdminWhatsAppTestConnection(w http.ResponseWriter, r *http.Request) {
+	status, err := admininfra.New(s.database, s.cfg.AppKey).WhatsAppStatus(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	props, err := json.Marshal(map[string]any{"state": status["state"]})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	_, err = s.database.ExecContext(r.Context(), "INSERT INTO settings (`key`,value,`group`,is_public,created_at,updated_at) VALUES ('wa.enabled','0','integration.whatsapp',0,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE `key`=VALUES(`key`)")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var anchorID int64
+	if err = s.database.QueryRowContext(r.Context(), "SELECT id FROM settings WHERE `key`='wa.enabled' AND `group`='integration.whatsapp'").Scan(&anchorID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	actor := UserFrom(r.Context())
+	ua := r.UserAgent()
+	if len(ua) > 500 {
+		ua = ua[:500]
+	}
+	_, err = s.database.ExecContext(r.Context(), `INSERT INTO activity_logs (causer_id,subject_type,subject_id,event,description,properties,ip_address,user_agent,created_at) VALUES (?,'App\\Models\\Setting',?,'whatsapp.connection.tested',NULL,?,?,?,UTC_TIMESTAMP())`, actor.ID, anchorID, string(props), clientIP(r), ua)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, status, "OK", nil)
 }
 
 func (s *Server) loadAdminWhatsAppSnapshot(ctx context.Context) (map[string]any, error) {
