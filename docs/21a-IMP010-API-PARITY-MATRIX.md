@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (32/59 in Go)
+## Admin operations — `admin` (33/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -32,7 +32,7 @@ Status legend:
 | PATCH | `/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm` | session | keuangan, super_admin | **GO** | keuangan/super_admin; confirm settles the real collection |
 | GET | `/api/v1/admin/google-auth` | session | super_admin | **GO** | Super Admin global Google OAuth settings; secret is never returned; compare_google_auth_settings.py |
 | PUT | `/api/v1/admin/google-auth` | session | super_admin | **GO** | Global Google OAuth config validation, Laravel-compatible secret preservation/clear, encrypted storage, audit; compare_google_auth_settings.py |
-| GET | `/api/v1/admin/integrations/smtp` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/integrations/smtp` | session | super_admin | **GO** | Super Admin SMTP snapshot with write-only password state and active environment/dashboard source; compare_admin_smtp_settings.py |
 | PUT | `/api/v1/admin/integrations/smtp` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/smtp/test-connection` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/smtp/test-email` | session | super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 303 (80.8%) |
-|   of which fully GO | 303 |
+| Served by Go now | 304 (81.1%) |
+|   of which fully GO | 304 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 72 |
+| Still Laravel-only | 71 |
 | Areas fully ported | 34 / 45 |
