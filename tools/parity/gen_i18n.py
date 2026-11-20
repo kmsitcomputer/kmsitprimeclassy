@@ -77,6 +77,9 @@ KEYS = {
         "payment_not_verified",
         "sub_item_requires_owner_shipment",
     ],
+    "courier": [
+        "assigned",
+    ],
     "shipping": [
         "method_not_available",
     ],

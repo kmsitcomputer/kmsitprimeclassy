@@ -277,6 +277,8 @@ IMPLEMENTED = {
     ("POST", "/api/v1/delivery-refusals/{refusal}/disposition"): "redelivery/return_to_warehouse: shipping→transit reversal, reservation restore, fresh shipment, aggregate resync; compared by compare_refusals.py (14/0)",
     ("PATCH", "/api/v1/shipments/{shipment}/status"): "bulk diproses→dikirim / dikirim→terkirim transition: executor authorization, refusal guard, handover timestamps, Sub consume, aggregate sync, commissions; compared by compare_shipment_status.py",
     ("PATCH", "/api/v1/shipments/{shipment}/items/{orderItem}/status"): "per-ITEM work-unit transition (LOCKED courier work-unit model): one item, siblings untouched; compared by compare_shipment_status.py",
+    ("PATCH", "/api/v1/shipments/{shipment}/courier"): "CourierService::assignCourier: self_sub ban, coordinator-only, eligibility under Order→Shipment lock, SKS executor resolve, SC-03 gate, carve of wholly-unaccepted lines, idempotent replay; compared by compare_courier_assign.py (20/0)",
+    ("GET", "/api/v1/shipments/{shipment}/eligible-couriers"): "per-shipment assignable couriers (branch kurir/koordinator profiles + eligible SKS executors), read-only; compared by compare_courier_assign.py (20/0)",
 }
 
 

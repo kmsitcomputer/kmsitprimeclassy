@@ -347,9 +347,9 @@ func (s *Service) assignFreshShipment(ctx context.Context, tx *sql.Tx, orderID, 
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
-		description, properties, created_at, updated_at)
+		description, properties, created_at)
 		VALUES (?, 'App\Models
-Shipment', ?, ?, NULL, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+Shipment', ?, ?, NULL, ?, UTC_TIMESTAMP(6))`,
 		actorID, shipmentID, event, mustJSON(map[string]any{"order_id": orderID, "order_item_id": orderItemID}))
 	return err
 }

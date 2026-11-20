@@ -18,6 +18,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
+	"github.com/kmsitcomputer/primeclassy-go/internal/orders"
 )
 
 // GLM IMP-010 — Laravel-only endpoint slice. Kept out of server.go so the shared router file
@@ -68,6 +69,9 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	// Shipment status transitions — route gate super_admin,agen,admin,kurir,sales-kurir-sub,
 	// koordinator-kurir; ShipmentPolicy::updateStatus executor rules live in the service.
 	shipGate := RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")
+	koordGate := RequireRole("koordinator-kurir")
+	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/courier", chain(http.HandlerFunc(s.handleShipmentAssignCourier), RequireAuth, s.RequireAgentLinked, koordGate))
+	s.mux.Handle("GET /api/v1/shipments/{shipment}/eligible-couriers", chain(http.HandlerFunc(s.handleShipmentEligibleCouriers), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/items/{orderItem}/status", chain(http.HandlerFunc(s.handleShipmentItemStatus), RequireAuth, s.RequireAgentLinked, shipGate))
 
@@ -113,6 +117,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/delivery-refusals/{refusal}/hand-back",
 		"POST /api/v1/delivery-refusals/{refusal}/receive",
 		"POST /api/v1/delivery-refusals/{refusal}/disposition",
+		"PATCH /api/v1/shipments/{shipment}/courier",
+		"GET /api/v1/shipments/{shipment}/eligible-couriers",
 		"PATCH /api/v1/shipments/{shipment}/status",
 		"PATCH /api/v1/shipments/{shipment}/items/{orderItem}/status",
 		"GET /api/v1/reports/cancellations-refunds",
@@ -1167,6 +1173,106 @@ func (s *Server) handleRefusalDispose(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, result, "OK", nil)
 }
 
+func (s *Server) handleShipmentAssignCourier(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		CourierID      *int64 `json:"courier_id"`
+		ExecutorUserID *int64 `json:"executor_user_id"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	if body.ExecutorUserID == nil && body.CourierID == nil {
+		writeError(w, r, httpx.Validation(map[string][]string{"courier_id": {i18n.ValidationMessage(LocaleFrom(ctx), "required", "courier_id")}}))
+		return
+	}
+	var courierID, executorID int64
+	if body.CourierID != nil {
+		courierID = *body.CourierID
+	}
+	if body.ExecutorUserID != nil {
+		executorID = *body.ExecutorUserID
+		if body.CourierID != nil {
+			writeError(w, r, httpx.Validation(map[string][]string{"courier_id": {
+				"The courier id field prohibits executor user id from being present."}}))
+			return
+		}
+	}
+	// Laravel validates exists:couriers,id in the FormRequest (422) before the controller.
+	if courierID > 0 && executorID == 0 {
+		var exists bool
+		if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM couriers WHERE id = ?)`, courierID).
+			Scan(&exists); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		if !exists {
+			writeError(w, r, httpx.Validation(map[string][]string{"courier_id": {
+				i18n.ValidationMessage(LocaleFrom(ctx), "exists", "courier_id")}}))
+			return
+		}
+	}
+	orderID, aerr := s.dispatchService().AssignCourier(ctx, dispatchActor(r), id, courierID, executorID)
+	if aerr != nil {
+		var de *dispatch.DomainError
+		if errors.As(aerr, &de) {
+			m := de.Message
+			if de.Status == http.StatusNotFound {
+				m = msg(ctx, "system.endpoint_not_found")
+			}
+			writeError(w, r, httpx.NewError(de.Status, m))
+			return
+		}
+		writeError(w, r, aerr)
+		return
+	}
+	s.renderOrderOK(w, r, orderID, msg(ctx, "courier.assigned"))
+}
+
+func (s *Server) handleShipmentEligibleCouriers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	rows, aerr := s.dispatchService().EligibleCouriers(ctx, dispatchActor(r), id)
+	if aerr != nil {
+		var de *dispatch.DomainError
+		if errors.As(aerr, &de) {
+			m := de.Message
+			if de.Status == http.StatusNotFound || de.Message == "" {
+				m = msg(ctx, "system.endpoint_not_found")
+			}
+			writeError(w, r, httpx.NewError(de.Status, m))
+			return
+		}
+		writeError(w, r, aerr)
+		return
+	}
+	httpx.OK(w, rows, "OK", nil)
+}
+
+// renderOrderOK loads the order and renders the OrderResource projection Laravel returns.
+func (s *Server) renderOrderOK(w http.ResponseWriter, r *http.Request, orderID int64, message string) {
+	ctx := r.Context()
+	actor := UserFrom(ctx)
+	svc := s.orderService()
+	order, lerr := svc.LoadOrderForRead(ctx, orderID, true)
+	if lerr != nil {
+		writeError(w, r, orderError(ctx, lerr))
+		return
+	}
+	rendered, rerr := orders.Render(ctx, svc, order, viewerOf(actor))
+	if rerr != nil {
+		writeError(w, r, rerr)
+		return
+	}
+	httpx.OK(w, rendered, message, nil)
+}
 func (s *Server) handleShipmentStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)

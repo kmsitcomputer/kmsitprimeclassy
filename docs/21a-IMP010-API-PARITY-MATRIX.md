@@ -498,14 +498,14 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/settings` | public | — | **GO** |  |
 
-## Shipping & delivery — `shipments` (2/9 in Go)
+## Shipping & delivery — `shipments` (4/9 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| PATCH | `/api/v1/shipments/{shipment}/courier` | session | koordinator-kurir | LARAVEL |  |
+| PATCH | `/api/v1/shipments/{shipment}/courier` | session | koordinator-kurir | **GO** | CourierService::assignCourier: self_sub ban, coordinator-only, eligibility under Order→Shipment lock, SKS executor resolve, SC-03 gate, carve of wholly-unaccepted lines, idempotent replay; compared by compare_courier_assign.py (20/0) |
 | GET | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | LARAVEL |  |
-| GET | `/api/v1/shipments/{shipment}/eligible-couriers` | session | koordinator-kurir | LARAVEL |  |
+| GET | `/api/v1/shipments/{shipment}/eligible-couriers` | session | koordinator-kurir | **GO** | per-shipment assignable couriers (branch kurir/koordinator profiles + eligible SKS executors), read-only; compared by compare_courier_assign.py (20/0) |
 | PATCH | `/api/v1/shipments/{shipment}/expedition-handover` | session | koordinator-kurir | LARAVEL |  |
 | POST | `/api/v1/shipments/{shipment}/items/{orderItem}/refuse` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/shipments/{shipment}/items/{orderItem}/status` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | per-ITEM work-unit transition (LOCKED courier work-unit model): one item, siblings untouched; compared by compare_shipment_status.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 241 (64.3%) |
-|   of which fully GO | 241 |
+| Served by Go now | 243 (64.8%) |
+|   of which fully GO | 243 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 134 |
+| Still Laravel-only | 132 |
 | Areas fully ported | 24 / 45 |
