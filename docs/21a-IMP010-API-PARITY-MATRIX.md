@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (18/59 in Go)
+## Admin operations — `admin` (19/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -68,7 +68,7 @@ Status legend:
 | POST | `/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve` | session | agen, keuangan, super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/regions/export` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/regions/import` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/admin/return-items/{item}/refund` | session | keuangan, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/admin/return-items/{item}/refund` | session | keuangan, super_admin | **GO** | Keuangan/Super Admin and same-Agent gates, approved/full-paid/CRM-recipient checks, idempotent legacy refund attempt and payout, paid balance/invoice reversal, refund completion, Sales-only fee adjustment and audit; compare_return_item_refund.py |
 | GET | `/api/v1/admin/returns` | session | admin, agen, super_admin | **GO** | Admin/Agen branch-scoped, Super Admin optional agent_id, status list filter, latest-first pagination, full ReturnRequestResource + pagination meta; compare_admin_returns.py |
 | GET | `/api/v1/admin/returns/{return}` | session | admin, agen, super_admin | **GO** | Super Admin or same-Agent Admin/Agen branch authorization; complete ReturnRequestResource, 404 for missing model and 403 for foreign branch; compare_admin_return_show.py |
 | PATCH | `/api/v1/admin/returns/{return}/pickup-schedule` | session | admin, agen, super_admin | **GO** | Admin/Agen branch scope, exact Y-m-d and WIB not-past validation, pending/approved item updates only, no-eligible-item error, response and activity audit; compare_return_pickup_schedule.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 284 (75.7%) |
-|   of which fully GO | 284 |
+| Served by Go now | 285 (76.0%) |
+|   of which fully GO | 285 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 91 |
+| Still Laravel-only | 90 |
 | Areas fully ported | 32 / 45 |

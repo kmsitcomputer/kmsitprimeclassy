@@ -195,6 +195,10 @@ func implementsRoute(method, path string) bool {
 	if method == http.MethodGet && path == "/api/v1/dispatch/returns" {
 		return true
 	}
+	if method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/admin/return-items/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/admin/return-items/"), "/")
+		return len(parts) == 2 && parts[0] != "" && parts[1] == "refund"
+	}
 	if matchesDomainERoute(method, path) || matchesDomainEReadRoute(method, path) || matchesGLMLaravelOnlyRoute(method, path) {
 		return true
 	}
