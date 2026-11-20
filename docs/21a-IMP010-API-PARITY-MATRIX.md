@@ -498,13 +498,13 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/settings` | public | — | **GO** |  |
 
-## Shipping & delivery — `shipments` (6/9 in Go)
+## Shipping & delivery — `shipments` (8/9 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | PATCH | `/api/v1/shipments/{shipment}/courier` | session | koordinator-kurir | **GO** | CourierService::assignCourier: self_sub ban, coordinator-only, eligibility under Order→Shipment lock, SKS executor resolve, SC-03 gate, carve of wholly-unaccepted lines, idempotent replay; compared by compare_courier_assign.py (20/0) |
-| GET | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | LARAVEL |  |
-| POST | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | LARAVEL |  |
+| GET | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | **GO** | R-03 append-only verification history (admin/super_admin, same-agent policy → 404), DeliveryVerificationResource; compared by compare_delivery_verifications.py (20/0) |
+| POST | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | **GO** | R-03 record outcome: Idempotency-Key required/≤100, outcome validation, not_delivered gate (delivered_at + item re-derive), append-only, idempotent replay, 409 conflict, audit; compared by compare_delivery_verifications.py (20/0) |
 | GET | `/api/v1/shipments/{shipment}/eligible-couriers` | session | koordinator-kurir | **GO** | per-shipment assignable couriers (branch kurir/koordinator profiles + eligible SKS executors), read-only; compared by compare_courier_assign.py (20/0) |
 | PATCH | `/api/v1/shipments/{shipment}/expedition-handover` | session | koordinator-kurir | **GO** | REM-003 carrier handover: provider gate (rajaongkir), carrier mismatch, idempotent replay, 409 tracking conflict, evidence media + provider_meta.handover, audit; multipart success via POST _method=PATCH spoofing (PHP does not parse multipart PATCH); compared by compare_handover_receipt.py (17/0) |
 | POST | `/api/v1/shipments/{shipment}/items/{orderItem}/refuse` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 245 (65.3%) |
-|   of which fully GO | 245 |
+| Served by Go now | 247 (65.9%) |
+|   of which fully GO | 247 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 130 |
+| Still Laravel-only | 128 |
 | Areas fully ported | 24 / 45 |

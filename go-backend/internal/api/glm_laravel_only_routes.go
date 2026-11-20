@@ -75,6 +75,9 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/shipments/{shipment}/expedition-handover", chain(http.HandlerFunc(s.handleExpeditionHandoverSpoofed), RequireAuth, s.RequireAgentLinked, koordGate))
 	receiptGate := RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/receipt", chain(http.HandlerFunc(s.handleShipmentReceipt), RequireAuth, s.RequireAgentLinked, receiptGate))
+	dvGate := RequireRole("super_admin,admin")
+	s.mux.Handle("GET /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerifications), RequireAuth, s.RequireAgentLinked, dvGate))
+	s.mux.Handle("POST /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerificationStore), RequireAuth, s.RequireAgentLinked, dvGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/courier", chain(http.HandlerFunc(s.handleShipmentAssignCourier), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/eligible-couriers", chain(http.HandlerFunc(s.handleShipmentEligibleCouriers), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
@@ -124,6 +127,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/delivery-refusals/{refusal}/disposition",
 		"PATCH /api/v1/shipments/{shipment}/courier",
 		"PATCH /api/v1/shipments/{shipment}/expedition-handover",
+		"GET /api/v1/shipments/{shipment}/delivery-verifications",
+		"POST /api/v1/shipments/{shipment}/delivery-verifications",
 		"GET /api/v1/shipments/{shipment}/receipt",
 		"GET /api/v1/shipments/{shipment}/eligible-couriers",
 		"PATCH /api/v1/shipments/{shipment}/status",
@@ -1349,6 +1354,70 @@ func (s *Server) handleShipmentReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, receipt, "OK", nil)
+}
+
+func (s *Server) handleDeliveryVerifications(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	rows, aerr := s.dispatchService().DeliveryVerifications(ctx, dispatchActor(r), id)
+	if aerr != nil {
+		writeDispatchError(w, r, aerr)
+		return
+	}
+	httpx.OK(w, rows, "OK", nil)
+}
+
+func (s *Server) handleDeliveryVerificationStore(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Outcome string  `json:"outcome"`
+		Note    *string `json:"note"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	fields := fieldErrors{}
+	if body.Outcome == "" {
+		fields.add("outcome", i18n.ValidationMessage(LocaleFrom(ctx), "required", "outcome"))
+	} else if body.Outcome != "received" && body.Outcome != "not_received" && body.Outcome != "return" {
+		fields.add("outcome", i18n.ValidationMessage(LocaleFrom(ctx), "in", "outcome"))
+	}
+	if body.Note != nil && len([]rune(*body.Note)) > 2000 {
+		fields.add("note", i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "note", "max", "2000"))
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(map[string][]string(fields)))
+		return
+	}
+	// R-03: the Idempotency-Key header is mandatory.
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		writeError(w, r, &httpx.Error{Status: 422, Message: "Header Idempotency-Key wajib diisi.",
+			ErrorsAny: map[string]any{"idempotency_key": msg(ctx, "system.field_required")}})
+		return
+	}
+	if len(key) > 100 {
+		writeError(w, r, &httpx.Error{Status: 422, Message: "Header Idempotency-Key tidak valid (maksimal 100 karakter).",
+			ErrorsAny: map[string]any{"idempotency_key": msg(ctx, "system.field_invalid")}})
+		return
+	}
+	note := ""
+	if body.Note != nil {
+		note = *body.Note
+	}
+	record, aerr := s.dispatchService().RecordDeliveryVerification(ctx, dispatchActor(r), id, body.Outcome, note, key)
+	if aerr != nil {
+		writeDispatchError(w, r, aerr)
+		return
+	}
+	httpx.Created(w, record, "Verifikasi pengiriman berhasil dicatat.")
 }
 
 func (s *Server) handleShipmentAssignCourier(w http.ResponseWriter, r *http.Request) {

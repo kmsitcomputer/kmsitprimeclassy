@@ -281,6 +281,8 @@ IMPLEMENTED = {
     ("GET", "/api/v1/shipments/{shipment}/eligible-couriers"): "per-shipment assignable couriers (branch kurir/koordinator profiles + eligible SKS executors), read-only; compared by compare_courier_assign.py (20/0)",
     ("PATCH", "/api/v1/shipments/{shipment}/expedition-handover"): "REM-003 carrier handover: provider gate (rajaongkir), carrier mismatch, idempotent replay, 409 tracking conflict, evidence media + provider_meta.handover, audit; multipart success via POST _method=PATCH spoofing (PHP does not parse multipart PATCH); compared by compare_handover_receipt.py (17/0)",
     ("GET", "/api/v1/shipments/{shipment}/receipt"): "thermal receipt (pre/post-pickup mode derived from shipped_at), printReceipt policy, read-only + shipment.receipt_printed audit (is_reprint); compared by compare_handover_receipt.py (17/0)",
+    ("GET", "/api/v1/shipments/{shipment}/delivery-verifications"): "R-03 append-only verification history (admin/super_admin, same-agent policy → 404), DeliveryVerificationResource; compared by compare_delivery_verifications.py (20/0)",
+    ("POST", "/api/v1/shipments/{shipment}/delivery-verifications"): "R-03 record outcome: Idempotency-Key required/≤100, outcome validation, not_delivered gate (delivered_at + item re-derive), append-only, idempotent replay, 409 conflict, audit; compared by compare_delivery_verifications.py (20/0)",
 }
 
 

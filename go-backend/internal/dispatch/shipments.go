@@ -1311,3 +1311,159 @@ func (s *Service) ShipmentOrderID(ctx context.Context, shipmentID int64) (int64,
 	err := s.database.DB.QueryRowContext(ctx, `SELECT order_id FROM shipments WHERE id = ?`, shipmentID).Scan(&orderID)
 	return orderID, err
 }
+
+// DeliveryVerifications ports DeliveryVerificationController::index (append-only history).
+func (s *Service) DeliveryVerifications(ctx context.Context, a Actor, shipmentID int64) (any, error) {
+	if !s.canVerifyDelivery(ctx, a, shipmentID) {
+		return nil, &DomainError{Status: 404, Message: ""}
+	}
+	rows, err := s.database.DB.QueryContext(ctx, `SELECT v.id, v.shipment_id, v.outcome, v.note,
+		v.verified_at, u.id, u.name, v.created_at FROM delivery_verifications v
+		LEFT JOIN users u ON u.id = v.verified_by WHERE v.shipment_id = ? ORDER BY v.id`, shipmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	data := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, shipID int64
+		var outcome string
+		var note sql.NullString
+		var verifiedAt, createdAt sql.NullTime
+		var uid sql.NullInt64
+		var uname sql.NullString
+		if err := rows.Scan(&id, &shipID, &outcome, &note, &verifiedAt, &uid, &uname, &createdAt); err != nil {
+			return nil, err
+		}
+		row := map[string]any{"id": id, "shipment_id": shipID, "outcome": outcome,
+			"note": nullStrPtr(note.String), "verified_at": carbonMicro(verifiedAt),
+			"verified_by": map[string]any{"id": nullIntPtr(uid), "name": nullStrPtr(uname.String)},
+			"created_at":  carbonMicro(createdAt)}
+		data = append(data, row)
+	}
+	return data, rows.Err()
+}
+
+// RecordDeliveryVerification ports DeliveryVerificationService::record (R-03 append-only).
+func (s *Service) RecordDeliveryVerification(ctx context.Context, a Actor, shipmentID int64,
+	outcome, note, idempotencyKey string) (map[string]any, error) {
+	if outcome != "received" && outcome != "not_received" && outcome != "return" {
+		return nil, &DomainError{Status: 422, Message: "Hasil verifikasi pengiriman tidak valid."}
+	}
+	normalizedNote := strings.TrimSpace(note)
+	if normalizedNote == "" {
+		normalizedNote = ""
+	}
+	var verificationID int64
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if !s.canVerifyDeliveryTx(ctx, tx, a, shipmentID) {
+			return &DomainError{Status: 404, Message: ""}
+		}
+		var deliveredAt sql.NullTime
+		if err := tx.QueryRowContext(ctx, `SELECT delivered_at FROM shipments WHERE id = ? FOR UPDATE`, shipmentID).
+			Scan(&deliveredAt); err != nil {
+			if err == sql.ErrNoRows {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		if !deliveredAt.Valid {
+			return &DomainError{Status: 422, Message: "Pengiriman belum selesai; verifikasi belum dapat dilakukan."}
+		}
+		var unarrived bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM order_items WHERE shipment_id = ?
+			AND status NOT IN ('terkirim','pengembalian','kembali'))`, shipmentID).Scan(&unarrived); err != nil {
+			return err
+		}
+		if unarrived {
+			return &DomainError{Status: 422, Message: "Pengiriman belum selesai; verifikasi belum dapat dilakukan."}
+		}
+		var existingID int64
+		var exShipment int64
+		var exOutcome, exNote sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT id, shipment_id, outcome, note FROM delivery_verifications
+			WHERE verified_by = ? AND idempotency_key = ? FOR UPDATE`, a.ID, idempotencyKey).
+			Scan(&existingID, &exShipment, &exOutcome, &exNote)
+		if err == nil {
+			// A replay is only a replay of the SAME request; a reused key for a different
+			// shipment/outcome/note is a conflict, never an unrelated record.
+			if exShipment != shipmentID || exOutcome.String != outcome || exNote.String != normalizedNote {
+				return &DomainError{Status: 409, Message: "Idempotency-Key sudah dipakai untuk permintaan verifikasi yang berbeda."}
+			}
+			verificationID = existingID
+			return nil
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+		res, ierr := tx.ExecContext(ctx, `INSERT INTO delivery_verifications (shipment_id, outcome, note,
+			verified_by, verified_at, idempotency_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+			shipmentID, outcome, nullStrPtr(normalizedNote), a.ID, idempotencyKey)
+		if ierr != nil {
+			return ierr
+		}
+		newID, lerr := res.LastInsertId()
+		if lerr != nil {
+			return lerr
+		}
+		verificationID = newID
+		var orderID int64
+		_ = tx.QueryRowContext(ctx, `SELECT order_id FROM shipments WHERE id = ?`, shipmentID).Scan(&orderID)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\Shipment', ?, 'shipment.delivery_verified', ?, ?, UTC_TIMESTAMP(6))`,
+			a.ID, shipmentID, nullStrPtr(normalizedNote), mustJSON(map[string]any{"order_id": orderID,
+				"outcome": outcome, "verification_id": newID, "actor_role": a.Role})); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Render the created/replayed record (DeliveryVerificationResource with verifiedBy).
+	var id, shipID int64
+	var out2, note2 sql.NullString
+	var verifiedAt, createdAt sql.NullTime
+	var uid sql.NullInt64
+	var uname sql.NullString
+	if err := s.database.DB.QueryRowContext(ctx, `SELECT v.id, v.shipment_id, v.outcome, v.note,
+		v.verified_at, u.id, u.name, v.created_at FROM delivery_verifications v
+		LEFT JOIN users u ON u.id = v.verified_by WHERE v.id = ?`, verificationID).
+		Scan(&id, &shipID, &out2, &note2, &verifiedAt, &uid, &uname, &createdAt); err != nil {
+		return nil, err
+	}
+	_ = outcome
+	return map[string]any{"id": id, "shipment_id": shipID, "outcome": nullStrPtr(out2.String),
+		"note": nullStrPtr(note2.String), "verified_at": carbonMicro(verifiedAt),
+		"verified_by": map[string]any{"id": nullIntPtr(uid), "name": nullStrPtr(uname.String)},
+		"created_at":  carbonMicro(createdAt)}, nil
+}
+
+// canVerifyDelivery mirrors DeliveryVerificationPolicy (super_admin, or same-branch admin).
+func (s *Service) canVerifyDelivery(ctx context.Context, a Actor, shipmentID int64) bool {
+	if a.IsSuper {
+		return true
+	}
+	if a.Role != "admin" {
+		return false
+	}
+	var agentID int64
+	err := s.database.DB.QueryRowContext(ctx, `SELECT o.agent_id FROM shipments sh
+		JOIN orders o ON o.id = sh.order_id WHERE sh.id = ?`, shipmentID).Scan(&agentID)
+	return err == nil && agentID == a.AgentID
+}
+
+func (s *Service) canVerifyDeliveryTx(ctx context.Context, tx *sql.Tx, a Actor, shipmentID int64) bool {
+	if a.IsSuper {
+		return true
+	}
+	if a.Role != "admin" {
+		return false
+	}
+	var agentID int64
+	err := tx.QueryRowContext(ctx, `SELECT o.agent_id FROM shipments sh
+		JOIN orders o ON o.id = sh.order_id WHERE sh.id = ?`, shipmentID).Scan(&agentID)
+	return err == nil && agentID == a.AgentID
+}
