@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -213,6 +214,101 @@ func (s *Service) WhatsAppStatus(ctx context.Context) (map[string]any, error) {
 	}
 	base["state"], base["reachable"], base["connected"], base["logged_in"], base["devices"], base["device_id"], base["detail"] = state, true, connected, logged, devices, deviceID, nil
 	return base, nil
+}
+
+func (s *Service) WhatsAppTestNumbers(ctx context.Context) ([]string, error) {
+	settings, err := s.settings(ctx, "integration.whatsapp")
+	if err != nil {
+		return nil, err
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(settings["wa.test_numbers"]), &values); err != nil {
+		return []string{}, nil
+	}
+	return values, nil
+}
+
+// SendWhatsAppText sends a single explicitly requested test/ops message and returns a duplicate-safety outcome.
+func (s *Service) SendWhatsAppText(ctx context.Context, number, message string) (map[string]any, error) {
+	settings, err := s.settings(ctx, "integration.whatsapp")
+	if err != nil {
+		return nil, err
+	}
+	base, user, cipher := settings["wa.base_url"], settings["wa.username"], settings["wa.password"]
+	password, decErr := cryptox.DecryptString(s.appKey, cipher)
+	if base == "" || user == "" || cipher == "" || decErr != nil || password == "" || settings["wa.enabled"] != "1" {
+		return map[string]any{"outcome": "failed", "error_class": "not_configured", "error_message": "WhatsApp gateway is not configured."}, nil
+	}
+	device := settings["wa.device_id"]
+	timeout := intDefault(settings["wa.timeout"], 10)
+	if timeout < 2 {
+		timeout = 2
+	}
+	if timeout > 30 {
+		timeout = 30
+	}
+	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	body, _ := json.Marshal(map[string]string{"phone": number + "@s.whatsapp.net", "message": message})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/send/message", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(user, password)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if device != "" {
+		req.Header.Set("X-Device-Id", device)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		detail := sanitizeGatewayError(err.Error())
+		outcome := "unknown"
+		class := "timeout"
+		if strings.Contains(strings.ToLower(detail), "connection refused") || strings.Contains(strings.ToLower(detail), "could not resolve") || strings.Contains(strings.ToLower(detail), "failed to connect") {
+			outcome = "retry"
+			class = "unreachable"
+		}
+		return map[string]any{"outcome": outcome, "error_class": class, "error_message": detail}, nil
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		code, _ := payload["code"].(string)
+		if code == "" || strings.EqualFold(code, "SUCCESS") {
+			results, _ := payload["results"].(map[string]any)
+			return map[string]any{"outcome": "sent", "provider_message_id": results["message_id"]}, nil
+		}
+		return map[string]any{"outcome": "unknown", "error_class": "unexpected_response", "error_message": "Unexpected provider response: " + code}, nil
+	}
+	messageText, _ := payload["message"].(string)
+	if messageText == "" {
+		messageText = fmt.Sprintf("HTTP %d", resp.StatusCode)
+	} else {
+		messageText = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, messageText)
+	}
+	messageText = sanitizeGatewayError(messageText)
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return map[string]any{"outcome": "failed", "error_class": "auth", "error_message": "Gateway rejected the credentials."}, nil
+	}
+	if resp.StatusCode == 404 {
+		return map[string]any{"outcome": "failed", "error_class": "device_not_found", "error_message": messageText}, nil
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return map[string]any{"outcome": "failed", "error_class": "rejected", "error_message": messageText}, nil
+	}
+	return map[string]any{"outcome": "unknown", "error_class": "provider_error", "error_message": messageText}, nil
+}
+
+func sanitizeGatewayError(value string) string {
+	value = regexp.MustCompile(`(?i)(Authorization|Basic|Bearer)\s*[:=]?\s*[A-Za-z0-9+/=._-]{6,}`).ReplaceAllString(value, "$1 [redacted]")
+	value = regexp.MustCompile(`(?i)(https?://)[^/\s@]+:[^/\s@]+@`).ReplaceAllString(value, "$1[redacted]@")
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) > 200 {
+		value = string(runes[:200])
+	}
+	return value
 }
 
 func rawBool(values map[string]string, key string, fallback bool) bool {

@@ -81,3 +81,5 @@ func cleanPreview(raw string) string {
 	}
 	return value
 }
+
+func CleanWhatsAppMessage(raw string) string { return cleanPreview(raw) }
