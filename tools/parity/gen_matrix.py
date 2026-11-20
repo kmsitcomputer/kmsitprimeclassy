@@ -24,6 +24,8 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/admin/additional-payments/{payment}/status"): "Keuangan/Super Admin pending-only settlement; proof→order→transaction lock order, transfer verification, COD and transfer balances, invoice snapshots, audit and stale replay; compare_admin_additional_payment_status.py",
     ("GET", "/api/v1/admin/shipping-providers"): "Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py",
     ("GET", "/api/v1/admin/shipping-couriers"): "Super Admin provider-supported courier master list ordered by name; compare_admin_shipping_couriers.py",
+    ("POST", "/api/v1/admin/shipping-couriers"): "Super Admin courier create with lowercase code, regex/max/unique validation and audit; compare_admin_shipping_couriers.py",
+    ("PATCH", "/api/v1/admin/shipping-couriers/{shippingCourier}/toggle"): "Super Admin courier active-state toggle and audit; compare_admin_shipping_couriers.py",
     ("PATCH", "/api/v1/admin/shipping-providers/{provider}/toggle"): "Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",
     ("POST", "/api/v1/orders/{order}/assisted-returns"): "CRM-origin only; owner Sales/SKS/Korsal, append-only consent current-state + item/quantity quota, public image evidence, transactional return items/order state/audit; compare_assisted_return.py",

@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (25/59 in Go)
+## Admin operations — `admin` (27/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -76,8 +76,8 @@ Status legend:
 | GET | `/api/v1/admin/settings` | session | super_admin | **GO** | identical to the public read (single service in the reference) |
 | PUT | `/api/v1/admin/settings` | session | super_admin | **GO** | unknown keys ignored, JSON keys encoded, returns the resolved settings |
 | GET | `/api/v1/admin/shipping-couriers` | session | super_admin | **GO** | Super Admin provider-supported courier master list ordered by name; compare_admin_shipping_couriers.py |
-| POST | `/api/v1/admin/shipping-couriers` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/admin/shipping-couriers/{shippingCourier}/toggle` | session | super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/shipping-couriers` | session | super_admin | **GO** | Super Admin courier create with lowercase code, regex/max/unique validation and audit; compare_admin_shipping_couriers.py |
+| PATCH | `/api/v1/admin/shipping-couriers/{shippingCourier}/toggle` | session | super_admin | **GO** | Super Admin courier active-state toggle and audit; compare_admin_shipping_couriers.py |
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 294 (78.4%) |
-|   of which fully GO | 294 |
+| Served by Go now | 296 (78.9%) |
+|   of which fully GO | 296 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 81 |
+| Still Laravel-only | 79 |
 | Areas fully ported | 34 / 45 |
