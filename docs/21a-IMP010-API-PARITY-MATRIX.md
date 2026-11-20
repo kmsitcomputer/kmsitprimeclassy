@@ -17,18 +17,18 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (8/59 in Go)
+## Admin operations — `admin` (14/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/admin/additional-payments` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/additional-payments/{payment}/status` | session | keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/agents` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/admin/agents` | session | super_admin | LARAVEL |  |
-| DELETE | `/api/v1/admin/agents/{agentProfile}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/admin/agents/{agentProfile}` | session | super_admin | LARAVEL |  |
-| PATCH | `/api/v1/admin/agents/{agent}/toggle-status` | session | super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/audit-logs` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/agents` | session | super_admin | **GO** | AgentDirectoryResource projection ordered by name (set-compared), soft-delete excluded; 107/0 compared by compare_admin_agents.py |
+| POST | `/api/v1/admin/agents` | session | super_admin | **GO** | accumulated store validation, not_an_agent / profile_already_exists 422s, 201 + directory resource, agent_profile.created audit; 107/0 compared by compare_admin_agents.py |
+| DELETE | `/api/v1/admin/agents/{agentProfile}` | session | super_admin | **GO** | profile delete with SUBJECT=acting-user audit and localized response; 107/0 compared by compare_admin_agents.py |
+| PATCH | `/api/v1/admin/agents/{agentProfile}` | session | super_admin | **GO** | sometimes-field partial update under lock, decimal:7 strings, old/new audit properties; 107/0 compared by compare_admin_agents.py |
+| PATCH | `/api/v1/admin/agents/{agent}/toggle-status` | session | super_admin | **GO** | active<->inactive flip both directions, not_an_agent 422, binding-miss 404, status audit; 107/0 compared by compare_admin_agents.py |
+| GET | `/api/v1/admin/audit-logs` | session | super_admin | **GO** | super_admin paged audit trail compared by compare_reports.py (GLM reporting slice, 150/150) |
 | PATCH | `/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm` | session | keuangan, super_admin | **GO** | keuangan/super_admin; confirm settles the real collection |
 | GET | `/api/v1/admin/google-auth` | session | super_admin | LARAVEL |  |
 | PUT | `/api/v1/admin/google-auth` | session | super_admin | LARAVEL |  |
@@ -219,26 +219,26 @@ Status legend:
 | POST | `/api/v1/consent/otp` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/consent/otp/{challenge}/verify` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 
-## CRM — `crm` (4/16 in Go)
+## CRM — `crm` (15/16 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/crm/customers` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
-| POST | `/api/v1/crm/customers` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/crm/customers` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: validation, duplicate phone normalization, 201 + resource, audit; 36/0 compared by compare_crm_writes.py |
 | GET | `/api/v1/crm/customers/{customer}` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/crm/customers/{customer}` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/crm/customers/{customer}/archive` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/crm/customers/{customer}/consent-events` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/crm/customers/{customer}/consent-otp` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/crm/customers/{customer}/link` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/crm/customers/{customer}/link-otp` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
+| PATCH | `/api/v1/crm/customers/{customer}` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: partial update, no-change PATCH writes no audit row; 36/0 compared by compare_crm_writes.py |
+| POST | `/api/v1/crm/customers/{customer}/archive` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: archive/unarchive lifecycle + audit; 36/0 compared by compare_crm_writes.py |
+| POST | `/api/v1/crm/customers/{customer}/consent-events` | session | korsal, sales, sales-kurir-sub | **GO** | CRM consent: multipart evidence capture, real evidence file + hash, key idempotency, consumed challenge 422; 17/0 compared by compare_crm_consent.py |
+| POST | `/api/v1/crm/customers/{customer}/consent-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM consent: channel gates (unlinked 409, unverified email 422, whatsapp 409), challenge row; 17/0 compared by compare_crm_consent.py |
+| POST | `/api/v1/crm/customers/{customer}/link` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: link consumption, double-link 409/422, link event + audit; 26/0 compared by compare_crm_link.py |
+| POST | `/api/v1/crm/customers/{customer}/link-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: OTP gates (unknown konsumen, unverified email, channel, rate limit), identity_otp_challenges row; 26/0 compared by compare_crm_link.py |
 | POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/crm/customers/{customer}/unlink` | session | admin, agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/crm/customers/{customer}/unlink` | session | admin, agen, korsal, sales, sales-kurir-sub | **GO** | CRM linking: unlink scope + event + audit; 26/0 compared by compare_crm_link.py |
 | GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| POST | `/api/v1/crm/customers/{customer}/visits` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/crm/customers/{customer}/visits` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit validation (status set, date, plan_next_before rule) + audit; 36/0 compared by compare_crm_writes.py |
 | GET | `/api/v1/crm/follow-ups` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/crm/link-candidates` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| PATCH | `/api/v1/crm/visits/{visit}` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
+| GET | `/api/v1/crm/link-candidates` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: masked candidates, referral reach; 26/0 compared by compare_crm_link.py |
+| PATCH | `/api/v1/crm/visits/{visit}` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit update + audit; 36/0 compared by compare_crm_writes.py |
 
 ## dashboard — `dashboard` (0/2 in Go)
 
@@ -331,22 +331,22 @@ Status legend:
 | GET | `/api/v1/manage/products` | session | admin, agen, super_admin | **GO** | status/category/search/pagination filters, RBAC and per-agent availability compared by compare_products.py |
 | GET | `/api/v1/manage/products/{product}` | session | admin, agen, super_admin | **GO** | simple/variation detail, stock projection, missing ID and RBAC compared by compare_products.py |
 
-## Media — `media` (0/3 in Go)
+## Media — `media` (3/3 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/media` | session | super_admin | LARAVEL |  |
-| POST | `/api/v1/media` | session | — | LARAVEL |  |
-| DELETE | `/api/v1/media/{media}` | session | — | LARAVEL |  |
+| GET | `/api/v1/media` | session | super_admin | **GO** | super_admin-only route gate (narrower than the policy — verified), user_avatar excluded, collection filter, pagination; 73/0 compared by compare_media.py |
+| POST | `/api/v1/media` | session | — | **GO** | FormRequest validation before MediaPolicy, MIME/extension sniffing, uuid storage, per-collection policy (user_avatar open to every role); 73/0 compared by compare_media.py |
+| DELETE | `/api/v1/media/{media}` | session | — | **GO** | policy per collection, avatar owner-only delete, file cleanup, binding-miss 404; 73/0 compared by compare_media.py |
 
-## Notifications — `notifications` (0/4 in Go)
+## Notifications — `notifications` (4/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/notifications/admin` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| POST | `/api/v1/notifications/admin/read-all` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/notifications/admin/unread-count` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| POST | `/api/v1/notifications/admin/{id}/read` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
+| GET | `/api/v1/notifications/admin` | session | admin, agen, keuangan, super_admin | **GO** | per-recipient projection, pagination meta, unread filter, strict boolean rule; 97/0 compared by compare_notifications_admin.py |
+| POST | `/api/v1/notifications/admin/read-all` | session | admin, agen, keuangan, super_admin | **GO** | idempotent; updated count; 97/0 compared by compare_notifications_admin.py |
+| GET | `/api/v1/notifications/admin/unread-count` | session | admin, agen, keuangan, super_admin | **GO** | owned unread count; 97/0 compared by compare_notifications_admin.py |
+| POST | `/api/v1/notifications/admin/{id}/read` | session | admin, agen, keuangan, super_admin | **GO** | own rows only, foreign/missing id is a 404, replay keeps read_at; 97/0 compared by compare_notifications_admin.py |
 
 ## Orders — item receipts — `order-items` (0/2 in Go)
 
@@ -463,26 +463,26 @@ Status legend:
 | GET | `/api/v1/regions/regencies` | public | — | **GO** |  |
 | GET | `/api/v1/regions/villages` | public | — | **GO** |  |
 
-## Reporting — `reports` (1/17 in Go)
+## Reporting — `reports` (17/17 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/reports/cancellations-refunds` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/couriers` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/couriers-per-agent` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/crm-visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/customers` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/fees/agent` | session | agen, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/fees/courier` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/fees/sales-korsal` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/finance-orders` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/finance-summary` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/korsal` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/my-customers` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
-| GET | `/api/v1/reports/network-summary` | session | agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/network-transactions` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/payment-status` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/reports/sales` | session | admin, agen, korsal, super_admin | LARAVEL |  |
+| GET | `/api/v1/reports/cancellations-refunds` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/couriers` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/couriers-per-agent` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/crm-visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/customers` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/fees/agent` | session | agen, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/fees/courier` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/fees/sales-korsal` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/finance-orders` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/finance-summary` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/korsal` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/my-customers` | session | korsal, sales, sales-kurir-sub | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/network-summary` | session | agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/network-transactions` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/payment-status` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
+| GET | `/api/v1/reports/sales` | session | admin, agen, korsal, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
 | GET | `/api/v1/reports/transactions` | session | admin, agen, korsal, super_admin | **PARTIAL** |  |
 
 ## Returns — items — `return-items` (0/2 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 192 (51.2%) |
-|   of which fully GO | 176 |
+| Served by Go now | 232 (61.9%) |
+|   of which fully GO | 216 |
 |   of which PARTIAL (incomplete behaviour) | 16 |
-| Still Laravel-only | 183 |
-| Areas fully ported | 20 / 45 |
+| Still Laravel-only | 143 |
+| Areas fully ported | 23 / 45 |
