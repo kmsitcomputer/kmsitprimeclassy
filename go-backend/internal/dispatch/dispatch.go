@@ -21,6 +21,7 @@ type Actor struct {
 	Role    string
 	AgentID int64
 	IsSuper bool
+	Status  string
 }
 
 // DomainError maps abort(...) / ApiException to an HTTP status + message.
@@ -387,4 +388,51 @@ func metaCarrierService(raw string) (any, any) {
 		return nil, nil
 	}
 	return m["courier"], m["service"]
+}
+
+// ---- delivery-refusal write paths (REM-003 reverse custody) ---------------------------------------
+
+// isExecutor ports DeliveryRefusalService::assertExecutor: the shipment's assigned kurir
+// (courier.user_id match) or the authorized self-delivery actor; the actor must be active.
+func (s *Service) isExecutor(ctx context.Context, tx *sql.Tx, shipmentID, userID int64) (bool, error) {
+	var byCourier, selfDelivered sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT c.user_id, sh.self_delivered_by_user_id
+		FROM shipments sh LEFT JOIN couriers c ON c.id = sh.courier_id WHERE sh.id = ?`, shipmentID).
+		Scan(&byCourier, &selfDelivered)
+	if err != nil {
+		return false, err
+	}
+	if byCourier.Valid && byCourier.Int64 == userID {
+		return true, nil
+	}
+	return selfDelivered.Valid && selfDelivered.Int64 == userID, nil
+}
+
+// refusalRow re-reads the row and renders DeliveryRefusalController::payload.
+func refusalRow(ctx context.Context, tx *sql.Tx, refusalID int64) map[string]any {
+	var id, orderItemID int64
+	var shipmentID sql.NullInt64
+	var status string
+	var quantity int64
+	_ = tx.QueryRowContext(ctx, `SELECT id, order_item_id, shipment_id, status, quantity FROM delivery_refusals WHERE id = ?`,
+		refusalID).Scan(&id, &orderItemID, &shipmentID, &status, &quantity)
+	return map[string]any{"id": id, "status": status, "quantity": quantity,
+		"order_item_id": orderItemID, "shipment_id": nullIntPtr(shipmentID)}
+}
+
+// writeRefusalAudit is ActivityLogger::log with subject DeliveryRefusal.
+func writeRefusalAudit(ctx context.Context, tx *sql.Tx, causerID, refusalID int64, event string, props map[string]any, description string) error {
+	payload := any(nil)
+	if props != nil {
+		buf, err := json.Marshal(props)
+		if err != nil {
+			return err
+		}
+		payload = string(buf)
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO activity_logs
+		(causer_id, subject_type, subject_id, event, description, properties, created_at)
+		VALUES (?, 'App\Models\DeliveryRefusal', ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
+		causerID, refusalID, event, nullableStr(description), payload)
+	return err
 }

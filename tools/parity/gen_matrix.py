@@ -272,6 +272,9 @@ IMPLEMENTED = {
     ("GET", "/api/v1/dispatch/regions"): "cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py",
     ("GET", "/api/v1/dispatch/expeditions"): "expedition shipments + four readiness gates; koordinator-kurir only; compared by compare_dispatch.py",
     ("GET", "/api/v1/dispatch/refusals"): "open refusals branch projection + status filter; koordinator-kurir only; compared by compare_dispatch.py",
+    ("POST", "/api/v1/delivery-refusals/{refusal}/hand-back"): "executor custody transfer, idempotent replay, audit; compared by compare_refusals.py (14/0)",
+    ("POST", "/api/v1/delivery-refusals/{refusal}/receive"): "koordinator receipt, state machine handed_back→received, audit; compared by compare_refusals.py (14/0)",
+    ("POST", "/api/v1/delivery-refusals/{refusal}/disposition"): "redelivery/return_to_warehouse: shipping→transit reversal, reservation restore, fresh shipment, aggregate resync; compared by compare_refusals.py (14/0)",
 }
 
 

@@ -247,13 +247,13 @@ Status legend:
 | GET | `/api/v1/dashboard/kpis` | session | agen, gudang, korsal, kurir, sales, sales-kurir-sub | LARAVEL |  |
 | GET | `/api/v1/dashboard/summary` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
 
-## delivery-refusals — `delivery-refusals` (0/3 in Go)
+## delivery-refusals — `delivery-refusals` (3/3 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/delivery-refusals/{refusal}/disposition` | session | koordinator-kurir | LARAVEL |  |
-| POST | `/api/v1/delivery-refusals/{refusal}/hand-back` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
-| POST | `/api/v1/delivery-refusals/{refusal}/receive` | session | koordinator-kurir | LARAVEL |  |
+| POST | `/api/v1/delivery-refusals/{refusal}/disposition` | session | koordinator-kurir | **GO** | redelivery/return_to_warehouse: shipping→transit reversal, reservation restore, fresh shipment, aggregate resync; compared by compare_refusals.py (14/0) |
+| POST | `/api/v1/delivery-refusals/{refusal}/hand-back` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | executor custody transfer, idempotent replay, audit; compared by compare_refusals.py (14/0) |
+| POST | `/api/v1/delivery-refusals/{refusal}/receive` | session | koordinator-kurir | **GO** | koordinator receipt, state machine handed_back→received, audit; compared by compare_refusals.py (14/0) |
 
 ## Dispatch — `dispatch` (4/9 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 236 (62.9%) |
-|   of which fully GO | 236 |
+| Served by Go now | 239 (63.7%) |
+|   of which fully GO | 239 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 139 |
-| Areas fully ported | 23 / 45 |
+| Still Laravel-only | 136 |
+| Areas fully ported | 24 / 45 |

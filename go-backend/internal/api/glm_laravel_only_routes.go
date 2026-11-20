@@ -59,6 +59,12 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("GET /api/v1/dispatch/expeditions", chain(http.HandlerFunc(s.handleDispatchExpeditions), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
 	s.mux.Handle("GET /api/v1/dispatch/refusals", chain(http.HandlerFunc(s.handleDispatchRefusals), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
 
+	// Delivery-refusal write paths (REM-003 reverse custody): hand-back is the shipment EXECUTOR's;
+	// receive + disposition are the branch Koordinator's. Verified Laravel split (api_v1.php:316-326).
+	s.mux.Handle("POST /api/v1/delivery-refusals/{refusal}/hand-back", chain(http.HandlerFunc(s.handleRefusalHandBack), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")))
+	s.mux.Handle("POST /api/v1/delivery-refusals/{refusal}/receive", chain(http.HandlerFunc(s.handleRefusalReceive), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
+	s.mux.Handle("POST /api/v1/delivery-refusals/{refusal}/disposition", chain(http.HandlerFunc(s.handleRefusalDispose), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
+
 	// Management reports (ReportController) — read-only, role-gated per route below.
 	// Each route mirrors its Laravel route/middleware gate exactly (see backend/routes/api_v1.php).
 	s.mux.Handle("GET /api/v1/reports/cancellations-refunds", chain(http.HandlerFunc(s.handleReportCancellationsRefunds), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
@@ -98,6 +104,9 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/dispatch/regions",
 		"GET /api/v1/dispatch/expeditions",
 		"GET /api/v1/dispatch/refusals",
+		"POST /api/v1/delivery-refusals/{refusal}/hand-back",
+		"POST /api/v1/delivery-refusals/{refusal}/receive",
+		"POST /api/v1/delivery-refusals/{refusal}/disposition",
 		"GET /api/v1/reports/cancellations-refunds",
 		"GET /api/v1/reports/couriers",
 		"GET /api/v1/reports/couriers-per-agent",
@@ -1020,7 +1029,7 @@ func (s *Server) handleAdminAgentsToggleStatus(w http.ResponseWriter, r *http.Re
 
 func dispatchActor(r *http.Request) dispatch.Actor {
 	u := UserFrom(r.Context())
-	return dispatch.Actor{ID: u.ID, Role: u.Role, AgentID: derefInt(u.AgentID), IsSuper: u.Role == "super_admin"}
+	return dispatch.Actor{ID: u.ID, Role: u.Role, AgentID: derefInt(u.AgentID), IsSuper: u.Role == "super_admin", Status: u.Status}
 }
 
 func derefInt(v *int64) int64 {
@@ -1075,6 +1084,74 @@ func writeDispatchError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	writeError(w, r, err)
+}
+
+func (s *Server) handleRefusalHandBack(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(httpx.PathValue(r, "refusal"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	result, err := s.dispatchService().HandBack(r.Context(), dispatchActor(r), id)
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) handleRefusalReceive(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(httpx.PathValue(r, "refusal"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	result, err := s.dispatchService().Receive(r.Context(), dispatchActor(r), id)
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) handleRefusalDispose(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "refusal"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Action string  `json:"action"`
+		Note   *string `json:"note"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	if body.Action == "" {
+		fields["action"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "required", "action")}
+	} else if body.Action != "redelivery" && body.Action != "return_to_warehouse" {
+		fields["action"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "in", "action")}
+	}
+	if body.Note != nil && len(*body.Note) > 255 {
+		fields["note"] = []string{i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "note", "max", "255")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	note := ""
+	if body.Note != nil {
+		note = *body.Note
+	}
+	result, err := s.dispatchService().Dispose(ctx, dispatchActor(r), id, body.Action, note)
+	if err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
 }
 
 func (s *Server) handleNotificationsAdminMarkRead(w http.ResponseWriter, r *http.Request) {
