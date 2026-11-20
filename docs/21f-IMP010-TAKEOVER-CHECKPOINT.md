@@ -28,43 +28,20 @@ Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. 
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (Phase 5b — 136 Laravel-only routes, resumed after `e5c82d3`)
+## EXACT NEXT ACTION (updated 2026-11-20, HEAD ef25a87)
 
-Progress: 3 PARTIAL closed (`5948405`, 12/12) + dispatch reads (4, `f09d819`, 31/31) + refusal writes
-(3, `e5c82d3`, 14/14). Verified facts: activity_logs has NO updated_at; delivery_refusals has NO
-product/sub columns (JOIN order_items instead); shipments.status enum('pending','picked_up','in_transit',
-'delivered','failed'); hand-back route gate = super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir;
-Dispose source columns come from order_items JOIN. Bash heredoc eats backticks — write SQL via editor.
-
-Domain order:
-1. Shipping & delivery (9) + Courier kurir (6) + Dispatch writes (2) + return-items courier (1).
-2. Orders remainder (8) + order-items receipts (2) + consent chain (6).
-3. Invoices (2), dashboard (2), catalog (3), bestsellers (1), checkout (2).
-4. Admin ops (~45): SMTP 4, WhatsApp admin 10, google-auth 2, regions export/import 2, refunds ~14, returns 3.
-5. Google Sheets (7), Installer (7), Profile whatsapp/email (5).
-
-Per-domain loop: inspect Laravel -> implement -> wire GLM slice + matches + gen_matrix IMPLEMENTED ->
-compare_<domain>.py (RBAC + data-backed + DB state) -> run vs 8899/8082 (restart pc_go_imp010 after
-code changes; never two harnesses concurrently) -> go test/vet -> commit -> regenerate matrix.
-
-Phase 6 (final gate) -> Phase 7 (retirement) -> Phase 8 (final report) remain.
-Phase 6 (final verification gate) then Phase 7 (retirement gates) then Phase 8 (final report) remain.
-
-Phase 5a fixes landed (`5948405`):
-- auth.Register → RegistrationNotifier port: waMsisdn + wa.enabled-gated whatsapp_messages ledger enqueue
-  (idempotency key txn:account_registered:user:{id}, max_attempts clamped 1–5, after-commit, never fails signup).
-- ApproveOpname → REM-01/D-07 catalog publication loop: reads pending_catalog_change + catalog_published_at,
-  calls catalog.PublishCatalogChange (column-whitelisted UPDATE; attributes rewrite via replaceVariationAttributes),
-  stamps catalog_published_at, all inside the approve transaction (rollback-safe).
-- CreateOpname → LoadOpnameStoreResponse: the store response shape is `$opname->load('items')` — scalar-only
-  opname (no status/approved/rejected) + scalar items (no product/variation) + intOrZero for the integer cast.
-- Harness: tools/parity/compare_partials_final.py — 12/12 PASS.
-
-Phase 6 verification gate and Phase 7 retirement remain gated on 375/375.
-
-## Known gotchas
-
-- `pc_go_imp010` must be restarted after canonical code changes (it binds the canonical worktree).
-- Harnesses share `primeclassy_testing`: NEVER run two concurrently; reset (f.reset()+seed_full()) between scenario runs.
-- gen_matrix.py IMPLEMENTED/GAPS are explicit dicts — every new route must be added there, then `python3 tools/parity/gen_matrix.py > docs/21a-IMP010-API-PARITY-MATRIX.md`.
-- DashboardSummary and other reporting.go handlers may share the []byte bug — audit remaining raw-Scan handlers in reporting.go during the reporting verification pass (DashboardSummary not yet data-backed compared).
+- Matrix: **241 GO / 0 PARTIAL / 134 Laravel-only** (375 routes).
+- Just completed: shipment status transitions (2 routes, compare_shipment_status.py 19/19 PASS,
+  commit ef25a87) — internal/dispatch/shipments.go: executor auth, F02 kurir-toko dispatch gate,
+  REM-003 expedition gate, refusal guard, handover, Sub consume, aggregate sync, commissions,
+  finalizer, order recompute. Note: executor 'terkirim' requires multipart proof upload; the Go
+  handler currently rejects executor terkirim without proof identically to Laravel — multipart
+  proof ingestion (media store → shipment.proof_media_id) is still needed for the success path
+  (matches Laravel 422 both sides; office bulk override path does not need proof).
+- NEXT: continue Shipping & delivery domain — PATCH /shipments/{shipment}/courier
+  (CourierService::assignCourier: self_sub ban, coordinator-only, eligibility under
+  Order→Shipment lock, sales-kurir-sub eligibility, idempotent replay, audit), then
+  GET eligible-couriers, expedition handover (multipart evidence), receipt print,
+  delivery-verifications; then dispatch writes (2) + return-items courier assign.
+- Harness rules unchanged: one runner at a time, restart pc_go_imp010 after code changes,
+  seed via compare_users.py/seed_full + seed_dispatch.
