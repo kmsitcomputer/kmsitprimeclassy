@@ -86,6 +86,7 @@ func implementsRoute(method, path string) bool {
 	switch method + " " + path {
 	case
 		"GET /api/v1/install/status",
+		"GET /api/v1/admin/returns",
 		"GET /api/v1/settings",
 		"GET /api/v1/languages",
 		"GET /api/v1/categories",

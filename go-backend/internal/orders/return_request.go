@@ -107,10 +107,10 @@ func (s *ReturnRequestService) Request(ctx context.Context, actorID int64, actor
 	if err != nil {
 		return nil, err
 	}
-	return loadReturnRequestResource(ctx, s.Database, returnID)
+	return LoadReturnRequestResource(ctx, s.Database, returnID)
 }
 
-func loadReturnRequestResource(ctx context.Context, database *db.DB, id int64) (map[string]any, error) {
+func LoadReturnRequestResource(ctx context.Context, database *db.DB, id int64) (map[string]any, error) {
 	var orderID, requestedBy int64
 	var orderNo, reason, status, requesterName string
 	var buyerName, evidence sql.NullString

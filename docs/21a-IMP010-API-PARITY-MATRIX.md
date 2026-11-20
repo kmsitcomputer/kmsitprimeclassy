@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (14/59 in Go)
+## Admin operations — `admin` (15/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -69,7 +69,7 @@ Status legend:
 | GET | `/api/v1/admin/regions/export` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/regions/import` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/return-items/{item}/refund` | session | keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/returns` | session | admin, agen, super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/returns` | session | admin, agen, super_admin | **GO** | Admin/Agen branch-scoped, Super Admin optional agent_id, status list filter, latest-first pagination, full ReturnRequestResource + pagination meta; compare_admin_returns.py |
 | GET | `/api/v1/admin/returns/{return}` | session | admin, agen, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/returns/{return}/pickup-schedule` | session | admin, agen, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/returns/{return}/review` | session | admin, agen, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 279 (74.4%) |
-|   of which fully GO | 279 |
+| Served by Go now | 280 (74.7%) |
+|   of which fully GO | 280 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 96 |
+| Still Laravel-only | 95 |
 | Areas fully ported | 32 / 45 |
