@@ -28,19 +28,31 @@ Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. 
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (Phase 5b — 143 Laravel-only routes)
+## EXACT NEXT ACTION (Phase 5b — 139 Laravel-only routes, resumed after `f09d819`)
 
-Regenerate `tools/parity-glm/laravel_only_inventory.tsv` from the CURRENT matrix (the committed TSV is stale —
-13 routes were verified and 13 PARTIALs closed since). Domain order (dependency-aware, per §3 of the mandate):
-1. **Dispatch** (9: penugasan/kurir assignment) + **Shipping & delivery** (9: shipment status/courier/expedition-handover/verifications/refuse) + **Courier** kurir (6: dashboard/returns confirm/pickup) + **delivery-refusals** (3) — these share the shipments domain.
-2. **Orders remainder** (8: assisted-returns, consent-context/events, invoice, items, refund-recipient, returns) + **order-items** (2 receipts) + **consent-events** (4) + **consent** (2) — REM-005 consent chain.
-3. **Invoices** (2), **dashboard** (2), **catalog** (3 + bestsellers 1), **checkout** (2).
-4. **Admin operations** (~51: integrations SMTP/WhatsApp, agents CRUD remainder, audit-logs DONE, regions export/import, refunds obligations/attempts ~14, returns, returns-items 2, google-auth).
-5. **Google Sheets** (7), **Installer** (7), **Profile** whatsapp/email (5), **Identity** (google-auth bits).
+Progress this session: 3 PARTIAL closed (`5948405`, 12/12) + dispatch reads (4 routes, `f09d819`, 31/31).
+Regenerate the Laravel-only inventory from the CURRENT matrix before each domain (stale TSVs are dangerous).
+Verified environment facts: orders/order_items/delivery_refusals have NO deleted_at column; couriers.type
+enum('internal','external'); DeliveryRefusal::OPEN_STATUSES = ['with_courier','handed_back','received'];
+courier fixtures need type='internal'. Harness: tools/parity/compare_dispatch.py (pattern reuse).
 
-Environment: pc_laravel_imp010:8899 + pc_go_imp010:8082, DB `primeclassy_testing` (korsal user 20 seeded by
-compare_users.py). Harness pattern: tools/parity/compare_partials_final.py + compare_partials_glm.py (remember
-the tuple-vs-list normalizer; OPN- numbers and random suffixes must be scrubbed).
+Domain order (dependency-aware):
+1. **Shipping & delivery** (9: shipment status/items status/refuse/receipt/expedition-handover/courier assign/eligible-couriers/delivery-verifications GET+POST) + **delivery-refusals** writes (3: receive/dispose/hand-back) — same shipments domain, ShipmentPolicy executor rules.
+2. **Courier** kurir (6: orders, reports/delivered, returns, returns/pickup-today, returns/{item}/confirm, returns/{item}/pickup).
+3. **Dispatch writes** (2: split-batch, request-fulfillment) + **return-items courier assign** (1).
+4. **Orders remainder** (8: assisted-returns, consent-context, consent-events, invoice, items, refund-recipient GET+POST, returns) + **order-items receipts** (2).
+5. **consent-events** (4) + **consent** (2) — REM-005 chain.
+6. **Invoices** (2), **dashboard** (2), **catalog** (3), **bestsellers** (1), **checkout** (2: courier-options, geocode).
+7. **Admin operations** (~47 remaining: integrations SMTP 4, WhatsApp admin 10, google-auth 2, agents CRUD remaining 0 (done), audit-logs done, regions export/import 2, refunds obligations/attempts ~14, returns 2, return-items 1, others).
+8. **Google Sheets** (7), **Installer** (7), **Profile** whatsapp/email (5).
+
+Each domain: inspect Laravel controller/service/policy → implement (prefer a new internal/<domain> package
+following internal/dispatch) → wire routes into the GLM slice + matchesGLMLaravelOnlyRoute + gen_matrix
+IMPLEMENTED dict → write compare_<domain>.py (RBAC matrix + data-backed + DB state) → run against
+pc_laravel_imp010:8899 / pc_go_imp010:8082 / primeclassy_testing (restart pc_go_imp010 after code changes;
+NEVER run two harnesses concurrently) → scoped go test/vet → commit → regenerate matrix.
+
+Phase 6 (final verification gate) then Phase 7 (retirement gates) then Phase 8 (final report) remain.
 
 Phase 5a fixes landed (`5948405`):
 - auth.Register → RegistrationNotifier port: waMsisdn + wa.enabled-gated whatsapp_messages ledger enqueue
