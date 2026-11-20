@@ -102,7 +102,12 @@ func (s *Service) Snapshot(ctx context.Context, integration string) (map[string]
 	out["timeout"] = intSetting(get("timeout", "10"))
 	out["max_attempts"] = intSetting(get("max_attempts", "3"))
 	out["backoff_seconds"] = intSetting(get("backoff_seconds", "60"))
-	out["configured"] = flag("enabled") && get("base_url", "") != "" && get("username", "") != "" && raw["wa.password"] != ""
+	passwordReady := false
+	if cipher := raw["wa.password"]; cipher != "" {
+		plain, err := cryptox.DecryptString(s.appKey, cipher)
+		passwordReady = err == nil && plain != ""
+	}
+	out["configured"] = flag("enabled") && get("base_url", "") != "" && get("username", "") != "" && passwordReady
 	var testNumbers []string
 	_ = json.Unmarshal([]byte(get("test_numbers", "[]")), &testNumbers)
 	out["test_numbers_count"] = len(testNumbers)
@@ -112,9 +117,31 @@ func (s *Service) Snapshot(ctx context.Context, integration string) (map[string]
 	}
 	out["test_numbers"] = masked
 	out["events"] = []any{}
-	out["otp"] = map[string]any{"enabled": false, "ttl_minutes": 5, "max_attempts": 5, "cooldown_seconds": 60, "limit": 3, "limit_window_minutes": 10}
+	out["otp"] = map[string]any{
+		"enabled":              rawBool(raw, "wa.otp.enabled", false),
+		"ttl_minutes":          rawInt(raw, "wa.otp.ttl_minutes", 5),
+		"max_attempts":         rawInt(raw, "wa.otp.max_attempts", 5),
+		"cooldown_seconds":     rawInt(raw, "wa.otp.cooldown_seconds", 60),
+		"limit":                rawInt(raw, "wa.otp.limit", 3),
+		"limit_window_minutes": rawInt(raw, "wa.otp.limit_window_minutes", 10),
+	}
 	out["limits"] = map[string]int{"per_recipient_per_hour": intDefault(get("rate.recipient_hour", "6"), 6), "global_per_minute": intDefault(get("rate.global_minute", "20"), 20)}
 	return out, nil
+}
+
+func rawBool(values map[string]string, key string, fallback bool) bool {
+	v, ok := values[key]
+	if !ok {
+		return fallback
+	}
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") || strings.EqualFold(v, "on")
+}
+
+func rawInt(values map[string]string, key string, fallback int) int {
+	if n, err := strconv.Atoi(values[key]); err == nil {
+		return n
+	}
+	return fallback
 }
 
 func blankNil(v string) any {

@@ -10,6 +10,7 @@ import (
 // registerDomainERoutes installs the Domain E route slice. It is intentionally kept out of server.go so
 // the shared router file remains untouched while parallel domain work is in flight.
 func (s *Server) registerDomainERoutes() {
+	s.mux.Handle("GET /api/v1/admin/integrations/whatsapp", chain(http.HandlerFunc(s.handleAdminWhatsAppSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/shipping-couriers", chain(http.HandlerFunc(s.handleAdminShippingCouriers), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))

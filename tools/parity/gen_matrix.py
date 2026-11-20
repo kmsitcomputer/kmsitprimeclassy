@@ -31,6 +31,7 @@ IMPLEMENTED = {
     ("PUT", "/api/v1/admin/google-auth"): "Global Google OAuth config validation, Laravel-compatible secret preservation/clear, encrypted storage, audit; compare_google_auth_settings.py",
     ("GET", "/api/v1/agent/google-auth"): "Agent/Admin own-branch Google OAuth config; no cross-branch identifier accepted, secret masked; compare_google_auth_settings.py",
     ("PUT", "/api/v1/agent/google-auth"): "Agent/Admin own-branch config validation, encrypted secret preserve/clear, scoped audit; compare_google_auth_settings.py",
+    ("GET", "/api/v1/admin/integrations/whatsapp"): "Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",
     ("POST", "/api/v1/orders/{order}/assisted-returns"): "CRM-origin only; owner Sales/SKS/Korsal, append-only consent current-state + item/quantity quota, public image evidence, transactional return items/order state/audit; compare_assisted_return.py",
     ("POST", "/api/v1/orders/{order}/returns"): "Konsumen own-order return request; required public image evidence, item delivery/quantity checks, transactional item/status/refund/audit updates; compare_return_request.py",

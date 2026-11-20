@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (29/59 in Go)
+## Admin operations — `admin` (30/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -36,7 +36,7 @@ Status legend:
 | PUT | `/api/v1/admin/integrations/smtp` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/smtp/test-connection` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/smtp/test-email` | session | super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/integrations/whatsapp` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/integrations/whatsapp` | session | super_admin | **GO** | Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py |
 | PUT | `/api/v1/admin/integrations/whatsapp` | session | super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/integrations/whatsapp/messages` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/messages/{message}/retry` | session | super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 300 (80.0%) |
-|   of which fully GO | 300 |
+| Served by Go now | 301 (80.3%) |
+|   of which fully GO | 301 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 75 |
+| Still Laravel-only | 74 |
 | Areas fully ported | 34 / 45 |
