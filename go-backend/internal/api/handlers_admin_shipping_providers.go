@@ -18,6 +18,36 @@ type adminShippingProvider struct {
 	IsActive bool   `json:"is_active"`
 }
 
+type adminShippingCourier struct {
+	ID       int64  `json:"id"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	IsActive bool   `json:"is_active"`
+}
+
+func (s *Server) handleAdminShippingCouriers(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.database.QueryContext(r.Context(), `SELECT id,code,name,is_active FROM shipping_couriers ORDER BY name`)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	couriers := make([]adminShippingCourier, 0)
+	for rows.Next() {
+		var courier adminShippingCourier
+		if err := rows.Scan(&courier.ID, &courier.Code, &courier.Name, &courier.IsActive); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		couriers = append(couriers, courier)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, couriers, "OK", nil)
+}
+
 func (s *Server) handleAdminShippingProviders(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.database.QueryContext(r.Context(), `SELECT id,code,name,is_active FROM shipping_providers
 		WHERE code IN ('rajaongkir','openroute','kmsit') ORDER BY id`)

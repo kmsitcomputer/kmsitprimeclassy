@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (24/59 in Go)
+## Admin operations — `admin` (25/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -75,7 +75,7 @@ Status legend:
 | PATCH | `/api/v1/admin/returns/{return}/review` | session | admin, agen, super_admin | **GO** | Admin/Agen branch scope, Laravel validation and localized responses, order-first review transaction, return state reversal/approval, frozen financial units, refund obligations and audit; compare_return_review.py |
 | GET | `/api/v1/admin/settings` | session | super_admin | **GO** | identical to the public read (single service in the reference) |
 | PUT | `/api/v1/admin/settings` | session | super_admin | **GO** | unknown keys ignored, JSON keys encoded, returns the resolved settings |
-| GET | `/api/v1/admin/shipping-couriers` | session | super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/shipping-couriers` | session | super_admin | **GO** | Super Admin provider-supported courier master list ordered by name; compare_admin_shipping_couriers.py |
 | POST | `/api/v1/admin/shipping-couriers` | session | super_admin | LARAVEL |  |
 | PATCH | `/api/v1/admin/shipping-couriers/{shippingCourier}/toggle` | session | super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 293 (78.1%) |
-|   of which fully GO | 293 |
+| Served by Go now | 294 (78.4%) |
+|   of which fully GO | 294 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 82 |
+| Still Laravel-only | 81 |
 | Areas fully ported | 34 / 45 |
