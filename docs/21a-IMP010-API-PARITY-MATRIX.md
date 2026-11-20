@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (34/59 in Go)
+## Admin operations — `admin` (36/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -40,8 +40,8 @@ Status legend:
 | PUT | `/api/v1/admin/integrations/whatsapp` | session | super_admin | **GO** | Validated GOWA config, encrypted write-only password, normalized test-number allow-list, rate/OTP/event settings and redacted before/after audit; compare_admin_whatsapp_update.py |
 | GET | `/api/v1/admin/integrations/whatsapp/messages` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/messages/{message}/retry` | session | super_admin | LARAVEL |  |
-| DELETE | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | LARAVEL |  |
-| PUT | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | LARAVEL |  |
+| DELETE | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | idempotent Super Admin global template reset to Laravel default with before/after audit; compare_admin_whatsapp_templates.py |
+| PUT | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py |
 | POST | `/api/v1/admin/integrations/whatsapp/templates/{event}/preview` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/test-connection` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/test-message` | session | super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 305 (81.3%) |
-|   of which fully GO | 305 |
+| Served by Go now | 307 (81.9%) |
+|   of which fully GO | 307 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 70 |
+| Still Laravel-only | 68 |
 | Areas fully ported | 34 / 45 |

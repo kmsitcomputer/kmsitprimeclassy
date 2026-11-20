@@ -266,7 +266,8 @@
   "whatsapp.template_length": "يجب أن يكون القالب من 1 إلى :max حرفًا.",
   "whatsapp.template_unknown_vars": "يستخدم القالب متغيرات غير مسموحة لهذا الحدث: :vars",
   "whatsapp.test_number_registered": "تم تسجيل رقم الاختبار.",
-  "whatsapp.test_numbers_limit": "الحد الأقصى :max أرقام اختبار لكل وكيل."
+  "whatsapp.test_numbers_limit": "الحد الأقصى :max أرقام اختبار لكل وكيل.",
+  "whatsapp.unknown_event": "حدث إشعار غير معروف."
  },
  "en": {
   "address.created": "Address saved successfully.",
@@ -510,7 +511,8 @@
   "whatsapp.template_length": "The template must be 1–:max characters.",
   "whatsapp.template_unknown_vars": "The template uses variables that are not allowed for this event: :vars",
   "whatsapp.test_number_registered": "Test number registered.",
-  "whatsapp.test_numbers_limit": "At most :max test numbers per Agent."
+  "whatsapp.test_numbers_limit": "At most :max test numbers per Agent.",
+  "whatsapp.unknown_event": "Unknown notification event."
  },
  "id": {
   "address.created": "Alamat berhasil disimpan.",
@@ -790,7 +792,8 @@
   "whatsapp.template_length": "Template harus 1–:max karakter.",
   "whatsapp.template_unknown_vars": "Template memakai variabel yang tidak diizinkan untuk event ini: :vars",
   "whatsapp.test_number_registered": "Nomor uji didaftarkan.",
-  "whatsapp.test_numbers_limit": "Maksimal :max nomor uji per Agen."
+  "whatsapp.test_numbers_limit": "Maksimal :max nomor uji per Agen.",
+  "whatsapp.unknown_event": "Event notifikasi tidak dikenal."
  },
  "zh": {
   "address.created": "地址保存成功。",
@@ -1059,6 +1062,7 @@
   "whatsapp.template_length": "模板必须为 1–:max 个字符。",
   "whatsapp.template_unknown_vars": "模板使用了此事件不允许的变量：:vars",
   "whatsapp.test_number_registered": "测试号码已登记。",
-  "whatsapp.test_numbers_limit": "每个代理最多 :max 个测试号码。"
+  "whatsapp.test_numbers_limit": "每个代理最多 :max 个测试号码。",
+  "whatsapp.unknown_event": "未知的通知事件。"
  }
 }

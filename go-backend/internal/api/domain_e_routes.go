@@ -12,6 +12,8 @@ import (
 func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("GET /api/v1/admin/integrations/whatsapp", chain(http.HandlerFunc(s.handleAdminWhatsAppSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/whatsapp", chain(http.HandlerFunc(s.handleAdminWhatsAppSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("PUT /api/v1/admin/integrations/whatsapp/templates/{event}", chain(http.HandlerFunc(s.handleAdminWhatsAppTemplateUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("DELETE /api/v1/admin/integrations/whatsapp/templates/{event}", chain(http.HandlerFunc(s.handleAdminWhatsAppTemplateReset), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))

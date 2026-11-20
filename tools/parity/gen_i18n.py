@@ -236,6 +236,7 @@ KEYS = {
         "saved",
         "invalid_base_url",
         "config_incomplete",
+        "unknown_event",
         "otp_unavailable",
         "number_not_verified",
         "event_not_configurable",

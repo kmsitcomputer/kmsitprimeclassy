@@ -32,6 +32,8 @@ IMPLEMENTED = {
     ("GET", "/api/v1/agent/google-auth"): "Agent/Admin own-branch Google OAuth config; no cross-branch identifier accepted, secret masked; compare_google_auth_settings.py",
     ("PUT", "/api/v1/agent/google-auth"): "Agent/Admin own-branch config validation, encrypted secret preserve/clear, scoped audit; compare_google_auth_settings.py",
     ("GET", "/api/v1/admin/integrations/whatsapp"): "Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py",
+    ("PUT", "/api/v1/admin/integrations/whatsapp/templates/{event}"): "Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py",
+    ("DELETE", "/api/v1/admin/integrations/whatsapp/templates/{event}"): "idempotent Super Admin global template reset to Laravel default with before/after audit; compare_admin_whatsapp_templates.py",
     ("GET", "/api/v1/admin/integrations/smtp"): "Super Admin SMTP snapshot with write-only password state and active environment/dashboard source; compare_admin_smtp_settings.py",
     ("PUT", "/api/v1/admin/integrations/smtp"): "validated SMTP config, encrypted write-only secret preserve/clear, completeness guard and redacted audit; compare_admin_smtp_update.py",
     ("GET", "/api/v1/admin/orders/{order}/refunds"): "Order-scoped refund obligations, attempts, payouts, children, reductions and integer-cent financial metrics; compare_admin_order_refund_ledger.py",

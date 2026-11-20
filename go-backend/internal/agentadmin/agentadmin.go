@@ -905,6 +905,9 @@ func validateTemplate(event, template string) error {
 	return nil
 }
 
+// ValidateWhatsAppTemplate applies the exact shared transactional-template contract.
+func ValidateWhatsAppTemplate(event, template string) error { return validateTemplate(event, template) }
+
 type WhatsAppTestNumber struct {
 	ID     int64  `json:"id"`
 	Masked string `json:"masked"`
