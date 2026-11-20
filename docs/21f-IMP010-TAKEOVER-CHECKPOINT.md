@@ -28,20 +28,21 @@ Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. 
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (updated 2026-11-20, HEAD ef25a87)
+## EXACT NEXT ACTION (updated 2026-11-20, HEAD 6c003e4)
 
-- Matrix: **241 GO / 0 PARTIAL / 134 Laravel-only** (375 routes).
-- Just completed: shipment status transitions (2 routes, compare_shipment_status.py 19/19 PASS,
-  commit ef25a87) — internal/dispatch/shipments.go: executor auth, F02 kurir-toko dispatch gate,
-  REM-003 expedition gate, refusal guard, handover, Sub consume, aggregate sync, commissions,
-  finalizer, order recompute. Note: executor 'terkirim' requires multipart proof upload; the Go
-  handler currently rejects executor terkirim without proof identically to Laravel — multipart
-  proof ingestion (media store → shipment.proof_media_id) is still needed for the success path
-  (matches Laravel 422 both sides; office bulk override path does not need proof).
-- NEXT: continue Shipping & delivery domain — PATCH /shipments/{shipment}/courier
-  (CourierService::assignCourier: self_sub ban, coordinator-only, eligibility under
-  Order→Shipment lock, sales-kurir-sub eligibility, idempotent replay, audit), then
-  GET eligible-couriers, expedition handover (multipart evidence), receipt print,
-  delivery-verifications; then dispatch writes (2) + return-items courier assign.
-- Harness rules unchanged: one runner at a time, restart pc_go_imp010 after code changes,
-  seed via compare_users.py/seed_full + seed_dispatch.
+- Matrix: **243 GO / 0 PARTIAL / 132 Laravel-only** (375 routes).
+- Completed this session:
+  1. ef25a87 — shipment status transitions (2 routes, compare_shipment_status.py 19/19).
+  2. 6c003e4 — courier assignment + eligible-couriers (2 routes, compare_courier_assign.py 20/20):
+     assignCourier full port incl. SKS executor resolve, SC-03 gate, carve of wholly-unaccepted
+     lines (assignFreshShipment reuse), A1-01 sentinel, idempotent replay, already_assigned raw key.
+- Schema facts learned: activity_logs has NO updated_at (MariaDB 1054 "in 'INSERT INTO'");
+  couriers HAS updated_at; stock_requests needs request_number; stock_request_items has no status col.
+- Harness note: gen_i18n.py has an explicit KEYS whitelist — add new message groups there
+  (courier.added: "assigned"); i18n catalog JSON is {locale: {key: text}}.
+- NEXT: continue Shipping & delivery — PATCH /shipments/{shipment}/expedition-handover
+  (multipart evidence upload → media + provider_meta.handover, REM-003), GET
+  /shipments/{shipment}/receipt (ShipmentReceiptResource + ActivityLogger shipment.receipt_printed),
+  delivery-verifications routes, then dispatch writes (2) + return-items courier assign (1).
+- Harness rules unchanged: one runner at a time; restart pc_go_imp010 after code changes;
+  Go container mounts go-backend at /src and runs `go run ./cmd/api` (rebuild on restart).
