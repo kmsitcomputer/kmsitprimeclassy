@@ -145,11 +145,11 @@ Status legend:
 | POST | `/api/v1/auth/register` | public | — | **GO** | user + referral chain + closures; welcome e-mail/WA notification not emitted (queue bridge outstanding) |
 | POST | `/api/v1/auth/reset-password` | public | — | LARAVEL |  |
 
-## Catalog — bestsellers — `bestsellers` (0/1 in Go)
+## Catalog — bestsellers — `bestsellers` (1/1 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/bestsellers` | public | — | LARAVEL |  |
+| GET | `/api/v1/bestsellers` | public | — | **GO** | Agent-resolved receipt-based product ranking with accepted-return deductions, unresolved-allocation exclusion, WIB date windows and hidden metadata; compare_bestsellers.py |
 
 ## catalog — `catalog` (0/3 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 334 (89.1%) |
-|   of which fully GO | 334 |
+| Served by Go now | 335 (89.3%) |
+|   of which fully GO | 335 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 41 |
-| Areas fully ported | 36 / 45 |
+| Still Laravel-only | 40 |
+| Areas fully ported | 37 / 45 |

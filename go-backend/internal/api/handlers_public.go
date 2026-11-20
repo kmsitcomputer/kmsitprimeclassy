@@ -6,16 +6,80 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/catalog"
 	"github.com/kmsitcomputer/primeclassy-go/internal/cms"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/inventory"
 	"github.com/kmsitcomputer/primeclassy-go/internal/site"
 )
 
 // ---- catalog ---------------------------------------------------------------------------------------
+
+func (s *Server) handleBestsellers(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	q := r.URL.Query()
+	period := q.Get("period")
+	if period == "" {
+		period = "30"
+	}
+	fields := map[string][]string{}
+	if period != "7" && period != "30" && period != "90" && period != "all" {
+		fields["period"] = []string{i18n.ValidationMessage(locale, "in", "period", "values", "7, 30, 90, all")}
+	}
+	limit := 8
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			fields["limit"] = []string{i18n.ValidationMessage(locale, "integer", "limit")}
+		} else if n != 4 && n != 8 && n != 12 {
+			fields["limit"] = []string{i18n.ValidationMessage(locale, "in", "limit", "values", "4, 8, 12")}
+		} else {
+			limit = n
+		}
+	}
+	var explicit *int64
+	if raw, ok := q["agent_id"]; ok && len(raw) > 0 && raw[0] != "" {
+		id, err := strconv.ParseInt(raw[0], 10, 64)
+		if err != nil {
+			fields["agent_id"] = []string{i18n.ValidationMessage(locale, "integer", "agent_id")}
+		} else {
+			explicit = &id
+		}
+	}
+	ref := q.Get("ref")
+	if utf8.RuneCountInString(ref) > 40 {
+		fields["ref"] = []string{i18n.ValidationMessage(locale, "max.string", "ref", "max", "40")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	var userID int64
+	var role string
+	var agentID *int64
+	if user := UserFrom(ctx); user != nil {
+		userID, role, agentID = user.ID, user.Role, user.AgentID
+	}
+	scope, err := catalog.BestsellerAgent(ctx, s.database, userID, role, agentID, explicit, ref)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if scope == nil {
+		httpx.OK(w, []map[string]any{}, "OK", map[string]any{"hidden": true})
+		return
+	}
+	items, hidden, err := catalog.Bestsellers(ctx, s.database, *scope, period, limit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, items, "OK", map[string]any{"hidden": hidden})
+}
 
 // handleProducts mirrors Catalog\ProductController::index for anonymous and authenticated visitors,
 // including the optional Agent/Sub availability projection.
