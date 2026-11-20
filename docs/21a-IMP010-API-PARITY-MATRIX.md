@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (17/59 in Go)
+## Admin operations — `admin` (18/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -71,7 +71,7 @@ Status legend:
 | PATCH | `/api/v1/admin/return-items/{item}/refund` | session | keuangan, super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/returns` | session | admin, agen, super_admin | **GO** | Admin/Agen branch-scoped, Super Admin optional agent_id, status list filter, latest-first pagination, full ReturnRequestResource + pagination meta; compare_admin_returns.py |
 | GET | `/api/v1/admin/returns/{return}` | session | admin, agen, super_admin | **GO** | Super Admin or same-Agent Admin/Agen branch authorization; complete ReturnRequestResource, 404 for missing model and 403 for foreign branch; compare_admin_return_show.py |
-| PATCH | `/api/v1/admin/returns/{return}/pickup-schedule` | session | admin, agen, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/admin/returns/{return}/pickup-schedule` | session | admin, agen, super_admin | **GO** | Admin/Agen branch scope, exact Y-m-d and WIB not-past validation, pending/approved item updates only, no-eligible-item error, response and activity audit; compare_return_pickup_schedule.py |
 | PATCH | `/api/v1/admin/returns/{return}/review` | session | admin, agen, super_admin | **GO** | Admin/Agen branch scope, Laravel validation and localized responses, order-first review transaction, return state reversal/approval, frozen financial units, refund obligations and audit; compare_return_review.py |
 | GET | `/api/v1/admin/settings` | session | super_admin | **GO** | identical to the public read (single service in the reference) |
 | PUT | `/api/v1/admin/settings` | session | super_admin | **GO** | unknown keys ignored, JSON keys encoded, returns the resolved settings |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 282 (75.2%) |
-|   of which fully GO | 282 |
+| Served by Go now | 283 (75.5%) |
+|   of which fully GO | 283 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 93 |
+| Still Laravel-only | 92 |
 | Areas fully ported | 32 / 45 |

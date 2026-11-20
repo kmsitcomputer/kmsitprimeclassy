@@ -25,6 +25,7 @@ IMPLEMENTED = {
     ("GET", "/api/v1/admin/returns"): "Admin/Agen branch-scoped, Super Admin optional agent_id, status list filter, latest-first pagination, full ReturnRequestResource + pagination meta; compare_admin_returns.py",
     ("GET", "/api/v1/admin/returns/{return}"): "Super Admin or same-Agent Admin/Agen branch authorization; complete ReturnRequestResource, 404 for missing model and 403 for foreign branch; compare_admin_return_show.py",
     ("PATCH", "/api/v1/admin/returns/{return}/review"): "Admin/Agen branch scope, Laravel validation and localized responses, order-first review transaction, return state reversal/approval, frozen financial units, refund obligations and audit; compare_return_review.py",
+    ("PATCH", "/api/v1/admin/returns/{return}/pickup-schedule"): "Admin/Agen branch scope, exact Y-m-d and WIB not-past validation, pending/approved item updates only, no-eligible-item error, response and activity audit; compare_return_pickup_schedule.py",
     ("POST", "/api/v1/orders/{order}/items"): "Admin-only SC-03; order-first locking, Agent reservation, canonical shipment grouping, Stock Request reopen/reconcile, additional-payment ledger and replay/conflict; compare_order_line_addition.py",
     ("GET", "/api/v1/install/status"): "",
     ("GET", "/api/v1/settings"): "",
