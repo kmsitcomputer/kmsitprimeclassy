@@ -196,3 +196,56 @@ func (s *Service) InitiateRefundAttempt(ctx context.Context, attemptID, actorID 
 		return err
 	})
 }
+
+func (s *Service) CancelRefundAttempt(ctx context.Context, attemptID, actorID int64, reason string) error {
+	var obligationID, orderID int64
+	if err := s.Database.QueryRowContext(ctx, `SELECT a.obligation_id,o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, attemptID).Scan(&obligationID, &orderID); err != nil {
+		return err
+	}
+	return s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var lockedOrder int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&lockedOrder); err != nil {
+			return err
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM refund_attempts WHERE id=? FOR UPDATE`, attemptID).Scan(&status); err != nil {
+			return err
+		}
+		if status != "created" {
+			return &Problem{Status: 422, Message: "Hanya attempt pra-inisiasi yang dapat dibatalkan.", Errors: map[string]any{"code": "attempt_cancel_window_closed"}}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE refund_attempts SET status='cancelled',finished_at=UTC_TIMESTAMP(6),updated_at=UTC_TIMESTAMP(6) WHERE id=?`, attemptID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO refund_ledger_events(order_id,obligation_id,attempt_id,event_type,event_key,actor_type,actor_id,reason,occurred_at,created_at,updated_at) VALUES (?,?,?,'attempt.cancelled',?,'user',?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE id=id`, orderID, obligationID, attemptID, fmt.Sprintf("attempt_cancelled:%d", attemptID), actorID, reason)
+		return err
+	})
+}
+
+func (s *Service) MarkRefundAttemptUnknown(ctx context.Context, attemptID, actorID int64, note *string) error {
+	var obligationID, orderID int64
+	if err := s.Database.QueryRowContext(ctx, `SELECT a.obligation_id,o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, attemptID).Scan(&obligationID, &orderID); err != nil {
+		return err
+	}
+	return s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var lockedOrder int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&lockedOrder); err != nil {
+			return err
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM refund_attempts WHERE id=? FOR UPDATE`, attemptID).Scan(&status); err != nil {
+			return err
+		}
+		if status == "unknown" {
+			return nil
+		}
+		if status != "processing" {
+			return &Problem{Status: 422, Message: "Attempt tidak berada pada status processing.", Errors: map[string]any{"code": "invalid_attempt_state"}}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE refund_attempts SET status='unknown',unknown_since=UTC_TIMESTAMP(6),failure_message=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, note, attemptID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO refund_ledger_events(order_id,obligation_id,attempt_id,event_type,event_key,actor_type,actor_id,reason,occurred_at,created_at,updated_at) VALUES (?,?,?,'attempt.unknown',?,'user',?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE id=id`, orderID, obligationID, attemptID, fmt.Sprintf("attempt_unknown:%d", attemptID), actorID, note)
+		return err
+	})
+}

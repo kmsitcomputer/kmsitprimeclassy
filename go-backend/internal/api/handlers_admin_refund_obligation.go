@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -258,6 +259,138 @@ func (s *Server) handleAdminRefundAttemptInitiate(w http.ResponseWriter, r *http
 	}
 	if len(rows) == 0 {
 		writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		return
+	}
+	httpx.OK(w, rows[0], "OK", nil)
+}
+
+func (s *Server) handleAdminRefundAttemptCancel(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	attemptID, ok := pathID(w, r, "attempt")
+	if !ok {
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var reason string
+	fields := map[string][]string{}
+	value, exists := body["reason"]
+	if !exists || string(value) == "null" || string(value) == `""` {
+		fields["reason"] = []string{i18n.ValidationMessage(locale, "required", "reason")}
+	} else if json.Unmarshal(value, &reason) != nil {
+		fields["reason"] = []string{i18n.ValidationMessage(locale, "string", "reason")}
+	} else {
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			fields["reason"] = []string{i18n.ValidationMessage(locale, "required", "reason")}
+		} else if utf8.RuneCountInString(reason) > 255 {
+			fields["reason"] = []string{i18n.ValidationMessage(locale, "max.string", "reason", "max", "255")}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	_, actorID, accessErr := s.refundAttemptAccess(ctx, attemptID, locale)
+	if accessErr != nil {
+		writeError(w, r, accessErr)
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	if err := service.CancelRefundAttempt(ctx, attemptID, actorID, reason); err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	s.writeRefundAttempt(w, r, attemptID)
+}
+
+func (s *Server) handleAdminRefundAttemptUnknown(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	attemptID, ok := pathID(w, r, "attempt")
+	if !ok {
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var note *string
+	fields := map[string][]string{}
+	if value, exists := body["note"]; exists && string(value) != "null" {
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			fields["note"] = []string{i18n.ValidationMessage(locale, "string", "note")}
+		} else {
+			text = strings.TrimSpace(text)
+			if utf8.RuneCountInString(text) > 255 {
+				fields["note"] = []string{i18n.ValidationMessage(locale, "max.string", "note", "max", "255")}
+			} else if text != "" {
+				note = &text
+			}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	_, actorID, accessErr := s.refundAttemptAccess(ctx, attemptID, locale)
+	if accessErr != nil {
+		writeError(w, r, accessErr)
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	if err := service.MarkRefundAttemptUnknown(ctx, attemptID, actorID, note); err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	s.writeRefundAttempt(w, r, attemptID)
+}
+
+func (s *Server) refundAttemptAccess(ctx context.Context, id int64, locale string) (int64, int64, *httpx.Error) {
+	var orderID int64
+	if err := s.database.QueryRowContext(ctx, `SELECT o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, id).Scan(&orderID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "system.endpoint_not_found")}
+		}
+		return 0, 0, &httpx.Error{Status: 500, Message: "Internal Server Error", Err: err}
+	}
+	actor := UserFrom(ctx)
+	var agentID sql.NullInt64
+	if err := s.database.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=?`, orderID).Scan(&agentID); err != nil {
+		return 0, 0, &httpx.Error{Status: 500, Message: "Internal Server Error", Err: err}
+	}
+	if actor.Role != "super_admin" && (actor.AgentID == nil || !agentID.Valid || *actor.AgentID != agentID.Int64) {
+		return 0, 0, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "system.unauthorized_action")}
+	}
+	if actor.Role != "super_admin" && actor.Role != "keuangan" {
+		return 0, 0, &httpx.Error{Status: 403, Message: "Hanya Keuangan yang dapat melakukan aksi ini.", ErrorsAny: map[string]any{"code": "refund_role_forbidden"}}
+	}
+	return orderID, actor.ID, nil
+}
+
+func (s *Server) writeRefundProblem(w http.ResponseWriter, r *http.Request, err error, locale string) {
+	var problem *orders.Problem
+	if errors.As(err, &problem) {
+		writeError(w, r, &httpx.Error{Status: problem.Status, Message: problem.Message, FieldStrings: problem.Fields, ErrorsAny: problem.Errors})
+	} else if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, r, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "system.endpoint_not_found")})
+	} else {
+		writeError(w, r, err)
+	}
+}
+
+func (s *Server) writeRefundAttempt(w http.ResponseWriter, r *http.Request, id int64) {
+	rows, err := queryModelMaps(r.Context(), s.database.DB, `SELECT * FROM refund_attempts WHERE id=?`, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, r, &httpx.Error{Status: 404, Message: msg(r.Context(), "system.endpoint_not_found")})
 		return
 	}
 	httpx.OK(w, rows[0], "OK", nil)
