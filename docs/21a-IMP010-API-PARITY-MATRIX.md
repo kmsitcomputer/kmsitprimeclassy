@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 per-item receipt events index (admin own-agent / super_admin), date + verifier projection; compared by compare_item_receipts.py (16/0) |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 record actual receipt: Idempotency-Key 8–100, arrived-status gate, date window (not future/before order), time-date consistency, quantity bounded by fulfilled across all events, fingerprint replay/409; compared by compare_item_receipts.py (16/0) |
 
-## Orders — `orders` (23/25 in Go)
+## Orders — `orders` (24/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -382,7 +382,7 @@ Status legend:
 | POST | `/api/v1/orders/{order}/payment/verify` | session | keuangan, super_admin | **GO** | keuangan/super_admin; self-verification forbidden; verified_amount ≤ outstanding/submitted |
 | GET | `/api/v1/orders/{order}/refund-recipient` | session | admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin | **GO** | G17-D4 refund-recipient evidence index (destination full only for keuangan/super_admin, masked tail otherwise); compared by compare_recipient.py (13/0) |
 | POST | `/api/v1/orders/{order}/refund-recipient` | session | admin, agen, keuangan, korsal, sales, sales-kurir-sub, super_admin | **GO** | append-only recipient record: CRM-origin gate, canRecord authority, method validation, destination required for bank/ewallet, authorization (consent or evidence) gate, consent/return binding, supersedes chain, audit; compared by compare_recipient.py (13/0) |
-| POST | `/api/v1/orders/{order}/returns` | session | konsumen | LARAVEL |  |
+| POST | `/api/v1/orders/{order}/returns` | session | konsumen | **GO** | Konsumen own-order return request; required public image evidence, item delivery/quantity checks, transactional item/status/refund/audit updates; compare_return_request.py |
 | PATCH | `/api/v1/orders/{order}/status` | session | admin, agen, super_admin | **GO** | super_admin/agen/admin bulk diproses→dikirim→terkirim; payment eligibility under the Order lock; Sub items never advance here; first handover stamps the basis |
 
 ## CMS — pages — `pages` (1/1 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 277 (73.9%) |
-|   of which fully GO | 277 |
+| Served by Go now | 278 (74.1%) |
+|   of which fully GO | 278 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 98 |
+| Still Laravel-only | 97 |
 | Areas fully ported | 31 / 45 |

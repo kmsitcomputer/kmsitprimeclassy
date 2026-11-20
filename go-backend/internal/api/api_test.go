@@ -213,12 +213,12 @@ func TestUnknownPathReturns404Envelope(t *testing.T) {
 
 func TestKnownUnimplementedRouteReturns501(t *testing.T) {
 	h := newHarness(t)
-	// `POST /orders/{order}/returns` is a REAL Laravel route that this build does not serve yet. It must be a 501
+	// `GET /orders/{order}/invoice` is a REAL Laravel route that this build does not serve yet. It must be a 501
 	// with the machine-readable code, never a 404 (which would look like "no such endpoint") and never a 200.
 	//
 	// (POST /orders itself USED to be the example here; it is implemented now, so the guard moved to a route that
 	// is still outstanding — the assertion is about the fallback behaviour, not about that one endpoint.)
-	res := h.do(http.MethodPost, "/api/v1/orders/1/returns", map[string]any{})
+	res := h.do(http.MethodGet, "/api/v1/orders/1/invoice", map[string]any{})
 	if res.status != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501", res.status)
 	}

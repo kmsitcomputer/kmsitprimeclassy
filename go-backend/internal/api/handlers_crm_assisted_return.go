@@ -168,7 +168,7 @@ func parseAssistedReturnForm(w http.ResponseWriter, r *http.Request) (map[string
 		}
 		defer file.Close()
 		var readErr error
-		evidence, readErr = io.ReadAll(io.LimitReader(file, 4096*1024+1))
+		evidence, readErr = io.ReadAll(io.LimitReader(file, 5120*1024+1))
 		if readErr != nil {
 			writeError(w, r, readErr)
 			return nil, nil, nil, ""
@@ -232,32 +232,33 @@ func parseAssistedReturnItems(form map[string]string, loc string) ([]crm.Assiste
 		item := byIndex[index]
 		idText, idPresent := item["order_item_id"]
 		id, idErr := strconv.ParseInt(idText, 10, 64)
+		validLine := true
 		if !idPresent || strings.TrimSpace(idText) == "" {
 			key := fmt.Sprintf("items.%d.order_item_id", index)
-			errs[key] = []string{i18n.ValidationMessage(loc, "required", "items."+strconv.Itoa(index)+".order item id")}
-			continue
+			errs[key] = []string{nestedItemValidationMessage(loc, "required", key)}
+			validLine = false
 		}
-		if idErr != nil {
+		if idPresent && strings.TrimSpace(idText) != "" && idErr != nil {
 			key := fmt.Sprintf("items.%d.order_item_id", index)
-			errs[key] = []string{i18n.ValidationMessage(loc, "integer", "items."+strconv.Itoa(index)+".order item id")}
-			continue
+			errs[key] = []string{nestedItemValidationMessage(loc, "integer", key)}
+			validLine = false
 		}
 		qtyText, qtyPresent := item["quantity"]
 		quantity, qtyErr := strconv.ParseInt(qtyText, 10, 64)
 		if !qtyPresent || strings.TrimSpace(qtyText) == "" {
 			key := fmt.Sprintf("items.%d.quantity", index)
-			errs[key] = []string{i18n.ValidationMessage(loc, "required", "items."+strconv.Itoa(index)+".quantity")}
-			continue
+			errs[key] = []string{i18n.ValidationMessage(loc, "required", key)}
+			validLine = false
 		}
-		if qtyErr != nil {
+		if qtyPresent && strings.TrimSpace(qtyText) != "" && qtyErr != nil {
 			key := fmt.Sprintf("items.%d.quantity", index)
-			errs[key] = []string{i18n.ValidationMessage(loc, "integer", "items."+strconv.Itoa(index)+".quantity")}
-			continue
+			errs[key] = []string{i18n.ValidationMessage(loc, "integer", key)}
+			validLine = false
 		}
-		if quantity < 1 {
+		if qtyErr == nil && quantity < 1 {
 			key := fmt.Sprintf("items.%d.quantity", index)
-			errs[key] = []string{i18n.ValidationMessage(loc, "min.numeric", "items."+strconv.Itoa(index)+".quantity", "min", "1")}
-			continue
+			errs[key] = []string{i18n.ValidationMessage(loc, "min.numeric", key, "min", "1")}
+			validLine = false
 		}
 		restock := true
 		if value, ok := item["restock"]; ok {
@@ -272,9 +273,16 @@ func parseAssistedReturnItems(form map[string]string, loc string) ([]crm.Assiste
 				continue
 			}
 		}
-		lines = append(lines, crm.AssistedReturnLine{Index: index, OrderItemID: id, Quantity: quantity, Restock: restock})
+		if validLine {
+			lines = append(lines, crm.AssistedReturnLine{Index: index, OrderItemID: id, Quantity: quantity, Restock: restock})
+		}
 	}
 	return lines, errs
+}
+
+func nestedItemValidationMessage(locale, rule, field string) string {
+	message := i18n.ValidationMessage(locale, rule, field)
+	return strings.ReplaceAll(message, strings.ReplaceAll(field, "_", " "), field)
 }
 
 func parseInteger(value string) (int64, bool) {
