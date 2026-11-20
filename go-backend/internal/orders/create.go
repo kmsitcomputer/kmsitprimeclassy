@@ -69,6 +69,18 @@ type Input struct {
 	StockSource       *string
 	SubLocationID     *int64
 	VoucherCode       *string
+	CRM               *CrmOrigin
+}
+
+// CrmOrigin is the persisted buyer and owning seller attribution for an assisted CRM order.
+// It is populated only after CreateAssisted has checked the actor's CRM authority.
+type CrmOrigin struct {
+	CustomerID    int64
+	AgentID       int64
+	OwnerID       int64
+	OwnerKorsalID *int64
+	BuyerName     string
+	BuyerPhone    *string
 }
 
 // Order is the persisted order, carrying everything the resource renders.
@@ -230,7 +242,14 @@ type Service struct {
 // Create is OrderService::createOrder for the account-origin path.
 func (s *Service) Create(ctx context.Context, in Input) (*Order, bool, error) {
 	// 1. Idempotency pre-check: a replay returns the existing order, untouched.
-	if existing, err := s.findByIdempotencyKey(ctx, in.KonsumenID, in.IdempotencyKey); err != nil {
+	var existing *Order
+	var err error
+	if in.CRM != nil {
+		existing, err = s.findByCRMIdempotencyKey(ctx, in.CRM.CustomerID, in.IdempotencyKey)
+	} else {
+		existing, err = s.findByIdempotencyKey(ctx, in.KonsumenID, in.IdempotencyKey)
+	}
+	if err != nil {
 		return nil, false, err
 	} else if existing != nil {
 		return existing, true, nil
@@ -241,14 +260,20 @@ func (s *Service) Create(ctx context.Context, in Input) (*Order, bool, error) {
 		return nil, false, err
 	}
 
-	stockSource, subLocationID, err := s.resolveStockSource(ctx, in)
-	if err != nil {
-		return nil, false, err
-	}
-
-	agentID, err := s.agentBranchOf(ctx, in.KonsumenID)
-	if err != nil {
-		return nil, false, err
+	stockSource, subLocationID := stockSourceAgent, (*int64)(nil)
+	var agentID *int64
+	if in.CRM != nil {
+		id := in.CRM.AgentID
+		agentID = &id
+	} else {
+		stockSource, subLocationID, err = s.resolveStockSource(ctx, in)
+		if err != nil {
+			return nil, false, err
+		}
+		agentID, err = s.agentBranchOf(ctx, in.KonsumenID)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	if agentID == nil {
 		return nil, false, &Problem{Status: 422, Message: s.Messages("order.no_agent_branch")}
@@ -262,13 +287,85 @@ func (s *Service) Create(ctx context.Context, in Input) (*Order, bool, error) {
 		// Two concurrent requests with the same key: the unique index rejected the loser. Answer with the
 		// winner's order — a replay is not an error.
 		if isDuplicateKey(err) && in.IdempotencyKey != "" {
-			if existing, ferr := s.findByIdempotencyKey(ctx, in.KonsumenID, in.IdempotencyKey); ferr == nil && existing != nil {
+			var existing *Order
+			var ferr error
+			if in.CRM != nil {
+				existing, ferr = s.findByCRMIdempotencyKey(ctx, in.CRM.CustomerID, in.IdempotencyKey)
+			} else {
+				existing, ferr = s.findByIdempotencyKey(ctx, in.KonsumenID, in.IdempotencyKey)
+			}
+			if ferr == nil && existing != nil {
 				return existing, true, nil
 			}
 		}
 		return nil, false, err
 	}
 	return order, false, nil
+}
+
+// CreateAssisted verifies CrmAccess::canPlaceOrder and loads immutable buyer/owner facts before using
+// the same creation pipeline as account orders. CRM orders never accept a Sub stock source.
+func (s *Service) CreateAssisted(ctx context.Context, in Input, customerID int64, actorRole string, actorAgentID *int64) (*Order, bool, error) {
+	var buyerOriginColumns int
+	if err := s.Database.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME IN
+		('crm_customer_id','placed_by_user_id','buyer_name_snapshot','buyer_phone_snapshot')`).Scan(&buyerOriginColumns); err != nil {
+		return nil, false, err
+	}
+	if buyerOriginColumns != 4 {
+		return nil, false, &Problem{Status: 503, Message: s.Messages("crm.migration_pending")}
+	}
+	var customer CrmOrigin
+	var archived sql.NullTime
+	var phone sql.NullString
+	var ownerRole string
+	var ownerAgentID sql.NullInt64
+	err := s.Database.QueryRowContext(ctx, `SELECT c.agent_id,c.owner_user_id,c.name,c.phone,c.archived_at,
+		u.korsal_id, r.slug, u.agent_id
+		FROM crm_customers c JOIN users u ON u.id=c.owner_user_id JOIN roles r ON r.id=u.role_id
+		WHERE c.id=?`, customerID).Scan(&customer.AgentID, &customer.OwnerID, &customer.BuyerName, &phone, &archived, &customer.OwnerKorsalID, &ownerRole, &ownerAgentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, &Problem{Status: 404, Message: "No query results for model [App\\Models\\CrmCustomer]"}
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if phone.Valid {
+		customer.BuyerPhone = &phone.String
+	}
+	if archived.Valid {
+		return nil, false, &Problem{Status: 422, Message: s.Messages("crm.customer_archived")}
+	}
+	if actorAgentID == nil || *actorAgentID != customer.AgentID {
+		return nil, false, &Problem{Status: 404, Message: "No query results for model [App\\Models\\CrmCustomer]"}
+	}
+	allowed := false
+	switch actorRole {
+	case "agen":
+		allowed = true
+	case "sales", "sales-kurir-sub":
+		allowed = customer.OwnerID == in.ActorID
+	case "korsal":
+		allowed = customer.OwnerID == in.ActorID || (customer.OwnerKorsalID != nil && *customer.OwnerKorsalID == in.ActorID)
+	}
+	if !allowed {
+		return nil, false, &Problem{Status: 403, Message: "This action is unauthorized."}
+	}
+	if ownerRole != "sales" && ownerRole != "sales-kurir-sub" && ownerRole != "korsal" {
+		return nil, false, &Problem{Status: 422, Message: s.Messages("crm.owner_invalid")}
+	}
+	if !ownerAgentID.Valid || ownerAgentID.Int64 != customer.AgentID {
+		return nil, false, &Problem{Status: 422, Message: s.Messages("crm.owner_invalid")}
+	}
+	if in.Destination.AddressID != nil {
+		return nil, false, &Problem{Status: 422, Message: s.Messages("crm.address_book_not_allowed")}
+	}
+	customer.CustomerID = customerID
+	in.CRM = &customer
+	in.KonsumenID = 0
+	in.StockSource = nil
+	in.SubLocationID = nil
+	return s.Create(ctx, in)
 }
 
 func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int64, method PaymentMethod, stockSource string, subLocationID *int64) (*Order, error) {
@@ -288,7 +385,11 @@ func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int
 		return nil, &Problem{Status: 422, Message: s.Messages("order.agent_profile_incomplete")}
 	}
 
-	dest, err := quoter.ResolveDestination(ctx, in.KonsumenID, in.Destination)
+	destinationUserID := in.KonsumenID
+	if in.CRM != nil {
+		destinationUserID = 0
+	}
+	dest, err := quoter.ResolveDestination(ctx, destinationUserID, in.Destination)
 	if err != nil {
 		return nil, err
 	}
@@ -552,8 +653,8 @@ func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int
 	if err := logActivity(ctx, tx, in.ActorID, orderID, "order.created", map[string]any{
 		"total_amount":      total,
 		"item_count":        len(in.Lines),
-		"konsumen_id":       in.KonsumenID,
-		"crm_customer_id":   nil,
+		"konsumen_id":       nullableOriginID(in.KonsumenID, in.CRM == nil),
+		"crm_customer_id":   crmCustomerID(in.CRM),
 		"placed_by_user_id": in.ActorID,
 		"shipping_provider": quote.ProviderCode,
 	}, s.IP, s.UserAgent); err != nil {
@@ -640,14 +741,18 @@ func (s *Service) priceAndReserveLine(ctx context.Context, tx *sql.Tx, quoter *c
 	// Sales commission recipient (OrderService's documented rule): a self-purchase by a chain role credits
 	// THEMSELVES; otherwise the konsumen's own sales rep, else their korsal, else the branch agent.
 	beneficiary := in.KonsumenID
-	chainRole, err := s.konsumenIsChainRole(ctx, in.KonsumenID)
-	if err != nil {
-		return 0, 0, err
-	}
-	if !chainRole {
-		beneficiary, err = s.salesBeneficiary(ctx, in.KonsumenID, agentID)
+	if in.CRM != nil {
+		beneficiary = in.CRM.OwnerID
+	} else {
+		chainRole, err := s.konsumenIsChainRole(ctx, in.KonsumenID)
 		if err != nil {
 			return 0, 0, err
+		}
+		if !chainRole {
+			beneficiary, err = s.salesBeneficiary(ctx, in.KonsumenID, agentID)
+			if err != nil {
+				return 0, 0, err
+			}
 		}
 	}
 	if err := recordCommission(ctx, tx, orderID, itemID, agentID, beneficiary, agentFee, salesFee); err != nil {

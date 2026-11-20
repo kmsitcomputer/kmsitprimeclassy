@@ -63,6 +63,21 @@ func (s *Service) findByIdempotencyKey(ctx context.Context, konsumenID int64, ke
 	return s.loadOrder(ctx, orderID, 0)
 }
 
+func (s *Service) findByCRMIdempotencyKey(ctx context.Context, customerID int64, key string) (*Order, error) {
+	if key == "" {
+		return nil, nil
+	}
+	var orderID int64
+	err := s.Database.QueryRowContext(ctx, `SELECT id FROM orders WHERE crm_customer_id=? AND idempotency_key=?`, customerID, key).Scan(&orderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.loadOrder(ctx, orderID, 0)
+}
+
 // resolvePaymentMethod is OrderService::resolvePaymentMethod.
 func (s *Service) resolvePaymentMethod(ctx context.Context, code string) (PaymentMethod, error) {
 	if strings.TrimSpace(code) == "" {
@@ -239,8 +254,19 @@ func (s *Service) insertPlaceholder(ctx context.Context, tx *sql.Tx, in Input, a
 	if err != nil {
 		return 0, err
 	}
+	var crmID, salesID, korsalID, buyerName, buyerPhone any
+	if in.CRM == nil {
+		salesID = nullInt64(s.userColumn(ctx, in.KonsumenID, "sales_id"))
+		korsalID = nullInt64(s.userColumn(ctx, in.KonsumenID, "korsal_id"))
+	} else {
+		crmID = in.CRM.CustomerID
+		salesID = in.CRM.OwnerID
+		korsalID = nullInt64(in.CRM.OwnerKorsalID)
+		buyerName = in.CRM.BuyerName
+		buyerPhone = nullIfEmpty(derefString(in.CRM.BuyerPhone))
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO orders
-		(order_no, idempotency_key, konsumen_id, placed_by_user_id, sales_id, korsal_id, agent_id,
+		(order_no, idempotency_key, konsumen_id, crm_customer_id, placed_by_user_id, buyer_name_snapshot, buyer_phone_snapshot, sales_id, korsal_id, agent_id,
 		 payment_method_id, source_address_id, status, payment_status,
 		 subtotal_amount, shipping_fee_amount, admin_fee_amount, total_amount,
 		 recipient_name_snapshot, recipient_phone_snapshot, address_snapshot,
@@ -248,9 +274,9 @@ func (s *Service) insertPlaceholder(ctx context.Context, tx *sql.Tx, in Input, a
 		 latitude_snapshot, longitude_snapshot,
 		 province_id, regency_id, district_id, village_id, postal_code,
 		 delivery_date_estimate, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-		"TEMP-"+placeholder, nullIfEmpty(in.IdempotencyKey), in.KonsumenID, in.ActorID,
-		nullInt64(s.userColumn(ctx, in.KonsumenID, "sales_id")), nullInt64(s.userColumn(ctx, in.KonsumenID, "korsal_id")),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+		"TEMP-"+placeholder, nullIfEmpty(in.IdempotencyKey), nullableOriginID(in.KonsumenID, in.CRM == nil), crmID, in.ActorID, buyerName, buyerPhone,
+		salesID, korsalID,
 		agentID, method.ID, nullableInt(dest.AddressID), status,
 		derefStringPtr(dest.RecipientName), derefStringPtr(dest.RecipientPhone), derefStringPtr(dest.AddressLine),
 		nullableString(dest.VillageName), nullableString(dest.DistrictName), nullableString(dest.RegencyName),
@@ -1030,6 +1056,19 @@ func nullIfEmpty(v string) any {
 		return nil
 	}
 	return v
+}
+
+func nullableOriginID(v int64, include bool) any {
+	if !include {
+		return nil
+	}
+	return v
+}
+func crmCustomerID(v *CrmOrigin) any {
+	if v == nil {
+		return nil
+	}
+	return v.CustomerID
 }
 
 func nullableString(v *string) any {

@@ -230,9 +230,10 @@ func (s *Service) CanView(ctx context.Context, v RoleScopes, orderID int64) (boo
 		return false, nil
 	}
 	var (
-		konsumenID, agentID int64
-		korsalID, salesID   sql.NullInt64
-		status              string
+		konsumenID        sql.NullInt64
+		agentID           int64
+		korsalID, salesID sql.NullInt64
+		status            string
 	)
 	err := s.Database.QueryRowContext(ctx, `SELECT konsumen_id, agent_id, korsal_id, sales_id, status
 		FROM orders WHERE id = ?`, orderID).
@@ -247,7 +248,7 @@ func (s *Service) CanView(ctx context.Context, v RoleScopes, orderID int64) (boo
 	switch {
 	case v.Role == "super_admin":
 		return true, nil
-	case konsumenID == v.UserID:
+	case konsumenID.Valid && konsumenID.Int64 == v.UserID:
 		return true, nil
 	case v.isRole("agen", "admin", "keuangan", "koordinator-kurir"):
 		return v.AgentID != nil && *v.AgentID == agentID, nil
@@ -256,14 +257,14 @@ func (s *Service) CanView(ctx context.Context, v RoleScopes, orderID int64) (boo
 			return true, nil
 		}
 		// IMP-004 symmetric korsal leg: the konsumen's CURRENT korsal_id points at this user, same Agent.
-		return s.konsumenCurrentlyInChain(ctx, konsumenID, "korsal_id", v.UserID, v.AgentID), nil
+		return konsumenID.Valid && s.konsumenCurrentlyInChain(ctx, konsumenID.Int64, "korsal_id", v.UserID, v.AgentID), nil
 	case v.isRole("sales", "sales-kurir-sub"):
 		if salesID.Valid && salesID.Int64 == v.UserID {
 			return true, nil
 		}
-		return s.konsumenCurrentlyInChain(ctx, konsumenID, "sales_id", v.UserID, v.AgentID), nil
+		return konsumenID.Valid && s.konsumenCurrentlyInChain(ctx, konsumenID.Int64, "sales_id", v.UserID, v.AgentID), nil
 	case v.Role == "konsumen":
-		return konsumenID == v.UserID, nil
+		return konsumenID.Valid && konsumenID.Int64 == v.UserID, nil
 	case v.Role == "gudang":
 		if (status != "diproses" && status != "dikirim") || v.AgentID == nil || *v.AgentID != agentID {
 			return false, nil

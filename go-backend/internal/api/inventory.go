@@ -164,6 +164,8 @@ func implementsRoute(method, path string) bool {
 		return true
 	case "GET /api/v1/warehouse/orders/diproses":
 		return true
+	case "POST /api/v1/crm/customers/{customer}/orders":
+		return true
 	case "GET /api/v1/warehouse/returns":
 		return true
 	}

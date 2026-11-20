@@ -146,6 +146,8 @@ func (s *Server) routes() {
 		RequireAuth, s.RequireAgentLinked,
 		RequireRole("konsumen,agen,korsal,sales,sales-kurir-sub"),
 		s.Throttle(30, time.Minute)))
+	s.mux.Handle("POST /api/v1/crm/customers/{customer}/orders", chain(http.HandlerFunc(s.handleCrmAssistedOrder),
+		RequireAuth, s.RequireAgentLinked, RequireRole("agen,korsal,sales,sales-kurir-sub"), s.Throttle(30, time.Minute)))
 	s.mux.HandleFunc("GET /api/v1/products", s.handleProducts)
 	s.mux.HandleFunc("GET /api/v1/products/{slug}", s.handleProductDetail)
 	s.mux.HandleFunc("GET /api/v1/homepage", s.handleHomepage)

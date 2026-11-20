@@ -219,7 +219,7 @@ Status legend:
 | POST | `/api/v1/consent/otp` | session | agen, korsal, sales, sales-kurir-sub | **GO** | REM-005 OTP issue: ConsentAccess capture scope, verified-email channel gate, per-subject issuance serialization + rate limit, HMAC code hash, invalidate prior live challenges; compared by compare_consent.py (26/0) |
 | POST | `/api/v1/consent/otp/{challenge}/verify` | session | agen, korsal, sales, sales-kurir-sub | **GO** | OTP verify: issuing-actor binding, attempt counter persists on mismatch, expiry/lock states; compared by compare_consent.py (26/0) |
 
-## CRM — `crm` (15/16 in Go)
+## CRM — `crm` (16/16 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -232,7 +232,7 @@ Status legend:
 | POST | `/api/v1/crm/customers/{customer}/consent-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM consent: channel gates (unlinked 409, unverified email 422, whatsapp 409), challenge row; 17/0 compared by compare_crm_consent.py |
 | POST | `/api/v1/crm/customers/{customer}/link` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: link consumption, double-link 409/422, link event + audit; 26/0 compared by compare_crm_link.py |
 | POST | `/api/v1/crm/customers/{customer}/link-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: OTP gates (unknown konsumen, unverified email, channel, rate limit), identity_otp_challenges row; 26/0 compared by compare_crm_link.py |
-| POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | **GO** | CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py |
 | POST | `/api/v1/crm/customers/{customer}/unlink` | session | admin, agen, korsal, sales, sales-kurir-sub | **GO** | CRM linking: unlink scope + event + audit; 26/0 compared by compare_crm_link.py |
 | GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | POST | `/api/v1/crm/customers/{customer}/visits` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit validation (status set, date, plan_next_before rule) + audit; 36/0 compared by compare_crm_writes.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 274 (73.1%) |
-|   of which fully GO | 274 |
+| Served by Go now | 275 (73.3%) |
+|   of which fully GO | 275 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 101 |
-| Areas fully ported | 30 / 45 |
+| Still Laravel-only | 100 |
+| Areas fully ported | 31 / 45 |
