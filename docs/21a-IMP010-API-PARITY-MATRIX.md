@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (45/59 in Go)
+## Admin operations — `admin` (46/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -51,7 +51,7 @@ Status legend:
 | PATCH | `/api/v1/admin/languages/{language}/set-default` | session | super_admin | **GO** | exactly one default; the target must be active |
 | PATCH | `/api/v1/admin/languages/{language}/toggle-active` | session | super_admin | **GO** | the default language can never be deactivated |
 | GET | `/api/v1/admin/order-refunds` | session | admin, agen, keuangan, super_admin | **GO** | Branch-scoped fulfillment-shortfall refunds, current buyer/adjuster names, item snapshots, decimal refund amount and status, latest-first pagination; compare_admin_order_refunds.py |
-| PATCH | `/api/v1/admin/order-refunds/{adjustment}/status` | session | keuangan, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/admin/order-refunds/{adjustment}/status` | session | keuangan, super_admin | **GO** | Keuangan/Super Admin pending-only status update with Order-first lock, CRM refund-recipient guard, ledger legacy settlement or payment reversal/invoice snapshot, branch scope and audit; compare_admin_order_refund_status.py |
 | POST | `/api/v1/admin/order-sales-reductions/{reduction}/reinstate` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/orders/{order}/cancellation/finalize` | session | agen, keuangan, super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/orders/{order}/refunds` | session | admin, agen, keuangan, super_admin | **GO** | Order-scoped refund obligations, attempts, payouts, children, reductions and integer-cent financial metrics; compare_admin_order_refund_ledger.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 317 (84.5%) |
-|   of which fully GO | 317 |
+| Served by Go now | 318 (84.8%) |
+|   of which fully GO | 318 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 58 |
+| Still Laravel-only | 57 |
 | Areas fully ported | 34 / 45 |

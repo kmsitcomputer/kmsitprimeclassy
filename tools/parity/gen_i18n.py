@@ -92,6 +92,7 @@ KEYS = {
         "invalid_quantity",
         "requested",
         "sub_location_unavailable",
+        "refund_marked",
     ],
     "shipping": [
         "method_not_available",
