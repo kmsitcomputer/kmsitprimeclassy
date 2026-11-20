@@ -28,37 +28,35 @@ Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. 
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (updated 2026-11-20, HEAD 5ca162e)
+## EXACT NEXT ACTION (updated 2026-11-20, HEAD 9329df4)
 
-- Matrix: **250 GO / 0 PARTIAL / 125 Laravel-only** (375 routes). Domain 1 (Shipping, dispatch,
-  courier, returns) COMPLETE — all 18 routes of the shipping block are GO:
-  shipments status (2), courier assign + eligible (2), expedition-handover + receipt (2),
-  delivery-verifications (2), dispatch writes split-batch + request-fulfillment (2),
-  return-items courier (1), plus earlier refusal/status/refusal routes.
+- Matrix: **260 GO / 0 PARTIAL / 115 Laravel-only** (375 routes).
 - Commits this session: 28a03de (handover+receipt), 4aa51e1 (delivery-verifications),
-  08ad48f (dispatch writes), 5ca162e (return courier assign). All harnesses PASS:
-  compare_handover_receipt 17/17, compare_delivery_verifications 20/20,
-  compare_dispatch_writes 19/19, compare_return_assign 15/15.
-- Key parity facts learned:
-  - Laravel multipart PATCH: PHP does not populate $_POST for multipart PATCH — the success
-    path is only reachable via POST + _method=PATCH spoofing; Go mirrors this exactly
-    (plain multipart PATCH → 422 all-required, like the reference).
-  - Provider codes are 'rajaongkir'/'pickup' (NOT 'expedition'); Shipping label map
-    {openroute: Kurir Lokal, rajaongkir: Ekspedisi}.
-  - whenLoaded semantics: assign/handover OrderResource loads ONLY items + shipments.courier.user
-    (no konsumen/sales/korsal/returns/payment, no item shipment context); StockRequestResource
-    without product/variation/order loaded omits those keys entirely.
-  - ApiException errors payload is a SCALAR string (not array) — use httpx.Error.ErrorsAny.
-  - delivery_verifications has updated_at; return_items requires return_id + refund_amount
-    (NOT NULL) and has no 'reason'/'quantity'/'requested_by' columns (those live on 'returns').
-  - i18n: message whitelist lives in gen_i18n.py KEYS; courier group added.
-- NEXT DOMAIN (per plan): orders/consent chain (16 routes) — inspect Laravel
-  OrderController (update, cancel, payment-proof, COD, bank-transfer verification,
-  assisted orders, CRM order linking, customer consent) then continue the per-batch loop:
-  inspect → implement (orders package or new internal package) → wire GLM slice + gen_matrix
-  IMPLEMENTED dict → harness → scoped go test/vet → commit → regen matrix.
-- Harness rules unchanged: ONE runner at a time (shared DB primeclassy_testing), restart
-  pc_go_imp010 after Go changes (go run ./cmd/api, mounts /src), seed via
-  compare_fulfillment.seed_full + domain seeds; scrub timestamps (TS regex) and scrub
-  ids in dict payloads; heredocs eat backticks — use editor tool or printf|python3 for
-  SQL/code containing quotes.
+  08ad48f (dispatch writes), 5ca162e (return courier assign), 9329df4 (consent 8 routes).
+  All harnesses PASS: handover_receipt 17/17, delivery_verifications 20/20,
+  dispatch_writes 19/19, return_assign 15/15, consent 26/26.
+- Domain status: Shipping/dispatch/courier/returns COMPLETE (18 routes); consent chain
+  COMPLETE (8 routes: /consent/otp ×2, /consent-events store/withdraw/dispute/reinstate,
+  /orders/{order}/consent-events + consent-context).
+- Key parity facts (in addition to earlier checkpoint notes):
+  - ConsentEvent event_type enum values are consent_captured/consent_withdrawn/
+    consent_disputed/consent_reinstated (NOT bare captured/withdrawn).
+  - OTP code hash = HMAC-SHA256(APP_KEY, "challenge_id|subject_id|purpose|code") — same
+    APP_KEY both runtimes; harness brute-forces 1e6 codes to recover it for verify tests.
+  - OTP attempt counter must COMMIT even on wrong code (Laravel throws after commit).
+  - consent_events chain rows have root_event_id FK — delete children before roots in seeds.
+  - Laravel multipart array fields: scope[0][order_item_id]=.. (PHP parses); Go handler
+    reads both that form and JSON scope.
+  - db() helper in harness returns STRING values — cast ids to int before putting them in
+    JSON bodies (DecodeJSON into *int64 fails on strings).
+  - 403 policy message: "Anda tidak memiliki akses untuk melakukan aksi ini." (system).
+- NEXT: continue orders/consent domain per matrix — remaining laravel-only in this domain:
+  POST /crm/customers/{customer}/orders, /orders/{order}/assisted-returns,
+  /orders/{order}/items, /orders/{order}/invoice, /orders/{order}/returns,
+  /orders/{order}/refund-recipient ×2, kurir read surfaces (orders/reports/returns ×5),
+  kurir returns confirm/pickup, /shipments/{shipment}/items/{orderItem}/refuse,
+  warehouse surfaces (diproses, stock-request, returns ×3), order-items receipts ×2,
+  return-items receipt-allocations. Then admin ops (~45), Google Sheets (7),
+  Installer (7), Profile (5), auth google/forgot (4), dashboard (2), catalog (3).
+- Harness rules unchanged: ONE runner at a time, restart pc_go_imp010 after Go changes,
+  scrub TS + ids, use editor tool (not heredoc) for SQL/code with quotes/backticks.
