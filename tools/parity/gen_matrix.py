@@ -34,6 +34,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/admin/refund-attempts/{attempt}/reconcile"): "Finance reconciliation of unknown attempts to succeeded payout or failed state, evidence, audit and cancellation re-entry in one transaction; compare_admin_refund_attempt_reconcile.py",
     ("GET", "/api/v1/invoice/config"): "Super Admin global or Agen branch-scoped resolved invoice configuration with built-in defaults; compare_invoice_config.py",
     ("PUT", "/api/v1/invoice/config"): "Agen own-scope or Super Admin global display settings, Laravel validation, media existence and defaults resolution; compare_invoice_config.py",
+    ("GET", "/api/v1/dashboard/summary"): "Role/branch scoped order, revenue, customer and roster totals with date filters; compare_dashboard_summary.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve"): "Finance/Owner exits A/B with historical-owner enforcement, evidence, idempotent no-op, state audit and branch authorization; compare_admin_refund_needs_verification.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/deferred/request"): "Finance deferred materialization request, Order/obligation locks, idempotent event key and available-entitlement snapshot; compare_admin_refund_deferred.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/deferred/materialize"): "Owner-only deferred entitlement materialization with replay-first idempotency, cash cap, child approval, parent balance update and append-only audit; compare_admin_refund_deferred.py",

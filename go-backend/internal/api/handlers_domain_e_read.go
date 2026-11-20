@@ -200,6 +200,8 @@ func matchesDomainEReadRoute(method, path string) bool {
 	rest := strings.TrimPrefix(path, "/api/v1/")
 	parts := strings.Split(rest, "/")
 	switch parts[0] {
+	case "dashboard":
+		return len(parts) == 2 && parts[1] == "summary"
 	case "crm":
 		if len(parts) == 2 && parts[1] == "follow-ups" {
 			return true

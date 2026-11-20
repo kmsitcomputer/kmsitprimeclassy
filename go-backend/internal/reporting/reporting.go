@@ -315,7 +315,7 @@ func reportOrderScope(actor Actor, agentFilter string) (string, []any, error) {
 			return "1=1", nil, nil
 		}
 		return "o.agent_id=?", []any{agentFilter}, nil
-	case "agen", "admin":
+	case "agen", "admin", "sales", "sales-kurir-sub":
 		if actor.AgentID == nil {
 			return "", nil, ErrForbidden
 		}

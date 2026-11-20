@@ -184,6 +184,16 @@ func (s *Server) handleReportNetworkSummary(w http.ResponseWriter, r *http.Reque
 	httpx.OK(w, data, "OK", nil)
 }
 
+func (s *Server) handleReportDashboardSummary(w http.ResponseWriter, r *http.Request) {
+	actor := reportingActor(r)
+	data, err := s.reportingService().DashboardSummary(r.Context(), actor, reportFilters(r.URL.Query()))
+	if err != nil {
+		writeDomainReadError(w, r, err)
+		return
+	}
+	httpx.OK(w, data, "OK", nil)
+}
+
 func (s *Server) handleReportNetworkTransactions(w http.ResponseWriter, r *http.Request) {
 	actor := reportingActor(r)
 	data, err := s.reportingService().NetworkTransactions(r.Context(), actor, reportFilters(r.URL.Query()))
