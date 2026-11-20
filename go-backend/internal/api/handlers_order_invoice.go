@@ -13,9 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/document"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
 	"github.com/kmsitcomputer/primeclassy-go/internal/orders"
 )
@@ -195,7 +197,7 @@ func invoiceContainsString(values []string, target string) bool {
 }
 
 func (s *Server) invoiceConfig(ctx context.Context, agentID int64) (map[string]any, error) {
-	defaults := map[string]any{"company_name": "PrimeClassy", "title": "INVOICE", "contact": "", "address": "", "footer": "Terima kasih atas kepercayaan Anda.", "notes": "", "show_items": true, "show_konsumen": true, "show_sales": true, "show_korsal": true, "show_payment_summary": true, "show_voucher": true}
+	defaults := map[string]any{"company_name": "PrimeClassy", "title": "INVOICE", "contact": "", "address": "", "footer": "Terima kasih atas kepercayaan Anda.", "notes": "", "show_items": true, "show_konsumen": true, "show_sales": true, "show_korsal": true, "show_payment_summary": true, "show_voucher": true, "logo_media_id": nil}
 	for _, id := range []int64{0, agentID} {
 		var raw sql.NullString
 		err := s.database.QueryRowContext(ctx, `SELECT CAST(config AS CHAR) FROM invoice_configs WHERE agent_id=?`, id).Scan(&raw)
@@ -215,6 +217,142 @@ func (s *Server) invoiceConfig(ctx context.Context, agentID int64) (map[string]a
 		}
 	}
 	return defaults, nil
+}
+
+func (s *Server) handleInvoiceConfigShow(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	scope := int64(0)
+	if actor.Role != "super_admin" {
+		if actor.AgentID == nil {
+			writeError(w, r, &httpx.Error{Status: http.StatusForbidden, Message: "Tidak diizinkan."})
+			return
+		}
+		scope = *actor.AgentID
+	}
+	config, err := s.invoiceConfig(r.Context(), scope)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, config, "OK", nil)
+}
+
+func (s *Server) handleInvoiceConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	actor := UserFrom(ctx)
+	scope := int64(0)
+	if actor.Role != "super_admin" {
+		if actor.AgentID == nil {
+			writeError(w, r, &httpx.Error{Status: http.StatusForbidden, Message: "Tidak diizinkan."})
+			return
+		}
+		scope = *actor.AgentID
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	clean := map[string]any{}
+	fields := map[string][]string{}
+	for _, f := range []struct {
+		name string
+		max  int
+	}{{"company_name", 120}, {"title", 60}, {"contact", 255}, {"address", 500}, {"footer", 500}, {"notes", 500}} {
+		raw, ok := body[f.name]
+		if !ok {
+			continue
+		}
+		if string(raw) == "null" {
+			clean[f.name] = nil
+			continue
+		}
+		var text string
+		if json.Unmarshal(raw, &text) != nil {
+			fields[f.name] = []string{i18n.ValidationMessage(locale, "string", f.name)}
+			continue
+		}
+		if utf8.RuneCountInString(text) > f.max {
+			fields[f.name] = []string{i18n.ValidationMessage(locale, "max.string", f.name, "max", strconv.Itoa(f.max))}
+			continue
+		}
+		clean[f.name] = text
+	}
+	for _, name := range []string{"show_items", "show_konsumen", "show_sales", "show_korsal", "show_payment_summary", "show_voucher"} {
+		raw, ok := body[name]
+		if !ok {
+			continue
+		}
+		if string(raw) == "null" {
+			clean[name] = nil
+			continue
+		}
+		var value any
+		if json.Unmarshal(raw, &value) != nil {
+			fields[name] = []string{i18n.ValidationMessage(locale, "boolean", name)}
+			continue
+		}
+		valid := false
+		switch v := value.(type) {
+		case bool:
+			valid = true
+		case float64:
+			valid = v == 0 || v == 1
+		case string:
+			valid = v == "0" || v == "1"
+		}
+		if !valid {
+			fields[name] = []string{i18n.ValidationMessage(locale, "boolean", name)}
+			continue
+		}
+		clean[name] = value
+	}
+	if raw, ok := body["logo_media_id"]; ok && string(raw) == "null" {
+		clean["logo_media_id"] = nil
+	} else if ok {
+		var id int64
+		var text string
+		var err error
+		if json.Unmarshal(raw, &text) == nil {
+			id, err = strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+		} else {
+			err = json.Unmarshal(raw, &id)
+		}
+		if err != nil {
+			fields["logo_media_id"] = []string{i18n.ValidationMessage(locale, "integer", "logo_media_id")}
+		} else {
+			var exists int
+			if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM media WHERE id=?`, id).Scan(&exists); err != nil {
+				writeError(w, r, err)
+				return
+			}
+			if exists == 0 {
+				fields["logo_media_id"] = []string{i18n.ValidationMessage(locale, "exists", "logo_media_id")}
+			} else {
+				clean["logo_media_id"] = id
+			}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	raw, err := json.Marshal(clean)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	_, err = s.database.ExecContext(ctx, `INSERT INTO invoice_configs(agent_id,config,created_at,updated_at) VALUES (?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE config=VALUES(config),updated_at=UTC_TIMESTAMP(6)`, scope, string(raw))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	config, err := s.invoiceConfig(ctx, scope)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, config, "OK", nil)
 }
 
 func invoiceString(c map[string]any, k, def string) string {

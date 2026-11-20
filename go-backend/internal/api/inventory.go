@@ -466,6 +466,8 @@ func matchesDomainERoute(method, path string) bool {
 		return false
 	}
 	switch p[0] {
+	case "invoice":
+		return len(p) == 3 && p[1] == "config" && (method == http.MethodGet || method == http.MethodPut)
 	case "admin":
 		return method == http.MethodPost && ((len(p) == 4 && p[1] == "refund-attempts" && p[2] != "" && (p[3] == "complete" || p[3] == "reconcile")) || (len(p) == 5 && p[1] == "refund-obligations" && p[2] != "" && p[3] == "needs-verification" && p[4] == "resolve") || (len(p) == 5 && p[1] == "refund-obligations" && p[2] != "" && p[3] == "deferred" && (p[4] == "request" || p[4] == "materialize")))
 	case "orders":

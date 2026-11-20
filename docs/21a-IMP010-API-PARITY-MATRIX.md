@@ -300,12 +300,12 @@ Status legend:
 | POST | `/api/v1/install/run` | public | — | LARAVEL |  |
 | GET | `/api/v1/install/status` | public | — | **GO** |  |
 
-## Invoices — `invoice` (0/2 in Go)
+## Invoices — `invoice` (2/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/invoice/config` | session | agen, super_admin | LARAVEL |  |
-| PUT | `/api/v1/invoice/config` | session | agen, super_admin | LARAVEL |  |
+| GET | `/api/v1/invoice/config` | session | agen, super_admin | **GO** | Super Admin global or Agen branch-scoped resolved invoice configuration with built-in defaults; compare_invoice_config.py |
+| PUT | `/api/v1/invoice/config` | session | agen, super_admin | **GO** | Agen own-scope or Super Admin global display settings, Laravel validation, media existence and defaults resolution; compare_invoice_config.py |
 
 ## Courier — `kurir` (6/6 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 331 (88.3%) |
-|   of which fully GO | 331 |
+| Served by Go now | 333 (88.8%) |
+|   of which fully GO | 333 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 44 |
-| Areas fully ported | 35 / 45 |
+| Still Laravel-only | 42 |
+| Areas fully ported | 36 / 45 |
