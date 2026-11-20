@@ -185,3 +185,80 @@ func (s *Server) handleAdminRefundObligationCreateAttempt(w http.ResponseWriter,
 	}
 	httpx.Created(w, rows[0], "Attempt dibuat.")
 }
+
+func (s *Server) handleAdminRefundAttemptInitiate(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	attemptID, ok := pathID(w, r, "attempt")
+	if !ok {
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var external *string
+	fields := map[string][]string{}
+	if value, exists := body["external_reference"]; exists && string(value) != "null" {
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			fields["external_reference"] = []string{i18n.ValidationMessage(locale, "string", "external_reference")}
+		} else {
+			text = strings.TrimSpace(text)
+			if utf8.RuneCountInString(text) > 191 {
+				fields["external_reference"] = []string{i18n.ValidationMessage(locale, "max.string", "external_reference", "max", "191")}
+			} else if text != "" {
+				external = &text
+			}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	var orderID int64
+	if err := s.database.QueryRowContext(ctx, `SELECT o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, attemptID).Scan(&orderID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		} else {
+			writeError(w, r, err)
+		}
+		return
+	}
+	actor := UserFrom(ctx)
+	var agentID sql.NullInt64
+	if err := s.database.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=?`, orderID).Scan(&agentID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if actor.Role != "super_admin" && (actor.AgentID == nil || !agentID.Valid || *actor.AgentID != agentID.Int64) {
+		writeError(w, r, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "system.unauthorized_action")})
+		return
+	}
+	if actor.Role != "super_admin" && actor.Role != "keuangan" {
+		writeError(w, r, &httpx.Error{Status: 403, Message: "Hanya Keuangan yang dapat melakukan aksi ini.", ErrorsAny: map[string]any{"code": "refund_role_forbidden"}})
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	if err := service.InitiateRefundAttempt(ctx, attemptID, actor.ID, external); err != nil {
+		var problem *orders.Problem
+		if errors.As(err, &problem) {
+			writeError(w, r, &httpx.Error{Status: problem.Status, Message: problem.Message, FieldStrings: problem.Fields, ErrorsAny: problem.Errors})
+		} else if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		} else {
+			writeError(w, r, err)
+		}
+		return
+	}
+	rows, err := queryModelMaps(ctx, s.database.DB, `SELECT * FROM refund_attempts WHERE id=?`, attemptID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		return
+	}
+	httpx.OK(w, rows[0], "OK", nil)
+}

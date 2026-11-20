@@ -163,3 +163,36 @@ func (s *Service) CreateRefundAttempt(ctx context.Context, obligationID, actorID
 	}
 	return attemptID, err
 }
+
+func (s *Service) InitiateRefundAttempt(ctx context.Context, attemptID, actorID int64, externalReference *string) error {
+	var obligationID, orderID int64
+	if err := s.Database.QueryRowContext(ctx, `SELECT a.obligation_id,o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, attemptID).Scan(&obligationID, &orderID); err != nil {
+		return err
+	}
+	return s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var lockedOrder int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&lockedOrder); err != nil {
+			return err
+		}
+		var status string
+		var existingReference sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT status,external_reference FROM refund_attempts WHERE id=? FOR UPDATE`, attemptID).Scan(&status, &existingReference); err != nil {
+			return err
+		}
+		if status == "processing" {
+			return nil
+		}
+		if status != "created" {
+			return &Problem{Status: 422, Message: "Attempt tidak berada pada status created.", Errors: map[string]any{"code": "invalid_attempt_state"}}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE refund_attempts SET status='processing',initiated_at=UTC_TIMESTAMP(6),started_at=UTC_TIMESTAMP(6),external_reference=COALESCE(?,external_reference),processed_by=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, externalReference, actorID, attemptID); err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{"external_reference": externalReference})
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO refund_ledger_events(order_id,obligation_id,attempt_id,event_type,event_key,actor_type,actor_id,payload,occurred_at,created_at,updated_at) VALUES (?,?,?,'attempt.initiated',?,'user',?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE id=id`, orderID, obligationID, attemptID, fmt.Sprintf("attempt_initiated:%d", attemptID), actorID, string(payload))
+		return err
+	})
+}
