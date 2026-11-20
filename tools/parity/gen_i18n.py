@@ -95,6 +95,7 @@ KEYS = {
     ],
     "shipping": [
         "method_not_available",
+        "provider_toggled",
     ],
     "media": [
         "unknown_collection",
