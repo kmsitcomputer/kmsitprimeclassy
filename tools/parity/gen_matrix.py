@@ -29,6 +29,7 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/admin/return-items/{item}/refund"): "Keuangan/Super Admin and same-Agent gates, approved/full-paid/CRM-recipient checks, idempotent legacy refund attempt and payout, paid balance/invoice reversal, refund completion, Sales-only fee adjustment and audit; compare_return_item_refund.py",
     ("GET", "/api/v1/dispatch/returns"): "Operational pickup queue, same-Agent and Super Admin agent_id validation, pending/approved return items whose order item is pengembalian, courier projection and capped pagination; compare_dispatch_returns.py",
     ("GET", "/api/v1/dispatch/history"): "Delivered shipment history, same-Agent and Super Admin agent_id validation, WIB date bounds, courier/region/order search filters, executor and proof projection, capped pagination; compare_dispatch_history.py",
+    ("GET", "/api/v1/dispatch"): "Branch-scoped dispatchable standard shipments, matching order and shipment delivery-date/region/payment filters, per-shipment item/resource projection, stock fulfillment and paid-in-full signal; compare_dispatch_queue.py",
     ("POST", "/api/v1/orders/{order}/items"): "Admin-only SC-03; order-first locking, Agent reservation, canonical shipment grouping, Stock Request reopen/reconcile, additional-payment ledger and replay/conflict; compare_order_line_addition.py",
     ("GET", "/api/v1/install/status"): "",
     ("GET", "/api/v1/settings"): "",

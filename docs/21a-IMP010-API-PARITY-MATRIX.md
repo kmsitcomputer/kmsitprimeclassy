@@ -255,11 +255,11 @@ Status legend:
 | POST | `/api/v1/delivery-refusals/{refusal}/hand-back` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | executor custody transfer, idempotent replay, audit; compared by compare_refusals.py (14/0) |
 | POST | `/api/v1/delivery-refusals/{refusal}/receive` | session | koordinator-kurir | **GO** | koordinator receipt, state machine handed_back→received, audit; compared by compare_refusals.py (14/0) |
 
-## Dispatch — `dispatch` (8/9 in Go)
+## Dispatch — `dispatch` (9/9 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/dispatch` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
+| GET | `/api/v1/dispatch` | session | admin, agen, koordinator-kurir, super_admin | **GO** | Branch-scoped dispatchable standard shipments, matching order and shipment delivery-date/region/payment filters, per-shipment item/resource projection, stock fulfillment and paid-in-full signal; compare_dispatch_queue.py |
 | GET | `/api/v1/dispatch/couriers` | session | admin, agen, koordinator-kurir, super_admin | **GO** | branch active couriers, for_returns narrows to kurir, super_admin agent_id gate; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/expeditions` | session | koordinator-kurir | **GO** | expedition shipments + four readiness gates; koordinator-kurir only; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/history` | session | admin, agen, koordinator-kurir, super_admin | **GO** | Delivered shipment history, same-Agent and Super Admin agent_id validation, WIB date bounds, courier/region/order search filters, executor and proof projection, capped pagination; compare_dispatch_history.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 286 (76.3%) |
-|   of which fully GO | 286 |
+| Served by Go now | 287 (76.5%) |
+|   of which fully GO | 287 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 89 |
-| Areas fully ported | 32 / 45 |
+| Still Laravel-only | 88 |
+| Areas fully ported | 33 / 45 |

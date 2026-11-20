@@ -10,6 +10,7 @@ import (
 // registerDomainERoutes installs the Domain E route slice. It is intentionally kept out of server.go so
 // the shared router file remains untouched while parallel domain work is in flight.
 func (s *Server) registerDomainERoutes() {
+	s.mux.Handle("GET /api/v1/dispatch", chain(http.HandlerFunc(s.handleDispatchQueue), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,koordinator-kurir")))
 	userRosterRoles := "super_admin,agen,korsal,sales,sales-kurir-sub,admin,keuangan,kurir,koordinator-kurir"
 	userCreateRoles := "super_admin,agen,korsal,koordinator-kurir"
 	s.mux.Handle("POST /api/v1/users", chain(http.HandlerFunc(s.handleUsersStore), RequireAuth, s.RequireAgentLinked, RequireRole(userCreateRoles)))
