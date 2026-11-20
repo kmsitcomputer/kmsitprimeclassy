@@ -18,6 +18,7 @@ ROUTES = os.path.join(ROOT, "go-backend", "internal", "api", "parity_routes.json
 
 # Endpoints the Go service serves. Anything absent is NOT PORTED.
 IMPLEMENTED = {
+    ("GET", "/api/v1/orders/{order}/invoice"): "OrderPolicy view+viewInvoice audience, lazy locked invoice issuance, viewer-safe PDF projection and dynamic branch/global configuration; compare_order_invoice.py",
     ("GET", "/api/v1/admin/additional-payments"): "Branch-scoped operational/finance oversight list, current buyer/requester names, manual payment instructions, latest-first pagination; compare_admin_additional_payments.py",
     ("GET", "/api/v1/admin/order-refunds"): "Branch-scoped fulfillment-shortfall refunds, current buyer/adjuster names, item snapshots, decimal refund amount and status, latest-first pagination; compare_admin_order_refunds.py",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",

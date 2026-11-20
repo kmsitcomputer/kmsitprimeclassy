@@ -202,6 +202,7 @@ KEYS = {
         "settlement_requested",
         "settlement_replayed",
         "already_processed",
+        "invoice_not_issued",
     ],
     "product": [
         "variation_required",

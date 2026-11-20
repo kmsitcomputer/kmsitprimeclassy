@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 per-item receipt events index (admin own-agent / super_admin), date + verifier projection; compared by compare_item_receipts.py (16/0) |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 record actual receipt: Idempotency-Key 8–100, arrived-status gate, date window (not future/before order), time-date consistency, quantity bounded by fulfilled across all events, fingerprint replay/409; compared by compare_item_receipts.py (16/0) |
 
-## Orders — `orders` (24/25 in Go)
+## Orders — `orders` (25/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -368,7 +368,7 @@ Status legend:
 | GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | capture panel context (subject id only to capturing actor; CRM mode + channel availability); compared by compare_consent.py (26/0) |
 | GET | `/api/v1/orders/{order}/consent-events` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | consent history per order (order view policy), ConsentEventResource; compared by compare_consent.py (26/0) |
 | PUT | `/api/v1/orders/{order}/due-date` | session | admin, keuangan, super_admin | **GO** | admin/keuangan/super_admin; audited old/new + reason; no-op when unchanged |
-| GET | `/api/v1/orders/{order}/invoice` | session | — | LARAVEL |  |
+| GET | `/api/v1/orders/{order}/invoice` | session | — | **GO** | OrderPolicy view+viewInvoice audience, lazy locked invoice issuance, viewer-safe PDF projection and dynamic branch/global configuration; compare_order_invoice.py |
 | POST | `/api/v1/orders/{order}/items` | session | admin | **GO** | Admin-only SC-03; order-first locking, Agent reservation, canonical shipment grouping, Stock Request reopen/reconcile, additional-payment ledger and replay/conflict; compare_order_line_addition.py |
 | GET | `/api/v1/orders/{order}/items/{item}/cancel-eligibility` | session | admin, agen, super_admin | **GO** | read-only projector: order window, stock source, item status, open refusal, remaining quantity and a pending additional payment decide `eligible` + `reason_code`; max_quantity is fulfilled_quantity only when eligible |
 | POST | `/api/v1/orders/{order}/items/{item}/cancel-undelivered` | session | admin, agen, super_admin | **GO** | REM-003 Owner Option A: cancels part of the undelivered/undispatched remainder (also after first dispatch); expected_quantity mismatch is a 409 stale-quantity guard; recomputes the order status forward-only |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 289 (77.1%) |
-|   of which fully GO | 289 |
+| Served by Go now | 290 (77.3%) |
+|   of which fully GO | 290 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 86 |
-| Areas fully ported | 33 / 45 |
+| Still Laravel-only | 85 |
+| Areas fully ported | 34 / 45 |

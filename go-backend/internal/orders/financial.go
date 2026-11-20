@@ -832,6 +832,37 @@ func (s *Service) invoiceEligible(ctx context.Context, tx *sql.Tx, orderID int64
 	return verified, nil
 }
 
+// EnsureInvoiceIssued ports InvoiceIssuanceService::ensureIssuedIfEligible. Legacy eligible invoices
+// are issued lazily under the canonical Order lock; ineligible orders remain untouched.
+func (s *Service) EnsureInvoiceIssued(ctx context.Context, orderID, actorID int64) (bool, error) {
+	issued := false
+	err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		order, err := s.lockOrderForPayment(ctx, tx, orderID)
+		if err != nil {
+			return err
+		}
+		var issuedAt sql.NullTime
+		if err := tx.QueryRowContext(ctx, `SELECT invoice_issued_at FROM orders WHERE id=?`, orderID).Scan(&issuedAt); err != nil {
+			return err
+		}
+		if issuedAt.Valid {
+			issued = true
+			return nil
+		}
+		eligible, err := s.invoiceEligible(ctx, tx, orderID, order.Status, derefString(order.PaymentType),
+			money.String(order.Paid), money.String(order.GrossReceived))
+		if err != nil || !eligible {
+			return err
+		}
+		if err := s.syncInvoiceAfterChange(ctx, tx, orderID, actorID, "invoice_issued"); err != nil {
+			return err
+		}
+		issued = true
+		return nil
+	})
+	return issued, err
+}
+
 // snapshotInvoiceIfChanged is InvoiceIssuanceService::snapshotIfChanged.
 func (s *Service) snapshotInvoiceIfChanged(ctx context.Context, tx *sql.Tx, orderID int64, orderNo, trigger,
 	total, paid, paymentStatus string, dueDate sql.NullString) error {
