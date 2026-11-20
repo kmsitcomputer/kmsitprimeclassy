@@ -34,6 +34,8 @@ IMPLEMENTED = {
     ("GET", "/api/v1/admin/integrations/whatsapp"): "Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py",
     ("PUT", "/api/v1/admin/integrations/whatsapp/templates/{event}"): "Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py",
     ("DELETE", "/api/v1/admin/integrations/whatsapp/templates/{event}"): "idempotent Super Admin global template reset to Laravel default with before/after audit; compare_admin_whatsapp_templates.py",
+    ("POST", "/api/v1/admin/integrations/whatsapp/templates/{event}/preview"): "Super Admin global template preview, token validation and optional-line rendering; compare_admin_whatsapp_preview.py",
+    ("POST", "/api/v1/agent/whatsapp/events/{event}/preview"): "Agen/Admin branch-authorized template preview with shared validation and sample rendering; compare_admin_whatsapp_preview.py",
     ("GET", "/api/v1/admin/integrations/smtp"): "Super Admin SMTP snapshot with write-only password state and active environment/dashboard source; compare_admin_smtp_settings.py",
     ("PUT", "/api/v1/admin/integrations/smtp"): "validated SMTP config, encrypted write-only secret preserve/clear, completeness guard and redacted audit; compare_admin_smtp_update.py",
     ("GET", "/api/v1/admin/orders/{order}/refunds"): "Order-scoped refund obligations, attempts, payouts, children, reductions and integer-cent financial metrics; compare_admin_order_refund_ledger.py",

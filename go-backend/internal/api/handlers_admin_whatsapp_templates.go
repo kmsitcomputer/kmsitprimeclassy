@@ -96,6 +96,70 @@ func (s *Server) handleAdminWhatsAppTemplateReset(w http.ResponseWriter, r *http
 	httpx.OK(w, after, i18n.Translate(locale, "whatsapp.saved"), nil)
 }
 
+func (s *Server) handleAdminWhatsAppTemplatePreview(w http.ResponseWriter, r *http.Request) {
+	locale, event := LocaleFrom(r.Context()), r.PathValue("event")
+	if !adminWhatsAppEvent(event) {
+		writeError(w, r, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "whatsapp.unknown_event")})
+		return
+	}
+	template, ok := readWhatsAppPreviewTemplate(w, r)
+	if !ok {
+		return
+	}
+	preview, err := agentadmin.PreviewWhatsAppTemplate(event, template)
+	if err != nil {
+		writeAdminWhatsAppTemplateError(w, r, err)
+		return
+	}
+	httpx.OK(w, map[string]string{"preview": preview}, "OK", nil)
+}
+
+func (s *Server) handleAgentWhatsAppTemplatePreview(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.agentAdmin(w, r, true); !ok {
+		return
+	}
+	template, ok := readWhatsAppPreviewTemplate(w, r)
+	if !ok {
+		return
+	}
+	preview, err := agentadmin.PreviewWhatsAppTemplate(r.PathValue("event"), template)
+	if err != nil {
+		writeAdminWhatsAppTemplateError(w, r, err)
+		return
+	}
+	httpx.OK(w, map[string]string{"preview": preview}, "OK", nil)
+}
+
+func readWhatsAppPreviewTemplate(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return "", false
+	}
+	raw, ok := body["template"]
+	var template string
+	if !ok || json.Unmarshal(raw, &template) != nil || template == "" {
+		locale := LocaleFrom(r.Context())
+		writeError(w, r, httpx.Validation(map[string][]string{"template": {i18n.ValidationMessage(locale, "required", "template")}}))
+		return "", false
+	}
+	if utf8.RuneCountInString(template) > 2000 {
+		locale := LocaleFrom(r.Context())
+		writeError(w, r, httpx.Validation(map[string][]string{"template": {i18n.ValidationMessage(locale, "max.string", "template", "max", "2000")}}))
+		return "", false
+	}
+	return template, true
+}
+
+func writeAdminWhatsAppTemplateError(w http.ResponseWriter, r *http.Request, err error) {
+	var validation *agentadmin.Error
+	if errors.As(err, &validation) {
+		writeError(w, r, &httpx.Error{Status: validation.Status, Message: validation.Message, Fields: validation.Fields})
+		return
+	}
+	writeError(w, r, err)
+}
+
 func whatsAppTemplate(snapshot map[string]any, event string) string {
 	events, _ := snapshot["events"].([]map[string]any)
 	for _, item := range events {

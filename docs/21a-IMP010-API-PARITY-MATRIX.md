@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (36/59 in Go)
+## Admin operations — `admin` (37/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -42,7 +42,7 @@ Status legend:
 | POST | `/api/v1/admin/integrations/whatsapp/messages/{message}/retry` | session | super_admin | LARAVEL |  |
 | DELETE | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | idempotent Super Admin global template reset to Laravel default with before/after audit; compare_admin_whatsapp_templates.py |
 | PUT | `/api/v1/admin/integrations/whatsapp/templates/{event}` | session | super_admin | **GO** | Super Admin global message template validation, save, snapshot and audit; compare_admin_whatsapp_templates.py |
-| POST | `/api/v1/admin/integrations/whatsapp/templates/{event}/preview` | session | super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/integrations/whatsapp/templates/{event}/preview` | session | super_admin | **GO** | Super Admin global template preview, token validation and optional-line rendering; compare_admin_whatsapp_preview.py |
 | POST | `/api/v1/admin/integrations/whatsapp/test-connection` | session | super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/integrations/whatsapp/test-message` | session | super_admin | LARAVEL |  |
 | GET | `/api/v1/admin/languages` | session | super_admin | **GO** | admin listing: every language, active or not |
@@ -81,7 +81,7 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
-## agent — `agent` (21/33 in Go)
+## agent — `agent` (22/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -105,7 +105,7 @@ Status legend:
 | POST | `/api/v1/agent/whatsapp/device` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **GO** | RBAC, agent_id selector, event ordering and full payload compared with database read-only evidence by compare_whatsapp_events.py |
 | PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **GO** | boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py |
-| POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | LARAVEL |  |
+| POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | **GO** | Agen/Admin branch-authorized template preview with shared validation and sample rendering; compare_admin_whatsapp_preview.py |
 | DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **GO** | idempotent reset, no-op persistence, event validation, branch scope and conditional AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_resets.py |
 | POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/messages` | session | admin, agen | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 307 (81.9%) |
-|   of which fully GO | 307 |
+| Served by Go now | 309 (82.4%) |
+|   of which fully GO | 309 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 68 |
+| Still Laravel-only | 66 |
 | Areas fully ported | 34 / 45 |

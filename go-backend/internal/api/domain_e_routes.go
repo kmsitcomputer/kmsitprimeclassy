@@ -14,6 +14,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("PUT /api/v1/admin/integrations/whatsapp", chain(http.HandlerFunc(s.handleAdminWhatsAppSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/whatsapp/templates/{event}", chain(http.HandlerFunc(s.handleAdminWhatsAppTemplateUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("DELETE /api/v1/admin/integrations/whatsapp/templates/{event}", chain(http.HandlerFunc(s.handleAdminWhatsAppTemplateReset), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
+	s.mux.Handle("POST /api/v1/admin/integrations/whatsapp/templates/{event}/preview", chain(http.HandlerFunc(s.handleAdminWhatsAppTemplatePreview), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("GET /api/v1/admin/google-auth", chain(http.HandlerFunc(s.handleAdminGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
@@ -41,6 +42,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("PATCH /api/v1/users/{user}/convert-to-sales-kurir", chain(http.HandlerFunc(s.handleUsersConvertToSalesKurirSub), RequireAuth, s.RequireAgentLinked, RequireRole(auth.RoleAgen)))
 
 	agentAccount := "agen,admin"
+	s.mux.Handle("POST /api/v1/agent/whatsapp/events/{event}/preview", chain(http.HandlerFunc(s.handleAgentWhatsAppTemplatePreview), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("GET /api/v1/agent/google-auth", chain(http.HandlerFunc(s.handleAgentGoogleAuthShow), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("PUT /api/v1/agent/google-auth", chain(http.HandlerFunc(s.handleAgentGoogleAuthUpdate), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("GET /api/v1/agent/payment-methods", chain(http.HandlerFunc(s.handleAgentPaymentMethods), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
