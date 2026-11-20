@@ -132,10 +132,6 @@ KEYS = {
         "consent_scope_exceeded",
         "migration_pending",
     ],
-    "whatsapp": [
-        "otp_unavailable",
-        "number_not_verified",
-    ],
     "consent": [
         "otp_sent",
         "captured",
@@ -234,6 +230,10 @@ KEYS = {
     "whatsapp": [
         "scope_forbidden",
         "saved",
+        "invalid_base_url",
+        "config_incomplete",
+        "otp_unavailable",
+        "number_not_verified",
         "event_not_configurable",
         "template_length",
         "template_chars",

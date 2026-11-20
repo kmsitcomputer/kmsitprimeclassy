@@ -167,10 +167,10 @@ func intDefault(v string, fallback int) int {
 }
 
 func maskNumber(v string) string {
-	if len(v) <= 4 {
-		return strings.Repeat("*", len(v))
+	if len(v) <= 5 {
+		return v
 	}
-	return strings.Repeat("*", len(v)-4) + v[len(v)-4:]
+	return v[:2] + "••••" + v[len(v)-3:]
 }
 
 func (s *Service) snapshotSettings(ctx context.Context, group string, secretKeys map[string]bool) (map[string]any, error) {
@@ -237,6 +237,48 @@ func (s *Service) SaveSettings(ctx context.Context, group string, values map[str
 		}
 		writes := map[string]string{}
 		for key, value := range values {
+			if group == "whatsapp" {
+				if key == "limits" {
+					limits, _ := value.(map[string]any)
+					for name, limit := range limits {
+						dbKey := map[string]string{"per_recipient_per_hour": "rate.recipient_hour", "global_per_minute": "rate.global_minute"}[name]
+						if dbKey != "" {
+							text, err := encodeSetting(limit)
+							if err != nil {
+								return err
+							}
+							writes[prefix+dbKey] = text
+						}
+					}
+					continue
+				}
+				if key == "otp" {
+					otp, _ := value.(map[string]any)
+					for name, item := range otp {
+						if containsWhatsAppOTPField(name) {
+							text, err := encodeSetting(item)
+							if err != nil {
+								return err
+							}
+							writes[prefix+"otp."+name] = text
+						}
+					}
+					continue
+				}
+				if key == "events" {
+					events, _ := value.(map[string]any)
+					for name, enabled := range events {
+						if isWhatsAppEvent(name) {
+							text, err := encodeSetting(enabled)
+							if err != nil {
+								return err
+							}
+							writes[prefix+"event."+name] = text
+						}
+					}
+					continue
+				}
+			}
 			if !allowedSetting(group, key) {
 				continue
 			}
@@ -277,6 +319,22 @@ func (s *Service) SaveSettings(ctx context.Context, group string, values map[str
 		return nil, err
 	}
 	return s.snapshotSettings(ctx, dbGroup, secrets)
+}
+
+func containsWhatsAppOTPField(name string) bool {
+	switch name {
+	case "enabled", "ttl_minutes", "max_attempts", "cooldown_seconds", "limit", "limit_window_minutes":
+		return true
+	}
+	return false
+}
+
+func isWhatsAppEvent(name string) bool {
+	switch name {
+	case "order_created", "payment_paid", "payment_partial", "order_processed", "order_shipped", "order_delivered", "order_cancelled", "return_requested", "return_approved", "refund_completed", "payment_proof_uploaded", "payment_failed", "return_rejected", "refund_requested", "refund_approved", "refund_rejected":
+		return true
+	}
+	return false
 }
 
 func allowedSetting(group, key string) bool {
