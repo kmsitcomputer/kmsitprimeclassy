@@ -59,8 +59,8 @@ def main():
             blocked_path = f"/api/v1/admin/order-sales-reductions/{blocked_reduction_id}/reinstate"
             blocked = admin.call("POST", blocked_path, json.dumps({"evidence": "In-flight attempt guard"}).encode(), {"Content-Type": "application/json"})
             r.db(f"UPDATE refund_attempts SET status='failed' WHERE id={attempt_id}")
-            r.db(f"UPDATE refund_obligations SET amount=60.00 WHERE id={obligation_id}")
-            r.db(f"UPDATE orders SET total_amount=100.00,paid_amount=60.00,remaining_amount=40.00,gross_received_amount=60.00,payment_status='partially_paid' WHERE id={order_id}")
+            r.db(f"UPDATE refund_obligations SET amount=60.50 WHERE id={obligation_id}")
+            r.db(f"UPDATE orders SET total_amount=100.00,paid_amount=60.00,remaining_amount=40.00,gross_received_amount=61.00,payment_status='partially_paid' WHERE id={order_id}")
             financial_bound = admin.call("POST", blocked_path, json.dumps({"evidence": "Reserved refund exceeds available balance"}).encode(), {"Content-Type": "application/json"})
             consumer = r.Client(base)
             consumer.login("konsumen@imp010.test")

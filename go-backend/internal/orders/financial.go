@@ -436,7 +436,7 @@ func (s *Service) metricsForOrder(ctx context.Context, tx *sql.Tx, orderID int64
 	// Reserved = the unpaid remainder of every OPEN obligation.
 	var reservedRaw sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(
-			GREATEST(CAST(o.amount AS SIGNED) - CAST(COALESCE(p.paid_total, 0) AS SIGNED), 0)), 0)
+			GREATEST(o.amount - COALESCE(p.paid_total, 0), 0)), 0)
 		FROM refund_obligations o
 		LEFT JOIN (SELECT obligation_id, SUM(amount) AS paid_total FROM refund_payouts GROUP BY obligation_id) p
 			ON p.obligation_id = o.id
