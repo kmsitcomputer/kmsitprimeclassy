@@ -80,6 +80,9 @@ KEYS = {
     "courier": [
         "assigned",
     ],
+    "return": [
+        "sub_location_unavailable",
+    ],
     "shipping": [
         "method_not_available",
     ],

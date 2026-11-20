@@ -554,7 +554,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/warehouse-stock` | session | admin, agen, gudang, super_admin | **GO** | Laravel paginates without ORDER BY (upstream defect); Go orders by id, so cross-page SET is compared instead of page bytes |
 
-## Inventory — warehouse — `warehouse` (44/49 in Go)
+## Inventory — warehouse — `warehouse` (49/49 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -573,11 +573,11 @@ Status legend:
 | PATCH | `/api/v1/warehouse/opnames/{opname}/count` | session | gudang | **GO** |  |
 | POST | `/api/v1/warehouse/opnames/{opname}/reject` | session | admin | **GO** |  |
 | POST | `/api/v1/warehouse/opnames/{opname}/submit` | session | gudang | **GO** | refuses while any item is uncounted |
-| GET | `/api/v1/warehouse/orders/diproses` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/orders/{order}/stock-request` | session | gudang | LARAVEL |  |
-| GET | `/api/v1/warehouse/returns` | session | gudang | LARAVEL |  |
-| POST | `/api/v1/warehouse/returns/{item}/finalize` | session | admin | LARAVEL |  |
-| POST | `/api/v1/warehouse/returns/{item}/inspect` | session | gudang | LARAVEL |  |
+| GET | `/api/v1/warehouse/orders/diproses` | session | gudang | **GO** | Gudang branch queue with requested-order priority, no-courier/self-delivery exclusion, warehouse OrderResource projection and fulfillment-request overlay; compare_warehouse_orders.py |
+| GET | `/api/v1/warehouse/orders/{order}/stock-request` | session | gudang | **GO** | same-branch warehouse-scope guard, StockRequestResource/product+variation projection and Transit/Shipping/reserved buckets; compare_warehouse_orders.py |
+| GET | `/api/v1/warehouse/returns` | session | gudang | **GO** | approved and uninspected return lines only, same-branch queue, ReturnRequestResource projection and pagination; compare_warehouse_orders.py |
+| POST | `/api/v1/warehouse/returns/{item}/finalize` | session | admin | **GO** | Admin same-branch idempotent disposition; good units restock Agent Transit or original active Sub Location with return_restock audit, damaged-only adds no stock; compare_warehouse_orders.py |
+| POST | `/api/v1/warehouse/returns/{item}/inspect` | session | gudang | **GO** | Gudang same-branch validation and transactional received/good/damaged inspection update; compare_warehouse_orders.py |
 | GET | `/api/v1/warehouse/sellable` | session | admin, agen, gudang, super_admin | **GO** | Go answers 422 when neither product_id nor variation_id is given; Laravel 500s there (upstream defect, documented divergence) |
 | GET | `/api/v1/warehouse/settings` | session | admin, agen, gudang, super_admin | **GO** | reproduces Laravel's firstOrCreate side effect (a GET may create the row) |
 | PATCH | `/api/v1/warehouse/settings/factory-plan` | session | admin | **GO** |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 269 (71.7%) |
-|   of which fully GO | 269 |
+| Served by Go now | 274 (73.1%) |
+|   of which fully GO | 274 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 106 |
-| Areas fully ported | 29 / 45 |
+| Still Laravel-only | 101 |
+| Areas fully ported | 30 / 45 |

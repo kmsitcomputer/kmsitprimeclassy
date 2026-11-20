@@ -156,6 +156,11 @@ IMPLEMENTED = {
     ("POST", "/api/v1/warehouse/fulfillment-proposals/{proposal}/approve"): "admin EXCEPTION path; a reason (min 5 chars) is mandatory and audited; settles the whole prepared quantity",
     ("POST", "/api/v1/warehouse/fulfillment-proposals/{proposal}/reject"): "admin; moves no stock",
     ("POST", "/api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy"): "F07: write_off reduces Transit by an adjustment movement and lifts the hold under a UUID idempotency key (retry answers 409); restock is refused pending an Owner inspection rule",
+    ("GET", "/api/v1/warehouse/orders/diproses"): "Gudang branch queue with requested-order priority, no-courier/self-delivery exclusion, warehouse OrderResource projection and fulfillment-request overlay; compare_warehouse_orders.py",
+    ("GET", "/api/v1/warehouse/orders/{order}/stock-request"): "same-branch warehouse-scope guard, StockRequestResource/product+variation projection and Transit/Shipping/reserved buckets; compare_warehouse_orders.py",
+    ("GET", "/api/v1/warehouse/returns"): "approved and uninspected return lines only, same-branch queue, ReturnRequestResource projection and pagination; compare_warehouse_orders.py",
+    ("POST", "/api/v1/warehouse/returns/{item}/inspect"): "Gudang same-branch validation and transactional received/good/damaged inspection update; compare_warehouse_orders.py",
+    ("POST", "/api/v1/warehouse/returns/{item}/finalize"): "Admin same-branch idempotent disposition; good units restock Agent Transit or original active Sub Location with return_restock audit, damaged-only adds no stock; compare_warehouse_orders.py",
     # --- checkpoint R: warehouse stock-request two-party gate (compare_warehouse_requests.py, 22 checks)
     ("GET", "/api/v1/warehouse/stock-addition-requests"): "agent-scoped list; sub_location is loaded here (unlike show)",
     ("POST", "/api/v1/warehouse/stock-addition-requests"): "gudang only; target is product XOR variation; quantity > 0",

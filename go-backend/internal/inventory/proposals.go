@@ -1401,6 +1401,12 @@ func loadRequestItem(ctx context.Context, d *db.DB, itemID int64, withImages boo
 	return &it, nil
 }
 
+// LoadRequestItemForWarehouse loads the full StockRequestItemResource projection used by
+// WarehouseOrderController::stockRequest, including product images and variation compositions.
+func LoadRequestItemForWarehouse(ctx context.Context, d *db.DB, itemID int64) (*RequestItem, error) {
+	return loadRequestItem(ctx, d, itemID, true)
+}
+
 // primaryImagePath pulls the internal helper key the serializer leaves behind.
 func primaryImagePath(product map[string]any) string {
 	if path, ok := product["__image_path"].(string); ok {

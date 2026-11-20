@@ -162,6 +162,18 @@ func implementsRoute(method, path string) bool {
 		"POST /api/v1/warehouse/stock-requests/{stockRequest}/fulfill",
 		"POST /api/v1/warehouse/stock-requests/{stockRequest}/proposals":
 		return true
+	case "GET /api/v1/warehouse/orders/diproses":
+		return true
+	case "GET /api/v1/warehouse/returns":
+		return true
+	}
+	if method == http.MethodGet && strings.HasPrefix(path, "/api/v1/warehouse/orders/") {
+		rest := strings.TrimPrefix(path, "/api/v1/warehouse/orders/")
+		return strings.HasSuffix(rest, "/stock-request") && strings.Count(rest, "/") == 1
+	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/api/v1/warehouse/returns/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/warehouse/returns/"), "/")
+		return len(parts) == 2 && parts[0] != "" && (parts[1] == "inspect" || parts[1] == "finalize")
 	}
 	if matchesDomainERoute(method, path) || matchesDomainEReadRoute(method, path) || matchesGLMLaravelOnlyRoute(method, path) {
 		return true

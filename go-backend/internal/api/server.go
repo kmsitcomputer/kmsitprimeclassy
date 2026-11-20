@@ -230,6 +230,13 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/warehouse/fulfillment-proposals/{proposal}/reject", chain(http.HandlerFunc(s.handleProposalReject), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
 	s.mux.Handle("POST /api/v1/warehouse/stock-request-items/{item}/resolve-discrepancy", chain(http.HandlerFunc(s.handleResolveDiscrepancy), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
 
+	// Gudang's operational order queue; visibility and the order projection are enforced in the handler.
+	s.mux.Handle("GET /api/v1/warehouse/orders/diproses", chain(http.HandlerFunc(s.handleWarehouseOrdersDiproses), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/orders/{order}/stock-request", chain(http.HandlerFunc(s.handleWarehouseOrderStockRequest), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("GET /api/v1/warehouse/returns", chain(http.HandlerFunc(s.handleWarehouseReturns), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/returns/{item}/inspect", chain(http.HandlerFunc(s.handleWarehouseReturnInspect), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
+	s.mux.Handle("POST /api/v1/warehouse/returns/{item}/finalize", chain(http.HandlerFunc(s.handleWarehouseReturnFinalize), RequireAuth, s.RequireAgentLinked, RequireRole("admin")))
+
 	// Stock opname (Gudang drafts/counts/submits, Admin approves).
 	s.mux.Handle("GET /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameIndex), RequireAuth, s.RequireAgentLinked, RequireRole(stockRead)))
 	s.mux.Handle("POST /api/v1/warehouse/opnames", chain(http.HandlerFunc(s.handleOpnameStore), RequireAuth, s.RequireAgentLinked, RequireRole("gudang")))
