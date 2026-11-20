@@ -203,21 +203,21 @@ Status legend:
 | GET | `/api/v1/commissions` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
 | GET | `/api/v1/commissions/summary` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
 
-## consent-events — `consent-events` (0/4 in Go)
+## consent-events — `consent-events` (4/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/consent-events` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/consent-events/{consentEvent}/dispute` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| POST | `/api/v1/consent-events/{consentEvent}/reinstate` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/consent-events/{consentEvent}/withdraw` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| POST | `/api/v1/consent-events` | session | agen, korsal, sales, sales-kurir-sub | **GO** | append-only consent capture: capture scope, order/subject binding, usable-challenge window (15 min, single-use), evidence sha256, scope validation, consent_key idempotency + 409 conflict; compared by compare_consent.py (26/0) |
+| POST | `/api/v1/consent-events/{consentEvent}/dispute` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | append-only chain dispute (allowed-from captured/reinstated/withdrawn); compared by compare_consent.py (26/0) |
+| POST | `/api/v1/consent-events/{consentEvent}/reinstate` | session | admin, agen, super_admin | **GO** | authorized review reinstate (agen/admin/super_admin, allowed-from disputed); compared by compare_consent.py (26/0) |
+| POST | `/api/v1/consent-events/{consentEvent}/withdraw` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | append-only chain withdraw (root-only, allowed-from captured/reinstated); compared by compare_consent.py (26/0) |
 
-## Consent — `consent` (0/2 in Go)
+## Consent — `consent` (2/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/consent/otp` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/consent/otp/{challenge}/verify` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/consent/otp` | session | agen, korsal, sales, sales-kurir-sub | **GO** | REM-005 OTP issue: ConsentAccess capture scope, verified-email channel gate, per-subject issuance serialization + rate limit, HMAC code hash, invalidate prior live challenges; compared by compare_consent.py (26/0) |
+| POST | `/api/v1/consent/otp/{challenge}/verify` | session | agen, korsal, sales, sales-kurir-sub | **GO** | OTP verify: issuing-actor binding, attempt counter persists on mismatch, expiry/lock states; compared by compare_consent.py (26/0) |
 
 ## CRM — `crm` (15/16 in Go)
 
@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
 
-## Orders — `orders` (17/25 in Go)
+## Orders — `orders` (19/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -365,8 +365,8 @@ Status legend:
 | GET | `/api/v1/orders/{order}` | session | — | **GO** | policy-gated detail (own buyer, branch roles, korsal/sales team + the reassigned-owner leg, gudang queue-only); loads payment_transaction + returns, which the list omits |
 | POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/cancel` | session | — | **GO** | konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction |
-| GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
-| GET | `/api/v1/orders/{order}/consent-events` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | capture panel context (subject id only to capturing actor; CRM mode + channel availability); compared by compare_consent.py (26/0) |
+| GET | `/api/v1/orders/{order}/consent-events` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | consent history per order (order view policy), ConsentEventResource; compared by compare_consent.py (26/0) |
 | PUT | `/api/v1/orders/{order}/due-date` | session | admin, keuangan, super_admin | **GO** | admin/keuangan/super_admin; audited old/new + reason; no-op when unchanged |
 | GET | `/api/v1/orders/{order}/invoice` | session | — | LARAVEL |  |
 | POST | `/api/v1/orders/{order}/items` | session | admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 250 (66.7%) |
-|   of which fully GO | 250 |
+| Served by Go now | 258 (68.8%) |
+|   of which fully GO | 258 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 125 |
-| Areas fully ported | 24 / 45 |
+| Still Laravel-only | 117 |
+| Areas fully ported | 26 / 45 |

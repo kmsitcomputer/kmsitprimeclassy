@@ -286,6 +286,14 @@ IMPLEMENTED = {
     ("POST", "/api/v1/dispatch/order-items/{orderItem}/split-batch"): "REM-002 batch split: koordinator gates, window/sub/provider/quantity gates, stock-request demand carve, fresh shipment, proportional courier-fee; compared by compare_dispatch_writes.py (19/0)",
     ("POST", "/api/v1/dispatch/orders/{order}/request-fulfillment"): "REM-001 coordinator fulfillment request: warehouse-scope gate, outstanding gate, coordinator_* columns, audit, StockRequestResource projection; compared by compare_dispatch_writes.py (19/0)",
     ("PATCH", "/api/v1/return-items/{item}/courier"): "return pickup courier assignment (never self-claimed): office/dispatch gates, already_reviewed gate, courier eligibility, idempotent replay, 409 stale-assignment with expected_courier_id, audit; compared by compare_return_assign.py (15/0)",
+    ("POST", "/api/v1/consent/otp"): "REM-005 OTP issue: ConsentAccess capture scope, verified-email channel gate, per-subject issuance serialization + rate limit, HMAC code hash, invalidate prior live challenges; compared by compare_consent.py (26/0)",
+    ("POST", "/api/v1/consent/otp/{challenge}/verify"): "OTP verify: issuing-actor binding, attempt counter persists on mismatch, expiry/lock states; compared by compare_consent.py (26/0)",
+    ("POST", "/api/v1/consent-events"): "append-only consent capture: capture scope, order/subject binding, usable-challenge window (15 min, single-use), evidence sha256, scope validation, consent_key idempotency + 409 conflict; compared by compare_consent.py (26/0)",
+    ("POST", "/api/v1/consent-events/{consentEvent}/withdraw"): "append-only chain withdraw (root-only, allowed-from captured/reinstated); compared by compare_consent.py (26/0)",
+    ("POST", "/api/v1/consent-events/{consentEvent}/dispute"): "append-only chain dispute (allowed-from captured/reinstated/withdrawn); compared by compare_consent.py (26/0)",
+    ("POST", "/api/v1/consent-events/{consentEvent}/reinstate"): "authorized review reinstate (agen/admin/super_admin, allowed-from disputed); compared by compare_consent.py (26/0)",
+    ("GET", "/api/v1/orders/{order}/consent-events"): "consent history per order (order view policy), ConsentEventResource; compared by compare_consent.py (26/0)",
+    ("GET", "/api/v1/orders/{order}/consent-context"): "capture panel context (subject id only to capturing actor; CRM mode + channel availability); compared by compare_consent.py (26/0)",
 }
 
 

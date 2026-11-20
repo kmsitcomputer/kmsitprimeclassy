@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kmsitcomputer/primeclassy-go/internal/consent"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/dispatch"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
@@ -82,6 +83,20 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/dispatch/orders/{order}/request-fulfillment", chain(http.HandlerFunc(s.handleDispatchRequestFulfillment), RequireAuth, s.RequireAgentLinked, koordGate))
 	retGate := RequireRole("super_admin,agen,admin,koordinator-kurir")
 	s.mux.Handle("PATCH /api/v1/return-items/{item}/courier", chain(http.HandlerFunc(s.handleReturnItemAssignCourier), RequireAuth, s.RequireAgentLinked, retGate))
+
+	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
+	// chain (ConsentAccess); the OTP code is emailed, never returned.
+	consentCaptureGate := RequireRole("sales,sales-kurir-sub,korsal,agen")
+	s.mux.Handle("POST /api/v1/consent/otp", chain(http.HandlerFunc(s.handleConsentIssueOtp), RequireAuth, s.RequireAgentLinked, consentCaptureGate))
+	s.mux.Handle("POST /api/v1/consent/otp/{challenge}/verify", chain(http.HandlerFunc(s.handleConsentVerifyOtp), RequireAuth, s.RequireAgentLinked, consentCaptureGate))
+	s.mux.Handle("POST /api/v1/consent-events", chain(http.HandlerFunc(s.handleConsentCapture), RequireAuth, s.RequireAgentLinked, consentCaptureGate))
+	consentActGate := RequireRole("konsumen,sales,sales-kurir-sub,korsal,agen,admin,super_admin")
+	s.mux.Handle("POST /api/v1/consent-events/{consentEvent}/withdraw", chain(http.HandlerFunc(s.handleConsentWithdraw), RequireAuth, s.RequireAgentLinked, consentActGate))
+	s.mux.Handle("POST /api/v1/consent-events/{consentEvent}/dispute", chain(http.HandlerFunc(s.handleConsentDispute), RequireAuth, s.RequireAgentLinked, consentActGate))
+	s.mux.Handle("GET /api/v1/orders/{order}/consent-events", chain(http.HandlerFunc(s.handleOrderConsentEvents), RequireAuth, s.RequireAgentLinked, consentActGate))
+	s.mux.Handle("GET /api/v1/orders/{order}/consent-context", chain(http.HandlerFunc(s.handleOrderConsentContext), RequireAuth, s.RequireAgentLinked, consentActGate))
+	consentReinstateGate := RequireRole("agen,admin,super_admin")
+	s.mux.Handle("POST /api/v1/consent-events/{consentEvent}/reinstate", chain(http.HandlerFunc(s.handleConsentReinstate), RequireAuth, s.RequireAgentLinked, consentReinstateGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/courier", chain(http.HandlerFunc(s.handleShipmentAssignCourier), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/eligible-couriers", chain(http.HandlerFunc(s.handleShipmentEligibleCouriers), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
@@ -134,6 +149,14 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/shipments/{shipment}/delivery-verifications",
 		"POST /api/v1/dispatch/order-items/{orderItem}/split-batch",
 		"PATCH /api/v1/return-items/{item}/courier",
+		"POST /api/v1/consent/otp",
+		"POST /api/v1/consent/otp/{challenge}/verify",
+		"POST /api/v1/consent-events",
+		"POST /api/v1/consent-events/{consentEvent}/withdraw",
+		"POST /api/v1/consent-events/{consentEvent}/dispute",
+		"POST /api/v1/consent-events/{consentEvent}/reinstate",
+		"GET /api/v1/orders/{order}/consent-events",
+		"GET /api/v1/orders/{order}/consent-context",
 		"POST /api/v1/dispatch/orders/{order}/request-fulfillment",
 		"POST /api/v1/shipments/{shipment}/delivery-verifications",
 		"GET /api/v1/shipments/{shipment}/receipt",
@@ -1462,6 +1485,96 @@ func (s *Server) handleReturnItemAssignCourier(w http.ResponseWriter, r *http.Re
 		return
 	}
 	httpx.OK(w, result, msg(ctx, "courier.assigned"), nil)
+}
+
+func (s *Server) consentService() *consent.Service {
+	return consent.New(s.database, s.cfg.AppKey)
+}
+
+func consentActor(r *http.Request) consent.Actor {
+	u := UserFrom(r.Context())
+	return consent.Actor{ID: u.ID, Role: u.Role, AgentID: derefInt(u.AgentID), IsSuper: u.Role == "super_admin"}
+}
+
+func writeConsentError(w http.ResponseWriter, r *http.Request, err error) {
+	var de *consent.DomainError
+	if errors.As(err, &de) {
+		m := de.Message
+		if de.Status == http.StatusNotFound || de.Message == "" {
+			m = msg(r.Context(), "system.endpoint_not_found")
+		}
+		writeError(w, r, httpx.NewError(de.Status, m))
+		return
+	}
+	writeError(w, r, err)
+}
+
+func (s *Server) handleConsentIssueOtp(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var body struct {
+		SubjectUserID *int64  `json:"subject_user_id"`
+		Purpose       *string `json:"purpose"`
+		Channel       *string `json:"channel"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	fields := fieldErrors{}
+	if body.SubjectUserID == nil {
+		fields.add("subject_user_id", i18n.ValidationMessage(LocaleFrom(ctx), "required", "subject_user_id"))
+	} else {
+		var exists bool
+		if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)`, *body.SubjectUserID).
+			Scan(&exists); err == nil && !exists {
+			fields.add("subject_user_id", i18n.ValidationMessage(LocaleFrom(ctx), "exists", "subject_user_id"))
+		}
+	}
+	if body.Purpose == nil || *body.Purpose == "" {
+		fields.add("purpose", i18n.ValidationMessage(LocaleFrom(ctx), "required", "purpose"))
+	} else if *body.Purpose != "assisted_return" {
+		fields.add("purpose", i18n.ValidationMessage(LocaleFrom(ctx), "in", "purpose"))
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(map[string][]string(fields)))
+		return
+	}
+	channel := "email"
+	if body.Channel != nil && *body.Channel != "" {
+		channel = *body.Channel
+	}
+	if channel != "email" && channel != "whatsapp" {
+		writeError(w, r, httpx.Validation(map[string][]string{"channel": {
+			i18n.ValidationMessage(LocaleFrom(ctx), "in", "channel")}}))
+		return
+	}
+	result, err := s.consentService().IssueOtp(ctx, consentActor(r), *body.SubjectUserID, *body.Purpose)
+	if err != nil {
+		writeConsentError(w, r, err)
+		return
+	}
+	httpx.Created(w, result, "Kode verifikasi terkirim.")
+}
+
+func (s *Server) handleConsentVerifyOtp(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "challenge"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Code *string `json:"code"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	if body.Code == nil || len(*body.Code) != 6 {
+		writeError(w, r, httpx.Validation(map[string][]string{"code": {
+			"The code must be 6 digits."}}))
+		return
+	}
+	result, err := s.consentService().VerifyOtp(ctx, consentActor(r), id, *body.Code)
+	if err != nil {
+		writeConsentError(w, r, err)
+		return
+	}
+	httpx.OK(w, result, "Kode terverifikasi.", nil)
 }
 
 func (s *Server) handleDeliveryVerifications(w http.ResponseWriter, r *http.Request) {
