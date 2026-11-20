@@ -40,6 +40,7 @@ IMPLEMENTED = {
     ("GET", "/api/v1/catalog/export"): "Product and variation CSV/XLSX export, formula-safe cells, explicit single-Agent stock context and Sub-location ownership; compare_catalog_export.py",
     ("GET", "/api/v1/agent/whatsapp/messages"): "One branch Agent's latest 50 delivery rows, masked destination and no message body; compare_agent_whatsapp_messages.py",
     ("GET", "/api/v1/profile/whatsapp"): "Self-only masked phone, derived verification proof, active challenge and WhatsApp OTP delivery availability; compare_profile_whatsapp.py",
+    ("GET", "/api/v1/agent/whatsapp"): "Scoped Agent device status refresh, masked pairing state and gateway readiness; compare_agent_whatsapp_status.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve"): "Finance/Owner exits A/B with historical-owner enforcement, evidence, idempotent no-op, state audit and branch authorization; compare_admin_refund_needs_verification.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/deferred/request"): "Finance deferred materialization request, Order/obligation locks, idempotent event key and available-entitlement snapshot; compare_admin_refund_deferred.py",
     ("POST", "/api/v1/admin/refund-obligations/{obligation}/deferred/materialize"): "Owner-only deferred entitlement materialization with replay-first idempotency, cash cap, child approval, parent balance update and append-only audit; compare_admin_refund_deferred.py",

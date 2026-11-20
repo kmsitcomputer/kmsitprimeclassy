@@ -81,7 +81,7 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
-## agent — `agent` (23/33 in Go)
+## agent — `agent` (24/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -101,7 +101,7 @@ Status legend:
 | PUT | `/api/v1/agent/shipping-tariff` | session | agen | **GO** | pricing validation, Laravel response message, audit properties and resulting tariff row compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/store-profile` | session | agen | **GO** |  |
 | PUT | `/api/v1/agent/store-profile` | session | agen | **GO** | Laravel validation messages, decimal:7 response strings, ignored client ownership fields, activity old/new projection and owner-only scope compared by compare_agentadmin.py |
-| GET | `/api/v1/agent/whatsapp` | session | admin, agen | LARAVEL |  |
+| GET | `/api/v1/agent/whatsapp` | session | admin, agen | **GO** | Scoped Agent device status refresh, masked pairing state and gateway readiness; compare_agent_whatsapp_status.py |
 | POST | `/api/v1/agent/whatsapp/device` | session | admin, agen | LARAVEL |  |
 | GET | `/api/v1/agent/whatsapp/events` | session | admin, agen | **GO** | RBAC, agent_id selector, event ordering and full payload compared with database read-only evidence by compare_whatsapp_events.py |
 | PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **GO** | boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 339 (90.4%) |
-|   of which fully GO | 339 |
+| Served by Go now | 340 (90.7%) |
+|   of which fully GO | 340 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 36 |
+| Still Laravel-only | 35 |
 | Areas fully ported | 38 / 45 |

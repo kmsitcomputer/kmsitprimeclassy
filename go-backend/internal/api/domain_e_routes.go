@@ -90,6 +90,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("GET /api/v1/agent/whatsapp/scope", chain(http.HandlerFunc(s.handleAgentWhatsAppScope), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("GET /api/v1/agent/whatsapp/events", chain(http.HandlerFunc(s.handleAgentWhatsAppEvents), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("GET /api/v1/agent/whatsapp/messages", chain(http.HandlerFunc(s.handleAgentWhatsAppMessages), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
+	s.mux.Handle("GET /api/v1/agent/whatsapp", chain(http.HandlerFunc(s.handleAgentWhatsAppStatus), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("PUT /api/v1/agent/whatsapp/events/{event}", chain(http.HandlerFunc(s.handleAgentWhatsAppEventUpdate), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("DELETE /api/v1/agent/whatsapp/events/{event}/template", chain(http.HandlerFunc(s.handleAgentWhatsAppTemplateReset), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
 	s.mux.Handle("GET /api/v1/agent/whatsapp/test-numbers", chain(http.HandlerFunc(s.handleAgentWhatsAppTestNumbers), RequireAuth, s.RequireAgentLinked, RequireRole(agentAccount)))
