@@ -378,7 +378,7 @@ func inSet(v string, set ...string) bool {
 	return false
 }
 
-// metaCarrierService reads provider_meta's courier/service keys; a non-JSON column degrades to nulls.
+// Shipments is DispatchController::index — dispatchable shipment rows per branch.
 func metaCarrierService(raw string) (any, any) {
 	if raw == "" {
 		return nil, nil
@@ -388,6 +388,50 @@ func metaCarrierService(raw string) (any, any) {
 		return nil, nil
 	}
 	return m["courier"], m["service"]
+}
+
+func (s *Service) Shipments(ctx context.Context, a Actor, q url.Values) (map[string]any, error) {
+	agentID, err := resolveAgentID(ctx, s.database, a, q)
+	if err != nil {
+		return nil, err
+	}
+	eligible, args := dispatchEligibleOrders(q, agentID)
+	perPage := clampInt(q.Get("per_page"), 15, 1, 1<<30)
+	page := clampInt(q.Get("page"), 1, 1, 1<<30)
+	shipWhere := `sh.order_id IN (SELECT o.id FROM orders o WHERE ` + eligible + `)
+		AND sh.delivery_mode = 'standard' AND sh.status = 'pending'
+		AND sh.courier_id IS NULL AND sh.self_delivered_by_user_id IS NULL
+		AND EXISTS(SELECT 1 FROM order_items i WHERE i.shipment_id = sh.id AND i.status <> 'dibatalkan')
+		AND (sh.shipping_provider_code IS NULL OR sh.shipping_provider_code NOT IN ('expedition','pickup'))`
+	sArgs := append([]any(nil), args...)
+	if v := q.Get("delivery_date"); v != "" {
+		shipWhere += ` AND EXISTS(SELECT 1 FROM order_items i WHERE i.shipment_id = sh.id AND DATE(i.requested_delivery_date) = ?)`
+		sArgs = append(sArgs, v)
+	}
+	var total int
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM shipments sh WHERE `+shipWhere, sArgs...).Scan(&total); err != nil {
+		return nil, err
+	}
+	lastPage := (total + perPage - 1) / perPage
+	if lastPage < 1 {
+		lastPage = 1
+	}
+	sArgs = append(sArgs, perPage, (page-1)*perPage)
+	rows, err := s.database.QueryContext(ctx, `SELECT sh.id, sh.order_id, o.order_no, o.recipient_name_snapshot,
+		o.recipient_phone_snapshot, o.address_snapshot, o.delivery_date_snapshot, o.status, sh.created_at
+		FROM shipments sh JOIN orders o ON o.id = sh.order_id WHERE `+shipWhere+` ORDER BY sh.id DESC LIMIT ? OFFSET ?`, sArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	data := make([]map[string]any, 0)
+	for rows.Next() {
+		data = append(data, scanDispatchShipmentRow(rows))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"data": data, "meta": map[string]int{"current_page": page, "last_page": lastPage, "total": total}}, nil
 }
 
 // ---- delivery-refusal write paths (REM-003 reverse custody) ---------------------------------------

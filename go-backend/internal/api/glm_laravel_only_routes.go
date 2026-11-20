@@ -65,6 +65,12 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/delivery-refusals/{refusal}/receive", chain(http.HandlerFunc(s.handleRefusalReceive), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
 	s.mux.Handle("POST /api/v1/delivery-refusals/{refusal}/disposition", chain(http.HandlerFunc(s.handleRefusalDispose), RequireAuth, s.RequireAgentLinked, RequireRole("koordinator-kurir")))
 
+	// Shipment status transitions — route gate super_admin,agen,admin,kurir,sales-kurir-sub,
+	// koordinator-kurir; ShipmentPolicy::updateStatus executor rules live in the service.
+	shipGate := RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")
+	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
+	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/items/{orderItem}/status", chain(http.HandlerFunc(s.handleShipmentItemStatus), RequireAuth, s.RequireAgentLinked, shipGate))
+
 	// Management reports (ReportController) — read-only, role-gated per route below.
 	// Each route mirrors its Laravel route/middleware gate exactly (see backend/routes/api_v1.php).
 	s.mux.Handle("GET /api/v1/reports/cancellations-refunds", chain(http.HandlerFunc(s.handleReportCancellationsRefunds), RequireAuth, s.RequireAgentLinked, RequireRole("admin,agen,keuangan,super_admin")))
@@ -107,6 +113,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/delivery-refusals/{refusal}/hand-back",
 		"POST /api/v1/delivery-refusals/{refusal}/receive",
 		"POST /api/v1/delivery-refusals/{refusal}/disposition",
+		"PATCH /api/v1/shipments/{shipment}/status",
+		"PATCH /api/v1/shipments/{shipment}/items/{orderItem}/status",
 		"GET /api/v1/reports/cancellations-refunds",
 		"GET /api/v1/reports/couriers",
 		"GET /api/v1/reports/couriers-per-agent",
@@ -1080,7 +1088,12 @@ func (s *Server) dispatchService() *dispatch.Service { return dispatch.New(s.dat
 func writeDispatchError(w http.ResponseWriter, r *http.Request, err error) {
 	var de *dispatch.DomainError
 	if errors.As(err, &de) {
-		writeError(w, r, httpx.NewError(de.Status, de.Message))
+		m := de.Message
+		if de.Status == http.StatusNotFound {
+			// Laravel model binding renders ModelNotFoundException as the generic route-not-found message.
+			m = msg(r.Context(), "system.endpoint_not_found")
+		}
+		writeError(w, r, httpx.NewError(de.Status, m))
 		return
 	}
 	writeError(w, r, err)
@@ -1152,6 +1165,65 @@ func (s *Server) handleRefusalDispose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) handleShipmentStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	status := body.Status
+	if status == "" {
+		writeError(w, r, httpx.Validation(map[string][]string{"status": {i18n.ValidationMessage(LocaleFrom(ctx), "required", "status")}}))
+		return
+	}
+	if status != "dikirim" && status != "terkirim" {
+		writeError(w, r, httpx.Validation(map[string][]string{"status": {i18n.ValidationMessage(LocaleFrom(ctx), "in", "status")}}))
+		return
+	}
+	if err := s.dispatchService().TransitionShipment(ctx, dispatchActor(r), id, status); err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, nil, msg(ctx, "order.status_updated"), nil)
+}
+
+func (s *Server) handleShipmentItemStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shipmentID, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	itemID, err := strconv.ParseInt(httpx.PathValue(r, "orderItem"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	status := body.Status
+	if status == "" {
+		writeError(w, r, httpx.Validation(map[string][]string{"status": {i18n.ValidationMessage(LocaleFrom(ctx), "required", "status")}}))
+		return
+	}
+	if status != "dikirim" && status != "terkirim" {
+		writeError(w, r, httpx.Validation(map[string][]string{"status": {i18n.ValidationMessage(LocaleFrom(ctx), "in", "status")}}))
+		return
+	}
+	if err := s.dispatchService().TransitionOrderItem(ctx, dispatchActor(r), shipmentID, itemID, status); err != nil {
+		writeDispatchError(w, r, err)
+		return
+	}
+	httpx.OK(w, nil, msg(ctx, "order.status_updated"), nil)
 }
 
 func (s *Server) handleNotificationsAdminMarkRead(w http.ResponseWriter, r *http.Request) {

@@ -275,6 +275,8 @@ IMPLEMENTED = {
     ("POST", "/api/v1/delivery-refusals/{refusal}/hand-back"): "executor custody transfer, idempotent replay, audit; compared by compare_refusals.py (14/0)",
     ("POST", "/api/v1/delivery-refusals/{refusal}/receive"): "koordinator receipt, state machine handed_back→received, audit; compared by compare_refusals.py (14/0)",
     ("POST", "/api/v1/delivery-refusals/{refusal}/disposition"): "redelivery/return_to_warehouse: shipping→transit reversal, reservation restore, fresh shipment, aggregate resync; compared by compare_refusals.py (14/0)",
+    ("PATCH", "/api/v1/shipments/{shipment}/status"): "bulk diproses→dikirim / dikirim→terkirim transition: executor authorization, refusal guard, handover timestamps, Sub consume, aggregate sync, commissions; compared by compare_shipment_status.py",
+    ("PATCH", "/api/v1/shipments/{shipment}/items/{orderItem}/status"): "per-ITEM work-unit transition (LOCKED courier work-unit model): one item, siblings untouched; compared by compare_shipment_status.py",
 }
 
 
