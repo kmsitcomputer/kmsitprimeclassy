@@ -402,6 +402,91 @@ func (s *Server) handleAdminRefundAttemptFail(w http.ResponseWriter, r *http.Req
 	s.writeRefundAttempt(w, r, attemptID)
 }
 
+func (s *Server) handleAdminRefundAttemptComplete(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	attemptID, ok := pathID(w, r, "attempt")
+	if !ok {
+		return
+	}
+	_, actorID, accessErr := s.refundAttemptAccess(ctx, attemptID, locale)
+	if accessErr != nil {
+		writeError(w, r, accessErr)
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	var proofID *int64
+	var proofType, gatewayReference *string
+	if value, exists := body["proof_media_id"]; exists && string(value) != "null" {
+		var n int64
+		var parsed bool
+		var text string
+		if json.Unmarshal(value, &text) == nil {
+			n, _ = strconv.ParseInt(text, 10, 64)
+			parsed = n > 0
+		} else if json.Unmarshal(value, &n) == nil {
+			parsed = true
+		}
+		if !parsed {
+			fields["proof_media_id"] = []string{i18n.ValidationMessage(locale, "integer", "proof_media_id")}
+		} else {
+			var count int
+			if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM media WHERE id=?`, n).Scan(&count); err != nil {
+				writeError(w, r, err)
+				return
+			}
+			if count == 0 {
+				fields["proof_media_id"] = []string{i18n.ValidationMessage(locale, "exists", "proof_media_id")}
+			} else {
+				proofID = &n
+			}
+		}
+	}
+	for _, field := range []struct {
+		name string
+		max  int
+		dest **string
+	}{{"proof_type", 60, &proofType}, {"gateway_reference", 191, &gatewayReference}} {
+		if value, exists := body[field.name]; exists && string(value) != "null" {
+			var text string
+			if json.Unmarshal(value, &text) != nil {
+				fields[field.name] = []string{i18n.ValidationMessage(locale, "string", field.name)}
+				continue
+			}
+			text = strings.TrimSpace(text)
+			if utf8.RuneCountInString(text) > field.max {
+				fields[field.name] = []string{i18n.ValidationMessage(locale, "max.string", field.name, "max", strconv.Itoa(field.max))}
+			} else if text != "" {
+				*field.dest = &text
+			}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	payoutID, err := service.CompleteRefundAttempt(ctx, attemptID, actorID, proofID, proofType, gatewayReference)
+	if err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	rows, err := queryModelMaps(ctx, s.database.DB, `SELECT * FROM refund_payouts WHERE id=?`, payoutID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		return
+	}
+	httpx.OK(w, rows[0], "Payout tercatat.", nil)
+}
+
 func (s *Server) refundAttemptAccess(ctx context.Context, id int64, locale string) (int64, int64, *httpx.Error) {
 	var orderID int64
 	if err := s.database.QueryRowContext(ctx, `SELECT o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, id).Scan(&orderID); err != nil {

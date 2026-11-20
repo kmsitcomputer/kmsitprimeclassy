@@ -466,6 +466,8 @@ func matchesDomainERoute(method, path string) bool {
 		return false
 	}
 	switch p[0] {
+	case "admin":
+		return method == http.MethodPost && len(p) == 4 && p[1] == "refund-attempts" && p[2] != "" && p[3] == "complete"
 	case "orders":
 		return method == http.MethodPost && len(p) == 3 && p[1] != "" && (p[2] == "assisted-returns" || p[2] == "returns")
 	case "referral":

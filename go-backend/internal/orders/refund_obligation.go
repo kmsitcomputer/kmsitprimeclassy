@@ -295,3 +295,138 @@ func (s *Service) MarkRefundAttemptFailed(ctx context.Context, attemptID, actorI
 	}
 	return nil
 }
+
+func (s *Service) CompleteRefundAttempt(ctx context.Context, attemptID, actorID int64, proofMediaID *int64, proofType, gatewayReference *string) (int64, error) {
+	var obligationID, orderID int64
+	if err := s.Database.QueryRowContext(ctx, `SELECT a.obligation_id,o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, attemptID).Scan(&obligationID, &orderID); err != nil {
+		return 0, err
+	}
+	var payoutID int64
+	changed := false
+	err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var lockedOrder int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&lockedOrder); err != nil {
+			return err
+		}
+		var obligationAmount, attemptAmount, attemptStatus, method, idempotencyKey string
+		var obligationStatus, orderStatus string
+		var existingProof sql.NullInt64
+		var existingProofType, existingGateway sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT status,CAST(amount AS CHAR) FROM refund_obligations WHERE id=? FOR UPDATE`, obligationID).Scan(&obligationStatus, &obligationAmount); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT status,CAST(amount AS CHAR),method,idempotency_key,proof_media_id,proof_type,external_reference FROM refund_attempts WHERE id=? FOR UPDATE`, attemptID).Scan(&attemptStatus, &attemptAmount, &method, &idempotencyKey, &existingProof, &existingProofType, &existingGateway); err != nil {
+			return err
+		}
+		var existing sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM refund_payouts WHERE attempt_id=?`, attemptID).Scan(&existing); err == nil && existing.Valid {
+			payoutID = existing.Int64
+			return nil
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if attemptStatus != "processing" {
+			code := "invalid_attempt_state"
+			if attemptStatus == "created" {
+				code = "attempt_not_initiated"
+			}
+			return &Problem{Status: 422, Message: "Attempt belum diinisiasi; penyelesaian tidak diizinkan.", Errors: map[string]any{"code": code}}
+		}
+		var paidRaw, inFlightRaw sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount),0) FROM refund_payouts WHERE obligation_id=?`, obligationID).Scan(&paidRaw); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount),0) FROM refund_attempts WHERE obligation_id=? AND id<>? AND status IN ('created','processing','unknown')`, obligationID, attemptID).Scan(&inFlightRaw); err != nil {
+			return err
+		}
+		remaining := toCents(parseDecimalString(obligationAmount)) - toCents(parseDecimalString(paidRaw.String)) - toCents(parseDecimalString(inFlightRaw.String))
+		amount := toCents(parseDecimalString(attemptAmount))
+		if amount > remaining {
+			return &Problem{Status: 422, Message: "Nominal payout melebihi sisa obligation setelah self-exclusion.", Errors: map[string]any{"code": "attempt_exceeds_remaining", "remaining_cents": remaining}}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE refund_attempts SET status='succeeded',finished_at=UTC_TIMESTAMP(6),processed_by=?,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='processing'`, actorID, attemptID); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM orders WHERE id=?`, orderID).Scan(&orderStatus); err != nil {
+			return err
+		}
+		recordedOnCancelled := obligationStatus == "cancelled" || orderStatus == "dibatalkan"
+		if proofMediaID == nil && existingProof.Valid {
+			v := existingProof.Int64
+			proofMediaID = &v
+		}
+		if proofType == nil && existingProofType.Valid {
+			v := existingProofType.String
+			proofType = &v
+		}
+		if gatewayReference == nil && existingGateway.Valid {
+			v := existingGateway.String
+			gatewayReference = &v
+		}
+		verification := "proven"
+		payoutNo, err := ulid()
+		if err != nil {
+			return err
+		}
+		var proofID any
+		if proofMediaID != nil {
+			proofID = *proofMediaID
+		}
+		var proofTypeValue, gatewayValue any
+		if proofType != nil {
+			proofTypeValue = *proofType
+		}
+		if gatewayReference != nil {
+			gatewayValue = *gatewayReference
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO refund_payouts(payout_no,obligation_id,order_id,attempt_id,payout_key,amount,method,paid_at,proof_media_id,proof_type,gateway_reference,verification_status,affects_paid_amount,paid_effect_applied_at,recorded_on_cancelled_obligation,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,UTC_TIMESTAMP(6),?,?,?,'proven',1,UTC_TIMESTAMP(6),?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, "RP-"+payoutNo, obligationID, orderID, attemptID, idempotencyKey, money.String(float64(amount)/100), method, proofID, proofTypeValue, gatewayValue, recordedOnCancelled, actorID)
+		if err != nil {
+			return err
+		}
+		payoutID, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		var paidRawOrder, totalRaw string
+		if err := tx.QueryRowContext(ctx, `SELECT CAST(paid_amount AS CHAR),CAST(total_amount AS CHAR) FROM orders WHERE id=?`, orderID).Scan(&paidRawOrder, &totalRaw); err != nil {
+			return err
+		}
+		newPaid := max64(0, toCents(parseDecimalString(paidRawOrder))-amount)
+		remainingOrder := max64(0, toCents(parseDecimalString(totalRaw))-newPaid)
+		paymentStatus := "unpaid"
+		if remainingOrder == 0 {
+			paymentStatus = "paid"
+		} else if newPaid > 0 {
+			paymentStatus = "partially_paid"
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE orders SET paid_amount=?,remaining_amount=?,payment_status=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, money.String(float64(newPaid)/100), money.String(float64(remainingOrder)/100), paymentStatus, orderID); err != nil {
+			return err
+		}
+		if err := s.syncInvoiceAfterChange(ctx, tx, orderID, actorID, "refund_processed"); err != nil {
+			return err
+		}
+		if err := s.refreshRefundObligation(ctx, tx, obligationID); err != nil {
+			return err
+		}
+		if err := refundEvent(ctx, tx, orderID, obligationID, attemptID, payoutID, "payout.recorded", "payout:"+fmt.Sprint(attemptID), actorID, nil, map[string]any{"amount_cents": amount, "verification_status": verification, "recorded_on_cancelled_obligation": recordedOnCancelled}); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if changed {
+		var status string
+		if err := s.Database.QueryRowContext(ctx, `SELECT status FROM orders WHERE id=?`, orderID).Scan(&status); err != nil {
+			return 0, err
+		}
+		if status == "dibatalkan" {
+			if err := s.FinalizeCancellation(ctx, orderID, actorID); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return payoutID, nil
+}
