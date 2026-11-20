@@ -28,31 +28,38 @@ Status: Phase 0–4 DONE, Phase 5a (3 PARTIAL closed) DONE at commit `5948405`. 
    - referral preview 422: upstream defect — `'referral'` key declared TWICE in lang/{en,id}/messages.php (L98/L394, L109/L405) so the second array silently wins and `messages.referral.invalid_code` / `.code_not_found` never resolve; Laravel emits RAW KEYS in every locale (tinker-verified). Go reproduces the raw-key contract (documented in-code; consider docs/21b entry).
 8. Reclassified 13 PARTIAL → GO. Remaining GAPS (3): register (welcome e-mail/WA queue bridge), sub-stock/my (`reserved` from order_items), warehouse/opnames (pending_catalog_change publication).
 
-## EXACT NEXT ACTION (updated 2026-11-20, HEAD effd103)
+## EXACT NEXT ACTION (updated 2026-11-20, HEAD d49a1f5)
 
-- Matrix: **261 GO / 0 PARTIAL / 114 Laravel-only** (375 routes).
-- Commits this session: 28a03de (handover+receipt 17/17), 4aa51e1 (delivery-verifications
-  20/20), 08ad48f (dispatch writes 19/19), 5ca162e (return courier assign 15/15),
-  9329df4 (consent 8 routes 26/26), effd103 (item refuse 15/15 + refusals regression 14/14).
-- Domain status: Shipping/dispatch/courier/returns COMPLETE (19 routes incl. refuse);
-  consent chain COMPLETE (8 routes).
-- Additional parity facts:
-  - Refusal executor denial split: policy authorize() renders "This action is unauthorized."
-    (non-executor koordinator-kurir), while the SERVICE executor check renders
-    "Order ini sudah ditugaskan ke kurir lain." (office roles the policy let through).
-  - already_open message: "Sudah ada penolakan terbuka untuk item ini."
-- NEXT (orders/consent domain continues, ~29 routes): kurir read surfaces
-  (GET /kurir/orders, /kurir/reports/delivered, /kurir/returns, /kurir/returns/pickup-today),
-  kurir writes (POST /kurir/returns/{item}/pickup, /kurir/returns/{item}/confirm),
-  order reads (/orders/{order}/items, /orders/{order}/invoice, /orders/{order}/returns,
-  /orders/{order}/refund-recipient ×2, /orders/{order}/assisted-returns),
-  CRM order link (POST /crm/customers/{customer}/orders), warehouse surfaces
-  (GET /warehouse/orders/diproses, /warehouse/orders/{order}/stock-request, /warehouse/returns,
-  POST /warehouse/returns/{item}/inspect, /warehouse/returns/{item}/finalize),
-  order-item receipts (GET/POST /order-items/{item}/receipts),
-  POST /return-items/{returnItem}/receipt-allocations.
-  Then: auth google/forgot (4), dashboard (2), catalog export/imports (3), admin ops (~45),
-  Google Sheets (7), Installer (7), Profile (5).
-- Harness rules unchanged: ONE runner at a time; restart pc_go_imp010 after Go changes;
-  scrub TS + ids; use editor tool for SQL/code with quotes (heredocs break); db() returns
+- Matrix: **271 GO / 0 PARTIAL / 104 Laravel-only** (375 routes).
+- Commits this session: f78d2d0 (kurir dashboard 6 routes, compare_kurir 17/17),
+  0f21b3e (refund-recipient ×2, compare_recipient 13/13), d49a1f5 (order-item
+  receipts ×2, compare_item_receipts 16/16).
+- Domain status: shipping/dispatch/courier COMPLETE + consent COMPLETE + kurir
+  dashboard COMPLETE + refund-recipient + item receipts done.
+- Key facts learned this stretch:
+  - internal/crm package ALREADY EXISTS (read surfaces, Actor with AgentID *int64) —
+    refund-recipient was added as RecipientActor alongside it.
+  - CourierOrderResource always includes recipient/lat/lng fields (detail_available
+    stays true — assignment-only queue); pickup response pickup_scheduled_for is a
+    FULL datetime, confirm response omits it entirely.
+  - crm_customers has customer_type (not stage/status); refund_recipient_evidences
+    supersedes chain FK — delete children first.
+  - Model-binding 404 ("Endpoint tidak ditemukan.") must precede policy denials on
+    GET index surfaces when the row is missing.
+  - Laravel date_format:Y-m-d message is "<attr> tidak sesuai format Y-m-d.".
+- NEXT (104 remaining): the big orders-domain writes — POST /orders (already GO),
+  POST /crm/customers/{customer}/orders (placeOrder), POST /orders/{order}/items
+  (addItem), POST /orders/{order}/assisted-returns (initiateReturn),
+  POST /orders/{order}/returns (ReturnController::store),
+  POST /return-items/{returnItem}/receipt-allocations, GET /orders/{order}/invoice
+  (PDF — special handling), warehouse surfaces (GET /warehouse/orders/diproses,
+  /warehouse/orders/{order}/stock-request, /warehouse/returns, POST
+  /warehouse/returns/{item}/inspect, /warehouse/returns/{item}/finalize),
+  then auth google/forgot (4), dashboard (2: /dashboard/summary, /dashboard/kpis),
+  catalog export/imports (3), admin ops (~45), Google Sheets (7), Installer (7),
+  Profile (5), bestsellers (1).
+- NOTE: the Go _parity inventory endpoint lags the matrix generator (counts internal
+  inventory only) — the matrix is canonical.
+- Harness rules unchanged: ONE runner at a time; restart pc_go_imp010 after Go
+  changes; scrub TS + ids; editor tool for SQL/code with quotes; db() returns
   STRING values — cast ids to int in JSON bodies.
