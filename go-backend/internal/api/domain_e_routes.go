@@ -11,6 +11,7 @@ import (
 // the shared router file remains untouched while parallel domain work is in flight.
 func (s *Server) registerDomainERoutes() {
 	s.mux.HandleFunc("GET /api/v1/bestsellers", s.handleBestsellers)
+	s.mux.Handle("GET /api/v1/catalog/export", chain(http.HandlerFunc(s.handleCatalogExport), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("GET /api/v1/dashboard/kpis", chain(http.HandlerFunc(s.handleDashboardKPIs), RequireAuth, s.RequireAgentLinked, RequireRole("agen,korsal,sales,sales-kurir-sub,gudang,kurir")))
 	s.mux.Handle("GET /api/v1/dashboard/summary", chain(http.HandlerFunc(s.handleReportDashboardSummary), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin,korsal,sales,sales-kurir-sub")))
 	s.mux.Handle("GET /api/v1/invoice/config", chain(http.HandlerFunc(s.handleInvoiceConfigShow), RequireAuth, s.RequireAgentLinked, RequireRole("agen,super_admin")))
