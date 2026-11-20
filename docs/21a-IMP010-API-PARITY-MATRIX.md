@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (55/59 in Go)
+## Admin operations — `admin` (56/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -65,7 +65,7 @@ Status legend:
 | POST | `/api/v1/admin/refund-obligations/{obligation}/attempts` | session | agen, keuangan, super_admin | **GO** | Finance-only attempt creation with CRM recipient evidence guard, Order/obligation locking, scoped key replay/collision protection, reservation arithmetic and durable attempt-created event; compare_admin_refund_attempt_create.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/materialize` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/request` | session | agen, keuangan, super_admin | LARAVEL |  |
-| POST | `/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve` | session | agen, keuangan, super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve` | session | agen, keuangan, super_admin | **GO** | Finance/Owner exits A/B with historical-owner enforcement, evidence, idempotent no-op, state audit and branch authorization; compare_admin_refund_needs_verification.py |
 | GET | `/api/v1/admin/regions/export` | session | super_admin | **GO** | Super Admin four-level joined reference export with Laravel CSV quoting, filename and UTF-8 content type; compare_admin_regions_csv.py |
 | POST | `/api/v1/admin/regions/import` | session | super_admin | **GO** | Super Admin multipart CSV import, validated hierarchy rows, one transaction, exact upsert counts and audit; compare_admin_regions_csv.py |
 | PATCH | `/api/v1/admin/return-items/{item}/refund` | session | keuangan, super_admin | **GO** | Keuangan/Super Admin and same-Agent gates, approved/full-paid/CRM-recipient checks, idempotent legacy refund attempt and payout, paid balance/invoice reversal, refund completion, Sales-only fee adjustment and audit; compare_return_item_refund.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 327 (87.2%) |
-|   of which fully GO | 327 |
+| Served by Go now | 328 (87.5%) |
+|   of which fully GO | 328 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 48 |
+| Still Laravel-only | 47 |
 | Areas fully ported | 34 / 45 |

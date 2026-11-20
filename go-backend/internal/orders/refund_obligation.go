@@ -430,3 +430,60 @@ func (s *Service) CompleteRefundAttempt(ctx context.Context, attemptID, actorID 
 	}
 	return payoutID, nil
 }
+
+func (s *Service) ResolveRefundNeedsVerification(ctx context.Context, obligationID, actorID int64, exit, evidence string, reason *string) error {
+	if strings.TrimSpace(evidence) == "" {
+		return &Problem{Status: 422, Message: "Resolusi needs_verification memerlukan bukti.", Errors: map[string]any{"code": "reconciliation_evidence_required"}}
+	}
+	if exit != "A" && exit != "B" {
+		return &Problem{Status: 422, Message: "Exit needs_verification tidak valid.", Errors: map[string]any{"code": "invalid_needs_verification_exit"}}
+	}
+	return s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderID int64
+		var status, provenance, source string
+		if err := tx.QueryRowContext(ctx, `SELECT order_id,status,provenance,source_type FROM refund_obligations WHERE id=? FOR UPDATE`, obligationID).Scan(&orderID, &status, &provenance, &source); err != nil {
+			return err
+		}
+		var agentID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&agentID); err != nil {
+			return err
+		}
+		var role string
+		var actorAgent sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT roles.slug,users.agent_id FROM users JOIN roles ON roles.id=users.role_id WHERE users.id=?`, actorID).Scan(&role, &actorAgent); err != nil {
+			return err
+		}
+		if role != "super_admin" && (!actorAgent.Valid || !agentID.Valid || actorAgent.Int64 != agentID.Int64) {
+			return &Problem{Status: 404, Message: s.Messages("system.unauthorized_action")}
+		}
+		if status != "needs_verification" {
+			return nil
+		}
+		historical := provenance == "legacy" || provenance == "provisional_legacy" || source == "legacy" || source == "manual"
+		if exit == "A" {
+			if role != "super_admin" && role != "keuangan" {
+				return &Problem{Status: 403, Message: "Hanya Keuangan yang dapat melakukan aksi ini.", Errors: map[string]any{"code": "refund_role_forbidden"}}
+			}
+			if historical && role != "super_admin" && role != "agen" {
+				return &Problem{Status: 403, Message: "Aksi ini memerlukan persetujuan Owner/Agent.", Errors: map[string]any{"code": "refund_owner_approval_required"}}
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE refund_obligations SET status='approved',approved_by=?,approved_at=UTC_TIMESTAMP(6),approval_source='manual',reason=COALESCE(?,reason),updated_at=UTC_TIMESTAMP(6) WHERE id=?`, actorID, reason, obligationID)
+			if err != nil {
+				return err
+			}
+		} else {
+			if role != "super_admin" && role != "agen" {
+				return &Problem{Status: 403, Message: "Aksi ini memerlukan persetujuan Owner/Agent.", Errors: map[string]any{"code": "refund_owner_approval_required"}}
+			}
+			r := "needs_verification_exit_b"
+			if reason != nil {
+				r = *reason
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE refund_obligations SET status='cancelled',cancelled_at=UTC_TIMESTAMP(6),cancel_reason=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, r, obligationID); err != nil {
+				return err
+			}
+		}
+		why := reason
+		return refundEvent(ctx, tx, orderID, obligationID, 0, 0, "needs_verification.resolved", "nv_resolved:"+fmt.Sprint(obligationID), actorID, why, map[string]any{"exit": exit, "evidence": evidence, "historical": historical})
+	})
+}

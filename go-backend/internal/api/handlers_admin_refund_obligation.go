@@ -487,6 +487,71 @@ func (s *Server) handleAdminRefundAttemptComplete(w http.ResponseWriter, r *http
 	httpx.OK(w, rows[0], "Payout tercatat.", nil)
 }
 
+func (s *Server) handleAdminRefundNeedsVerificationResolve(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	id, ok := pathID(w, r, "obligation")
+	if !ok {
+		return
+	}
+	var orderID int64
+	if err := s.database.QueryRowContext(ctx, `SELECT order_id FROM refund_obligations WHERE id=?`, id).Scan(&orderID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	actor := UserFrom(ctx)
+	var agentID sql.NullInt64
+	if err := s.database.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=?`, orderID).Scan(&agentID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if actor.Role != "super_admin" && (actor.AgentID == nil || !agentID.Valid || *actor.AgentID != agentID.Int64) {
+		writeError(w, r, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "system.unauthorized_action")})
+		return
+	}
+	var body struct {
+		Exit     string  `json:"exit"`
+		Evidence string  `json:"evidence"`
+		Reason   *string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	if body.Exit != "A" && body.Exit != "B" {
+		fields["exit"] = []string{i18n.ValidationMessage(locale, "in", "exit", "values", "A, B")}
+	}
+	if strings.TrimSpace(body.Evidence) == "" {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "required", "evidence")}
+	} else if n := utf8.RuneCountInString(body.Evidence); n < 3 {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "min.string", "evidence", "min", "3")}
+	} else if n > 2000 {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "max.string", "evidence", "max", "2000")}
+	}
+	if body.Reason != nil && utf8.RuneCountInString(*body.Reason) > 255 {
+		fields["reason"] = []string{i18n.ValidationMessage(locale, "max.string", "reason", "max", "255")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	if err := service.ResolveRefundNeedsVerification(ctx, id, actor.ID, body.Exit, body.Evidence, body.Reason); err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	rows, err := queryModelMaps(ctx, s.database.DB, `SELECT * FROM refund_obligations WHERE id=?`, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		return
+	}
+	httpx.OK(w, rows[0], "OK", nil)
+}
+
 func (s *Server) refundAttemptAccess(ctx context.Context, id int64, locale string) (int64, int64, *httpx.Error) {
 	var orderID int64
 	if err := s.database.QueryRowContext(ctx, `SELECT o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, id).Scan(&orderID); err != nil {
