@@ -3,6 +3,7 @@ package orders
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -94,4 +95,71 @@ func (s *Service) MarkAdjustmentRefundStatus(ctx context.Context, adjustmentID, 
 		_, err = tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id,subject_type,subject_id,event,description,properties,ip_address,user_agent,created_at) VALUES (?,'App\\Models\\OrderItemAdjustment',?,'order_item_adjustment.refund_status_changed',NULL,?,NULLIF(?,''),NULLIF(?,''),UTC_TIMESTAMP(6))`, actorID, adjustmentID, props, s.IP, s.UserAgent)
 		return err
 	})
+}
+
+func (s *Service) ReinstateReduction(ctx context.Context, reductionID, actorID int64, evidence string, reason *string) error {
+	var orderID int64
+	if err := s.Database.QueryRowContext(ctx, `SELECT order_id FROM order_sales_reductions WHERE id=?`, reductionID).Scan(&orderID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &Problem{Status: 404, Message: s.Messages("system.endpoint_not_found")}
+		}
+		return err
+	}
+	err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var agentID sql.NullInt64
+		var ownerRole string
+		var actorAgentID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&agentID); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT role.slug,users.agent_id FROM users JOIN roles role ON role.id=users.role_id WHERE users.id=?`, actorID).Scan(&ownerRole, &actorAgentID); err != nil {
+			return err
+		}
+		var amount string
+		var reinstated sql.NullTime
+		if err := tx.QueryRowContext(ctx, `SELECT CAST(amount AS CHAR),reinstated_at FROM order_sales_reductions WHERE id=? FOR UPDATE`, reductionID).Scan(&amount, &reinstated); err != nil {
+			return err
+		}
+		if ownerRole != "super_admin" && (!actorAgentID.Valid || !agentID.Valid || actorAgentID.Int64 != agentID.Int64) {
+			return &Problem{Status: 404, Message: s.Messages("system.unauthorized_action")}
+		}
+		if ownerRole != "super_admin" && ownerRole != "agen" {
+			return &Problem{Status: 403, Message: "Aksi ini memerlukan persetujuan Owner/Agent.", Errors: map[string]any{"code": "refund_owner_approval_required"}}
+		}
+		if reinstated.Valid {
+			return nil
+		}
+		var inFlight int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM refund_attempts WHERE obligation_id IN (SELECT id FROM refund_obligations WHERE order_id=?) AND status IN ('created','processing','unknown')`, orderID).Scan(&inFlight); err != nil {
+			return err
+		}
+		if inFlight > 0 {
+			return &Problem{Status: 422, Message: "Reinstatement diblokir oleh attempt yang masih berjalan.", Errors: map[string]any{"code": "reinstatement_blocked_by_inflight_attempt"}}
+		}
+		metrics, err := s.metricsForOrder(ctx, tx, orderID)
+		if err != nil {
+			return err
+		}
+		amountCents := toCents(parseDecimalString(amount))
+		billableAfter := metrics.BillableCents + amountCents
+		available := metrics.PaidCents - billableAfter
+		if metrics.GrossCents < metrics.AppliedCents+metrics.ReservedCents {
+			return &Problem{Status: 422, Message: "Reinstatement melanggar batas A + R_r ≤ G.", Errors: map[string]any{"code": "reinstatement_exceeds_bounds"}}
+		}
+		if billableAfter <= metrics.PaidCents && metrics.ReservedCents > max64(0, available) {
+			return &Problem{Status: 422, Message: "Reinstatement melanggar batas R_r ≤ P − B.", Errors: map[string]any{"code": "reinstatement_exceeds_bounds"}}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE order_sales_reductions SET reinstated_at=UTC_TIMESTAMP(6),reinstated_by=?,reinstatement_reason=?,reinstatement_reconciliation_ref=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, actorID, reason, evidence, reductionID); err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{"amount_cents": amountCents, "evidence": evidence})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO refund_ledger_events(order_id,event_type,event_key,actor_type,actor_id,reason,payload,occurred_at,created_at,updated_at) VALUES (?,'reinstatement.applied',?,'user',?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, orderID, fmt.Sprintf("reinstatement:%d", reductionID), actorID, reason, string(payload)); err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }

@@ -20,6 +20,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/admin/integrations/whatsapp/test-connection", chain(http.HandlerFunc(s.handleAdminWhatsAppTestConnection), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/admin/integrations/whatsapp/test-message", chain(http.HandlerFunc(s.handleAdminWhatsAppTestMessage), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PATCH /api/v1/admin/order-refunds/{adjustment}/status", chain(http.HandlerFunc(s.handleAdminOrderRefundStatus), RequireAuth, s.RequireAgentLinked, RequireRole("keuangan,super_admin")))
+	s.mux.Handle("POST /api/v1/admin/order-sales-reductions/{reduction}/reinstate", chain(http.HandlerFunc(s.handleAdminOrderSalesReductionReinstate), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("GET /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsShow), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("PUT /api/v1/admin/integrations/smtp", chain(http.HandlerFunc(s.handleAdminSMTPSettingsUpdate), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin")))
 	s.mux.Handle("POST /api/v1/admin/integrations/smtp/test-connection", chain(http.HandlerFunc(s.handleAdminSMTPTestConnection), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin"), s.Throttle(6, time.Minute)))
