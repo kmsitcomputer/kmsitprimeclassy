@@ -487,3 +487,38 @@ func (s *Service) ResolveRefundNeedsVerification(ctx context.Context, obligation
 		return refundEvent(ctx, tx, orderID, obligationID, 0, 0, "needs_verification.resolved", "nv_resolved:"+fmt.Sprint(obligationID), actorID, why, map[string]any{"exit": exit, "evidence": evidence, "historical": historical})
 	})
 }
+
+func (s *Service) RequestDeferredMaterialization(ctx context.Context, obligationID, amountCents, actorID int64, clientKey string) error {
+	if amountCents <= 0 {
+		return &Problem{Status: 422, Message: "Nominal materialisasi harus lebih dari 0.", Errors: map[string]any{"code": "invalid_materialization_amount"}}
+	}
+	return s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderID int64
+		if err := tx.QueryRowContext(ctx, `SELECT order_id FROM refund_obligations WHERE id=? FOR UPDATE`, obligationID).Scan(&orderID); err != nil {
+			return err
+		}
+		var lockedOrder int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&lockedOrder); err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRowContext(ctx, `SELECT roles.slug FROM users JOIN roles ON roles.id=users.role_id WHERE users.id=?`, actorID).Scan(&role); err != nil {
+			return err
+		}
+		if role != "super_admin" && role != "keuangan" {
+			return &Problem{Status: 403, Message: "Hanya Keuangan yang dapat melakukan aksi ini.", Errors: map[string]any{"code": "refund_role_forbidden"}}
+		}
+		eventKey := "deferred_request:" + fmt.Sprint(obligationID) + ":" + clientKey
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM refund_ledger_events WHERE event_key=? LIMIT 1`, eventKey).Scan(&exists); err == nil {
+			return nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var deferredRaw string
+		if err := tx.QueryRowContext(ctx, `SELECT CAST(deferred_remaining AS CHAR) FROM refund_obligations WHERE id=?`, obligationID).Scan(&deferredRaw); err != nil {
+			return err
+		}
+		return refundEvent(ctx, tx, orderID, obligationID, 0, 0, "deferred.materialization_requested", eventKey, actorID, nil, map[string]any{"amount_cents": amountCents, "deferred_remaining_cents": toCents(parseDecimalString(deferredRaw))})
+	})
+}

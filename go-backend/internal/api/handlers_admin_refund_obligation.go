@@ -552,6 +552,70 @@ func (s *Server) handleAdminRefundNeedsVerificationResolve(w http.ResponseWriter
 	httpx.OK(w, rows[0], "OK", nil)
 }
 
+func (s *Server) handleAdminDeferredMaterializationRequest(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	id, ok := pathID(w, r, "obligation")
+	if !ok {
+		return
+	}
+	var orderID int64
+	if err := s.database.QueryRowContext(ctx, `SELECT order_id FROM refund_obligations WHERE id=?`, id).Scan(&orderID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	actor := UserFrom(ctx)
+	var agentID sql.NullInt64
+	if err := s.database.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=?`, orderID).Scan(&agentID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if actor.Role != "super_admin" && (actor.AgentID == nil || !agentID.Valid || *actor.AgentID != agentID.Int64) {
+		writeError(w, r, &httpx.Error{Status: 404, Message: i18n.Translate(locale, "system.unauthorized_action")})
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	raw, exists := body["amount_cents"]
+	var amount int64
+	if !exists || string(raw) == "null" || strings.TrimSpace(string(raw)) == "\"\"" {
+		fields["amount_cents"] = []string{i18n.ValidationMessage(locale, "required", "amount_cents")}
+	} else {
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			n, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+			if err != nil {
+				fields["amount_cents"] = []string{i18n.ValidationMessage(locale, "integer", "amount_cents")}
+			} else {
+				amount = n
+			}
+		} else if err := json.Unmarshal(raw, &amount); err != nil {
+			fields["amount_cents"] = []string{i18n.ValidationMessage(locale, "integer", "amount_cents")}
+		}
+		if len(fields) == 0 && amount < 1 {
+			fields["amount_cents"] = []string{i18n.ValidationMessage(locale, "min.numeric", "amount_cents", "min", "1")}
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		writeError(w, r, &httpx.Error{Status: 422, Message: "Header Idempotency-Key wajib untuk aksi ini.", ErrorsAny: map[string]any{"code": "idempotency_key_required"}})
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	if err := service.RequestDeferredMaterialization(ctx, id, amount, actor.ID, "deferred-request:"+key); err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	httpx.OK(w, nil, "Permintaan materialisasi dicatat.", nil)
+}
+
 func (s *Server) refundAttemptAccess(ctx context.Context, id int64, locale string) (int64, int64, *httpx.Error) {
 	var orderID int64
 	if err := s.database.QueryRowContext(ctx, `SELECT o.order_id FROM refund_attempts a JOIN refund_obligations o ON o.id=a.obligation_id WHERE a.id=?`, id).Scan(&orderID); err != nil {
