@@ -22,6 +22,7 @@ func (s *Server) registerCMSProfileRoutes() {
 	s.mux.HandleFunc("GET /api/v1/referral/{code}", s.handleReferralPreview)
 	s.mux.Handle("PATCH /api/v1/profile", chain(http.HandlerFunc(s.handleProfileUpdate), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("GET /api/v1/profile/email/verification", chain(http.HandlerFunc(s.handleEmailVerificationState), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("GET /api/v1/profile/whatsapp", chain(http.HandlerFunc(s.handleProfileWhatsAppState), RequireAuth))
 	s.mux.Handle("PATCH /api/v1/profile/referral-code", chain(http.HandlerFunc(s.handleProfileReferralCodeUpdate),
 		RequireAuth, s.RequireAgentLinked, RequireRole("agen,korsal,sales,sales-kurir-sub")))
 	s.mux.Handle("POST /api/v1/profile/referral-code/regenerate", chain(http.HandlerFunc(s.handleProfileReferralCodeRegenerate),

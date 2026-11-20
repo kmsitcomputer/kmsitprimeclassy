@@ -419,7 +419,7 @@ Status legend:
 | PUT | `/api/v1/products/{product}/variations/{variation}/fees` | session | agen, super_admin | **GO** | variation fee validation, authorization and persisted fee rows compared by compare_products.py |
 | GET | `/api/v1/products/{slug}` | public | — | **GO** | anonymous and authenticated Agent/Sub stock projections, source authorization, and missing slug compared by compare_products.py |
 
-## Profile — `profile` (6/11 in Go)
+## Profile — `profile` (7/11 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -431,7 +431,7 @@ Status legend:
 | DELETE | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **GO** | response, cleared code, and old-only audit projection compared by compare_profile_referral.py |
 | PATCH | `/api/v1/profile/referral-code` | session | agen, korsal, sales, sales-kurir-sub | **GO** | format/required/max/unique validation, success projection, self-scope and audit compared by compare_profile_referral.py |
 | POST | `/api/v1/profile/referral-code/regenerate` | session | agen, korsal, sales, sales-kurir-sub | **GO** | generated role prefix/code format, response, DB update and audit compared by compare_profile_referral.py |
-| GET | `/api/v1/profile/whatsapp` | session | — | LARAVEL |  |
+| GET | `/api/v1/profile/whatsapp` | session | — | **GO** | Self-only masked phone, derived verification proof, active challenge and WhatsApp OTP delivery availability; compare_profile_whatsapp.py |
 | POST | `/api/v1/profile/whatsapp/verification` | session | — | LARAVEL |  |
 | POST | `/api/v1/profile/whatsapp/verification/{challenge}/confirm` | session | — | LARAVEL |  |
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 338 (90.1%) |
-|   of which fully GO | 338 |
+| Served by Go now | 339 (90.4%) |
+|   of which fully GO | 339 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 37 |
+| Still Laravel-only | 36 |
 | Areas fully ported | 38 / 45 |

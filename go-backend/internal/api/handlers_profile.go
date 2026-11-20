@@ -1,11 +1,14 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/kmsitcomputer/primeclassy-go/internal/agentadmin"
+	"github.com/kmsitcomputer/primeclassy-go/internal/cryptox"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/profile"
@@ -173,6 +176,93 @@ func (s *Server) handleEmailVerificationState(w http.ResponseWriter, r *http.Req
 		return
 	}
 	httpx.OK(w, state, "OK", nil)
+}
+
+func (s *Server) handleProfileWhatsAppState(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	var phone sql.NullString
+	if err := s.database.QueryRowContext(ctx, `SELECT phone FROM users WHERE id=? AND deleted_at IS NULL`, user.ID).Scan(&phone); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	msisdn := ""
+	if phone.Valid {
+		msisdn = agentadmin.NormalizeWhatsAppNumber(phone.String)
+	}
+	var verified, pending bool
+	if msisdn != "" {
+		if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identity_otp_challenges WHERE subject_user_id=? AND purpose='whatsapp_number' AND sent_to_email=? AND consumed_at IS NOT NULL AND invalidated_at IS NULL)`, user.ID, "wa:"+msisdn).Scan(&verified); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identity_otp_challenges WHERE subject_user_id=? AND purpose='whatsapp_number' AND consumed_at IS NULL AND invalidated_at IS NULL AND expires_at>UTC_TIMESTAMP())`, user.ID).Scan(&pending); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	settings := map[string]string{}
+	rows, err := s.database.QueryContext(ctx, `SELECT `+"`key`"+`,value FROM settings WHERE `+"`group`"+`='integration.whatsapp' AND `+"`key`"+` IN ('wa.enabled','wa.base_url','wa.username','wa.password','wa.otp.enabled')`)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	for rows.Next() {
+		var k, v string
+		if err = rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			writeError(w, r, err)
+			return
+		}
+		settings[k] = v
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		writeError(w, r, err)
+		return
+	}
+	rows.Close()
+	password := ""
+	if cipher := settings["wa.password"]; cipher != "" {
+		password, _ = cryptox.DecryptString(s.cfg.AppKey, cipher)
+	}
+	configured := truthy(settings["wa.enabled"]) && settings["wa.base_url"] != "" && settings["wa.username"] != "" && password != ""
+	var agentID any = user.ID
+	if user.AgentID != nil {
+		agentID = *user.AgentID
+	}
+	var paired, messageTable, deviceTable bool
+	if err = s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='whatsapp_messages')`).Scan(&messageTable); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err = s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='agent_whatsapp_devices')`).Scan(&deviceTable); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if deviceTable {
+		if err = s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_whatsapp_devices WHERE agent_id=? AND paired_at IS NOT NULL)`, agentID).Scan(&paired); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	var masked any
+	if msisdn != "" {
+		masked = agentadmin.MaskWhatsAppNumber(msisdn)
+	}
+	httpx.OK(w, map[string]any{"has_phone": msisdn != "", "phone_masked": masked, "verified": verified, "channel_available": messageTable && configured && truthy(settings["wa.otp.enabled"]) && paired, "pending": pending}, "OK", nil)
+}
+
+func truthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func writeProfileReferralError(w http.ResponseWriter, r *http.Request, err error) {

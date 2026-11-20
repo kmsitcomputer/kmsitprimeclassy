@@ -449,6 +449,7 @@ func matchesDomainERoute(method, path string) bool {
 		"POST /api/v1/agent/whatsapp/test-numbers":      true,
 		"PATCH /api/v1/profile":                         true,
 		"GET /api/v1/profile/email/verification":        true,
+		"GET /api/v1/profile/whatsapp":                  true,
 		"PATCH /api/v1/profile/referral-code":           true,
 		"POST /api/v1/profile/referral-code/regenerate": true,
 		"DELETE /api/v1/profile/referral-code":          true,
