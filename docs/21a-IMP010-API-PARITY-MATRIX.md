@@ -81,7 +81,7 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
-## agent — `agent` (25/33 in Go)
+## agent — `agent` (31/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -107,17 +107,17 @@ Status legend:
 | PUT | `/api/v1/agent/whatsapp/events/{event}` | session | admin, agen | **GO** | boolean/string/max validation, template token validation, role and agent scope, persisted settings and AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_updates.py |
 | POST | `/api/v1/agent/whatsapp/events/{event}/preview` | session | admin, agen | **GO** | Agen/Admin branch-authorized template preview with shared validation and sample rendering; compare_admin_whatsapp_preview.py |
 | DELETE | `/api/v1/agent/whatsapp/events/{event}/template` | session | admin, agen | **GO** | idempotent reset, no-op persistence, event validation, branch scope and conditional AgentWhatsAppEventSetting audit compared by compare_whatsapp_event_resets.py |
-| POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | LARAVEL |  |
+| POST | `/api/v1/agent/whatsapp/logout` | session | admin, agen | **GO** | Agent-owned slot logout, persistent slot state transition and actor/target audit; compare_agent_whatsapp_status.py |
 | GET | `/api/v1/agent/whatsapp/messages` | session | admin, agen | **GO** | One branch Agent's latest 50 delivery rows, masked destination and no message body; compare_agent_whatsapp_messages.py |
-| POST | `/api/v1/agent/whatsapp/pair/code` | session | admin, agen | LARAVEL |  |
-| POST | `/api/v1/agent/whatsapp/pair/qr` | session | admin, agen | LARAVEL |  |
-| POST | `/api/v1/agent/whatsapp/reconnect` | session | admin, agen | LARAVEL |  |
-| POST | `/api/v1/agent/whatsapp/replace` | session | admin, agen | LARAVEL |  |
+| POST | `/api/v1/agent/whatsapp/pair/code` | session | admin, agen | **GO** | Validated MSISDN pairing code request, pairing state and audit without storing the full number; compare_agent_whatsapp_status.py |
+| POST | `/api/v1/agent/whatsapp/pair/qr` | session | admin, agen | **GO** | QR pairing with server-fetched allow-listed PNG path, data URI response and pairing state audit; compare_agent_whatsapp_status.py |
+| POST | `/api/v1/agent/whatsapp/reconnect` | session | admin, agen | **GO** | Agent-owned GOWA reconnect, refreshed connection state and actor/target audit; compare_agent_whatsapp_status.py |
+| POST | `/api/v1/agent/whatsapp/replace` | session | admin, agen | **GO** | Accepted-confirmation guard, create-before-delete slot replacement and replacement audit; compare_agent_whatsapp_status.py |
 | GET | `/api/v1/agent/whatsapp/scope` | session | admin, agen | **GO** | Agen self-scope, Admin branch-scope, denied roles, ignored client agent_id, and read-only DB state compared by compare_whatsapp_scope.py |
 | GET | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **GO** | masked numbers, max limit, Agen/Admin scope, forbidden roles and agent_id selector compared with read-only DB state by compare_whatsapp_test_numbers.py |
 | POST | `/api/v1/agent/whatsapp/test-numbers` | session | admin, agen | **GO** | Laravel accepted/required/max validation, MSISDN normalization, duplicate and 5-number cap behavior, branch scope, resulting rows and conditional audit compared by compare_whatsapp_test_number_add.py |
 | DELETE | `/api/v1/agent/whatsapp/test-numbers/{id}` | session | admin, agen | **GO** | owned/missing/foreign row behavior, selector scope, resulting rows and conditional AgentWhatsAppTestNumber audit compared by compare_whatsapp_test_number_delete.py |
-| POST | `/api/v1/agent/whatsapp/test-send` | session | admin, agen | LARAVEL |  |
+| POST | `/api/v1/agent/whatsapp/test-send` | session | admin, agen | **GO** | Allow-listed Agent test message with per-Agent limits, paired-device enforcement, sanitized payload, durable ledger, delivery attempt and audit; compare_agent_whatsapp_status.py |
 
 ## Agent directory — `agents` (1/1 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 341 (90.9%) |
-|   of which fully GO | 341 |
+| Served by Go now | 347 (92.5%) |
+|   of which fully GO | 347 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 34 |
+| Still Laravel-only | 28 |
 | Areas fully ported | 38 / 45 |

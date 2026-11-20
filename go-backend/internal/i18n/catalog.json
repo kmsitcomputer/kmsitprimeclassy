@@ -283,6 +283,9 @@
   "whatsapp.test_number_registered": "تم تسجيل رقم الاختبار.",
   "whatsapp.test_numbers_limit": "الحد الأقصى :max أرقام اختبار لكل وكيل.",
   "whatsapp.test_text": "رسالة اختبار PrimeClassy: بوابة WhatsApp تعمل.",
+  "whatsapp.test_send_limited": "تم بلوغ حد إرسال رسائل الاختبار. حاول مرة أخرى لاحقًا.",
+  "whatsapp.test_device_not_ready": "جهاز WhatsApp لهذا الوكيل غير متصل. وصّله أولًا.",
+  "whatsapp.test_gateway_off": "WhatsApp معطّل أو البوابة غير جاهزة.",
   "whatsapp.unknown_event": "حدث إشعار غير معروف."
  },
  "en": {
@@ -544,6 +547,9 @@
   "whatsapp.test_number_registered": "Test number registered.",
   "whatsapp.test_numbers_limit": "At most :max test numbers per Agent.",
   "whatsapp.test_text": "PrimeClassy test message: the WhatsApp gateway is working.",
+  "whatsapp.test_send_limited": "The test message sending limit has been reached. Try again later.",
+  "whatsapp.test_device_not_ready": "This Agent WhatsApp device is not connected. Connect it first.",
+  "whatsapp.test_gateway_off": "WhatsApp is disabled or the gateway is not ready.",
   "whatsapp.unknown_event": "Unknown notification event."
  },
  "id": {
@@ -841,6 +847,9 @@
   "whatsapp.test_number_registered": "Nomor uji didaftarkan.",
   "whatsapp.test_numbers_limit": "Maksimal :max nomor uji per Agen.",
   "whatsapp.test_text": "Pesan uji PrimeClassy: gateway WhatsApp berfungsi.",
+  "whatsapp.test_send_limited": "Batas pengiriman pesan uji tercapai. Coba lagi nanti.",
+  "whatsapp.test_device_not_ready": "Perangkat WhatsApp Agen ini belum terhubung. Hubungkan perangkat terlebih dahulu.",
+  "whatsapp.test_gateway_off": "WhatsApp sedang dinonaktifkan atau gateway belum siap.",
   "whatsapp.unknown_event": "Event notifikasi tidak dikenal."
  },
  "zh": {
@@ -1127,6 +1136,9 @@
   "whatsapp.test_number_registered": "测试号码已登记。",
   "whatsapp.test_numbers_limit": "每个代理最多 :max 个测试号码。",
   "whatsapp.test_text": "PrimeClassy 测试消息：WhatsApp 网关运行正常。",
+  "whatsapp.test_send_limited": "测试消息发送次数已达上限，请稍后再试。",
+  "whatsapp.test_device_not_ready": "此代理的 WhatsApp 设备尚未连接，请先连接设备。",
+  "whatsapp.test_gateway_off": "WhatsApp 已禁用或网关尚未就绪。",
   "whatsapp.unknown_event": "未知的通知事件。"
  }
 }
