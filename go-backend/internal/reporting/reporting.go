@@ -112,9 +112,11 @@ func (s *Service) CommissionIndex(ctx context.Context, actor Actor, q url.Values
 		if err := rows.Scan(&id, &orderID, &itemID, &beneficiaryID, &role, &amount, &status, &earned, &paid); err != nil {
 			return nil, nil, err
 		}
+		// Laravel serializes a DECIMAL attribute as a STRING ("5000.00") and timestamps as Carbon
+		// microsecond-UTC; verified against the reference (compare_partials_glm.py commissions run).
 		data = append(data, map[string]any{"id": id, "order_id": orderID, "order_item_id": nullInt(itemID),
-			"beneficiary_user_id": beneficiaryID, "beneficiary_role": role, "amount": amount, "status": status,
-			"earned_at": earned, "paid_at": nullTime(paid)})
+			"beneficiary_user_id": beneficiaryID, "beneficiary_role": role, "amount": decimal2(amount), "status": status,
+			"earned_at": carbonMicro(earned), "paid_at": carbonMicroNull(paid)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
@@ -139,7 +141,7 @@ func (s *Service) CommissionSummary(ctx context.Context, actor Actor, q url.Valu
 			rows.Close()
 			return nil, err
 		}
-		breakdown = append(breakdown, map[string]any{"beneficiary_role": role, "status": status, "total_amount": amount, "count": count})
+		breakdown = append(breakdown, map[string]any{"beneficiary_role": role, "status": status, "total_amount": decimal2(amount), "count": count})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -154,7 +156,8 @@ func (s *Service) CommissionSummary(ctx context.Context, actor Actor, q url.Valu
 		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.amount),0) FROM commissions c WHERE `+predicate+` AND c.beneficiary_role=?`, queryArgs...).Scan(&amount); err != nil {
 			return nil, err
 		}
-		out[keys[role]] = amount
+		// Verified: Laravel's top-level totals are INTEGERS while the breakdown amounts are decimal strings.
+		out[keys[role]] = int64(amount + 0.5)
 	}
 	return out, nil
 }
@@ -202,7 +205,12 @@ func (s *Service) Transactions(ctx context.Context, actor Actor, q url.Values) (
 		COALESCE(NULLIF(CASE WHEN sh.delivery_mode='self_sub' THEN self_user.name ELSE courier.name END,''),'-'),
 		o.status,
 		COALESCE(CASE WHEN buyer_roles.slug IN ('agen','korsal','sales','sales-kurir-sub','sales-kurir') THEN buyers.name ELSE COALESCE(sales.name,korsal.name,agent.name) END,'-'),
-		COALESCE(CASE WHEN buyer_roles.slug='agen' THEN NULL WHEN buyer_roles.slug='korsal' THEN buyers.name ELSE korsal.name END,'-')
+		COALESCE(CASE WHEN buyer_roles.slug='agen' THEN NULL WHEN buyer_roles.slug='korsal' THEN buyers.name ELSE korsal.name END,'-'),
+		o.agent_id,
+		CASE WHEN buyer_roles.slug IN ('agen','korsal','sales','sales-kurir-sub','sales-kurir') THEN buyers.id ELSE COALESCE(o.sales_id,o.korsal_id,o.agent_id) END,
+		courier.id,
+		o.sales_id,
+		o.korsal_id
 		FROM order_items i JOIN orders o ON o.id=i.order_id
 		LEFT JOIN shipments sh ON sh.id=i.shipment_id LEFT JOIN couriers courier ON courier.id=sh.courier_id
 		LEFT JOIN users self_user ON self_user.id=sh.self_delivered_by_user_id
@@ -216,7 +224,7 @@ func (s *Service) Transactions(ctx context.Context, actor Actor, q url.Values) (
 	defer rows.Close()
 	data := make([]map[string]any, 0)
 	for rows.Next() {
-		fields := make([]any, 16)
+		fields := make([]any, 21)
 		dests := make([]any, len(fields))
 		for i := range fields {
 			dests[i] = &fields[i]
@@ -224,10 +232,19 @@ func (s *Service) Transactions(ctx context.Context, actor Actor, q url.Values) (
 		if err := rows.Scan(dests...); err != nil {
 			return nil, nil, err
 		}
+		// The MySQL driver hands TEXT/VARCHAR columns back as []byte; encoding/json would serialize
+		// those as base64 (verified defect), so normalize every scanned field to its JSON-native type.
+		for i := range fields {
+			if b, ok := fields[i].([]byte); ok {
+				fields[i] = string(b)
+			}
+		}
 		data = append(data, map[string]any{"order_id": fields[0], "order_item_id": fields[1], "order_no": fields[2],
 			"order_date": fields[3], "sku": fields[4], "product": fields[5], "unit_price": fields[6], "quantity": fields[7],
 			"item_status": fields[8], "subtotal": fields[9], "customer": fields[10], "delivery_date": fields[11],
-			"courier": fields[12], "order_status": fields[13], "sales": fields[14], "korsal": fields[15]})
+			"courier": fields[12], "order_status": fields[13], "sales": fields[14], "korsal": fields[15],
+			"agent_id": fields[16], "sales_referrer_id": fields[17],
+			"courier_id": fields[18], "sales_id": fields[19], "korsal_id": fields[20]})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
@@ -362,6 +379,23 @@ func nullInt(v sql.NullInt64) any {
 func nullTime(v sql.NullTime) any {
 	if v.Valid {
 		return v.Time
+	}
+	return nil
+}
+
+// decimal2 renders a DECIMAL value the way Laravel's Eloquent string cast does ("5000.00").
+func decimal2(v float64) string {
+	return strconv.FormatFloat(v, 'f', 2, 64)
+}
+
+// carbonMicro formats a timestamp the way Laravel timestamps serialize: UTC microseconds + Z.
+func carbonMicro(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000000Z")
+}
+
+func carbonMicroNull(v sql.NullTime) any {
+	if v.Valid {
+		return carbonMicro(v.Time)
 	}
 	return nil
 }

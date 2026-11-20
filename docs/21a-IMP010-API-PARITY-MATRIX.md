@@ -182,15 +182,15 @@ Status legend:
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/cms/articles` | session | super_admin | **GO** |  |
-| POST | `/api/v1/cms/articles` | session | super_admin | **PARTIAL** |  |
-| DELETE | `/api/v1/cms/articles/{article}` | session | super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/cms/articles/{article}` | session | super_admin | **PARTIAL** |  |
+| POST | `/api/v1/cms/articles` | session | super_admin | **GO** |  |
+| DELETE | `/api/v1/cms/articles/{article}` | session | super_admin | **GO** |  |
+| PATCH | `/api/v1/cms/articles/{article}` | session | super_admin | **GO** |  |
 | GET | `/api/v1/cms/homepage-blocks` | session | super_admin | **GO** | resource projection, sort order, Super Admin gate, and read-only state compared by compare_cms_homepage_blocks.py |
 | POST | `/api/v1/cms/homepage-blocks` | session | super_admin | **GO** | JSON + multipart validation, HTML sanitization, persistence and upload side effects compared with Laravel |
 | PATCH | `/api/v1/cms/homepage-blocks/reorder` | session | super_admin | **GO** | ordering, partial and duplicate ID lists, ID coercion, per-item existence validation, RBAC, response and persisted sort_order compared with Laravel |
 | DELETE | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **GO** | block and referenced image files, missing IDs, Super Admin gate and response compared with Laravel |
-| PATCH | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **PARTIAL** |  |
-| PATCH | `/api/v1/cms/homepage-blocks/{block}/toggle` | session | super_admin | **PARTIAL** |  |
+| PATCH | `/api/v1/cms/homepage-blocks/{block}` | session | super_admin | **GO** |  |
+| PATCH | `/api/v1/cms/homepage-blocks/{block}/toggle` | session | super_admin | **GO** |  |
 | GET | `/api/v1/cms/pages` | session | super_admin | **GO** |  |
 | POST | `/api/v1/cms/pages` | session | super_admin | **GO** |  |
 | DELETE | `/api/v1/cms/pages/{page}` | session | super_admin | **GO** |  |
@@ -200,8 +200,8 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/commissions` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
-| GET | `/api/v1/commissions/summary` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/commissions` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
+| GET | `/api/v1/commissions/summary` | session | admin, agen, keuangan, koordinator-kurir, korsal, kurir, sales, sales-kurir-sub, super_admin | **GO** |  |
 
 ## consent-events — `consent-events` (0/4 in Go)
 
@@ -225,7 +225,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/crm/customers` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | POST | `/api/v1/crm/customers` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: validation, duplicate phone normalization, 201 + resource, audit; 36/0 compared by compare_crm_writes.py |
-| GET | `/api/v1/crm/customers/{customer}` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/crm/customers/{customer}` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | PATCH | `/api/v1/crm/customers/{customer}` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: partial update, no-change PATCH writes no audit row; 36/0 compared by compare_crm_writes.py |
 | POST | `/api/v1/crm/customers/{customer}/archive` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: archive/unarchive lifecycle + audit; 36/0 compared by compare_crm_writes.py |
 | POST | `/api/v1/crm/customers/{customer}/consent-events` | session | korsal, sales, sales-kurir-sub | **GO** | CRM consent: multipart evidence capture, real evidence file + hash, key idempotency, consumed challenge 422; 17/0 compared by compare_crm_consent.py |
@@ -234,9 +234,9 @@ Status legend:
 | POST | `/api/v1/crm/customers/{customer}/link-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: OTP gates (unknown konsumen, unverified email, channel, rate limit), identity_otp_challenges row; 26/0 compared by compare_crm_link.py |
 | POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | LARAVEL |  |
 | POST | `/api/v1/crm/customers/{customer}/unlink` | session | admin, agen, korsal, sales, sales-kurir-sub | **GO** | CRM linking: unlink scope + event + audit; 26/0 compared by compare_crm_link.py |
-| GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | POST | `/api/v1/crm/customers/{customer}/visits` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit validation (status set, date, plan_next_before rule) + audit; 36/0 compared by compare_crm_writes.py |
-| GET | `/api/v1/crm/follow-ups` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/crm/follow-ups` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | GET | `/api/v1/crm/link-candidates` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: masked candidates, referral reach; 26/0 compared by compare_crm_link.py |
 | PATCH | `/api/v1/crm/visits/{visit}` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit update + audit; 36/0 compared by compare_crm_writes.py |
 
@@ -285,7 +285,7 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/homepage` | public | — | **PARTIAL** | "bestseller" block returns [] for anonymous visitors (identical to the reference); authenticated ranking not ported |
+| GET | `/api/v1/homepage` | public | — | **GO** | "bestseller" block returns [] for anonymous visitors (identical to the reference); authenticated ranking not ported |
 
 ## Installer — `install` (1/8 in Go)
 
@@ -452,7 +452,7 @@ Status legend:
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/referral/{code}` | public | — | **PARTIAL** |  |
+| GET | `/api/v1/referral/{code}` | public | — | **GO** |  |
 
 ## Regions — `regions` (4/4 in Go)
 
@@ -483,7 +483,7 @@ Status legend:
 | GET | `/api/v1/reports/network-transactions` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
 | GET | `/api/v1/reports/payment-status` | session | admin, agen, keuangan, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
 | GET | `/api/v1/reports/sales` | session | admin, agen, korsal, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
-| GET | `/api/v1/reports/transactions` | session | admin, agen, korsal, super_admin | **PARTIAL** |  |
+| GET | `/api/v1/reports/transactions` | session | admin, agen, korsal, super_admin | **GO** |  |
 
 ## Returns — items — `return-items` (0/2 in Go)
 
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 232 (61.9%) |
-|   of which fully GO | 216 |
-|   of which PARTIAL (incomplete behaviour) | 16 |
+|   of which fully GO | 229 |
+|   of which PARTIAL (incomplete behaviour) | 3 |
 | Still Laravel-only | 143 |
 | Areas fully ported | 23 / 45 |

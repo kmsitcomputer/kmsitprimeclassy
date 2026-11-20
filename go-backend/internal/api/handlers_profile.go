@@ -143,9 +143,14 @@ func (s *Server) handleProfileReferralCodeDelete(w http.ResponseWriter, r *http.
 func (s *Server) handleReferralPreview(w http.ResponseWriter, r *http.Request) {
 	result, err := profile.ReferralPreview(r.Context(), s.database, httpx.PathValue(r, "code"))
 	if errors.Is(err, profile.ErrReferralCodeNotFound) {
+		// Verified upstream defect: backend/lang/{en,id}/messages.php declare 'referral' TWICE, so the
+		// second (reassignment-only) array silently replaces the first and messages.referral.invalid_code /
+		// messages.referral.code_not_found no longer resolve — Laravel emits the RAW KEYS in every locale
+		// (asserted with X-Locale: id/en and tinker). The contract is the raw keys, string-valued.
 		writeError(w, r, &httpx.Error{
-			Status: http.StatusUnprocessableEntity, Message: msg(r.Context(), "referral.invalid_code"),
-			FieldStrings: map[string]string{"referral_code": msg(r.Context(), "referral.code_not_found")},
+			Status:       http.StatusUnprocessableEntity,
+			Message:      "messages.referral.invalid_code",
+			FieldStrings: map[string]string{"referral_code": "messages.referral.code_not_found"},
 		})
 		return
 	}

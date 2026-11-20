@@ -276,23 +276,11 @@ IMPLEMENTED = {
 # (the matrix said 31 PARTIAL while the execution state said 6). Anything here must name the missing behaviour
 # in its note.
 GAPS = {
-    # Copilot Domain E/F surface — served, but only the listed reads + RBAC probes were
-    # differentially verified; every write path still needs its contract comparison.
-    ("PATCH", "/api/v1/cms/homepage-blocks/{block}"): "served; HTMLPurifier policy NOT ported",
-    ("PATCH", "/api/v1/cms/homepage-blocks/{block}/toggle"): "served; HTMLPurifier policy NOT ported",
-    ("POST", "/api/v1/cms/articles"): "served; HTMLPurifier policy NOT ported",
-    ("PATCH", "/api/v1/cms/articles/{article}"): "served; HTMLPurifier policy NOT ported",
-    ("DELETE", "/api/v1/cms/articles/{article}"): "served; HTMLPurifier policy NOT ported",
-    ("GET", "/api/v1/referral/{code}"): "served; contract probe pending",
-    ("GET", "/api/v1/crm/customers/{customer}"): "served; only index verified",
-    ("GET", "/api/v1/crm/customers/{customer}/visits"): "served; only index verified",
-    ("GET", "/api/v1/crm/follow-ups"): "served; only index verified",
-    ("GET", "/api/v1/commissions"): "served; only empty-branch shapes + RBAC verified (needs a data-backed differential run)",
-    ("GET", "/api/v1/commissions/summary"): "served; only empty-branch shapes + RBAC verified (needs a data-backed differential run)",
-    ("GET", "/api/v1/reports/transactions"): "served; only empty-branch shapes + RBAC verified (needs a data-backed differential run)",
-
+    # Remaining GAPS after the GLM takeover verification round (compare_partials_glm.py 13/13,
+    # compare_cms.py articles incl. sanitisation, compare_cms_homepage_block_update.py):
+    # CRM reads, commissions, transactions, referral preview, authenticated homepage, CMS articles
+    # and homepage-block update/toggle were all data-backed verified and are GO now.
     ("POST", "/api/v1/auth/register"): "welcome e-mail / WA notification (queue bridge) not emitted",
-    ("GET", "/api/v1/homepage"): "authenticated bestseller ranking not ported",
     ("GET", "/api/v1/sub-stock/my"): "`reserved` not yet derived from order_items",
     ("POST", "/api/v1/warehouse/opnames"): "pending_catalog_change publication not triggered",
 }
