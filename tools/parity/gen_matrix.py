@@ -21,6 +21,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",
     ("POST", "/api/v1/orders/{order}/assisted-returns"): "CRM-origin only; owner Sales/SKS/Korsal, append-only consent current-state + item/quantity quota, public image evidence, transactional return items/order state/audit; compare_assisted_return.py",
     ("POST", "/api/v1/orders/{order}/returns"): "Konsumen own-order return request; required public image evidence, item delivery/quantity checks, transactional item/status/refund/audit updates; compare_return_request.py",
+    ("POST", "/api/v1/return-items/{returnItem}/receipt-allocations"): "Admin own-Agent/Super Admin; approved inspected return only, exact quantity allocation across same-item receipts, capacity locks, one-shot identical replay, conflict on changed replay, audit; compare_return_receipt_allocations.py",
     ("POST", "/api/v1/orders/{order}/items"): "Admin-only SC-03; order-first locking, Agent reservation, canonical shipment grouping, Stock Request reopen/reconcile, additional-payment ledger and replay/conflict; compare_order_line_addition.py",
     ("GET", "/api/v1/install/status"): "",
     ("GET", "/api/v1/settings"): "",

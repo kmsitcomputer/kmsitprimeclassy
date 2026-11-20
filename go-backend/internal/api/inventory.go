@@ -154,6 +154,7 @@ func implementsRoute(method, path string) bool {
 		"PATCH /api/v1/orders/{order}/payment/cod",
 		"POST /api/v1/orders/{order}/payment/verify",
 		"POST /api/v1/orders/{order}/payment/settle",
+		"POST /api/v1/return-items/{returnItem}/receipt-allocations",
 		"PATCH /api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm",
 		"GET /api/v1/warehouse/stock-addition-requests",
 		"POST /api/v1/warehouse/stock-addition-requests",
@@ -177,6 +178,10 @@ func implementsRoute(method, path string) bool {
 	if method == http.MethodPost && strings.HasPrefix(path, "/api/v1/warehouse/returns/") {
 		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/warehouse/returns/"), "/")
 		return len(parts) == 2 && parts[0] != "" && (parts[1] == "inspect" || parts[1] == "finalize")
+	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/api/v1/return-items/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/return-items/"), "/")
+		return len(parts) == 2 && parts[0] != "" && parts[1] == "receipt-allocations"
 	}
 	if matchesDomainERoute(method, path) || matchesDomainEReadRoute(method, path) || matchesGLMLaravelOnlyRoute(method, path) {
 		return true

@@ -101,6 +101,7 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/orders/{order}/refund-recipient", chain(http.HandlerFunc(s.handleOrderRecipientStore), RequireAuth, s.RequireAgentLinked, recipientGate))
 	s.mux.Handle("GET /api/v1/order-items/{item}/receipts", chain(http.HandlerFunc(s.handleItemReceiptsIndex), RequireAuth, s.RequireAgentLinked, dvGate))
 	s.mux.Handle("POST /api/v1/order-items/{item}/receipts", chain(http.HandlerFunc(s.handleItemReceiptsStore), RequireAuth, s.RequireAgentLinked, dvGate))
+	s.mux.Handle("POST /api/v1/return-items/{returnItem}/receipt-allocations", chain(http.HandlerFunc(s.handleReturnReceiptAllocationsStore), RequireAuth, s.RequireAgentLinked, dvGate))
 
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
