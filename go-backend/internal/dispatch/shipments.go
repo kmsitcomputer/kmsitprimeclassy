@@ -6,7 +6,9 @@ package dispatch
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1825,4 +1827,215 @@ func (s *Service) canVerifyDeliveryTx(ctx context.Context, tx *sql.Tx, a Actor, 
 	err := tx.QueryRowContext(ctx, `SELECT o.agent_id FROM shipments sh
 		JOIN orders o ON o.id = sh.order_id WHERE sh.id = ?`, shipmentID).Scan(&agentID)
 	return err == nil && agentID == a.AgentID
+}
+
+// ItemReceipts ports OrderItemReceiptController::index (REM-07 per-item receipt events).
+func (s *Service) ItemReceipts(ctx context.Context, a Actor, orderItemID int64) (any, error) {
+	var exists bool
+	_ = s.database.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM order_items WHERE id = ?)`, orderItemID).Scan(&exists)
+	if !exists {
+		return nil, &DomainError{Status: 404, Message: ""}
+	}
+	if !s.itemReceiptAuthorized(ctx, a, orderItemID) {
+		return nil, &DomainError{Status: 403, Message: "This action is unauthorized."}
+	}
+	rows, err := s.database.DB.QueryContext(ctx, `SELECT id, order_item_id, quantity, received_on,
+		received_at, verified_by, verified_at FROM order_item_receipts WHERE order_item_id = ? ORDER BY id`, orderItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	data := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, oid, qty int64
+		var receivedOn string
+		var receivedAt sql.NullTime
+		var verifiedBy int64
+		var verifiedAt sql.NullTime
+		if err := rows.Scan(&id, &oid, &qty, &receivedOn, &receivedAt, &verifiedBy, &verifiedAt); err != nil {
+			return nil, err
+		}
+		row := map[string]any{"id": id, "order_item_id": oid, "quantity": qty, "received_on": receivedOn,
+			"verified_by": verifiedBy, "verified_at": carbonMicro(verifiedAt)}
+		if receivedAt.Valid {
+			row["received_at"] = receivedAt.Time.UTC().Format("2006-01-02T15:04:05.000000Z")
+		} else {
+			row["received_at"] = nil
+		}
+		data = append(data, row)
+	}
+	return data, rows.Err()
+}
+
+func (s *Service) itemReceiptAuthorized(ctx context.Context, a Actor, orderItemID int64) bool {
+	if a.IsSuper {
+		return true
+	}
+	if a.Role != "admin" {
+		return false
+	}
+	var agentID int64
+	err := s.database.DB.QueryRowContext(ctx, `SELECT o.agent_id FROM order_items i
+		JOIN orders o ON o.id = i.order_id WHERE i.id = ?`, orderItemID).Scan(&agentID)
+	return err == nil && agentID == a.AgentID
+}
+
+// RecordItemReceipt ports OrderItemReceiptService::record.
+func (s *Service) RecordItemReceipt(ctx context.Context, a Actor, orderItemID int64, quantity int64,
+	receivedOn string, receivedAt sql.NullString, evidenceMediaID sql.NullInt64, evidenceNote sql.NullString,
+	idempotencyKey string) (map[string]any, error) {
+	payload := map[string]any{"item": orderItemID, "qty": quantity, "on": receivedOn}
+	if receivedAt.Valid {
+		payload["at"] = receivedAt.String
+	}
+	if evidenceMediaID.Valid {
+		payload["media"] = evidenceMediaID.Int64
+	}
+	if evidenceNote.Valid {
+		payload["note"] = strings.TrimSpace(evidenceNote.String)
+	}
+	fingerprint := payloadFingerprint(payload)
+	var receiptID int64
+	var receiptQty int64
+	var receiptOn string
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderID, agentID int64
+		var status string
+		var fulfilled int64
+		var createdAt sql.NullTime
+		if err := tx.QueryRowContext(ctx, `SELECT order_id, status, fulfilled_quantity, created_at
+			FROM order_items WHERE id = ? FOR UPDATE`, orderItemID).Scan(&orderID, &status, &fulfilled, &createdAt); err != nil {
+			if err == sql.ErrNoRows {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id = ?`, orderID).Scan(&agentID); err != nil {
+			return err
+		}
+		if !(a.IsSuper || (a.Role == "admin" && agentID == a.AgentID)) {
+			return &DomainError{Status: 403, Message: "Tidak berwenang mencatat penerimaan item ini."}
+		}
+		var existingID int64
+		var existingFP sql.NullString
+		eerr := tx.QueryRowContext(ctx, `SELECT id, request_fingerprint FROM order_item_receipts
+			WHERE verified_by = ? AND idempotency_key = ? FOR UPDATE`, a.ID, idempotencyKey).
+			Scan(&existingID, &existingFP)
+		if eerr == nil {
+			if existingFP.String != fingerprint {
+				return &DomainError{Status: 409, Message: "Idempotency key dipakai dengan data berbeda."}
+			}
+			var q int64
+			var on string
+			if err := tx.QueryRowContext(ctx, `SELECT quantity, received_on FROM order_item_receipts WHERE id = ?`,
+				existingID).Scan(&q, &on); err != nil {
+				return err
+			}
+			receiptID, receiptQty, receiptOn = existingID, q, on
+			return nil
+		}
+		if eerr != sql.ErrNoRows {
+			return eerr
+		}
+		if quantity < 1 {
+			return &DomainError{Status: 422, Message: "Jumlah diterima harus positif."}
+		}
+		if status != "terkirim" && status != "pengembalian" && status != "kembali" {
+			return &DomainError{Status: 422, Message: "Item belum tiba/diterima sehingga penerimaan tidak dapat dicatat."}
+		}
+		date, derr := time.Parse("2006-01-02", receivedOn)
+		if derr != nil {
+			return &DomainError{Status: 422, Message: "Jumlah diterima harus positif."}
+		}
+		today := time.Now().UTC().Truncate(24 * time.Hour)
+		if date.After(today) {
+			return &DomainError{Status: 422, Message: "Tanggal penerimaan tidak boleh di masa depan."}
+		}
+		if createdAt.Valid && date.Before(createdAt.Time.UTC().Truncate(24*time.Hour)) {
+			return &DomainError{Status: 422, Message: "Tanggal penerimaan tidak boleh sebelum order dibuat."}
+		}
+		var atTime any
+		if receivedAt.Valid {
+			at, aerr := time.Parse(time.RFC3339, receivedAt.String)
+			if aerr != nil {
+				at, aerr = time.Parse("2006-01-02T15:04:05", receivedAt.String)
+				if aerr != nil {
+					return &DomainError{Status: 422, Message: "Waktu penerimaan tidak konsisten dengan tanggal penerimaan."}
+				}
+			}
+			if at.After(time.Now().UTC()) || at.Format("2006-01-02") != date.Format("2006-01-02") {
+				return &DomainError{Status: 422, Message: "Waktu penerimaan tidak konsisten dengan tanggal penerimaan."}
+			}
+			atTime = at.UTC().Format("2006-01-02 15:04:05")
+		}
+		var already int64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(quantity),0) FROM order_item_receipts
+			WHERE order_item_id = ? FOR UPDATE`, orderItemID).Scan(&already); err != nil {
+			return err
+		}
+		if already+quantity > fulfilled {
+			return &DomainError{Status: 422, Message: "Jumlah penerimaan melebihi kuantitas item."}
+		}
+		res, ierr := tx.ExecContext(ctx, `INSERT INTO order_item_receipts (order_item_id, order_id, agent_id,
+			quantity, received_on, received_at, evidence_media_id, evidence_note, verified_by, verified_at,
+			idempotency_key, request_fingerprint, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+			orderItemID, orderID, agentID, quantity, receivedOn, atTime, nullIntPtr(evidenceMediaID),
+			noteOrNull(evidenceNote), a.ID, idempotencyKey, fingerprint)
+		if ierr != nil {
+			return ierr
+		}
+		newID, lerr := res.LastInsertId()
+		if lerr != nil {
+			return lerr
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\Order', ?, 'order_item.receipt_recorded', NULL, ?, UTC_TIMESTAMP(6))`,
+			a.ID, orderID, mustJSON(map[string]any{"order_item_id": orderItemID, "receipt_id": newID,
+				"quantity": quantity, "received_on": receivedOn, "actor_role": a.Role})); err != nil {
+			return err
+		}
+		receiptID, receiptQty, receiptOn = newID, quantity, receivedOn
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": receiptID, "quantity": receiptQty, "received_on": receiptOn}, nil
+}
+
+func noteOrNull(v sql.NullString) any {
+	if !v.Valid {
+		return nil
+	}
+	t := strings.TrimSpace(v.String)
+	if t == "" {
+		return nil
+	}
+	return t
+}
+
+func payloadFingerprint(payload map[string]any) string {
+	// PayloadFingerprint::of — sorted-key JSON with trimmed strings, sha256.
+	keys := make([]string, 0, len(payload))
+	for k := range payload {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		kb, _ := json.Marshal(k)
+		vb, _ := json.Marshal(payload[k])
+		b.Write(kb)
+		b.WriteByte(':')
+		b.Write(vb)
+	}
+	b.WriteByte('}')
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }

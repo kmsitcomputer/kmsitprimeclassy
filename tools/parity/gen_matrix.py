@@ -303,6 +303,8 @@ IMPLEMENTED = {
     ("GET", "/api/v1/kurir/reports/delivered"): "delivered report (terkirim items on own shipments, from/to date filters, own courier commission sum as fee_amount); compared by compare_kurir.py (17/0)",
     ("GET", "/api/v1/orders/{order}/refund-recipient"): "G17-D4 refund-recipient evidence index (destination full only for keuangan/super_admin, masked tail otherwise); compared by compare_recipient.py (13/0)",
     ("POST", "/api/v1/orders/{order}/refund-recipient"): "append-only recipient record: CRM-origin gate, canRecord authority, method validation, destination required for bank/ewallet, authorization (consent or evidence) gate, consent/return binding, supersedes chain, audit; compared by compare_recipient.py (13/0)",
+    ("GET", "/api/v1/order-items/{item}/receipts"): "REM-07 per-item receipt events index (admin own-agent / super_admin), date + verifier projection; compared by compare_item_receipts.py (16/0)",
+    ("POST", "/api/v1/order-items/{item}/receipts"): "REM-07 record actual receipt: Idempotency-Key 8–100, arrived-status gate, date window (not future/before order), time-date consistency, quantity bounded by fulfilled across all events, fingerprint replay/409; compared by compare_item_receipts.py (16/0)",
 }
 
 

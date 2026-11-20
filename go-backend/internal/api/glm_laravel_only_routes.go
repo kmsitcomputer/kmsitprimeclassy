@@ -99,6 +99,8 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	recipientGate := RequireRole("sales,sales-kurir-sub,korsal,agen,admin,keuangan,super_admin")
 	s.mux.Handle("GET /api/v1/orders/{order}/refund-recipient", chain(http.HandlerFunc(s.handleOrderRecipientIndex), RequireAuth, s.RequireAgentLinked, recipientGate))
 	s.mux.Handle("POST /api/v1/orders/{order}/refund-recipient", chain(http.HandlerFunc(s.handleOrderRecipientStore), RequireAuth, s.RequireAgentLinked, recipientGate))
+	s.mux.Handle("GET /api/v1/order-items/{item}/receipts", chain(http.HandlerFunc(s.handleItemReceiptsIndex), RequireAuth, s.RequireAgentLinked, dvGate))
+	s.mux.Handle("POST /api/v1/order-items/{item}/receipts", chain(http.HandlerFunc(s.handleItemReceiptsStore), RequireAuth, s.RequireAgentLinked, dvGate))
 
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
@@ -172,6 +174,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"PATCH /api/v1/kurir/returns/{item}/confirm",
 		"GET /api/v1/kurir/reports/delivered",
 		"GET /api/v1/orders/{order}/refund-recipient",
+		"GET /api/v1/order-items/{item}/receipts",
+		"POST /api/v1/order-items/{item}/receipts",
 		"POST /api/v1/orders/{order}/refund-recipient",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",

@@ -348,12 +348,12 @@ Status legend:
 | GET | `/api/v1/notifications/admin/unread-count` | session | admin, agen, keuangan, super_admin | **GO** | owned unread count; 97/0 compared by compare_notifications_admin.py |
 | POST | `/api/v1/notifications/admin/{id}/read` | session | admin, agen, keuangan, super_admin | **GO** | own rows only, foreign/missing id is a 404, replay keeps read_at; 97/0 compared by compare_notifications_admin.py |
 
-## Orders — item receipts — `order-items` (0/2 in Go)
+## Orders — item receipts — `order-items` (2/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
-| POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | LARAVEL |  |
+| GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 per-item receipt events index (admin own-agent / super_admin), date + verifier projection; compared by compare_item_receipts.py (16/0) |
+| POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 record actual receipt: Idempotency-Key 8–100, arrived-status gate, date window (not future/before order), time-date consistency, quantity bounded by fulfilled across all events, fingerprint replay/409; compared by compare_item_receipts.py (16/0) |
 
 ## Orders — `orders` (21/25 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 267 (71.2%) |
-|   of which fully GO | 267 |
+| Served by Go now | 269 (71.7%) |
+|   of which fully GO | 269 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 108 |
-| Areas fully ported | 28 / 45 |
+| Still Laravel-only | 106 |
+| Areas fully ported | 29 / 45 |
