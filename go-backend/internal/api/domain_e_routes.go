@@ -29,6 +29,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/unknown", chain(http.HandlerFunc(s.handleAdminRefundAttemptUnknown), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/fail", chain(http.HandlerFunc(s.handleAdminRefundAttemptFail), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/complete", chain(http.HandlerFunc(s.handleAdminRefundAttemptComplete), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
+	s.mux.Handle("POST /api/v1/admin/refund-attempts/{attempt}/reconcile", chain(http.HandlerFunc(s.handleAdminRefundAttemptReconcile), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve", chain(http.HandlerFunc(s.handleAdminRefundNeedsVerificationResolve), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-obligations/{obligation}/deferred/request", chain(http.HandlerFunc(s.handleAdminDeferredMaterializationRequest), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))
 	s.mux.Handle("POST /api/v1/admin/refund-obligations/{obligation}/deferred/materialize", chain(http.HandlerFunc(s.handleAdminDeferredMaterialize), RequireAuth, s.RequireAgentLinked, RequireRole("agen,keuangan,super_admin")))

@@ -487,6 +487,88 @@ func (s *Server) handleAdminRefundAttemptComplete(w http.ResponseWriter, r *http
 	httpx.OK(w, rows[0], "Payout tercatat.", nil)
 }
 
+func (s *Server) handleAdminRefundAttemptReconcile(w http.ResponseWriter, r *http.Request) {
+	ctx, locale := r.Context(), LocaleFrom(r.Context())
+	id, ok := pathID(w, r, "attempt")
+	if !ok {
+		return
+	}
+	if _, _, accessErr := s.refundAttemptAccess(ctx, id, locale); accessErr != nil {
+		writeError(w, r, accessErr)
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	fields := map[string][]string{}
+	var succeeded bool
+	rawSucceeded, hasSucceeded := body["succeeded"]
+	if !hasSucceeded || len(rawSucceeded) == 0 || string(rawSucceeded) == "null" {
+		fields["succeeded"] = []string{i18n.ValidationMessage(locale, "required", "succeeded")}
+	} else if json.Unmarshal(rawSucceeded, &succeeded) != nil {
+		var n int
+		if json.Unmarshal(rawSucceeded, &n) == nil && (n == 0 || n == 1) {
+			succeeded = n == 1
+		} else {
+			var text string
+			if json.Unmarshal(rawSucceeded, &text) == nil && (text == "0" || text == "1") {
+				succeeded = text == "1"
+			} else {
+				fields["succeeded"] = []string{i18n.ValidationMessage(locale, "boolean", "succeeded")}
+			}
+		}
+	}
+	rawEvidence, hasEvidence := body["evidence"]
+	var evidence string
+	if !hasEvidence || string(rawEvidence) == "null" || strings.TrimSpace(string(rawEvidence)) == `""` {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "required", "evidence")}
+	} else if json.Unmarshal(rawEvidence, &evidence) != nil {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "string", "evidence")}
+	} else if strings.TrimSpace(evidence) == "" {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "required", "evidence")}
+	} else if n := utf8.RuneCountInString(evidence); n < 3 {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "min.string", "evidence", "min", "3")}
+	} else if n > 2000 {
+		fields["evidence"] = []string{i18n.ValidationMessage(locale, "max.string", "evidence", "max", "2000")}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(fields))
+		return
+	}
+	service := &orders.Service{Database: s.database, Messages: func(key string, _ ...string) string { return i18n.Translate(locale, key) }}
+	isPayout, err := service.ReconcileRefundAttempt(ctx, id, UserFrom(ctx).ID, succeeded, evidence)
+	if err != nil {
+		s.writeRefundProblem(w, r, err, locale)
+		return
+	}
+	var rows []map[string]any
+	if isPayout {
+		var payoutID int64
+		if err := s.database.QueryRowContext(ctx, `SELECT id FROM refund_payouts WHERE attempt_id=?`, id).Scan(&payoutID); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		rows, err = queryModelMaps(ctx, s.database.DB, `SELECT * FROM refund_payouts WHERE id=?`, payoutID)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+	} else {
+		rows, err = queryModelMaps(ctx, s.database.DB, `SELECT * FROM refund_attempts WHERE id=?`, id)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	if len(rows) == 0 {
+		writeError(w, r, &httpx.Error{Status: 404, Message: msg(ctx, "system.endpoint_not_found")})
+		return
+	}
+	httpx.OK(w, rows[0], "OK", nil)
+}
+
 func (s *Server) handleAdminRefundNeedsVerificationResolve(w http.ResponseWriter, r *http.Request) {
 	ctx, locale := r.Context(), LocaleFrom(r.Context())
 	id, ok := pathID(w, r, "obligation")

@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (58/59 in Go)
+## Admin operations — `admin` (59/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -59,7 +59,7 @@ Status legend:
 | POST | `/api/v1/admin/refund-attempts/{attempt}/complete` | session | agen, keuangan, super_admin | **GO** | Finance-only processing-to-succeeded transition, self-exclusion reservation, payout + paid-amount effect, idempotent replay and durable audit; compare_admin_refund_attempt_complete.py |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/fail` | session | agen, keuangan, super_admin | **GO** | Finance-only processing-to-failed transition, validated failure details, preserved replay, attempt audit and cancelled-order finalization re-entry; compare_admin_refund_attempt_fail.py |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/initiate` | session | agen, keuangan, super_admin | **GO** | Finance-only created-to-processing transition, Order-first locking, external reference preservation on replay, initiated timestamps and idempotent append-only audit; compare_admin_refund_attempt_initiate.py |
-| POST | `/api/v1/admin/refund-attempts/{attempt}/reconcile` | session | agen, keuangan, super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/refund-attempts/{attempt}/reconcile` | session | agen, keuangan, super_admin | **GO** | Finance reconciliation of unknown attempts to succeeded payout or failed state, evidence, audit and cancellation re-entry in one transaction; compare_admin_refund_attempt_reconcile.py |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/unknown` | session | agen, keuangan, super_admin | **GO** | Finance-only processing-to-unknown transition, optional note, replay preservation, unknown_since and durable audit; compare_admin_refund_attempt_terminals.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/approve` | session | agen, keuangan, super_admin | **GO** | Branch owner/Super Admin pending-only approval, owner authorization, idempotent approved replay and unique append-only ledger event; compare_admin_refund_obligation_approve.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/attempts` | session | agen, keuangan, super_admin | **GO** | Finance-only attempt creation with CRM recipient evidence guard, Order/obligation locking, scoped key replay/collision protection, reservation arithmetic and durable attempt-created event; compare_admin_refund_attempt_create.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 330 (88.0%) |
-|   of which fully GO | 330 |
+| Served by Go now | 331 (88.3%) |
+|   of which fully GO | 331 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 45 |
-| Areas fully ported | 34 / 45 |
+| Still Laravel-only | 44 |
+| Areas fully ported | 35 / 45 |
