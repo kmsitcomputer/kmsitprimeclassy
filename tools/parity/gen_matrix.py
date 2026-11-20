@@ -32,6 +32,7 @@ IMPLEMENTED = {
     ("GET", "/api/v1/agent/google-auth"): "Agent/Admin own-branch Google OAuth config; no cross-branch identifier accepted, secret masked; compare_google_auth_settings.py",
     ("PUT", "/api/v1/agent/google-auth"): "Agent/Admin own-branch config validation, encrypted secret preserve/clear, scoped audit; compare_google_auth_settings.py",
     ("GET", "/api/v1/admin/integrations/whatsapp"): "Super Admin GOWA configuration snapshot, masked password/test numbers, event defaults and OTP/rate settings; compare_admin_whatsapp_settings.py",
+    ("GET", "/api/v1/admin/orders/{order}/refunds"): "Order-scoped refund obligations, attempts, payouts, children, reductions and integer-cent financial metrics; compare_admin_order_refund_ledger.py",
     ("PUT", "/api/v1/admin/integrations/whatsapp"): "Validated GOWA config, encrypted write-only password, normalized test-number allow-list, rate/OTP/event settings and redacted before/after audit; compare_admin_whatsapp_update.py",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "CRM assisted order through canonical order creation; origin-scoped idempotency, owning seller attribution, Agent stock only; compare_crm_assisted_order.py",
     ("POST", "/api/v1/orders/{order}/assisted-returns"): "CRM-origin only; owner Sales/SKS/Korsal, append-only consent current-state + item/quantity quota, public image evidence, transactional return items/order state/audit; compare_assisted_return.py",

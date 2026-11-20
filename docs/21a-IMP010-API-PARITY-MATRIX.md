@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (31/59 in Go)
+## Admin operations — `admin` (32/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -54,7 +54,7 @@ Status legend:
 | PATCH | `/api/v1/admin/order-refunds/{adjustment}/status` | session | keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/order-sales-reductions/{reduction}/reinstate` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/orders/{order}/cancellation/finalize` | session | agen, keuangan, super_admin | LARAVEL |  |
-| GET | `/api/v1/admin/orders/{order}/refunds` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/orders/{order}/refunds` | session | admin, agen, keuangan, super_admin | **GO** | Order-scoped refund obligations, attempts, payouts, children, reductions and integer-cent financial metrics; compare_admin_order_refund_ledger.py |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/cancel` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/complete` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/refund-attempts/{attempt}/fail` | session | agen, keuangan, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 302 (80.5%) |
-|   of which fully GO | 302 |
+| Served by Go now | 303 (80.8%) |
+|   of which fully GO | 303 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 73 |
+| Still Laravel-only | 72 |
 | Areas fully ported | 34 / 45 |
