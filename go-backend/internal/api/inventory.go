@@ -434,6 +434,7 @@ func matchesDomainERoute(method, path string) bool {
 		"GET /api/v1/manage/products":                   true,
 		"GET /api/v1/agent/whatsapp/messages":           true,
 		"GET /api/v1/agent/whatsapp":                    true,
+		"POST /api/v1/agent/whatsapp/device":            true,
 		"GET /api/v1/catalog/export":                    true,
 		"POST /api/v1/products":                         true,
 		"GET /api/v1/users":                             true,

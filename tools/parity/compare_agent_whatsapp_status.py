@@ -9,8 +9,13 @@ class Gateway(BaseHTTPRequestHandler):
         data=json.dumps(obj).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
     def do_GET(self):
         if self.headers.get('Authorization')!='Basic c3ludGhldGljOnBhc3M=':self.send_response(401);self.end_headers();return
-        if self.path=='/devices/pc-status-fixture/status':self.respond({'results':{'is_connected':True,'is_logged_in':True}})
+        if self.path.endswith('/status') and self.path.endswith('pc-status-fixture/status'):self.respond({'results':{'is_connected':True,'is_logged_in':True}})
+        elif self.path.endswith('/status'):self.respond({'results':{'is_connected':False,'is_logged_in':False}})
         elif self.path=='/devices/pc-status-fixture':self.respond({'results':{'phone_number':'6281234567890'}})
+        else:self.send_response(404);self.end_headers()
+    def do_POST(self):
+        if self.headers.get('Authorization')!='Basic c3ludGhldGljOnBhc3M=':self.send_response(401);self.end_headers();return
+        if self.path=='/devices':self.respond({'code':'SUCCESS','results':{'device_id':'created'}})
         else:self.send_response(404);self.end_headers()
     def log_message(self,*args):pass
 def q(v):return 'NULL' if v is None or v=='NULL' else "'"+str(v).replace("'","''").replace('\\','\\\\')+"'"
@@ -49,11 +54,14 @@ def main():
                 unauth=r.Client(base).call('GET','/api/v1/agent/whatsapp')
                 admin=r.Client(base);assert admin.login('admin@imp010.test')==200
                 foreign=admin.call('GET','/api/v1/agent/whatsapp?agent_id=999999')
-                row=r.db(f"SELECT state,phone_masked,paired_at,last_checked_at FROM agent_whatsapp_devices WHERE agent_id={agent}")
-                logs=r.db(f"SELECT causer_id,subject_type,subject_id,event,CAST(properties AS CHAR) FROM activity_logs WHERE id>{before} AND event='whatsapp.device.paired' ORDER BY id")
+                status_row=r.db(f"SELECT state,phone_masked,paired_at,last_checked_at FROM agent_whatsapp_devices WHERE agent_id={agent}")
+                r.db(f'DELETE FROM agent_whatsapp_devices WHERE agent_id={agent}')
+                create=actor.call('POST','/api/v1/agent/whatsapp/device')
+                create_row=r.db(f"SELECT state,phone_masked,paired_at,last_checked_at FROM agent_whatsapp_devices WHERE agent_id={agent}")
+                logs=r.db(f"SELECT causer_id,subject_type,subject_id,event,CAST(properties AS CHAR) FROM activity_logs WHERE id>{before} AND event IN ('whatsapp.device.paired','whatsapp.device.created') ORDER BY id")
                 for log in logs:
                     if log[4] and log[4]!='NULL':log[4]=json.loads(log[4])
-                outputs.append([scrub(status),unauth,foreign]);side.append(normalize_side(row,logs))
+                outputs.append([scrub(status),unauth,foreign,scrub(create)]);side.append((normalize_side(status_row,[])[0],normalize_side(create_row,[])[0],normalize_side([],logs)[1]))
             finally:
                 r.db(f"DELETE FROM activity_logs WHERE id>{before} AND event IN ('whatsapp.device.paired','whatsapp.settings.updated')")
                 restore_device(agent,old_device);restore_settings(settings)
@@ -62,5 +70,7 @@ def main():
     status,body=outputs[0][0];data=body['data']
     if outputs[0][1][0]!=401 or outputs[0][2][0]!=403:raise AssertionError('WhatsApp status authorization contract mismatch')
     if status!=200 or data['device']['state']!='connected' or data['device']['phone_masked']!='62••••890' or not data['gateway_ready'] or side[0][0][0][0]!='connected':raise AssertionError('status/device refresh contract failed')
-    print('agent WhatsApp status differential: response, paired-state DB effect, audit and 2 authorization checks passed, 0 failed');return 0
+    create_status,create_body=outputs[0][3]
+    if create_status!=201 or create_body['data']['device']['state']!='not_paired' or side[0][1][0][0]!='not_paired':raise AssertionError('device creation contract failed')
+    print('agent WhatsApp status/device-create differential: 2 responses, 2 database states, audit and 2 authorization checks passed, 0 failed');return 0
 if __name__=='__main__':raise SystemExit(main())
