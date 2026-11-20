@@ -203,7 +203,7 @@ func matchesDomainEReadRoute(method, path string) bool {
 	case "bestsellers":
 		return len(parts) == 1
 	case "dashboard":
-		return len(parts) == 2 && parts[1] == "summary"
+		return len(parts) == 2 && (parts[1] == "summary" || parts[1] == "kpis")
 	case "crm":
 		if len(parts) == 2 && parts[1] == "follow-ups" {
 			return true

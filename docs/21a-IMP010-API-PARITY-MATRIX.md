@@ -240,11 +240,11 @@ Status legend:
 | GET | `/api/v1/crm/link-candidates` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: masked candidates, referral reach; 26/0 compared by compare_crm_link.py |
 | PATCH | `/api/v1/crm/visits/{visit}` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit update + audit; 36/0 compared by compare_crm_writes.py |
 
-## dashboard — `dashboard` (1/2 in Go)
+## dashboard — `dashboard` (2/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/v1/dashboard/kpis` | session | agen, gudang, korsal, kurir, sales, sales-kurir-sub | LARAVEL |  |
+| GET | `/api/v1/dashboard/kpis` | session | agen, gudang, korsal, kurir, sales, sales-kurir-sub | **GO** | Role-shaped own/team commission, attributed deals, follow-up, canonical stock and courier task KPIs; compare_dashboard_kpis.py |
 | GET | `/api/v1/dashboard/summary` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** | Role/branch scoped order, revenue, customer and roster totals with date filters; compare_dashboard_summary.py |
 
 ## delivery-refusals — `delivery-refusals` (3/3 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 335 (89.3%) |
-|   of which fully GO | 335 |
+| Served by Go now | 336 (89.6%) |
+|   of which fully GO | 336 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 40 |
-| Areas fully ported | 37 / 45 |
+| Still Laravel-only | 39 |
+| Areas fully ported | 38 / 45 |

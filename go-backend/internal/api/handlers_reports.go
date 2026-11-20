@@ -194,6 +194,15 @@ func (s *Server) handleReportDashboardSummary(w http.ResponseWriter, r *http.Req
 	httpx.OK(w, data, "OK", nil)
 }
 
+func (s *Server) handleDashboardKPIs(w http.ResponseWriter, r *http.Request) {
+	data, err := s.reportingService().DashboardKPIs(r.Context(), reportingActor(r), r.URL.Query())
+	if err != nil {
+		writeDomainReadError(w, r, err)
+		return
+	}
+	httpx.OK(w, data, "OK", nil)
+}
+
 func (s *Server) handleReportNetworkTransactions(w http.ResponseWriter, r *http.Request) {
 	actor := reportingActor(r)
 	data, err := s.reportingService().NetworkTransactions(r.Context(), actor, reportFilters(r.URL.Query()))
