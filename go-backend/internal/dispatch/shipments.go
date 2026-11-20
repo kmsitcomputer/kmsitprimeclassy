@@ -1706,6 +1706,100 @@ func (s *Service) renderStockRequest(ctx context.Context, tx *sql.Tx, srID int64
 	return nil
 }
 
+// AssignReturnPickupCourier ports ReturnController::assignPickupCourier +
+// ReturnService::assignPickupCourier (return pickups are assigned, never self-claimed).
+func (s *Service) AssignReturnPickupCourier(ctx context.Context, a Actor, returnItemID, courierID int64,
+	expectedCourierID sql.NullInt64) (map[string]any, error) {
+	var itemID, assignedCourier int64
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderItemID int64
+		if err := tx.QueryRowContext(ctx, `SELECT order_item_id FROM return_items WHERE id = ? FOR UPDATE`,
+			returnItemID).Scan(&orderItemID); err != nil {
+			if err == sql.ErrNoRows {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		var orderID int64
+		var itemStatus, returnStatus string
+		var prevCourier sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT i.order_id, i.status, r.status, r.courier_id
+			FROM order_items i JOIN return_items r ON r.order_item_id = i.id
+			WHERE i.id = ? FOR UPDATE`, orderItemID).Scan(&orderID, &itemStatus, &returnStatus, &prevCourier); err != nil {
+			return err
+		}
+		var agentID int64
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id = ?`, orderID).Scan(&agentID); err != nil {
+			return err
+		}
+		// Office/dispatch actors only, same branch (super_admin exempt).
+		switch a.Role {
+		case "super_admin":
+		case "agen", "admin", "koordinator-kurir":
+			if agentID != a.AgentID {
+				return &DomainError{Status: 403, Message: "Aksi tidak diizinkan untuk peran Anda."}
+			}
+		default:
+			return &DomainError{Status: 403, Message: "Aksi tidak diizinkan untuk peran Anda."}
+		}
+		if itemStatus != "pengembalian" || (returnStatus != "pending" && returnStatus != "approved") {
+			return &DomainError{Status: 422, Message: "Pengajuan pengembalian ini sudah diproses sebelumnya."}
+		}
+		var cAgent int64
+		var cActive bool
+		var cUser sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id, is_active, user_id FROM couriers WHERE id = ? FOR UPDATE`,
+			courierID).Scan(&cAgent, &cActive, &cUser); err != nil {
+			if err == sql.ErrNoRows {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		var eStatus, eRole string
+		var eAgent sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT u.status, r.slug, u.agent_id FROM users u
+			JOIN roles r ON r.id = u.role_id WHERE u.id = ? FOR UPDATE`, cUser).Scan(&eStatus, &eRole, &eAgent); err != nil {
+			return &DomainError{Status: 422, Message: "Kurir yang dipilih tidak berada di cabang agen yang sama atau sedang nonaktif."}
+		}
+		if cAgent != agentID || !cActive || eStatus != "active" || !eAgent.Valid || eAgent.Int64 != agentID ||
+			eRole != "kurir" {
+			return &DomainError{Status: 422, Message: "Kurir yang dipilih tidak berada di cabang agen yang sama atau sedang nonaktif."}
+		}
+		// Idempotent replay of the identical courier.
+		if prevCourier.Valid && prevCourier.Int64 == courierID {
+			itemID = returnItemID
+			assignedCourier = courierID
+			return nil
+		}
+		// Optimistic concurrency: a switch must match the expected previous assignment.
+		if expectedCourierID.Valid {
+			if !prevCourier.Valid || prevCourier.Int64 != expectedCourierID.Int64 {
+				return &DomainError{Status: 409, Message: "Penugasan retur telah berubah. Muat ulang sebelum menugaskan."}
+			}
+		} else if prevCourier.Valid {
+			return &DomainError{Status: 409, Message: "Penugasan retur telah berubah. Muat ulang sebelum menugaskan."}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE return_items SET courier_id = ?, updated_at = UTC_TIMESTAMP(6)
+			WHERE id = ?`, courierID, returnItemID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\ReturnItem', ?, 'return_item.courier_assigned', NULL, ?, UTC_TIMESTAMP(6))`,
+			a.ID, returnItemID, mustJSON(map[string]any{"courier_id": courierID,
+				"previous_courier_id": nullIntPtr(prevCourier), "actor_role": a.Role})); err != nil {
+			return err
+		}
+		itemID = returnItemID
+		assignedCourier = courierID
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": itemID, "courier_id": assignedCourier}, nil
+}
+
 // canVerifyDelivery mirrors DeliveryVerificationPolicy (super_admin, or same-branch admin).
 func (s *Service) canVerifyDelivery(ctx context.Context, a Actor, shipmentID int64) bool {
 	if a.IsSuper {

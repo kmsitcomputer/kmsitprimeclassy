@@ -485,11 +485,11 @@ Status legend:
 | GET | `/api/v1/reports/sales` | session | admin, agen, korsal, super_admin | **GO** | GLM reporting slice compared by compare_reports.py (150/150) |
 | GET | `/api/v1/reports/transactions` | session | admin, agen, korsal, super_admin | **GO** |  |
 
-## Returns — items — `return-items` (0/2 in Go)
+## Returns — items — `return-items` (1/2 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| PATCH | `/api/v1/return-items/{item}/courier` | session | admin, agen, koordinator-kurir, super_admin | LARAVEL |  |
+| PATCH | `/api/v1/return-items/{item}/courier` | session | admin, agen, koordinator-kurir, super_admin | **GO** | return pickup courier assignment (never self-claimed): office/dispatch gates, already_reviewed gate, courier eligibility, idempotent replay, 409 stale-assignment with expected_courier_id, audit; compared by compare_return_assign.py (15/0) |
 | POST | `/api/v1/return-items/{returnItem}/receipt-allocations` | session | admin, super_admin | LARAVEL |  |
 
 ## Site configuration — website — `settings` (1/1 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 249 (66.4%) |
-|   of which fully GO | 249 |
+| Served by Go now | 250 (66.7%) |
+|   of which fully GO | 250 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 126 |
+| Still Laravel-only | 125 |
 | Areas fully ported | 24 / 45 |

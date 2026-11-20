@@ -80,6 +80,8 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerificationStore), RequireAuth, s.RequireAgentLinked, dvGate))
 	s.mux.Handle("POST /api/v1/dispatch/order-items/{orderItem}/split-batch", chain(http.HandlerFunc(s.handleDispatchSplitBatch), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("POST /api/v1/dispatch/orders/{order}/request-fulfillment", chain(http.HandlerFunc(s.handleDispatchRequestFulfillment), RequireAuth, s.RequireAgentLinked, koordGate))
+	retGate := RequireRole("super_admin,agen,admin,koordinator-kurir")
+	s.mux.Handle("PATCH /api/v1/return-items/{item}/courier", chain(http.HandlerFunc(s.handleReturnItemAssignCourier), RequireAuth, s.RequireAgentLinked, retGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/courier", chain(http.HandlerFunc(s.handleShipmentAssignCourier), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/eligible-couriers", chain(http.HandlerFunc(s.handleShipmentEligibleCouriers), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
@@ -131,6 +133,7 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"PATCH /api/v1/shipments/{shipment}/expedition-handover",
 		"GET /api/v1/shipments/{shipment}/delivery-verifications",
 		"POST /api/v1/dispatch/order-items/{orderItem}/split-batch",
+		"PATCH /api/v1/return-items/{item}/courier",
 		"POST /api/v1/dispatch/orders/{order}/request-fulfillment",
 		"POST /api/v1/shipments/{shipment}/delivery-verifications",
 		"GET /api/v1/shipments/{shipment}/receipt",
@@ -1423,6 +1426,42 @@ func (s *Server) handleDispatchRequestFulfillment(w http.ResponseWriter, r *http
 		return
 	}
 	httpx.OK(w, result, "OK", nil)
+}
+
+func (s *Server) handleReturnItemAssignCourier(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "item"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		CourierID         *int64 `json:"courier_id"`
+		ExpectedCourierID *int64 `json:"expected_courier_id"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	if body.CourierID == nil {
+		writeError(w, r, httpx.Validation(map[string][]string{"courier_id": {
+			i18n.ValidationMessage(LocaleFrom(ctx), "required", "courier_id")}}))
+		return
+	}
+	var exists bool
+	if err := s.database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM couriers WHERE id = ?)`, *body.CourierID).
+		Scan(&exists); err == nil && !exists {
+		writeError(w, r, httpx.Validation(map[string][]string{"courier_id": {
+			i18n.ValidationMessage(LocaleFrom(ctx), "exists", "courier_id")}}))
+		return
+	}
+	var expected sql.NullInt64
+	if body.ExpectedCourierID != nil {
+		expected = sql.NullInt64{Int64: *body.ExpectedCourierID, Valid: true}
+	}
+	result, aerr := s.dispatchService().AssignReturnPickupCourier(ctx, dispatchActor(r), id, *body.CourierID, expected)
+	if aerr != nil {
+		writeDispatchError(w, r, aerr)
+		return
+	}
+	httpx.OK(w, result, msg(ctx, "courier.assigned"), nil)
 }
 
 func (s *Server) handleDeliveryVerifications(w http.ResponseWriter, r *http.Request) {

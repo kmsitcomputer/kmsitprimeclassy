@@ -285,6 +285,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/shipments/{shipment}/delivery-verifications"): "R-03 record outcome: Idempotency-Key required/≤100, outcome validation, not_delivered gate (delivered_at + item re-derive), append-only, idempotent replay, 409 conflict, audit; compared by compare_delivery_verifications.py (20/0)",
     ("POST", "/api/v1/dispatch/order-items/{orderItem}/split-batch"): "REM-002 batch split: koordinator gates, window/sub/provider/quantity gates, stock-request demand carve, fresh shipment, proportional courier-fee; compared by compare_dispatch_writes.py (19/0)",
     ("POST", "/api/v1/dispatch/orders/{order}/request-fulfillment"): "REM-001 coordinator fulfillment request: warehouse-scope gate, outstanding gate, coordinator_* columns, audit, StockRequestResource projection; compared by compare_dispatch_writes.py (19/0)",
+    ("PATCH", "/api/v1/return-items/{item}/courier"): "return pickup courier assignment (never self-claimed): office/dispatch gates, already_reviewed gate, courier eligibility, idempotent replay, 409 stale-assignment with expected_courier_id, audit; compared by compare_return_assign.py (15/0)",
 }
 
 
