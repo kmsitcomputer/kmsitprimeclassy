@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 	"strings"
@@ -100,6 +101,45 @@ func (s *Server) handleAdminReturnsIndex(w http.ResponseWriter, r *http.Request)
 		lastPage = 1
 	}
 	httpx.OK(w, data, "OK", map[string]any{"current_page": page, "last_page": lastPage, "total": total})
+}
+
+func (s *Server) handleAdminReturnsShow(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	returnID, ok := pathID(w, r, "return")
+	if !ok {
+		return
+	}
+	var orderID int64
+	if err := s.database.QueryRowContext(ctx, `SELECT order_id FROM returns WHERE id=?`, returnID).Scan(&orderID); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, r, notFoundError(ctx))
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	actor := UserFrom(ctx)
+	if actor.Role != "super_admin" {
+		var orderAgentID sql.NullInt64
+		if err := s.database.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=?`, orderID).Scan(&orderAgentID); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, r, notFoundError(ctx))
+				return
+			}
+			writeError(w, r, err)
+			return
+		}
+		if !orderAgentID.Valid || actor.AgentID == nil || orderAgentID.Int64 != *actor.AgentID {
+			writeError(w, r, forbiddenError(ctx))
+			return
+		}
+	}
+	resource, err := orders.LoadReturnRequestResource(ctx, s.database, returnID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, resource, "OK", nil)
 }
 
 func queryInteger(r *http.Request, key string, fallback int) int {

@@ -184,6 +184,10 @@ func implementsRoute(method, path string) bool {
 		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/return-items/"), "/")
 		return len(parts) == 2 && parts[0] != "" && parts[1] == "receipt-allocations"
 	}
+	if method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/returns/") {
+		rest := strings.TrimPrefix(path, "/api/v1/admin/returns/")
+		return rest != "" && !strings.Contains(rest, "/")
+	}
 	if matchesDomainERoute(method, path) || matchesDomainEReadRoute(method, path) || matchesGLMLaravelOnlyRoute(method, path) {
 		return true
 	}
