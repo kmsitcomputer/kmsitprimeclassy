@@ -101,6 +101,10 @@ KEYS = {
         "settings_updated",
         "agent_settings_updated",
     ],
+    "smtp": [
+        "saved",
+        "config_incomplete",
+    ],
     "media": [
         "unknown_collection",
         "upload_failed",

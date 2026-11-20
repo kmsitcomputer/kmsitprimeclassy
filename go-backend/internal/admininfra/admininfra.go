@@ -236,7 +236,11 @@ func (s *Service) SaveSettings(ctx context.Context, group string, values map[str
 			}
 		}
 		writes := map[string]string{}
+		clearPassword := group == "smtp" && values["clear_password"] == true
 		for key, value := range values {
+			if group == "smtp" && key == "clear_password" {
+				continue
+			}
 			if group == "whatsapp" {
 				if key == "limits" {
 					limits, _ := value.(map[string]any)
@@ -288,6 +292,9 @@ func (s *Service) SaveSettings(ctx context.Context, group string, values map[str
 			}
 			if secrets[key] {
 				if text == "" { // Blank means keep the existing value.
+					if clearPassword && key == "password" {
+						writes[prefix+key] = ""
+					}
 					continue
 				}
 				text, err = cryptox.EncryptString(s.appKey, text)
@@ -296,6 +303,9 @@ func (s *Service) SaveSettings(ctx context.Context, group string, values map[str
 				}
 			}
 			writes[prefix+key] = text
+		}
+		if clearPassword {
+			writes[prefix+"password"] = ""
 		}
 		if enabled, ok := writes[prefix+"enabled"]; ok && enabled == "1" {
 			host, port, from := choose(writes, old, prefix+"host"), choose(writes, old, prefix+"port"), choose(writes, old, prefix+"from_address")
