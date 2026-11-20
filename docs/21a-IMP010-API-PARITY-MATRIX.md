@@ -355,7 +355,7 @@ Status legend:
 | GET | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 per-item receipt events index (admin own-agent / super_admin), date + verifier projection; compared by compare_item_receipts.py (16/0) |
 | POST | `/api/v1/order-items/{item}/receipts` | session | admin, super_admin | **GO** | REM-07 record actual receipt: Idempotency-Key 8–100, arrived-status gate, date window (not future/before order), time-date consistency, quantity bounded by fulfilled across all events, fingerprint replay/409; compared by compare_item_receipts.py (16/0) |
 
-## Orders — `orders` (22/25 in Go)
+## Orders — `orders` (23/25 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -363,7 +363,7 @@ Status legend:
 | POST | `/api/v1/orders` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | full chain: canonical target locks, reservation, fee/commission snapshots, voucher redemption, invoice sequence, shipment grouping, payment transaction, Stock Request (COD), initial report snapshot; idempotent replay and total rollback verified |
 | GET | `/api/v1/orders/regions` | session | — | **GO** | region facets derived only from the caller's own scoped orders; each level empty until its parent is supplied |
 | GET | `/api/v1/orders/{order}` | session | — | **GO** | policy-gated detail (own buyer, branch roles, korsal/sales team + the reassigned-owner leg, gudang queue-only); loads payment_transaction + returns, which the list omits |
-| POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | **GO** | CRM-origin only; owner Sales/SKS/Korsal, append-only consent current-state + item/quantity quota, public image evidence, transactional return items/order state/audit; compare_assisted_return.py |
 | POST | `/api/v1/orders/{order}/cancel` | session | — | **GO** | konsumen/branch-agen/super_admin; reverses reservations (idempotent per item), returns accepted Shipping→Transit, cancels the Stock Request, books the sales reduction, freezes the financial snapshot and creates the refund obligation — all in ONE transaction |
 | GET | `/api/v1/orders/{order}/consent-context` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | capture panel context (subject id only to capturing actor; CRM mode + channel availability); compared by compare_consent.py (26/0) |
 | GET | `/api/v1/orders/{order}/consent-events` | session | admin, agen, konsumen, korsal, sales, sales-kurir-sub, super_admin | **GO** | consent history per order (order view policy), ConsentEventResource; compared by compare_consent.py (26/0) |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 276 (73.6%) |
-|   of which fully GO | 276 |
+| Served by Go now | 277 (73.9%) |
+|   of which fully GO | 277 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 99 |
+| Still Laravel-only | 98 |
 | Areas fully ported | 31 / 45 |

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 )
@@ -64,6 +65,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/unlink", chain(http.HandlerFunc(s.handleCRMUnlink), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/consent-otp", chain(http.HandlerFunc(s.handleCRMConsentOtp), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/crm/customers/{customer}/consent-events", chain(http.HandlerFunc(s.handleCRMCaptureConsent), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/orders/{order}/assisted-returns", chain(http.HandlerFunc(s.handleCRMAssistedReturn), RequireAuth, s.RequireAgentLinked, s.Throttle(30, time.Minute)))
 
 	// Commission/fee REPORTS — CommissionController::allowedBeneficiaryRoles scopes the rows per role.
 	commissionRoles := "super_admin,agen,sales,sales-kurir-sub,kurir,koordinator-kurir,admin,korsal,keuangan"

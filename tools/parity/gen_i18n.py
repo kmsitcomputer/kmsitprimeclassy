@@ -120,6 +120,8 @@ KEYS = {
         "owner_invalid",
         "address_book_not_allowed",
         "not_crm_order",
+        "consent_required",
+        "consent_scope_exceeded",
         "migration_pending",
     ],
     "whatsapp": [
