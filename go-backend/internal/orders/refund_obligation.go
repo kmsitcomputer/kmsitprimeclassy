@@ -522,3 +522,101 @@ func (s *Service) RequestDeferredMaterialization(ctx context.Context, obligation
 		return refundEvent(ctx, tx, orderID, obligationID, 0, 0, "deferred.materialization_requested", eventKey, actorID, nil, map[string]any{"amount_cents": amountCents, "deferred_remaining_cents": toCents(parseDecimalString(deferredRaw))})
 	})
 }
+
+func (s *Service) MaterializeDeferred(ctx context.Context, originID, amountCents, actorID int64, clientKey string) (int64, error) {
+	if amountCents <= 0 {
+		return 0, &Problem{Status: 422, Message: "Nominal materialisasi harus lebih dari 0.", Errors: map[string]any{"code": "invalid_materialization_amount"}}
+	}
+	var childID int64
+	err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderID int64
+		var originStatus, source, provenance, deferredAmount, deferredRemaining string
+		var snapshot sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT order_id,status,source_type,provenance,CAST(deferred_amount AS CHAR),CAST(deferred_remaining AS CHAR),snapshot_id FROM refund_obligations WHERE id=? FOR UPDATE`, originID).Scan(&orderID, &originStatus, &source, &provenance, &deferredAmount, &deferredRemaining, &snapshot); err != nil {
+			return err
+		}
+		var agentID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM orders WHERE id=? FOR UPDATE`, orderID).Scan(&agentID); err != nil {
+			return err
+		}
+		var role string
+		var actorAgent sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT roles.slug,users.agent_id FROM users JOIN roles ON roles.id=users.role_id WHERE users.id=?`, actorID).Scan(&role, &actorAgent); err != nil {
+			return err
+		}
+		if role != "super_admin" && (role != "agen" || !actorAgent.Valid || !agentID.Valid || actorAgent.Int64 != agentID.Int64) {
+			return &Problem{Status: 403, Message: "Aksi ini memerlukan persetujuan Owner/Agent.", Errors: map[string]any{"code": "refund_owner_approval_required"}}
+		}
+		if source != "deferred" && toCents(parseDecimalString(deferredAmount)) <= 0 {
+			return &Problem{Status: 422, Message: "Obligation ini tidak memiliki entitlement deferred.", Errors: map[string]any{"code": "not_a_deferred_origin"}}
+		}
+		childKey := "deferred:" + fmt.Sprint(originID) + ":" + clientKey
+		var existingAmount string
+		var existingParent sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT id,CAST(amount AS CHAR),parent_obligation_id FROM refund_obligations WHERE obligation_key=? FOR UPDATE`, childKey).Scan(&childID, &existingAmount, &existingParent); err == nil {
+			if toCents(parseDecimalString(existingAmount)) != amountCents || !existingParent.Valid || existingParent.Int64 != originID {
+				return &Problem{Status: 409, Message: "Idempotency key sudah digunakan dengan parameter berbeda.", Errors: map[string]any{"code": "idempotency_key_conflict"}}
+			}
+			eventKey := "deferred_replay:" + clientKey
+			var eventExists int
+			if e := tx.QueryRowContext(ctx, `SELECT 1 FROM refund_ledger_events WHERE event_key=? LIMIT 1`, eventKey).Scan(&eventExists); errors.Is(e, sql.ErrNoRows) {
+				if e := refundEvent(ctx, tx, orderID, originID, 0, 0, "deferred.materialization_replayed", eventKey, actorID, nil, map[string]any{"child_obligation_id": childID}); e != nil {
+					return e
+				}
+			} else if e != nil {
+				return e
+			}
+			return nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if originStatus == "cancelled" {
+			return &Problem{Status: 422, Message: "Origin deferred sudah dibatalkan/superseded.", Errors: map[string]any{"code": "deferred_origin_not_materializable"}}
+		}
+		remainingDeferred := toCents(parseDecimalString(deferredRemaining))
+		if remainingDeferred <= 0 {
+			return &Problem{Status: 422, Message: "Entitlement deferred sudah habis.", Errors: map[string]any{"code": "deferred_exhausted"}}
+		}
+		metrics, err := s.metricsForOrder(ctx, tx, orderID)
+		if err != nil {
+			return err
+		}
+		cap := min64(remainingDeferred, metrics.AvailableCents)
+		if amountCents > cap {
+			return &Problem{Status: 422, Message: "Nominal materialisasi melebihi batas deferred/kas tersedia.", Errors: map[string]any{"code": "deferred_materialization_exceeds_cap", "cap_cents": cap}}
+		}
+		no, err := ulid()
+		if err != nil {
+			return err
+		}
+		var snapshotValue any
+		if snapshot.Valid {
+			snapshotValue = snapshot.Int64
+		}
+		metadata, _ := json.Marshal(map[string]any{"client_idempotency_key": clientKey})
+		res, err := tx.ExecContext(ctx, `INSERT INTO refund_obligations(obligation_no,order_id,source_type,source_id,obligation_key,amount,status,provenance,reason,approved_by,approved_at,approval_source,snapshot_id,deferred_amount,deferred_remaining,parent_obligation_id,created_by,metadata,created_at,updated_at) VALUES (?,?,'deferred',?,?,?,'approved',?,'Deferred materialization',?,UTC_TIMESTAMP(6),'owner_manual_correction',?,0,0,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, "RO-"+no, orderID, originID, childKey, money.String(float64(amountCents)/100), provenance, actorID, snapshotValue, originID, actorID, string(metadata))
+		if err != nil {
+			return err
+		}
+		childID, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		res, err = tx.ExecContext(ctx, `UPDATE refund_obligations SET deferred_remaining=deferred_remaining-?,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND deferred_remaining>=?`, money.String(float64(amountCents)/100), originID, money.String(float64(amountCents)/100))
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return &Problem{Status: 409, Message: "Konflik materialisasi deferred; ulangi.", Errors: map[string]any{"code": "deferred_materialization_conflict"}}
+		}
+		if err := refundEvent(ctx, tx, orderID, childID, 0, 0, "deferred.materialized", "deferred_materialized:"+clientKey, actorID, nil, map[string]any{"origin_obligation_id": originID, "amount_cents": amountCents}); err != nil {
+			return err
+		}
+		return s.refreshRefundObligation(ctx, tx, originID)
+	})
+	return childID, err
+}

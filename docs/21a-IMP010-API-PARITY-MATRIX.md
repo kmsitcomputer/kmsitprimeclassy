@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (57/59 in Go)
+## Admin operations — `admin` (58/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -63,7 +63,7 @@ Status legend:
 | POST | `/api/v1/admin/refund-attempts/{attempt}/unknown` | session | agen, keuangan, super_admin | **GO** | Finance-only processing-to-unknown transition, optional note, replay preservation, unknown_since and durable audit; compare_admin_refund_attempt_terminals.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/approve` | session | agen, keuangan, super_admin | **GO** | Branch owner/Super Admin pending-only approval, owner authorization, idempotent approved replay and unique append-only ledger event; compare_admin_refund_obligation_approve.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/attempts` | session | agen, keuangan, super_admin | **GO** | Finance-only attempt creation with CRM recipient evidence guard, Order/obligation locking, scoped key replay/collision protection, reservation arithmetic and durable attempt-created event; compare_admin_refund_attempt_create.py |
-| POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/materialize` | session | agen, keuangan, super_admin | LARAVEL |  |
+| POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/materialize` | session | agen, keuangan, super_admin | **GO** | Owner-only deferred entitlement materialization with replay-first idempotency, cash cap, child approval, parent balance update and append-only audit; compare_admin_refund_deferred.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/deferred/request` | session | agen, keuangan, super_admin | **GO** | Finance deferred materialization request, Order/obligation locks, idempotent event key and available-entitlement snapshot; compare_admin_refund_deferred.py |
 | POST | `/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve` | session | agen, keuangan, super_admin | **GO** | Finance/Owner exits A/B with historical-owner enforcement, evidence, idempotent no-op, state audit and branch authorization; compare_admin_refund_needs_verification.py |
 | GET | `/api/v1/admin/regions/export` | session | super_admin | **GO** | Super Admin four-level joined reference export with Laravel CSV quoting, filename and UTF-8 content type; compare_admin_regions_csv.py |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 329 (87.7%) |
-|   of which fully GO | 329 |
+| Served by Go now | 330 (88.0%) |
+|   of which fully GO | 330 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 46 |
+| Still Laravel-only | 45 |
 | Areas fully ported | 34 / 45 |
