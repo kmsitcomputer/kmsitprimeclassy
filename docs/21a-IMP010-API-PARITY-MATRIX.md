@@ -17,7 +17,7 @@ Status legend:
 | DELETE | `/api/v1/addresses/{address}` | session | konsumen | **GO** | a foreign id is a 404 |
 | PATCH | `/api/v1/addresses/{address}` | session | konsumen | **GO** | promotes the default correctly where the reference leaves none (deviation D-9) |
 
-## Admin operations — `admin` (20/59 in Go)
+## Admin operations — `admin` (21/59 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -50,7 +50,7 @@ Status legend:
 | PATCH | `/api/v1/admin/languages/{language}` | session | super_admin | **GO** |  |
 | PATCH | `/api/v1/admin/languages/{language}/set-default` | session | super_admin | **GO** | exactly one default; the target must be active |
 | PATCH | `/api/v1/admin/languages/{language}/toggle-active` | session | super_admin | **GO** | the default language can never be deactivated |
-| GET | `/api/v1/admin/order-refunds` | session | admin, agen, keuangan, super_admin | LARAVEL |  |
+| GET | `/api/v1/admin/order-refunds` | session | admin, agen, keuangan, super_admin | **GO** | Branch-scoped fulfillment-shortfall refunds, current buyer/adjuster names, item snapshots, decimal refund amount and status, latest-first pagination; compare_admin_order_refunds.py |
 | PATCH | `/api/v1/admin/order-refunds/{adjustment}/status` | session | keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/order-sales-reductions/{reduction}/reinstate` | session | agen, keuangan, super_admin | LARAVEL |  |
 | POST | `/api/v1/admin/orders/{order}/cancellation/finalize` | session | agen, keuangan, super_admin | LARAVEL |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 288 (76.8%) |
-|   of which fully GO | 288 |
+| Served by Go now | 289 (77.1%) |
+|   of which fully GO | 289 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 87 |
+| Still Laravel-only | 86 |
 | Areas fully ported | 33 / 45 |
