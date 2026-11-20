@@ -7,9 +7,16 @@ package dispatch
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 )
 
 var itemTransitions = map[string][]string{
@@ -996,4 +1003,311 @@ func nullStrPtr(v string) any {
 		return nil
 	}
 	return v
+}
+
+// ExpeditionHandover ports CourierService::recordExpeditionHandover (REM-003).
+// evidence is the already-validated upload (nil when Laravel would fail validation first).
+func (s *Service) ExpeditionHandover(ctx context.Context, a Actor, shipmentID int64,
+	carrier, trackingNumber string, evidence *media.Upload) error {
+	return s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if a.Role != "koordinator-kurir" {
+			return &DomainError{Status: 403, Message: "Hanya Koordinator Kurir yang dapat menugaskan kurir."}
+		}
+		var orderID, orderAgent int64
+		var orderStatus, shipStatus, paymentStatus string
+		var provCode string
+		var tracking sql.NullString
+		var meta sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT o.id, o.agent_id, o.status, o.payment_status, sh.status,
+			COALESCE(sh.shipping_provider_code,''), sh.tracking_number, sh.provider_meta
+			FROM shipments sh JOIN orders o ON o.id = sh.order_id WHERE sh.id = ? FOR UPDATE`, shipmentID).
+			Scan(&orderID, &orderAgent, &orderStatus, &paymentStatus, &shipStatus, &provCode, &tracking, &meta)
+		if errors.Is(err, sql.ErrNoRows) {
+			return &DomainError{Status: 404, Message: ""}
+		}
+		if err != nil {
+			return err
+		}
+		if provCode != "rajaongkir" {
+			return &DomainError{Status: 422, Message: "Hanya pengiriman ekspedisi (RajaOngkir) yang memiliki serah terima ekspedisi."}
+		}
+		if orderStatus != "diproses" || shipStatus != "pending" {
+			return &DomainError{Status: 422, Message: "Kurir yang dipilih tidak berada di cabang agen yang sama atau sedang nonaktif."}
+		}
+		if orderAgent != a.AgentID {
+			return &DomainError{Status: 403, Message: "Aksi tidak diizinkan untuk peran Anda."}
+		}
+		if paymentStatus != "paid" {
+			return &DomainError{Status: 422, Message: "Pengiriman ekspedisi wajib lunas penuh (termasuk ongkir) sebelum dikirim."}
+		}
+		// assertExpeditionGoodsComplete: whole order in this shipment + stock request complete.
+		var outside bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM order_items WHERE order_id = ?
+			AND status <> 'dibatalkan' AND (shipment_id IS NULL OR shipment_id <> ?))`, orderID, shipmentID).Scan(&outside); err != nil {
+			return err
+		}
+		if outside {
+			return &DomainError{Status: 422, Message: "Pengiriman ekspedisi tidak boleh parsial; seluruh barang order harus dalam satu pengiriman."}
+		}
+		var incomplete bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM stock_requests sr JOIN stock_request_items sri
+			ON sri.stock_request_id = sr.id WHERE sr.order_id = ? AND (sri.remaining_qty > 0 OR sr.status IN ('pending','partial')))`, orderID).Scan(&incomplete); err != nil {
+			return err
+		}
+		if incomplete {
+			return &DomainError{Status: 422, Message: "Barang belum lengkap diterima Koordinator; pengiriman ekspedisi ditahan."}
+		}
+		// Carrier must match the checkout-chosen expedition carrier (provider_meta.courier).
+		chosen := ""
+		if meta.Valid && meta.String != "" {
+			var m map[string]any
+			if json.Unmarshal([]byte(meta.String), &m) == nil {
+				if c, ok := m["courier"].(string); ok {
+					chosen = strings.ToLower(c)
+				}
+			}
+		}
+		if chosen == "" || strings.ToLower(carrier) != chosen {
+			return &DomainError{Status: 422, Message: "Ekspedisi pada resi tidak sama dengan ekspedisi pilihan checkout."}
+		}
+		if tracking.Valid && tracking.String != "" {
+			// Idempotent replay — no second evidence row.
+			if tracking.String == trackingNumber {
+				return nil
+			}
+			return &DomainError{Status: 409, Message: "Resi sudah tercatat untuk pengiriman ini dengan nomor berbeda."}
+		}
+		// Evidence upload → media row (shipment_proof, mediable = Shipment).
+		mediableType := "App\\Models\\Shipment"
+		var mediaID int64
+		if evidence != nil {
+			m, err := media.Store(ctx, tx, "shipment_proof", *evidence, &mediableType, &shipmentID, &a.ID)
+			if err != nil {
+				return err
+			}
+			mediaID = m.ID
+		}
+		newMeta := map[string]any{}
+		if meta.Valid && meta.String != "" {
+			_ = json.Unmarshal([]byte(meta.String), &newMeta)
+		}
+		newMeta["handover"] = map[string]any{"media_id": mediaID, "carrier": chosen,
+			"recorded_by": a.ID, "recorded_at": time.Now().UTC().Format("2006-01-02T15:04:05") + "+00:00"}
+		metaJSON, _ := json.Marshal(newMeta)
+		if _, err := tx.ExecContext(ctx, `UPDATE shipments SET tracking_number = ?, provider_meta = ?,
+			updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, trackingNumber, string(metaJSON), shipmentID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\Shipment', ?, 'shipment.expedition_handover_recorded', NULL, ?, UTC_TIMESTAMP(6))`,
+			a.ID, shipmentID, mustJSON(map[string]any{"order_id": orderID, "carrier": chosen,
+				"tracking_number": trackingNumber, "media_id": mediaID})); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// Receipt ports ShipmentController::receipt + ShipmentReceiptResource (read-only;
+// audit row shipment.receipt_printed is written on every print).
+func (s *Service) Receipt(ctx context.Context, a Actor, shipmentID int64) (map[string]any, error) {
+	// ShipmentPolicy::printReceipt — which caller may print.
+	var orderStatus string
+	var orderAgent int64
+	var mode string
+	var courierID, selfDelivered sql.NullInt64
+	var konsumenPlacedBy sql.NullInt64
+	err := s.database.DB.QueryRowContext(ctx, `SELECT o.status, o.agent_id, o.placed_by_user_id, sh.delivery_mode,
+		sh.courier_id, sh.self_delivered_by_user_id FROM shipments sh JOIN orders o ON o.id = sh.order_id
+		WHERE sh.id = ?`, shipmentID).Scan(&orderStatus, &orderAgent, &konsumenPlacedBy, &mode, &courierID, &selfDelivered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, &DomainError{Status: 404, Message: ""}
+	}
+	if err != nil {
+		return nil, err
+	}
+	allowed := false
+	if orderStatus != "dibatalkan" {
+		switch a.Role {
+		case "super_admin":
+			allowed = true
+		case "agen", "admin":
+			allowed = orderAgent == a.AgentID
+		case "kurir", "sales-kurir-sub", "koordinator-kurir":
+			if mode == "self_sub" {
+				allowed = selfDelivered.Valid && selfDelivered.Int64 == a.ID &&
+					konsumenPlacedBy.Valid && konsumenPlacedBy.Int64 == a.ID
+			} else {
+				allowed = courierID.Valid
+				if allowed {
+					var cUser sql.NullInt64
+					_ = s.database.DB.QueryRowContext(ctx, `SELECT user_id FROM couriers WHERE id = ?`,
+						courierID.Int64).Scan(&cUser)
+					allowed = cUser.Valid && cUser.Int64 == a.ID
+				}
+			}
+		}
+	}
+	if !allowed {
+		// ShipmentPolicy::printReceipt denial renders the AuthorizationException text.
+		return nil, &DomainError{Status: 403, Message: "This action is unauthorized."}
+	}
+
+	var shID int64
+	var orderNo, recipientName, recipientPhone, address string
+	var village, district, regency, province sql.NullString
+	var orderCreatedAt sql.NullTime
+	var shippedAt sql.NullTime
+	var provCode sql.NullString
+	var courierName, selfName sql.NullString
+	var notes sql.NullString
+	var totalAmount, paidAmount, dpAmount, remainingAmount string
+	var paymentStatus, pmType sql.NullString
+	var deliveryEstimate sql.NullString
+	err = s.database.DB.QueryRowContext(ctx, `SELECT sh.id, o.order_no, o.recipient_name_snapshot,
+		o.recipient_phone_snapshot, o.address_snapshot, o.village_snapshot, o.district_snapshot,
+		o.regency_snapshot, o.province_snapshot, o.created_at, sh.shipped_at, sh.shipping_provider_code,
+		c.name, sd.name, o.notes, CAST(o.total_amount AS CHAR), CAST(o.paid_amount AS CHAR),
+		CAST(o.dp_amount AS CHAR), CAST(o.remaining_amount AS CHAR), o.payment_status, pm.type,
+		CAST(o.delivery_date_estimate AS CHAR)
+		FROM shipments sh
+		JOIN orders o ON o.id = sh.order_id
+		LEFT JOIN couriers c ON c.id = sh.courier_id
+		LEFT JOIN users sd ON sd.id = sh.self_delivered_by_user_id
+		LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
+		WHERE sh.id = ?`, shipmentID).
+		Scan(&shID, &orderNo, &recipientName, &recipientPhone, &address, &village, &district, &regency,
+			&province, &orderCreatedAt, &shippedAt, &provCode, &courierName, &selfName, &notes,
+			&totalAmount, &paidAmount, &dpAmount, &remainingAmount, &paymentStatus, &pmType, &deliveryEstimate)
+	if err != nil {
+		return nil, err
+	}
+	modeReceipt := "pre_pickup"
+	if shippedAt.Valid {
+		modeReceipt = "post_pickup"
+	}
+	labels := map[string]string{"openroute": "Kurir Lokal", "rajaongkir": "Ekspedisi"}
+	prov := ""
+	if provCode.Valid {
+		prov = provCode.String
+	}
+	label, ok := labels[prov]
+	if !ok {
+		label = prov
+	}
+	// Delivery date: first non-null requested_delivery_date among items, else order estimate.
+	var deliveryDate any
+	if err := s.database.DB.QueryRowContext(ctx, `SELECT requested_delivery_date FROM order_items
+		WHERE shipment_id = ? AND requested_delivery_date IS NOT NULL LIMIT 1`, shipmentID).Scan(&deliveryDate); err != nil {
+		if err == sql.ErrNoRows {
+			if deliveryEstimate.Valid {
+				deliveryDate = deliveryEstimate.String
+			}
+		} else {
+			return nil, err
+		}
+	}
+	items := make([]map[string]any, 0)
+	total := 0
+	rows, err := s.database.DB.QueryContext(ctx, `SELECT sku_snapshot, product_name_snapshot,
+		variation_label_snapshot, fulfilled_quantity FROM order_items WHERE shipment_id = ? ORDER BY id`, shipmentID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var sku, pname sql.NullString
+		var vlabel sql.NullString
+		var qty int64
+		if err := rows.Scan(&sku, &pname, &vlabel, &qty); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		items = append(items, map[string]any{"sku": nullStrPtr(sku.String), "product_name": nullStrPtr(pname.String),
+			"variation_label": nullStrPtr(vlabel.String), "quantity": qty})
+		total += int(qty)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	isCOD := pmType.Valid && pmType.String == "cod"
+	var codDue any
+	if isCOD && paymentStatus.String != "paid" {
+		tot, _ := strconv.ParseFloat(totalAmount, 64)
+		paid, _ := strconv.ParseFloat(paidAmount, 64)
+		due := tot - paid
+		if due < 0 {
+			due = 0
+		}
+		codDue = strconv.FormatFloat(due, 'f', 2, 64)
+	}
+	dpF, _ := strconv.ParseFloat(dpAmount, 64)
+	var dpPaid, dpOutstanding any
+	if dpF > 0 {
+		dpPaid = paidAmount
+		// hasOutstanding: round(max(total-paid,0),2) > 0 (order not cancelled here).
+		tot, _ := strconv.ParseFloat(totalAmount, 64)
+		pd, _ := strconv.ParseFloat(paidAmount, 64)
+		out := math.Round((tot-pd)*100) / 100
+		if out > 0 {
+			dpOutstanding = remainingAmount
+		}
+	}
+	isFullyPaid := paymentStatus.String == "paid"
+	if isFullyPaid {
+		rem, _ := strconv.ParseFloat(remainingAmount, 64)
+		isFullyPaid = rem <= 0
+	}
+	courier := courierName
+	if !courier.Valid && selfName.Valid {
+		courier = selfName
+	}
+	return map[string]any{
+		"shipment_id": shID, "mode": modeReceipt, "order_no": orderNo,
+		"order_date":     carbonMicro(orderCreatedAt),
+		"recipient_name": recipientName, "recipient_phone": recipientPhone, "address_line": address,
+		"village": nullStrPtr(village.String), "district": nullStrPtr(district.String),
+		"regency": nullStrPtr(regency.String), "province": nullStrPtr(province.String),
+		"delivery_date":        deliveryDate,
+		"shipping_method_code": nullStrPtr(prov), "shipping_method_label": label,
+		"is_official_carrier_label": false,
+		"courier_name":              nullStrPtr(courier.String), "picked_up_at": carbonMicro(shippedAt),
+		"items": items, "total_item_count": total, "notes": nullStrPtr(notes.String),
+		"payment": map[string]any{
+			"is_cod": isCOD, "cod_amount_due": codDue,
+			"is_down_payment": dpF > 0, "dp_paid_amount": dpPaid, "dp_outstanding_amount": dpOutstanding,
+			"is_fully_paid": isFullyPaid,
+		},
+	}, nil
+}
+
+// RecordReceiptPrint writes the shipment.receipt_printed audit row (every print, incl. reprints).
+func (s *Service) RecordReceiptPrint(ctx context.Context, a Actor, shipmentID int64) error {
+	var orderID int64
+	var shippedAt sql.NullTime
+	if err := s.database.DB.QueryRowContext(ctx, `SELECT order_id, shipped_at FROM shipments WHERE id = ?`,
+		shipmentID).Scan(&orderID, &shippedAt); err != nil {
+		return err
+	}
+	mode := "pre_pickup"
+	if shippedAt.Valid {
+		mode = "post_pickup"
+	}
+	var isReprint bool
+	_ = s.database.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM activity_logs WHERE subject_type = 'App\\Models\\Shipment'
+		AND subject_id = ? AND event = 'shipment.receipt_printed')`, shipmentID).Scan(&isReprint)
+	_, err := s.database.DB.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+		description, properties, created_at)
+		VALUES (?, 'App\\Models\\Shipment', ?, 'shipment.receipt_printed', NULL, ?, UTC_TIMESTAMP(6))`,
+		a.ID, shipmentID, mustJSON(map[string]any{"order_id": orderID, "mode": mode,
+			"is_reprint": isReprint, "actor_role": a.Role}))
+	return err
+}
+
+// ShipmentOrderID resolves the owning order of a shipment (handler projection support).
+func (s *Service) ShipmentOrderID(ctx context.Context, shipmentID int64) (int64, error) {
+	var orderID int64
+	err := s.database.DB.QueryRowContext(ctx, `SELECT order_id FROM shipments WHERE id = ?`, shipmentID).Scan(&orderID)
+	return orderID, err
 }

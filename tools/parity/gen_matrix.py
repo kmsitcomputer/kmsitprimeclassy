@@ -279,6 +279,8 @@ IMPLEMENTED = {
     ("PATCH", "/api/v1/shipments/{shipment}/items/{orderItem}/status"): "per-ITEM work-unit transition (LOCKED courier work-unit model): one item, siblings untouched; compared by compare_shipment_status.py",
     ("PATCH", "/api/v1/shipments/{shipment}/courier"): "CourierService::assignCourier: self_sub ban, coordinator-only, eligibility under Order→Shipment lock, SKS executor resolve, SC-03 gate, carve of wholly-unaccepted lines, idempotent replay; compared by compare_courier_assign.py (20/0)",
     ("GET", "/api/v1/shipments/{shipment}/eligible-couriers"): "per-shipment assignable couriers (branch kurir/koordinator profiles + eligible SKS executors), read-only; compared by compare_courier_assign.py (20/0)",
+    ("PATCH", "/api/v1/shipments/{shipment}/expedition-handover"): "REM-003 carrier handover: provider gate (rajaongkir), carrier mismatch, idempotent replay, 409 tracking conflict, evidence media + provider_meta.handover, audit; multipart success via POST _method=PATCH spoofing (PHP does not parse multipart PATCH); compared by compare_handover_receipt.py (17/0)",
+    ("GET", "/api/v1/shipments/{shipment}/receipt"): "thermal receipt (pre/post-pickup mode derived from shipped_at), printReceipt policy, read-only + shipment.receipt_printed audit (is_reprint); compared by compare_handover_receipt.py (17/0)",
 }
 
 

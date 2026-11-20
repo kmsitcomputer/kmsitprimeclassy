@@ -498,7 +498,7 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/settings` | public | — | **GO** |  |
 
-## Shipping & delivery — `shipments` (4/9 in Go)
+## Shipping & delivery — `shipments` (6/9 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -506,10 +506,10 @@ Status legend:
 | GET | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | LARAVEL |  |
 | POST | `/api/v1/shipments/{shipment}/delivery-verifications` | session | admin, super_admin | LARAVEL |  |
 | GET | `/api/v1/shipments/{shipment}/eligible-couriers` | session | koordinator-kurir | **GO** | per-shipment assignable couriers (branch kurir/koordinator profiles + eligible SKS executors), read-only; compared by compare_courier_assign.py (20/0) |
-| PATCH | `/api/v1/shipments/{shipment}/expedition-handover` | session | koordinator-kurir | LARAVEL |  |
+| PATCH | `/api/v1/shipments/{shipment}/expedition-handover` | session | koordinator-kurir | **GO** | REM-003 carrier handover: provider gate (rajaongkir), carrier mismatch, idempotent replay, 409 tracking conflict, evidence media + provider_meta.handover, audit; multipart success via POST _method=PATCH spoofing (PHP does not parse multipart PATCH); compared by compare_handover_receipt.py (17/0) |
 | POST | `/api/v1/shipments/{shipment}/items/{orderItem}/refuse` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
 | PATCH | `/api/v1/shipments/{shipment}/items/{orderItem}/status` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | per-ITEM work-unit transition (LOCKED courier work-unit model): one item, siblings untouched; compared by compare_shipment_status.py |
-| GET | `/api/v1/shipments/{shipment}/receipt` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | LARAVEL |  |
+| GET | `/api/v1/shipments/{shipment}/receipt` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | thermal receipt (pre/post-pickup mode derived from shipped_at), printReceipt policy, read-only + shipment.receipt_printed audit (is_reprint); compared by compare_handover_receipt.py (17/0) |
 | PATCH | `/api/v1/shipments/{shipment}/status` | session | admin, agen, koordinator-kurir, kurir, sales-kurir-sub, super_admin | **GO** | bulk diproses→dikirim / dikirim→terkirim transition: executor authorization, refusal guard, handover timestamps, Sub consume, aggregate sync, commissions; compared by compare_shipment_status.py |
 
 ## Inventory — agent — `stock` (3/3 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 243 (64.8%) |
-|   of which fully GO | 243 |
+| Served by Go now | 245 (65.3%) |
+|   of which fully GO | 245 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 132 |
+| Still Laravel-only | 130 |
 | Areas fully ported | 24 / 45 |

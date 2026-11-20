@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -70,6 +71,10 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	// koordinator-kurir; ShipmentPolicy::updateStatus executor rules live in the service.
 	shipGate := RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")
 	koordGate := RequireRole("koordinator-kurir")
+	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/expedition-handover", chain(http.HandlerFunc(s.handleExpeditionHandover), RequireAuth, s.RequireAgentLinked, koordGate))
+	s.mux.Handle("POST /api/v1/shipments/{shipment}/expedition-handover", chain(http.HandlerFunc(s.handleExpeditionHandoverSpoofed), RequireAuth, s.RequireAgentLinked, koordGate))
+	receiptGate := RequireRole("super_admin,agen,admin,kurir,sales-kurir-sub,koordinator-kurir")
+	s.mux.Handle("GET /api/v1/shipments/{shipment}/receipt", chain(http.HandlerFunc(s.handleShipmentReceipt), RequireAuth, s.RequireAgentLinked, receiptGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/courier", chain(http.HandlerFunc(s.handleShipmentAssignCourier), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/eligible-couriers", chain(http.HandlerFunc(s.handleShipmentEligibleCouriers), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
@@ -118,6 +123,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/delivery-refusals/{refusal}/receive",
 		"POST /api/v1/delivery-refusals/{refusal}/disposition",
 		"PATCH /api/v1/shipments/{shipment}/courier",
+		"PATCH /api/v1/shipments/{shipment}/expedition-handover",
+		"GET /api/v1/shipments/{shipment}/receipt",
 		"GET /api/v1/shipments/{shipment}/eligible-couriers",
 		"PATCH /api/v1/shipments/{shipment}/status",
 		"PATCH /api/v1/shipments/{shipment}/items/{orderItem}/status",
@@ -1173,6 +1180,177 @@ func (s *Server) handleRefusalDispose(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, result, "OK", nil)
 }
 
+var trackingRe = regexp.MustCompile(`^[A-Za-z0-9\-]+$`)
+
+func (s *Server) handleExpeditionHandover(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var carrier, tracking string
+	var evidence *media.Upload
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		// PHP does not populate $_POST for multipart PATCH bodies, so Laravel's validate()
+		// sees an empty request and fails every required rule. The success path is only
+		// reachable through Laravel form-method spoofing (POST + _method=PATCH), handled
+		// by handleExpeditionHandoverSpoofed. Mirror the reference exactly.
+		if r.URL.Query().Get("_method") != "POST" {
+			_ = r.ParseMultipartForm(8 << 20)
+		}
+	} else {
+		var body struct {
+			Carrier        string `json:"carrier"`
+			TrackingNumber string `json:"tracking_number"`
+		}
+		_ = httpx.DecodeJSON(r, &body)
+		carrier = body.Carrier
+		tracking = body.TrackingNumber
+	}
+	fields := fieldErrors{}
+	if carrier == "" {
+		fields.add("carrier", i18n.ValidationMessage(LocaleFrom(ctx), "required", "carrier"))
+	}
+	if tracking == "" {
+		fields.add("tracking_number", i18n.ValidationMessage(LocaleFrom(ctx), "required", "tracking_number"))
+	}
+	if evidence == nil {
+		fields.add("evidence", i18n.ValidationMessage(LocaleFrom(ctx), "required", "evidence"))
+	}
+	if carrier != "" && len([]rune(carrier)) > 30 {
+		fields.add("carrier", i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "carrier"))
+	}
+	if tracking != "" {
+		if len([]rune(tracking)) < 6 {
+			fields.add("tracking_number", i18n.ValidationMessage(LocaleFrom(ctx), "min.string", "tracking_number"))
+		}
+		if len([]rune(tracking)) > 40 {
+			fields.add("tracking_number", i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "tracking_number"))
+		}
+		if !trackingRe.MatchString(tracking) {
+			fields.add("tracking_number", i18n.ValidationMessage(LocaleFrom(ctx), "regex", "tracking_number"))
+		}
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(map[string][]string(fields)))
+		return
+	}
+	if err := s.dispatchService().ExpeditionHandover(ctx, dispatchActor(r), id, carrier, tracking, evidence); err != nil {
+		var de *dispatch.DomainError
+		if errors.As(err, &de) {
+			m := de.Message
+			if de.Status == http.StatusNotFound || de.Message == "" {
+				m = msg(ctx, "system.endpoint_not_found")
+			}
+			writeError(w, r, httpx.NewError(de.Status, m))
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	orderID, oerr := s.dispatchService().ShipmentOrderID(ctx, id)
+	if oerr != nil {
+		writeError(w, r, oerr)
+		return
+	}
+	s.renderOrderOK(w, r, orderID, msg(ctx, "courier.assigned"))
+}
+
+// handleExpeditionHandoverSpoofed mirrors Laravel form-method spoofing: a multipart POST with
+// _method=PATCH is routed to the PATCH handler by the reference framework; the multipart body
+// IS parsed for POST (PHP fills $_POST), making the success path reachable.
+func (s *Server) handleExpeditionHandoverSpoofed(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeError(w, r, httpx.NewError(http.StatusBadRequest, msg(r.Context(), "system.generic_error")))
+		return
+	}
+	if strings.ToUpper(r.FormValue("_method")) != "PATCH" {
+		writeError(w, r, httpx.NewError(http.StatusMethodNotAllowed, msg(r.Context(), "system.generic_error")))
+		return
+	}
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	carrier := r.FormValue("carrier")
+	tracking := r.FormValue("tracking_number")
+	var evidence *media.Upload
+	if files, ok := r.MultipartForm.File["evidence"]; ok && len(files) > 0 {
+		handle, oerr := files[0].Open()
+		if oerr == nil {
+			content, rerr := io.ReadAll(io.LimitReader(handle, 12<<20))
+			handle.Close()
+			if rerr == nil {
+				evidence = &media.Upload{Filename: files[0].Filename, Content: content}
+			}
+		}
+	}
+	fields := fieldErrors{}
+	if carrier == "" {
+		fields.add("carrier", i18n.ValidationMessage(LocaleFrom(ctx), "required", "carrier"))
+	}
+	if tracking == "" {
+		fields.add("tracking_number", i18n.ValidationMessage(LocaleFrom(ctx), "required", "tracking_number"))
+	}
+	if evidence == nil {
+		fields.add("evidence", i18n.ValidationMessage(LocaleFrom(ctx), "required", "evidence"))
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(map[string][]string(fields)))
+		return
+	}
+	if err := s.dispatchService().ExpeditionHandover(ctx, dispatchActor(r), id, carrier, tracking, evidence); err != nil {
+		var de *dispatch.DomainError
+		if errors.As(err, &de) {
+			m := de.Message
+			if de.Status == http.StatusNotFound || de.Message == "" {
+				m = msg(ctx, "system.endpoint_not_found")
+			}
+			writeError(w, r, httpx.NewError(de.Status, m))
+			return
+		}
+		writeError(w, r, err)
+		return
+	}
+	orderID, oerr := s.dispatchService().ShipmentOrderID(ctx, id)
+	if oerr != nil {
+		writeError(w, r, oerr)
+		return
+	}
+	s.renderOrderOK(w, r, orderID, msg(ctx, "courier.assigned"))
+}
+
+func (s *Server) handleShipmentReceipt(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	receipt, aerr := s.dispatchService().Receipt(ctx, dispatchActor(r), id)
+	if aerr != nil {
+		var de *dispatch.DomainError
+		if errors.As(aerr, &de) {
+			m := de.Message
+			if de.Status == http.StatusNotFound || de.Message == "" {
+				m = msg(ctx, "system.endpoint_not_found")
+			}
+			writeError(w, r, httpx.NewError(de.Status, m))
+			return
+		}
+		writeError(w, r, aerr)
+		return
+	}
+	if err := s.dispatchService().RecordReceiptPrint(ctx, dispatchActor(r), id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, receipt, "OK", nil)
+}
+
 func (s *Server) handleShipmentAssignCourier(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := strconv.ParseInt(httpx.PathValue(r, "shipment"), 10, 64)
@@ -1261,11 +1439,19 @@ func (s *Server) renderOrderOK(w http.ResponseWriter, r *http.Request, orderID i
 	ctx := r.Context()
 	actor := UserFrom(ctx)
 	svc := s.orderService()
-	order, lerr := svc.LoadOrderForRead(ctx, orderID, true)
+	order, lerr := svc.LoadOrderForRead(ctx, orderID, false)
 	if lerr != nil {
 		writeError(w, r, orderError(ctx, lerr))
 		return
 	}
+	// The reference's assign/handover responses load ONLY items + shipments.courier.user —
+	// konsumen/sales/korsal/returns/payment stay whenLoaded-absent, exactly like Laravel.
+	order.LoadItemShipment = false
+	order.LoadActors = false
+	order.LoadPaymentTransactions = false
+	order.LoadReturns = false
+	order.LoadDeliveryVerifications = false
+	order.Payment = nil
 	rendered, rerr := orders.Render(ctx, svc, order, viewerOf(actor))
 	if rerr != nil {
 		writeError(w, r, rerr)
