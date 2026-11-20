@@ -283,6 +283,8 @@ IMPLEMENTED = {
     ("GET", "/api/v1/shipments/{shipment}/receipt"): "thermal receipt (pre/post-pickup mode derived from shipped_at), printReceipt policy, read-only + shipment.receipt_printed audit (is_reprint); compared by compare_handover_receipt.py (17/0)",
     ("GET", "/api/v1/shipments/{shipment}/delivery-verifications"): "R-03 append-only verification history (admin/super_admin, same-agent policy → 404), DeliveryVerificationResource; compared by compare_delivery_verifications.py (20/0)",
     ("POST", "/api/v1/shipments/{shipment}/delivery-verifications"): "R-03 record outcome: Idempotency-Key required/≤100, outcome validation, not_delivered gate (delivered_at + item re-derive), append-only, idempotent replay, 409 conflict, audit; compared by compare_delivery_verifications.py (20/0)",
+    ("POST", "/api/v1/dispatch/order-items/{orderItem}/split-batch"): "REM-002 batch split: koordinator gates, window/sub/provider/quantity gates, stock-request demand carve, fresh shipment, proportional courier-fee; compared by compare_dispatch_writes.py (19/0)",
+    ("POST", "/api/v1/dispatch/orders/{order}/request-fulfillment"): "REM-001 coordinator fulfillment request: warehouse-scope gate, outstanding gate, coordinator_* columns, audit, StockRequestResource projection; compared by compare_dispatch_writes.py (19/0)",
 }
 
 

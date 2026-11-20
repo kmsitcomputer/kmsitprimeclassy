@@ -1441,6 +1441,271 @@ func (s *Service) RecordDeliveryVerification(ctx context.Context, a Actor, shipm
 		"created_at":  carbonMicro(createdAt)}, nil
 }
 
+// SplitBatch ports DispatchController::splitBatch + OrderFulfillmentService::splitItemIntoBatch
+// (koordinator splits a diproses agent-sourced line into a follow-up batch).
+func (s *Service) SplitBatch(ctx context.Context, a Actor, orderItemID, quantity int64, note string) (map[string]any, error) {
+	var childID, childShipment, childQty int64
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if a.Role != "koordinator-kurir" {
+			return &DomainError{Status: 403, Message: "Hanya Koordinator Kurir yang dapat menugaskan kurir."}
+		}
+		var orderID, agentID int64
+		var orderStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT order_id FROM order_items WHERE id = ? FOR UPDATE`, orderItemID).
+			Scan(&orderID); err != nil {
+			if err == sql.ErrNoRows {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id, status FROM orders WHERE id = ? FOR UPDATE`, orderID).
+			Scan(&agentID, &orderStatus); err != nil {
+			return err
+		}
+		if agentID != a.AgentID {
+			return &DomainError{Status: 403, Message: "Aksi tidak diizinkan untuk peran Anda."}
+		}
+		var status, stockSource string
+		var fulfilled int64
+		var shipID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT status, stock_source, fulfilled_quantity, shipment_id
+			FROM order_items WHERE id = ? FOR UPDATE`, orderItemID).Scan(&status, &stockSource, &fulfilled, &shipID); err != nil {
+			return err
+		}
+		if (orderStatus != "diproses" && orderStatus != "dikirim") || status != "diproses" {
+			return &DomainError{Status: 422, Message: "Jendela perubahan fulfillment sudah ditutup."}
+		}
+		if stockSource == "sub" {
+			return &DomainError{Status: 422, Message: "Produk tidak dapat ditambahkan ke pesanan yang bersumber dari stok Sub."}
+		}
+		if !shipID.Valid {
+			return &DomainError{Status: 422, Message: "Pengiriman ekspedisi/ambil di tempat tidak dapat ditugaskan ke Kurir Toko."}
+		}
+		var shipStatus, mode string
+		var provCode sql.NullString
+		var courierID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT status, delivery_mode, shipping_provider_code, courier_id
+			FROM shipments WHERE id = ? FOR UPDATE`, shipID.Int64).Scan(&shipStatus, &mode, &provCode, &courierID); err != nil {
+			return err
+		}
+		if shipStatus != "pending" || courierID.Valid || mode != "standard" ||
+			provCode.String == "rajaongkir" || provCode.String == "pickup" {
+			return &DomainError{Status: 422, Message: "Pengiriman ekspedisi/ambil di tempat tidak dapat ditugaskan ke Kurir Toko."}
+		}
+		if quantity < 1 || quantity >= fulfilled {
+			return &DomainError{Status: 422, Message: "Jumlah pemenuhan tidak valid."}
+		}
+		// splitItemForReschedule core (consolidate=false for batch splits).
+		var unitPrice, subtotal, courierFee string
+		var reqDate sql.NullString
+		var productID, variationID, subLocID sql.NullInt64
+		var pname, vlabel, sku sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT CAST(unit_price_snapshot AS CHAR), CAST(subtotal_snapshot AS CHAR),
+			CAST(courier_fee_amount AS CHAR), requested_delivery_date, product_id, product_variation_id,
+			sub_location_id, product_name_snapshot, variation_label_snapshot, sku_snapshot
+			FROM order_items WHERE id = ?`, orderItemID).Scan(&unitPrice, &subtotal, &courierFee, &reqDate,
+			&productID, &variationID, &subLocID, &pname, &vlabel, &sku); err != nil {
+			return err
+		}
+		up, _ := strconv.ParseFloat(unitPrice, 64)
+		cf, _ := strconv.ParseFloat(courierFee, 64)
+		sub, _ := strconv.ParseFloat(subtotal, 64)
+		movedSubtotal := math.Round(up*float64(quantity)*100) / 100
+		perUnit := 0.0
+		if fulfilled > 0 {
+			perUnit = cf / float64(fulfilled)
+		}
+		movedFee := math.Round(perUnit*float64(quantity)*100) / 100
+		retainedFee := math.Round((cf-movedFee)*100) / 100
+		retainedSubtotal := math.Round((sub-movedSubtotal)*100) / 100
+		// R-03 / decision G: lock the StockRequestItem and reject when the remainder cannot cover.
+		var srID int64
+		var srStatus string
+		var srItemID sql.NullInt64
+		var srRemaining int64
+		err := tx.QueryRowContext(ctx, `SELECT id, status FROM stock_requests WHERE order_id = ? FOR UPDATE`, orderID).
+			Scan(&srID, &srStatus)
+		if err == nil && srStatus != "cancelled" {
+			serr := tx.QueryRowContext(ctx, `SELECT id, remaining_qty FROM stock_request_items
+				WHERE stock_request_id = ? AND order_item_id = ? FOR UPDATE`, srID, orderItemID).
+				Scan(&srItemID, &srRemaining)
+			if serr == nil && srRemaining < quantity {
+				return &DomainError{Status: 422, Message: "Pemecahan tidak dapat dilakukan karena permintaan stok gudang sudah dipenuhi sebagian dan sisa tidak mencukupi."}
+			}
+		}
+		res, ierr := tx.ExecContext(ctx, `INSERT INTO order_items (order_id, split_from_order_item_id, product_id,
+			product_variation_id, stock_source, sub_location_id, product_name_snapshot, variation_label_snapshot,
+			sku_snapshot, unit_price_snapshot, agent_fee_amount, sales_fee_amount, courier_fee_amount,
+			subtotal_snapshot, original_quantity, fulfilled_quantity, requested_delivery_date, status,
+			created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+			orderID, orderItemID, productID, variationID, stockSource, subLocID, pname, vlabel, sku,
+			unitPrice, movedFee, movedSubtotal, quantity, quantity, nullStrPtr(reqDate.String), status)
+		if ierr != nil {
+			return ierr
+		}
+		newID, lerr := res.LastInsertId()
+		if lerr != nil {
+			return lerr
+		}
+		if srItemID.Valid {
+			if _, err := tx.ExecContext(ctx, `UPDATE stock_request_items SET requested_qty = requested_qty - ?,
+				remaining_qty = remaining_qty - ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, quantity, quantity, srItemID.Int64); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO stock_request_items (stock_request_id, order_item_id,
+				product_id, product_variation_id, sku_snapshot, requested_qty, fulfilled_qty, remaining_qty,
+				created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+				srID, newID, productID, variationID, sku, quantity, quantity); err != nil {
+				return err
+			}
+		}
+		if err := s.assignFreshShipment(ctx, tx, orderID, newID, false, subLocID, a.ID, "shipment.split_for_reschedule"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE order_items SET original_quantity = original_quantity - ?,
+			fulfilled_quantity = ?, subtotal_snapshot = ?, courier_fee_amount = ?, updated_at = UTC_TIMESTAMP(6)
+			WHERE id = ?`, quantity, fulfilled-quantity, retainedSubtotal, retainedFee, orderItemID); err != nil {
+			return err
+		}
+		reason := note
+		if reason == "" {
+			reason = "batch lanjutan"
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\OrderItem', ?, 'order_item.split_for_reschedule', ?, ?, UTC_TIMESTAMP(6))`,
+			a.ID, newID, reason, mustJSON(map[string]any{"order_id": orderID, "from_order_item_id": orderItemID,
+				"quantity_moved": quantity, "new_delivery_date": nullStrPtr(reqDate.String), "actor_role": a.Role})); err != nil {
+			return err
+		}
+		childID = newID
+		childQty = quantity
+		return tx.QueryRowContext(ctx, `SELECT shipment_id FROM order_items WHERE id = ?`, newID).Scan(&childShipment)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"order_item_id": childID, "shipment_id": childShipment, "quantity": childQty}, nil
+}
+
+// RequestFulfillment ports DispatchController::requestFulfillment +
+// StockRequestService::coordinatorRequestFulfillment (REM-001).
+func (s *Service) RequestFulfillment(ctx context.Context, a Actor, orderID int64, note string) (map[string]any, error) {
+	var out map[string]any
+	err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if a.Role != "koordinator-kurir" {
+			return &DomainError{Status: 403, Message: "Aksi tidak diizinkan untuk peran Anda."}
+		}
+		var agentID int64
+		var orderStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT agent_id, status FROM orders WHERE id = ? FOR UPDATE`, orderID).
+			Scan(&agentID, &orderStatus); err != nil {
+			if err == sql.ErrNoRows {
+				return &DomainError{Status: 404, Message: ""}
+			}
+			return err
+		}
+		if agentID != a.AgentID {
+			return &DomainError{Status: 403, Message: "Aksi tidak diizinkan untuk peran Anda."}
+		}
+		// isInWarehouseScope.
+		var selfDelivery, hasCourier, srOpen bool
+		_ = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shipments WHERE order_id = ? AND self_delivered_by_user_id IS NOT NULL),
+			EXISTS(SELECT 1 FROM shipments WHERE order_id = ? AND courier_id IS NOT NULL)`, orderID, orderID).Scan(&selfDelivery, &hasCourier)
+		inScope := false
+		if !selfDelivery {
+			if orderStatus == "diproses" && !hasCourier {
+				inScope = true
+			} else {
+				_ = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM stock_requests WHERE order_id = ?
+					AND status IN ('pending','partial'))`, orderID).Scan(&inScope)
+			}
+		}
+		_ = srOpen
+		if (orderStatus != "diproses" && orderStatus != "dikirim") || !inScope {
+			return &DomainError{Status: 422, Message: "Order tidak berada pada tahap yang dapat diminta ke Gudang."}
+		}
+		var srID int64
+		var srStatus string
+		err := tx.QueryRowContext(ctx, `SELECT id, status FROM stock_requests WHERE order_id = ? FOR UPDATE`, orderID).
+			Scan(&srID, &srStatus)
+		var outstanding int64
+		if err == nil {
+			if qerr := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(remaining_qty),0) FROM stock_request_items
+				WHERE stock_request_id = ? FOR UPDATE`, srID).Scan(&outstanding); qerr != nil {
+				return qerr
+			}
+		} else if err != sql.ErrNoRows {
+			return err
+		}
+		if err == sql.ErrNoRows || srStatus == "cancelled" || srStatus == "fulfilled" || outstanding <= 0 {
+			return &DomainError{Status: 422, Message: "Tidak ada kebutuhan barang yang masih outstanding untuk diminta."}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE stock_requests SET coordinator_requested_by = ?,
+			coordinator_requested_at = UTC_TIMESTAMP(6), coordinator_request_note = ?, updated_at = UTC_TIMESTAMP(6)
+			WHERE id = ?`, a.ID, nullStrPtr(note), srID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_logs (causer_id, subject_type, subject_id, event,
+			description, properties, created_at)
+			VALUES (?, 'App\\Models\\StockRequest', ?, 'stock_request.coordinator_requested', ?, ?, UTC_TIMESTAMP(6))`,
+			a.ID, srID, nullStrPtr(note), mustJSON(map[string]any{"order_id": orderID, "outstanding_qty": outstanding})); err != nil {
+			return err
+		}
+		return s.renderStockRequest(ctx, tx, srID, &out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Service) renderStockRequest(ctx context.Context, tx *sql.Tx, srID int64, out *map[string]any) error {
+	var agentID, orderID int64
+	var reqNumber, srStatus string
+	var crBy sql.NullInt64
+	var crAt sql.NullTime
+	var crNote sql.NullString
+	var createdAt, updatedAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, `SELECT agent_id, order_id, request_number, status, coordinator_requested_by,
+		coordinator_requested_at, coordinator_request_note, created_at, updated_at FROM stock_requests WHERE id = ?`,
+		srID).Scan(&agentID, &orderID, &reqNumber, &srStatus, &crBy, &crAt, &crNote, &createdAt, &updatedAt); err != nil {
+		return err
+	}
+	items := make([]map[string]any, 0)
+	rows, qerr := tx.QueryContext(ctx, `SELECT id, stock_request_id, order_item_id, product_id,
+		product_variation_id, sku_snapshot, requested_qty, fulfilled_qty, remaining_qty
+		FROM stock_request_items WHERE stock_request_id = ? ORDER BY id`, srID)
+	if qerr != nil {
+		return qerr
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, srid, oiID int64
+		var pid, vid sql.NullInt64
+		var sku sql.NullString
+		var rq, fq, rem int64
+		if err := rows.Scan(&id, &srid, &oiID, &pid, &vid, &sku, &rq, &fq, &rem); err != nil {
+			return err
+		}
+		items = append(items, map[string]any{"id": id, "stock_request_id": srid, "order_item_id": oiID,
+			"product_id": nullIntPtr(pid), "product_variation_id": nullIntPtr(vid),
+			"product_name": nil, "variation_label": nil,
+			"sku": nullStrPtr(sku.String), "sku_snapshot": nullStrPtr(sku.String),
+			"product_image_url": nil, "requested_qty": rq, "fulfilled_qty": fq, "remaining_qty": rem,
+			"current_stock": nil})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	*out = map[string]any{"id": srID, "agent_id": agentID, "order_id": orderID, "request_number": reqNumber,
+		"status": srStatus, "coordinator_requested_by": nullIntPtr(crBy),
+		"coordinator_requested_at": carbonMicro(crAt), "coordinator_request_note": nullStrPtr(crNote.String),
+		"items": items, "created_at": carbonMicro(createdAt), "updated_at": carbonMicro(updatedAt)}
+	return nil
+}
+
 // canVerifyDelivery mirrors DeliveryVerificationPolicy (super_admin, or same-branch admin).
 func (s *Service) canVerifyDelivery(ctx context.Context, a Actor, shipmentID int64) bool {
 	if a.IsSuper {

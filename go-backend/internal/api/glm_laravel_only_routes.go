@@ -78,6 +78,8 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	dvGate := RequireRole("super_admin,admin")
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerifications), RequireAuth, s.RequireAgentLinked, dvGate))
 	s.mux.Handle("POST /api/v1/shipments/{shipment}/delivery-verifications", chain(http.HandlerFunc(s.handleDeliveryVerificationStore), RequireAuth, s.RequireAgentLinked, dvGate))
+	s.mux.Handle("POST /api/v1/dispatch/order-items/{orderItem}/split-batch", chain(http.HandlerFunc(s.handleDispatchSplitBatch), RequireAuth, s.RequireAgentLinked, koordGate))
+	s.mux.Handle("POST /api/v1/dispatch/orders/{order}/request-fulfillment", chain(http.HandlerFunc(s.handleDispatchRequestFulfillment), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/courier", chain(http.HandlerFunc(s.handleShipmentAssignCourier), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("GET /api/v1/shipments/{shipment}/eligible-couriers", chain(http.HandlerFunc(s.handleShipmentEligibleCouriers), RequireAuth, s.RequireAgentLinked, koordGate))
 	s.mux.Handle("PATCH /api/v1/shipments/{shipment}/status", chain(http.HandlerFunc(s.handleShipmentStatus), RequireAuth, s.RequireAgentLinked, shipGate))
@@ -128,6 +130,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"PATCH /api/v1/shipments/{shipment}/courier",
 		"PATCH /api/v1/shipments/{shipment}/expedition-handover",
 		"GET /api/v1/shipments/{shipment}/delivery-verifications",
+		"POST /api/v1/dispatch/order-items/{orderItem}/split-batch",
+		"POST /api/v1/dispatch/orders/{order}/request-fulfillment",
 		"POST /api/v1/shipments/{shipment}/delivery-verifications",
 		"GET /api/v1/shipments/{shipment}/receipt",
 		"GET /api/v1/shipments/{shipment}/eligible-couriers",
@@ -1354,6 +1358,71 @@ func (s *Server) handleShipmentReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, receipt, "OK", nil)
+}
+
+func (s *Server) handleDispatchSplitBatch(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "orderItem"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Quantity *int64  `json:"quantity"`
+		Note     *string `json:"note"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	fields := fieldErrors{}
+	if body.Quantity == nil {
+		fields.add("quantity", i18n.ValidationMessage(LocaleFrom(ctx), "required", "quantity"))
+	} else if *body.Quantity < 1 {
+		fields.add("quantity", i18n.ValidationMessage(LocaleFrom(ctx), "min.numeric", "quantity", "min", "1"))
+	}
+	if body.Note != nil && len([]rune(*body.Note)) > 255 {
+		fields.add("note", i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "note", "max", "255"))
+	}
+	if len(fields) > 0 {
+		writeError(w, r, httpx.Validation(map[string][]string(fields)))
+		return
+	}
+	note := ""
+	if body.Note != nil {
+		note = *body.Note
+	}
+	result, aerr := s.dispatchService().SplitBatch(ctx, dispatchActor(r), id, *body.Quantity, note)
+	if aerr != nil {
+		writeDispatchError(w, r, aerr)
+		return
+	}
+	httpx.Created(w, result, "Created")
+}
+
+func (s *Server) handleDispatchRequestFulfillment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(httpx.PathValue(r, "order"), 10, 64)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, msg(ctx, "system.endpoint_not_found")))
+		return
+	}
+	var body struct {
+		Note *string `json:"note"`
+	}
+	_ = httpx.DecodeJSON(r, &body)
+	if body.Note != nil && len([]rune(*body.Note)) > 255 {
+		writeError(w, r, httpx.Validation(map[string][]string{"note": {
+			i18n.ValidationMessage(LocaleFrom(ctx), "max.string", "note", "max", "255")}}))
+		return
+	}
+	note := ""
+	if body.Note != nil {
+		note = *body.Note
+	}
+	result, aerr := s.dispatchService().RequestFulfillment(ctx, dispatchActor(r), id, note)
+	if aerr != nil {
+		writeDispatchError(w, r, aerr)
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
 }
 
 func (s *Server) handleDeliveryVerifications(w http.ResponseWriter, r *http.Request) {
