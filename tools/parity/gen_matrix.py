@@ -117,6 +117,8 @@ IMPLEMENTED = {
     ("POST", "/api/v1/checkout/geocode"): "GPS → canonical regional-master matcher (Nominatim port with provider config; GEOCODE_PROVIDER=noop in the isolated env mirrors the reference container having no external network), exact-chain single-match rule, matched:false fallback; compared by compare_external.py (18/0)",
     ("POST", "/api/v1/agent/shipping-providers/{provider}/destinations"): "RajaOngkir destination search: by-ID provider binding, rajaongkir-only gate, search 3..100 validation, shared 422 when the external API is unreachable; compared by compare_external.py (18/0)",
     ("POST", "/api/v1/agent/shipping-providers/{provider}/test"): "provider connectivity test: by-ID binding, rajaongkir/openroute/kmsit dispatch, coordinate validation, shared 422 when the provider is unreachable (KMSIT reason codes only with a live endpoint); compared by compare_external.py (18/0)",
+    ("POST", "/api/v1/catalog/imports"): "full import apply: hardened CSV/XLSX reader, per-row planner (all reference error codes), unstaged create/update with catalog_skus registry, staged stock path (draft product + physical_opname draft row with import row-key idempotency + PayloadFingerprint, replay); compared by compare_imports.py (14/0)",
+    ("POST", "/api/v1/catalog/imports/preview"): "pure validation pass over the same planner (writes nothing); compared by compare_imports.py (14/0)",
     ("GET", "/api/v1/settings"): "",
     ("GET", "/api/v1/languages"): "",
     ("GET", "/api/v1/categories"): "",

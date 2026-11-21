@@ -125,6 +125,8 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/checkout/geocode", chain(http.HandlerFunc(s.handleCheckoutGeocode), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/agent/shipping-providers/{provider}/destinations", chain(http.HandlerFunc(s.handleAgentProviderDestinations), RequireAuth, s.RequireAgentLinked, RequireRole(auth.RoleAgen)))
 	s.mux.Handle("POST /api/v1/agent/shipping-providers/{provider}/test", chain(http.HandlerFunc(s.handleAgentProviderTest), RequireAuth, s.RequireAgentLinked, RequireRole(auth.RoleAgen)))
+	s.mux.Handle("POST /api/v1/catalog/imports", chain(http.HandlerFunc(s.handleCatalogImportApply), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
+	s.mux.Handle("POST /api/v1/catalog/imports/preview", chain(http.HandlerFunc(s.handleCatalogImportPreview), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
@@ -220,6 +222,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/checkout/geocode",
 		"POST /api/v1/agent/shipping-providers/{provider}/destinations",
 		"POST /api/v1/agent/shipping-providers/{provider}/test",
+		"POST /api/v1/catalog/imports",
+		"POST /api/v1/catalog/imports/preview",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",

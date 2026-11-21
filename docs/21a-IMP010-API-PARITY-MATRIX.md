@@ -151,13 +151,13 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/bestsellers` | public | — | **GO** | Agent-resolved receipt-based product ranking with accepted-return deductions, unresolved-allocation exclusion, WIB date windows and hidden metadata; compare_bestsellers.py |
 
-## catalog — `catalog` (1/3 in Go)
+## catalog — `catalog` (3/3 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/catalog/export` | session | admin, agen, super_admin | **GO** | Product and variation CSV/XLSX export, formula-safe cells, explicit single-Agent stock context and Sub-location ownership; compare_catalog_export.py |
-| POST | `/api/v1/catalog/imports` | session | admin, agen, super_admin | LARAVEL |  |
-| POST | `/api/v1/catalog/imports/preview` | session | admin, agen, super_admin | LARAVEL |  |
+| POST | `/api/v1/catalog/imports` | session | admin, agen, super_admin | **GO** | full import apply: hardened CSV/XLSX reader, per-row planner (all reference error codes), unstaged create/update with catalog_skus registry, staged stock path (draft product + physical_opname draft row with import row-key idempotency + PayloadFingerprint, replay); compared by compare_imports.py (14/0) |
+| POST | `/api/v1/catalog/imports/preview` | session | admin, agen, super_admin | **GO** | pure validation pass over the same planner (writes nothing); compared by compare_imports.py (14/0) |
 
 ## Catalog — categories — `categories` (4/4 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 372 (99.2%) |
-|   of which fully GO | 372 |
+| Served by Go now | 374 (99.7%) |
+|   of which fully GO | 374 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 3 |
-| Areas fully ported | 43 / 45 |
+| Still Laravel-only | 1 |
+| Areas fully ported | 44 / 45 |
