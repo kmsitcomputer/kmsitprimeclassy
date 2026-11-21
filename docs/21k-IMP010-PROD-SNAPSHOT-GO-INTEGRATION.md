@@ -90,3 +90,11 @@ Verdict: **LOCAL DATA MIGRATION PASS** (pre-launch dataset; see Remaining Risks)
 
 ## O. Final verdict
 **LOCAL DATA MIGRATION PASS** (with the pre-launch-dataset caveat documented above)
+
+## Local env fix (post-report, local-only)
+
+After a Docker host reboot, pc_laravel_imp010 returned 500 (Access denied for
+user primeclassy_test on primeclassy_testing) — its MariaDB grant covered only
+the w1..w5 scratch DBs. Remediation: GRANT primeclassy_test ALL on
+primeclassy_testing (local MariaDB, no production impact). The Laravel serve
+command also needs `--env=testing` (the recreated container CMD lost it).
