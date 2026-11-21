@@ -53,3 +53,12 @@ func TestWhatsAppFromDeviceNeverFallsBackWithoutSlot(t *testing.T) {
 		t.Fatalf("unexpected result without an Agent device slot: %#v", got)
 	}
 }
+
+func TestTransactionalMailHTMLMatchesLaravelMailable(t *testing.T) {
+	got := renderTransactionalEmailHTML("A <B> & 'quote' \"yes\"\nsecond line")
+	want := "A &lt;B&gt; &amp; &#039;quote&#039; &quot;yes&quot;<br />\nsecond line" +
+		"<br><br>Salam,<br><strong>Tim PrimeClassy</strong><br><br><small>Pesan ini dikirim otomatis berdasarkan aktivitas transaksi atau akun Anda. Untuk bantuan, gunakan kanal layanan pelanggan resmi PrimeClassy.</small>"
+	if got != want {
+		t.Fatalf("transactional email HTML mismatch:\n got %q\nwant %q", got, want)
+	}
+}

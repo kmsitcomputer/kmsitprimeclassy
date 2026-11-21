@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"net"
@@ -38,6 +39,26 @@ func (s *Service) CheckSMTP(ctx context.Context) (bool, string, error) {
 // configuration. With SMTP off/incomplete it is a silent no-op, exactly like the
 // reference's `log` mailer: nothing is transmitted and nothing observable changes.
 func (s *Service) SendAccountMail(ctx context.Context, recipient, subject, body string) (bool, string, error) {
+	return s.sendDashboardMail(ctx, recipient, subject, body, "text/plain; charset=UTF-8")
+}
+
+// SendTransactionalMail mirrors TransactionalNotificationMail's escaped HTML body and footer.
+func (s *Service) SendTransactionalMail(ctx context.Context, recipient, subject, body string) (bool, string, error) {
+	return s.sendDashboardMail(ctx, recipient, subject, renderTransactionalEmailHTML(body), "text/html; charset=UTF-8")
+}
+
+func renderTransactionalEmailHTML(body string) string {
+	escaped := html.EscapeString(body)
+	escaped = strings.ReplaceAll(escaped, "&#34;", "&quot;")
+	escaped = strings.ReplaceAll(escaped, "&#39;", "&#039;")
+	escaped = strings.ReplaceAll(escaped, "\r\n", "<br />\r\n")
+	escaped = strings.ReplaceAll(escaped, "\r", "<br />\r")
+	escaped = strings.ReplaceAll(escaped, "\n", "<br />\n")
+	footer := "<br><br>Salam,<br><strong>Tim PrimeClassy</strong><br><br><small>Pesan ini dikirim otomatis berdasarkan aktivitas transaksi atau akun Anda. Untuk bantuan, gunakan kanal layanan pelanggan resmi PrimeClassy.</small>"
+	return escaped + footer
+}
+
+func (s *Service) sendDashboardMail(ctx context.Context, recipient, subject, body, contentType string) (bool, string, error) {
 	if _, err := mail.ParseAddress(recipient); err != nil || strings.ContainsAny(recipient, "\r\n") {
 		return false, "invalid_recipient", nil
 	}
@@ -64,8 +85,8 @@ func (s *Service) SendAccountMail(ctx context.Context, recipient, subject, body 
 	if err == nil {
 		fromHeader := (&mail.Address{Name: fromName, Address: from}).String()
 		toHeader := (&mail.Address{Address: recipient}).String()
-		message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s\r\n",
-			fromHeader, toHeader, mime.QEncoding.Encode("UTF-8", cleanSMTPHeader(subject)), body)
+		message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s\r\n",
+			fromHeader, toHeader, mime.QEncoding.Encode("UTF-8", cleanSMTPHeader(subject)), contentType, body)
 		_, err = io.WriteString(data, message)
 		closeErr := data.Close()
 		if err == nil {

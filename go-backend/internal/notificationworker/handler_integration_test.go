@@ -56,6 +56,11 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 		_, _ = lockConn.ExecContext(context.Background(), `SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing')`)
 	}()
 
+	testRecipientID, err := ensureNotificationTestSuperAdmin(t, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	waKeys := []string{"wa.enabled", "wa.base_url", "wa.username", "wa.password", "wa.device_id"}
 	smtpKeys := []string{"smtp.enabled", "smtp.host", "smtp.port", "smtp.from_address", "smtp.from_name", "smtp.username", "smtp.password", "smtp.encryption", "smtp.timeout", "smtp.transactional_enabled"}
 	waBefore := snapshotSettings(t, database, "integration.whatsapp", waKeys)
@@ -167,7 +172,7 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT dedupe_key FROM admin_notifications WHERE subject_type='whatsapp_message' AND subject_id=? ORDER BY id DESC LIMIT 1`, failureWAID).Scan(&dedupe); err != nil {
 		t.Fatal(err)
 	}
-	if failedStatus != "unknown" || dedupe != fmt.Sprintf("delivery.failed:whatsapp_message:%d:1", failureWAID) {
+	if failedStatus != "unknown" || dedupe != fmt.Sprintf("delivery.failed:whatsapp_message:%d:%d", failureWAID, testRecipientID) {
 		t.Fatalf("failure audit mismatch: status=%s dedupe=%s", failedStatus, dedupe)
 	}
 
@@ -182,8 +187,8 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	})
 	result, err = database.ExecContext(ctx, `INSERT INTO email_messages
 		(idempotency_key,event,recipient_role,recipient_user_id,recipient_email,subject,body,status,created_at,updated_at)
-		VALUES (?,'order_created','creator',13,'konsumen@imp010.test','Worker subject','Worker email body','queued',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
-		"worker-test-mail:"+strconv.FormatInt(time.Now().UnixNano(), 10))
+		VALUES (?,'order_created','creator',?,'konsumen@imp010.test','Worker subject','Worker email body','queued',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
+		"worker-test-mail:"+strconv.FormatInt(time.Now().UnixNano(), 10), testRecipientID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +218,46 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	if mailStatus != "sent" {
 		t.Fatalf("email status=%s, want sent", mailStatus)
 	}
+}
+
+func ensureNotificationTestSuperAdmin(t *testing.T, database *db.DB) (int64, error) {
+	t.Helper()
+	var userID int64
+	err := database.QueryRow(`SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id WHERE r.slug='super_admin' ORDER BY u.id LIMIT 1`).Scan(&userID)
+	if err == nil {
+		return userID, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	var roleID int64
+	roleErr := database.QueryRow(`SELECT id FROM roles WHERE slug='super_admin' LIMIT 1`).Scan(&roleID)
+	createdRole := false
+	if roleErr == sql.ErrNoRows {
+		result, insertErr := database.Exec(`INSERT INTO roles (slug,name,created_at,updated_at) VALUES ('super_admin','Super Admin',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`)
+		if insertErr != nil {
+			return 0, insertErr
+		}
+		roleID, _ = result.LastInsertId()
+		createdRole = true
+	} else if roleErr != nil {
+		return 0, roleErr
+	}
+	if createdRole {
+		t.Cleanup(func() { _, _ = database.Exec(`DELETE FROM roles WHERE id=?`, roleID) })
+	}
+	email := fmt.Sprintf("notification-worker-test-%d@imp010.test", time.Now().UnixNano())
+	result, err := database.Exec(`INSERT INTO users (role_id,name,email,password,status,created_at,updated_at)
+		VALUES (?,'Notification Worker Test',?,'unused-test-password','active',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, roleID, email)
+	if err != nil {
+		return 0, err
+	}
+	userID, err = result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	t.Cleanup(func() { _, _ = database.Exec(`DELETE FROM users WHERE id=?`, userID) })
+	return userID, nil
 }
 
 func snapshotSettings(t *testing.T, database *db.DB, group string, keys []string) map[string]string {

@@ -167,7 +167,7 @@ func (h *Handler) HandleEmail(ctx context.Context, id int64) error {
 	if snapshot["enabled"] != true || snapshot["complete"] != true || snapshot["transactional_enabled"] != true {
 		return h.finishEmail(ctx, id, "skipped", "mail_disabled", "", "", event, agentID, orderID)
 	}
-	sent, detail, err := h.infra.SendAccountMail(ctx, recipient, subject, body)
+	sent, detail, err := h.infra.SendTransactionalMail(ctx, recipient, subject, body)
 	if err != nil {
 		return err
 	}

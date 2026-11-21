@@ -20,6 +20,7 @@ import compare_orders
 LARAVEL_CONTAINER = "pc_laravel_imp010"
 GO_CONTAINER = "pc_go_imp010"
 QUEUE = "primeclassy-notify"
+EMAIL_USER_ID = 0
 WA_KEYS = ["wa.enabled", "wa.base_url", "wa.username", "wa.password", "wa.device_id"]
 SMTP_KEYS = ["smtp.enabled", "smtp.host", "smtp.port", "smtp.from_address", "smtp.from_name", "smtp.username", "smtp.password", "smtp.encryption", "smtp.timeout", "smtp.transactional_enabled"]
 
@@ -67,7 +68,7 @@ def enqueue_message(channel, worker, tag):
         class_name = "App\\Jobs\\SendWhatsAppMessageJob"
         serialized = f'O:{len(class_name)}:"{class_name}":2:{{s:9:"messageId";i:{message_id};s:5:"queue";s:18:"primeclassy-notify";}}'
     else:
-        f.db("INSERT INTO email_messages (idempotency_key,event,recipient_role,recipient_user_id,recipient_email,subject,body,status,created_at,updated_at) VALUES (" + ",".join((q("imp010-worker-diff:" + token), q("test"), q("creator"), "13", q("konsumen@imp010.test"), q("Worker parity"), q("worker parity " + tag), q("queued"), "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
+        f.db("INSERT INTO email_messages (idempotency_key,event,recipient_role,recipient_user_id,recipient_email,subject,body,status,created_at,updated_at) VALUES (" + ",".join((q("imp010-worker-diff:" + token), q("test"), q("creator"), str(EMAIL_USER_ID), q("konsumen@imp010.test"), q("Worker parity"), q("worker parity " + tag), q("queued"), "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
         message_id = int(f.db("SELECT id FROM email_messages WHERE idempotency_key=" + q("imp010-worker-diff:" + token))[0][0])
         class_name = "App\\Jobs\\SendTransactionalEmailJob"
         serialized = f'O:{len(class_name)}:"{class_name}":2:{{s:9:"messageId";i:{message_id};s:5:"queue";s:18:"primeclassy-notify";}}'
@@ -91,6 +92,7 @@ def enqueue_message(channel, worker, tag):
 
 
 def main():
+    global EMAIL_USER_ID
     if f.db("SELECT DATABASE()")[0][0] != "primeclassy_testing":
         raise RuntimeError("refusing non-testing database")
     expected = {}
@@ -100,6 +102,12 @@ def main():
         try:
             state["settings"] = snapshot_settings()
             state["initial_job_id"] = int(f.db("SELECT COALESCE(MAX(id),0) FROM jobs")[0][0])
+            roles = f.db("SELECT id FROM roles ORDER BY id LIMIT 1")
+            if not roles:
+                raise RuntimeError("test DB must have a role row before worker differential")
+            user_email = "worker-diff-" + uuid.uuid4().hex + "@imp010.test"
+            f.db("INSERT INTO users (role_id,name,email,password,status,created_at,updated_at) VALUES (%s,'Worker Parity Recipient',%s,'unused-test-password','active',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % (roles[0][0], q(user_email)))
+            EMAIL_USER_ID = int(f.db("SELECT id FROM users WHERE email=" + q(user_email))[0][0])
             disable_channels()
             for channel in ("whatsapp", "email"):
                 for worker in ("Laravel", "Go"):
@@ -122,6 +130,8 @@ def main():
                 f.db(f"DELETE FROM email_messages WHERE id={message_id}")
             f.db("DELETE FROM whatsapp_messages WHERE idempotency_key LIKE 'imp010-worker-diff:%'")
             f.db("DELETE FROM email_messages WHERE idempotency_key LIKE 'imp010-worker-diff:%'")
+            if EMAIL_USER_ID:
+                f.db(f"DELETE FROM users WHERE id={EMAIL_USER_ID}")
             if state["settings"] is not None:
                 restore_settings(state["settings"])
     return 0
