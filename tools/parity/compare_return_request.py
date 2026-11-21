@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Scoped Laravel ↔ Go differential for consumer return requests."""
-import base64, hashlib, http.cookiejar, json, pathlib, subprocess, urllib.error, urllib.parse, urllib.request, uuid
+import base64, hashlib, http.cookiejar, json, pathlib, re, subprocess, urllib.error, urllib.parse, urllib.request, uuid
+from compare_orders import TestDatabaseLock
 
 LARAVEL = "http://127.0.0.1:8899"
 GO = "http://127.0.0.1:8082"
@@ -90,11 +91,18 @@ def capture_state(order_id, item_id, return_id, file_path):
     if audit:
         props = json.loads(audit[0][2]); props.pop("order_id", None)
         audit[0][2] = json.dumps(props, sort_keys=True, separators=(",", ":"))
+        # Laravel and Go are reached through different container network paths in this harness.
+        audit[0][3] = "<client-ip>"
+    notifications = db(f"SELECT recipient_user_id,type,severity,title,body,subject_type FROM admin_notifications WHERE order_id={order_id} ORDER BY recipient_user_id,type")
+    for row in notifications:
+        row[4] = re.sub(r"D-\d+", "D-<sequence>", row[4])
+        row[4] = re.sub(r"RTN-\d+", "RTN-<sequence>", row[4])
     return {
         "return": db(f"SELECT status,reason,CAST(total_refund_amount AS CHAR),(consent_event_id IS NOT NULL) FROM returns WHERE id={return_id}"),
         "return_items": db(f"SELECT quantity_returned,CAST(refund_amount AS CHAR),restock,status,refund_status FROM return_items WHERE return_id={return_id} ORDER BY id"),
         "order_item": db(f"SELECT returned_quantity,status FROM order_items WHERE id={item_id} AND order_id={order_id}"),
         "audit": audit,
+        "admin_notifications": notifications,
         "file_sha256": hashlib.sha256(file_path.read_bytes()).hexdigest(),
     }
 
@@ -120,7 +128,7 @@ def cleanup_files(paths):
         pathlib.Path(path).unlink(missing_ok=True)
 
 
-def main():
+def main_unlocked():
     if db("SELECT DATABASE()")[0][0] != "primeclassy_testing":
         raise RuntimeError("refusing non-testing database")
     suffix = uuid.uuid4().hex[:12]
@@ -217,13 +225,18 @@ def main():
                            if (root / rel).exists()])
         if len(successes) == 2 and all(successes):
             if successes[0][0] != successes[1][0]: failures.append("success resource mismatch: " + json.dumps(successes[0][0], sort_keys=True) + " vs " + json.dumps(successes[1][0], sort_keys=True))
-            if successes[0][1] != successes[1][1]: failures.append("persisted state/evidence/audit mismatch")
+            if successes[0][1] != successes[1][1]:
+                failures.append("persisted state/evidence/audit mismatch")
+                for key in sorted(set(successes[0][1]) | set(successes[1][1])):
+                    if successes[0][1].get(key) != successes[1][1].get(key):
+                        failures.append(f"  {key}: Laravel={successes[0][1].get(key)!r} Go={successes[1][1].get(key)!r}")
             if successes[0][2] != successes[1][2]: failures.append(f"success message mismatch: {successes[0][2]} vs {successes[1][2]}")
         if len(successes) != 2 or any(item is None for item in successes): failures.append("missing runtime success evidence")
         if len(error_outcomes) == 2 and error_outcomes[0] != error_outcomes[1]:
             failures.append("error/rollback response, persisted state, or filesystem side effect mismatch: " + json.dumps(error_outcomes, sort_keys=True))
     finally:
         for order_id in orders:
+            db(f"DELETE FROM admin_notifications WHERE order_id={order_id}")
             for row in db(f"SELECT id,evidence_path FROM returns WHERE order_id={order_id}"):
                 rid, rel = int(row[0]), row[1]
                 db(f"DELETE FROM activity_logs WHERE subject_type LIKE '%ReturnRequest' AND subject_id={rid}")
@@ -248,6 +261,11 @@ def main():
         return 1
     print("ordinary return differential: 9 passed, 0 failed")
     return 0
+
+
+def main():
+    with TestDatabaseLock():
+        return main_unlocked()
 
 
 if __name__ == "__main__": raise SystemExit(main())

@@ -121,6 +121,12 @@ STATE_QUERIES["due"] = """SELECT IFNULL(CAST(old_due_date AS CHAR),'-'), CAST(ne
     FROM order_due_date_changes ORDER BY id"""
 STATE_QUERIES["media"] = """SELECT collection, mime_type, extension FROM media WHERE collection = 'cod_payment_proof'
     ORDER BY id"""
+# Lifecycle in-app notifications (order.created / payment.proof_uploaded / payment.failed):
+# recipients are seeded users (stable ids); volatile order/return numbers inside the body are
+# normalised so only the behavioural contract (recipient, type, severity, title, text) is compared.
+STATE_QUERIES["admin_notifications"] = """SELECT recipient_user_id, type, severity, title,
+        REGEXP_REPLACE(body, '(D|RTN|RO)-[0-9]+', '\\\\1-#'), subject_type
+    FROM admin_notifications ORDER BY id"""
 f.state = lambda: {name: rows(sql) for name, sql in STATE_QUERIES.items()}
 
 

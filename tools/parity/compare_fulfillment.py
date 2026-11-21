@@ -214,6 +214,10 @@ def norm_body(value, key=None):
         return [norm_body(v) for v in value]
     if isinstance(value, str) and TS_RE.match(value):
         return "<ts>"
+    if key == "proof_url" and isinstance(value, str):
+        # Laravel's test server advertises its request host while Go uses its configured
+        # canonical origin. The storage path is the behavioral contract under comparison.
+        return re.sub(r"^https?://[^/]+", "<runtime-origin>", value)
     return value
 
 

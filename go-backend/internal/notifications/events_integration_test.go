@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -114,8 +115,65 @@ func TestRecordOrderCreatedUsesBranchRecipientsAndIsIdempotent(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if !reflect.DeepEqual(recipients, []int64{10, 11}) {
 		t.Fatalf("recipients=%v, want branch Agent/Admin [10 11]", recipients)
+	}
+	tx, err = conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []func() error{
+		func() error { return RecordReturnRequested(ctx, tx, 77, 10, 78, "D-1126-00001", 1234567.5) },
+		func() error { return RecordReturnRequested(ctx, tx, 77, 10, 78, "D-1126-00001", 1234567.5) },
+		func() error { return RecordPaymentFailed(ctx, tx, 77, 10, 79, "D-1126-00001", 1234567.5) },
+		func() error { return RecordPaymentFailed(ctx, tx, 77, 10, 79, "D-1126-00001", 1234567.5) },
+	} {
+		if err := event(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = conn.QueryContext(ctx, `SELECT type,recipient_user_id,title,body,dedupe_key FROM admin_notifications WHERE type<>'order.created' ORDER BY type,recipient_user_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type notification struct {
+		event     string
+		recipient int64
+	}
+	var got []notification
+	for rows.Next() {
+		var event, title, body, key string
+		var recipient int64
+		if err := rows.Scan(&event, &recipient, &title, &body, &key); err != nil {
+			t.Fatal(err)
+		}
+		wantTitle, wantBody := "Pengajuan retur baru", "Pesanan D-1126-00001 · Total Rp 1.234.568 · Retur RTN-000078"
+		if event == "payment.failed" {
+			wantTitle, wantBody = "Pembayaran ditolak", "Pesanan D-1126-00001 · Total Rp 1.234.568"
+		}
+		wantSubject := "return"
+		wantID := int64(78)
+		if event == "payment.failed" {
+			wantSubject, wantID = "bank_transfer_verification", 79
+		}
+		if title != wantTitle || body != wantBody || key != fmt.Sprintf("%s:%s:%d:%d", event, wantSubject, wantID, recipient) {
+			t.Fatalf("unexpected notification event=%q recipient=%d title=%q body=%q key=%q", event, recipient, title, body, key)
+		}
+		got = append(got, notification{event, recipient})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []notification{{"payment.failed", 10}, {"payment.failed", 11}, {"return.requested", 10}, {"return.requested", 11}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("event recipients=%v, want %v", got, want)
 	}
 }
 

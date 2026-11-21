@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
 )
 
 type ReturnLine struct {
@@ -41,6 +43,10 @@ func (s *ReturnRequestService) Request(ctx context.Context, actorID int64, actor
 	}
 	var returnID int64
 	err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var agentID int64
+		var orderNo string
+		var orderTotal string
+		orderMetaErr := tx.QueryRowContext(ctx, `SELECT agent_id,order_no,CAST(total_amount AS CHAR) FROM orders WHERE id=?`, orderID).Scan(&agentID, &orderNo, &orderTotal)
 		fileID, err := randomReturnHex(20)
 		if err != nil {
 			return err
@@ -102,7 +108,17 @@ func (s *ReturnRequestService) Request(ctx context.Context, actorID int64, actor
 		_, err = tx.ExecContext(ctx, `INSERT INTO activity_logs(causer_id,subject_type,subject_id,event,description,properties,ip_address,user_agent,created_at)
 			VALUES (?, 'App\\Models\\ReturnRequest', ?, 'return.requested', ?, ?, NULLIF(?,''), NULLIF(?,''), UTC_TIMESTAMP(6))`,
 			actorID, returnID, reason, string(properties), ipAddress, userAgent)
-		return err
+		if err != nil {
+			return err
+		}
+		if orderMetaErr == nil {
+			if err := notifications.RecordReturnRequested(ctx, tx, orderID, agentID, returnID, orderNo, parseReturnAmount(orderTotal)); err != nil {
+				slog.WarnContext(ctx, "admin return-requested notification could not be recorded", "return_id", returnID, "error", err)
+			}
+		} else {
+			slog.WarnContext(ctx, "admin return-requested notification context could not be loaded", "return_id", returnID, "error", orderMetaErr)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

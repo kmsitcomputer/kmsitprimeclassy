@@ -13,11 +13,15 @@ package orders
 // must settle, never above the regular balance) runs under that Order lock BEFORE any write.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +31,7 @@ import (
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
 )
 
 // querier is the shared subset of *sql.Tx and *db.DB.
@@ -489,6 +494,23 @@ func (s *Service) SubmitBankTransferProof(ctx context.Context, in SubmitBankTran
 			return err
 		}
 
+		// In-app notification to the branch's Keuangan (AdminNotificationService::paymentProofUploaded).
+		// Deduped per proof bytes: the same file re-sent notifies nobody twice (Laravel after-commit
+		// semantics are preserved by running inside this transaction — a rollback notifies nobody).
+		proofSum := sha256.Sum256(in.Proof.Content)
+		proofHash := hex.EncodeToString(proofSum[:])
+		var konsumenName sql.NullString
+		_ = tx.QueryRowContext(ctx, `SELECT u.name FROM users u WHERE u.id = ?`, derefInt64(order.KonsumenID)).Scan(&konsumenName)
+		var orderNo string
+		if err := tx.QueryRowContext(ctx, `SELECT order_no FROM orders WHERE id = ?`, order.ID).Scan(&orderNo); err != nil {
+			return err
+		}
+		if err := notifications.RecordPaymentProofUploaded(ctx, tx, order.ID, order.AgentID, verificationID,
+			konsumenName.String, orderNo, proofHash); err != nil {
+			slog.WarnContext(ctx, "keuangan payment-proof notification could not be recorded",
+				"verification_id", verificationID, "error", err)
+		}
+
 		return logActivity(ctx, tx, in.ActorID, order.ID, "payment.proof_submitted", map[string]any{
 			"actor_role":               in.ActorRole,
 			"on_behalf_of_konsumen_id": nullableOrderID(onBehalf, order.KonsumenID),
@@ -796,6 +818,14 @@ func (s *Service) VerifyBankTransfer(ctx context.Context, in VerifyBankTransferI
 
 		if in.Approved {
 			return s.syncInvoiceAfterChange(ctx, tx, order.ID, in.ActorID, "payment_verified")
+		}
+		var orderNo string
+		if err := tx.QueryRowContext(ctx, `SELECT order_no FROM orders WHERE id=?`, order.ID).Scan(&orderNo); err != nil {
+			slog.WarnContext(ctx, "admin payment-failed notification context could not be loaded", "verification_id", verificationID, "error", err)
+			return nil
+		}
+		if err := notifications.RecordPaymentFailed(ctx, tx, order.ID, order.AgentID, verificationID, orderNo, order.Total); err != nil {
+			slog.WarnContext(ctx, "admin payment-failed notification could not be recorded", "verification_id", verificationID, "error", err)
 		}
 		return nil
 	})
