@@ -17,6 +17,7 @@ func (s *Server) registerDomainERoutes() {
 	s.mux.Handle("POST /api/v1/google-sheets/configs", chain(http.HandlerFunc(s.handleGoogleSheetsConfigStore), RequireAuth, s.RequireAgentLinked, RequireRole(googleSheetsRoles)))
 	s.mux.Handle("PUT /api/v1/google-sheets/configs/{config}", chain(http.HandlerFunc(s.handleGoogleSheetsConfigUpdate), RequireAuth, s.RequireAgentLinked, RequireRole(googleSheetsRoles)))
 	s.mux.Handle("DELETE /api/v1/google-sheets/configs/{config}", chain(http.HandlerFunc(s.handleGoogleSheetsConfigDestroy), RequireAuth, s.RequireAgentLinked, RequireRole(googleSheetsRoles)))
+	s.mux.Handle("POST /api/v1/google-sheets/configs/{config}/sync", chain(http.HandlerFunc(s.handleGoogleSheetsConfigSync), RequireAuth, s.RequireAgentLinked, RequireRole(googleSheetsRoles), s.Throttle(5, time.Minute)))
 	s.mux.HandleFunc("GET /api/v1/bestsellers", s.handleBestsellers)
 	s.mux.Handle("GET /api/v1/catalog/export", chain(http.HandlerFunc(s.handleCatalogExport), RequireAuth, s.RequireAgentLinked, RequireRole("super_admin,agen,admin")))
 	s.mux.Handle("GET /api/v1/dashboard/kpis", chain(http.HandlerFunc(s.handleDashboardKPIs), RequireAuth, s.RequireAgentLinked, RequireRole("agen,korsal,sales,sales-kurir-sub,gudang,kurir")))

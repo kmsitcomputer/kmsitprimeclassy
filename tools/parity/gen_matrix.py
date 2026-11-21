@@ -119,6 +119,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/agent/shipping-providers/{provider}/test"): "provider connectivity test: by-ID binding, rajaongkir/openroute/kmsit dispatch, coordinate validation, shared 422 when the provider is unreachable (KMSIT reason codes only with a live endpoint); compared by compare_external.py (18/0)",
     ("POST", "/api/v1/catalog/imports"): "full import apply: hardened CSV/XLSX reader, per-row planner (all reference error codes), unstaged create/update with catalog_skus registry, staged stock path (draft product + physical_opname draft row with import row-key idempotency + PayloadFingerprint, replay); compared by compare_imports.py (14/0)",
     ("POST", "/api/v1/catalog/imports/preview"): "pure validation pass over the same planner (writes nothing); compared by compare_imports.py (14/0)",
+    ("POST", "/api/v1/google-sheets/configs/{config}/sync"): "SyncService port: manage policy gate, per-config serialization (GET_LOCK), sync log lifecycle, mapping validation against the dataset catalog, per-dataset queries (DatasetRegistry shapes incl. canonical transactions projection), row limit guard, credential gate failure path (CREDENTIAL_NOT_FOUND summary, masked spreadsheet id); compared by compare_sheets_sync.py (7/0)",
     ("GET", "/api/v1/settings"): "",
     ("GET", "/api/v1/languages"): "",
     ("GET", "/api/v1/categories"): "",

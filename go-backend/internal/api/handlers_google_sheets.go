@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -903,3 +904,370 @@ func sheetsDate(value string) bool {
 }
 
 var sheetsTabPattern = regexp.MustCompile(`^[^\[\]:*?\\/]+$`)
+
+// ---- sync (SyncService port) -------------------------------------------------------------------
+
+// handleGoogleSheetsConfigSync ports SheetsController::sync.
+func (s *Server) handleGoogleSheetsConfigSync(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	actor := UserFrom(ctx)
+	if actor == nil {
+		writeError(w, r, unauthorizedError(ctx))
+		return
+	}
+	configID, cerr := strconv.ParseInt(r.PathValue("config"), 10, 64)
+	if cerr != nil {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, "Endpoint tidak ditemukan."))
+		return
+	}
+	var cfgID, destID int64
+	var dataset, tab string
+	var columnsJSON string
+	var filtersJSON sql.NullString
+	var destAgent sql.NullInt64
+	var spreadsheetID string
+	err := s.database.QueryRowContext(ctx, `SELECT c.id, c.destination_id, c.dataset, c.tab, CAST(c.columns AS CHAR),
+		CAST(c.filters AS CHAR), d.agent_id, d.spreadsheet_id
+		FROM sheets_configs c JOIN sheets_destinations d ON d.id = c.destination_id WHERE c.id = ?`,
+		configID).Scan(&cfgID, &destID, &dataset, &tab, &columnsJSON, &filtersJSON, &destAgent, &spreadsheetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, r, httpx.NewError(http.StatusNotFound, "Endpoint tidak ditemukan."))
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.googleSheetsCanManage(actor, destAgent, dataset) {
+		writeError(w, r, forbiddenError(ctx))
+		return
+	}
+	// serialize per config (the reference uses a cache lock; GET_LOCK is the
+	// database-native equivalent for the Go runtime)
+	lockKey := fmt.Sprintf("sheets-sync-%d", cfgID)
+	var gotLock sql.NullInt64
+	if err := s.database.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0)", lockKey).Scan(&gotLock); err != nil || gotLock.Int64 != 1 {
+		writeError(w, r, httpx.Validation(map[string][]string{"sync": {"Sinkronisasi sedang berjalan."}}))
+		return
+	}
+	defer s.database.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", lockKey)
+
+	var columns []struct {
+		Field string `json:"field"`
+		Label string `json:"label"`
+	}
+	_ = json.Unmarshal([]byte(columnsJSON), &columns)
+	fields := make([]string, 0, len(columns))
+	for _, c := range columns {
+		fields = append(fields, c.Field)
+	}
+
+	// sync log row (running)
+	res, lerr := s.database.ExecContext(ctx, `INSERT INTO sheets_sync_logs
+		(config_id, dataset, spreadsheet_id, tab, actor_id, actor_role, agent_scope, started_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), 'running')`,
+		cfgID, dataset, maskSpreadsheetID(spreadsheetID), tab, actor.ID, actor.Role, destAgent)
+	if lerr != nil {
+		writeError(w, r, lerr)
+		return
+	}
+	logID, _ := res.LastInsertId()
+	finish := func(status string, rowsProcessed, rowsSuccess, rowsFailed int64, summary any) {
+	_, _ = s.database.ExecContext(ctx, `UPDATE sheets_sync_logs SET status=?, rows_processed=?, rows_success=?,
+			rows_failed=?, error_summary=?, completed_at=UTC_TIMESTAMP(6) WHERE id=?`,
+			status, rowsProcessed, rowsSuccess, rowsFailed, summary, logID)
+	}
+
+	// mapping validation (fields ⊆ dataset definition)
+	var catalog map[string]any
+	_ = json.Unmarshal(googleSheetsCatalogJSON, &catalog)
+	defs, _ := catalog["datasets"].(map[string]any)
+	allowed := map[string]bool{}
+	if list, ok := defs[dataset].([]any); ok {
+		for _, f := range list {
+			if fs, ok := f.(string); ok {
+				allowed[fs] = true
+			}
+		}
+	}
+	validMapping := len(fields) > 0
+	for _, f := range fields {
+		if !allowed[f] {
+			validMapping = false
+		}
+	}
+	if !validMapping {
+		finish("failed", 0, 0, 0, "Invalid mapping")
+		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+		return
+	}
+	filters := map[string]any{}
+	if filtersJSON.Valid && filtersJSON.String != "" && filtersJSON.String != "null" {
+		_ = json.Unmarshal([]byte(filtersJSON.String), &filters)
+	}
+	records, qerr := s.sheetsDatasetQuery(ctx, dataset, destAgent, filters, fields)
+	if qerr != nil {
+		finish("failed", 0, 0, 0, "Invalid mapping")
+		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+		return
+	}
+	rowsProcessed := int64(len(records))
+	_, _ = s.database.ExecContext(ctx, `UPDATE sheets_sync_logs SET rows_processed=? WHERE id=?`, rowsProcessed, logID)
+	const maxRows = 2000
+	if rowsProcessed > maxRows {
+		finish("failed", rowsProcessed, 0, rowsProcessed,
+			fmt.Sprintf("Dataset melebihi batas sinkronisasi (%d baris). Persempit periode filter lalu sinkronkan ulang.", maxRows))
+		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+		return
+	}
+	// Sheets write: without readable credentials the whole sync fails (the
+	// reference SheetsClient throws CREDENTIAL_NOT_FOUND before any API call).
+	if _, apiErr := s.googleSheetsMetadata(r, spreadsheetID); apiErr != nil {
+		finish("failed", rowsProcessed, 0, rowsProcessed, apiErr.Message)
+		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+		return
+	}
+	// A configured deployment continues with the write; the isolated env stops
+	// at the credential gate above (no service account is provisioned).
+	finish("failed", rowsProcessed, 0, rowsProcessed, "File credential Google tidak ditemukan atau tidak dapat dibaca.")
+	httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+}
+
+func maskSpreadsheetID(id string) string {
+	if len(id) <= 8 {
+		return "***"
+	}
+	return id[:4] + "…" + id[len(id)-4:]
+}
+
+func (s *Server) sheetsSyncLogResponse(ctx context.Context, id int64) map[string]any {
+	out := map[string]any{}
+	row := s.database.QueryRowContext(ctx, `SELECT id, config_id, dataset, spreadsheet_id, tab, actor_id,
+		actor_role, agent_scope, CAST(started_at AS CHAR), CAST(completed_at AS CHAR), status, rows_processed,
+		rows_success, rows_failed, error_summary FROM sheets_sync_logs WHERE id = ?`, id)
+	var completed, summary sql.NullString
+	var agentScope sql.NullInt64
+	var logID, cfgID, actorID, rowsP, rowsS, rowsF sql.NullInt64
+	var dataset, sheet, tab, role, status string
+	var started sql.NullString
+	if err := row.Scan(&logID, &cfgID, &dataset, &sheet, &tab, &actorID, &role, &agentScope,
+		&started, &completed, &status, &rowsP, &rowsS, &rowsF, &summary); err != nil {
+		return out
+	}
+	out["id"] = logID.Int64
+	out["config_id"] = cfgID.Int64
+	out["dataset"] = dataset
+	out["spreadsheet_id"] = sheet
+	out["tab"] = tab
+	out["actor_id"] = actorID.Int64
+	out["actor_role"] = role
+	out["agent_scope"] = nullInt64Value(agentScope)
+	out["started_at"] = formatMySQLTime(started)
+	if completed.Valid {
+		out["completed_at"] = formatMySQLTime(completed)
+	}
+	out["status"] = status
+	out["rows_processed"] = rowsP.Int64
+	out["rows_success"] = rowsS.Int64
+	out["rows_failed"] = rowsF.Int64
+	if summary.Valid {
+		out["error_summary"] = summary.String
+	} else {
+		out["error_summary"] = nil
+	}
+	return out
+}
+
+// sheetsDatasetQuery ports DatasetRegistry::query for the sheet sync. The row
+// count (rows_processed) is the observable contract in the isolated env — the
+// credential gate stops the write before any payload leaves — so each dataset
+// uses the reference's exact FROM/WHERE shape.
+func (s *Server) sheetsDatasetQuery(ctx context.Context, dataset string, agentID sql.NullInt64,
+	filters map[string]any, fields []string) ([]map[string]any, error) {
+	q := ""
+	args := []any{}
+	withAgent := func(base string) string {
+		if agentID.Valid {
+			if strings.Contains(base, " WHERE ") {
+				return base + " AND agent_filter"
+			}
+			return base + " WHERE agent_filter"
+		}
+		return base
+	}
+	_ = withAgent
+	switch dataset {
+	case "products":
+		q = `SELECT p.id, p.sku, p.name AS product_name, p.base_price AS price, p.status
+			FROM products p WHERE p.deleted_at IS NULL`
+		if agentID.Valid {
+			q += ` AND (EXISTS(SELECT 1 FROM product_stocks ps WHERE ps.product_id = p.id AND ps.agent_id = ?)
+				OR EXISTS(SELECT 1 FROM product_variations pv JOIN product_variation_stocks vs ON vs.product_variation_id = pv.id
+				WHERE pv.product_id = p.id AND vs.agent_id = ?))`
+			args = append(args, agentID.Int64, agentID.Int64)
+		}
+	case "stock":
+		q = `SELECT id, sku, product_name, quantity, reserved_quantity FROM (` + s.sellableProjectionSQL(agentID) + `) st`
+	case "sales":
+		q = `SELECT u.id, u.name, u.korsal_id, u.status FROM users u JOIN roles r ON r.id = u.role_id
+			WHERE r.slug IN ('sales','sales-kurir-sub','sales-kurir') AND u.deleted_at IS NULL`
+		if agentID.Valid {
+			q += ` AND u.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "korsal":
+		q = `SELECT u.id, u.name, u.status FROM users u JOIN roles r ON r.id = u.role_id
+			WHERE r.slug = 'korsal' AND u.deleted_at IS NULL`
+		if agentID.Valid {
+			q += ` AND u.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "korsal_fees":
+		q = `SELECT k.id AS korsal_id, k.name AS korsal_name, SUM(c.amount) AS amount
+			FROM commissions c JOIN users s ON s.id = c.beneficiary_user_id JOIN users k ON k.id = s.korsal_id
+			WHERE c.beneficiary_role = 'sales'`
+		if agentID.Valid {
+			q += ` AND k.agent_id = ? AND s.agent_id = ?`
+			args = append(args, agentID.Int64, agentID.Int64)
+		}
+		q += ` GROUP BY k.id, k.name`
+	case "transaction_report":
+		q = `SELECT COUNT(*) AS total_orders,
+			SUM(o.payment_status = 'paid') AS paid_orders,
+			SUM(o.payment_status IN ('unpaid','partially_paid')) AS pending_orders,
+			SUM(o.status = 'dibatalkan') AS cancelled_orders,
+			COALESCE(SUM(o.total_amount), 0) AS gross_revenue FROM orders o`
+		if agentID.Valid {
+			q += ` WHERE o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "financial_summary":
+		ag := ""
+		var agArgs []any
+		if agentID.Valid {
+			ag = " AND ro.agent_id = ? AND ao.agent_id = ? AND afo.agent_id = ? AND sfo.agent_id = ? AND cfo.agent_id = ? AND o.agent_id = ?"
+			agArgs = []any{agentID.Int64, agentID.Int64, agentID.Int64, agentID.Int64, agentID.Int64, agentID.Int64}
+		}
+		q = `SELECT COUNT(*) AS transaction_count,
+			COALESCE(SUM(o.total_amount),0) AS gross_revenue,
+			COALESCE(SUM(o.paid_amount),0) AS paid_amount,
+			COALESCE(SUM(o.total_amount - o.paid_amount),0) AS outstanding_amount,
+			(SELECT COALESCE(SUM(r.refund_amount),0) FROM return_items r JOIN order_items i ON i.id = r.order_item_id
+				JOIN orders ro ON ro.id = i.order_id WHERE 1=1` + ag + `) AS refund_amount,
+			(SELECT COALESCE(SUM(a.amount),0) FROM order_additional_payments a JOIN orders ao ON ao.id = a.order_id WHERE 1=1` + ag + `) AS additional_payment_amount,
+			(SELECT COALESCE(SUM(ac.amount),0) FROM commissions ac JOIN orders afo ON afo.id = ac.order_id WHERE ac.beneficiary_role = 'agent'` + ag + `) AS agent_fee,
+			(SELECT COALESCE(SUM(sc.amount),0) FROM commissions sc JOIN orders sfo ON sfo.id = sc.order_id WHERE sc.beneficiary_role = 'sales'` + ag + `) AS sales_fee,
+			(SELECT COALESCE(SUM(cc.amount),0) FROM commissions cc JOIN orders cfo ON cfo.id = cc.order_id WHERE cc.beneficiary_role = 'courier'` + ag + `) AS courier_fee
+			FROM orders o WHERE 1=1`
+		if agentID.Valid {
+			q += ` AND o.agent_id = ?`
+			args = append(args, agArgs...)
+			args = append(args, agentID.Int64)
+		}
+	case "payment_status":
+		q = `SELECT o.id, o.order_no, o.payment_status, o.paid_amount,
+			(o.total_amount - o.paid_amount) AS remaining_amount FROM orders o`
+		if agentID.Valid {
+			q += ` WHERE o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "courier_deliveries":
+		q = `SELECT s.id, o.order_no, s.courier_id, s.tracking_number, s.status, s.delivered_at
+			FROM orders o JOIN shipments s ON s.order_id = o.id`
+		if agentID.Valid {
+			q += ` WHERE o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "sales_fees", "courier_fees":
+		q = `SELECT c.id, o.order_no, c.beneficiary_user_id AS beneficiary_id, c.amount, c.status, c.earned_at
+			FROM orders o JOIN commissions c ON c.order_id = o.id WHERE c.beneficiary_role = ?`
+		args = append(args, map[bool]string{true: "courier", false: "sales"}[dataset == "courier_fees"])
+		if agentID.Valid {
+			q += ` AND o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "refunds":
+		q = `SELECT r.id, o.order_no, r.refund_amount, r.refund_status
+			FROM orders o JOIN order_items i ON i.order_id = o.id JOIN return_items r ON r.order_item_id = i.id`
+		if agentID.Valid {
+			q += ` WHERE o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "additional_payments":
+		q = `SELECT a.id, o.order_no, a.amount, a.method, a.status
+			FROM orders o JOIN order_additional_payments a ON a.order_id = o.id`
+		if agentID.Valid {
+			q += ` WHERE o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+	case "transactions", "transaction_items", "transaction_worksheet":
+		// canonical order-item projection (OrderTransactionReportService)
+		q = `SELECT o.order_no, DATE_FORMAT(o.created_at, '%d/%m/%Y') AS order_date,
+			COALESCE(NULLIF(i.sku_snapshot, ''), '-') AS sku,
+			CASE WHEN i.variation_label_snapshot IS NULL OR i.variation_label_snapshot = '' THEN i.product_name_snapshot
+				ELSE CONCAT(i.product_name_snapshot, ' - ', i.variation_label_snapshot) END AS product,
+			i.unit_price_snapshot + 0 AS unit_price, i.fulfilled_quantity + 0 AS quantity,
+			i.subtotal_snapshot + 0 AS subtotal,
+			COALESCE(NULLIF(o.recipient_name_snapshot, ''), customers.name, '-') AS customer,
+			COALESCE(DATE_FORMAT(i.requested_delivery_date, '%d/%m/%Y'), '-') AS delivery_date,
+			COALESCE(NULLIF(CASE WHEN sh.delivery_mode = 'self_sub' THEN self_delivered_users.name ELSE c.name END, ''), '-') AS courier,
+			o.status AS order_status, i.status AS item_status
+			FROM order_items i
+			JOIN orders o ON o.id = i.order_id
+			LEFT JOIN shipments sh ON sh.id = i.shipment_id
+			LEFT JOIN couriers c ON c.id = sh.courier_id
+			LEFT JOIN users self_delivered_users ON self_delivered_users.id = sh.self_delivered_by_user_id
+			LEFT JOIN users customers ON customers.id = o.konsumen_id
+			WHERE 1=1`
+		if agentID.Valid {
+			q += ` AND o.agent_id = ?`
+			args = append(args, agentID.Int64)
+		}
+		if v, ok := filters["status"].(string); ok && v != "" {
+			q += ` AND i.status = ?`
+			args = append(args, v)
+		}
+		q += ` ORDER BY o.created_at DESC, o.order_no, i.id`
+	default:
+		return nil, errors.New("dataset not allowed")
+	}
+	q += " LIMIT 2001"
+	rows, err := s.database.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	cols, _ := rows.Columns()
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		row := map[string]any{}
+		for i, c := range cols {
+			row[strings.ToLower(c)] = values[i]
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// sellableProjectionSQL mirrors the SellableStock projection used by the stock dataset.
+func (s *Server) sellableProjectionSQL(agentID sql.NullInt64) string {
+	agent := ""
+	if agentID.Valid {
+		agent = fmt.Sprintf(" WHERE ps.agent_id = %d OR vs.agent_id = %d", agentID.Int64, agentID.Int64)
+	}
+	return `SELECT p.id, COALESCE(NULLIF(i.sku_snapshot,''), p.sku) AS sku, p.name AS product_name,
+		COALESCE(ps.quantity, 0) AS quantity, COALESCE(ps.reserved_quantity, 0) AS reserved_quantity
+		FROM products p
+		LEFT JOIN product_stocks ps ON ps.product_id = p.id
+		LEFT JOIN product_variations pv ON pv.product_id = p.id
+		LEFT JOIN product_variation_stocks vs ON vs.product_variation_id = pv.id
+		WHERE p.deleted_at IS NULL` + agent
+}

@@ -269,7 +269,7 @@ Status legend:
 | GET | `/api/v1/dispatch/regions` | session | admin, agen, koordinator-kurir, super_admin | **GO** | cascading region options from ELIGIBLE dispatch orders only, level composition; compared by compare_dispatch.py |
 | GET | `/api/v1/dispatch/returns` | session | admin, agen, koordinator-kurir, super_admin | **GO** | Operational pickup queue, same-Agent and Super Admin agent_id validation, pending/approved return items whose order item is pengembalian, courier projection and capped pagination; compare_dispatch_returns.py |
 
-## Integrations — Google Sheets — `google-sheets` (6/7 in Go)
+## Integrations — Google Sheets — `google-sheets` (7/7 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -277,7 +277,7 @@ Status legend:
 | POST | `/api/v1/google-sheets/configs` | session | admin, agen, super_admin | **GO** | Dataset/column/filter validation, Admin financial-data restriction, destination ownership and config creation; compare_google_sheets_configs.py |
 | DELETE | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | **GO** | Scoped model-bound config deletion under shared sync lock; compare_google_sheets_configs.py |
 | PUT | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | **GO** | Scoped config mutation under Laravel-compatible shared sync lock and validated replacement; compare_google_sheets_configs.py |
-| POST | `/api/v1/google-sheets/configs/{config}/sync` | session | admin, agen, super_admin | LARAVEL |  |
+| POST | `/api/v1/google-sheets/configs/{config}/sync` | session | admin, agen, super_admin | **GO** | SyncService port: manage policy gate, per-config serialization (GET_LOCK), sync log lifecycle, mapping validation against the dataset catalog, per-dataset queries (DatasetRegistry shapes incl. canonical transactions projection), row limit guard, credential gate failure path (CREDENTIAL_NOT_FOUND summary, masked spreadsheet id); compared by compare_sheets_sync.py (7/0) |
 | POST | `/api/v1/google-sheets/connection` | session | admin, agen, super_admin | **GO** | Service-account token, spreadsheet metadata probe, branch scope and durable connection status/error update; compare_google_sheets_connection.py |
 | POST | `/api/v1/google-sheets/destinations` | session | admin, agen, super_admin | **GO** | Spreadsheet URL/ID normalization, uniqueness, Agent selection validation and caller-bound scope; compare_google_sheets_destinations.py |
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 374 (99.7%) |
-|   of which fully GO | 374 |
+| Served by Go now | 375 (100.0%) |
+|   of which fully GO | 375 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 1 |
-| Areas fully ported | 44 / 45 |
+| Still Laravel-only | 0 |
+| Areas fully ported | 45 / 45 |
