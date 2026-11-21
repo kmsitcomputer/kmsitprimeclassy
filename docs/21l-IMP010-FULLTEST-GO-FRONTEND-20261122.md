@@ -7,11 +7,12 @@ Owner authorized the full Go backend suite and frontend verification/remediation
 ## Repository state
 
 - Branch: `imp010/go-backend`
-- HEAD before this checkpoint change: `b3497dbd31d244a8b73e5cdcc677c84649f80827`
 - Starting test baseline recorded at session start: `3608390476eba0383e5ebf2586f6a62ece180a7b`
-- Intervening commits observed on the shared branch:
+- The shared branch advanced during this run. Commits observed since that baseline, oldest first:
   - `dbb9b91 feat(imp-010): serve Laravel public disk at /storage + prod-snapshot integration report`
   - `b3497db chore: ignore local go build artifact go-backend/api`
+  - `06551b5 docs: record local env grant fix in snapshot report`
+- Verification/remediation commit: `e082178 test(imp-010): verify full Go and frontend suites`
 - Canonical matrix regenerated with `python3 tools/parity/gen_matrix.py`: **375 GO / 0 PARTIAL / 0 Laravel-only**, 45/45 areas.
 - `git diff --check`: passed before checkpoint creation.
 
@@ -54,4 +55,4 @@ Expected non-failing output observed: Vue Router test warnings, missing translat
 
 ## Exact next action
 
-Review `git status` and `git diff --check`, commit the verified Go test harness and frontend lint/test fixes locally on `imp010/go-backend`, then report the final commit hash. Do not run Laravel Full Test, push, deploy, or stop existing project containers.
+This full Go/frontend testing mandate is complete and locally committed. Leave execution paused for the next Owner mandate; do not run Laravel Full Test, push, deploy, or stop existing project containers.
