@@ -13,6 +13,7 @@ import (
 )
 
 const NotificationQueue = "primeclassy-notify"
+const databaseQueueRetryAfter = 90 // Laravel config/queue.php database.retry_after default.
 
 var ErrNoJob = errors.New("no queued job")
 
@@ -71,8 +72,9 @@ func ClaimNext(ctx context.Context, d *db.DB) (*Job, error) {
 	var j Job
 	err = tx.QueryRowContext(ctx, `SELECT id, queue, payload, attempts
 		FROM jobs
-		WHERE queue = ? AND reserved_at IS NULL AND available_at <= ?
-		ORDER BY id LIMIT 1 FOR UPDATE`, NotificationQueue, now).Scan(
+		WHERE queue = ? AND available_at <= ?
+		  AND (reserved_at IS NULL OR reserved_at <= ?)
+		ORDER BY id LIMIT 1 FOR UPDATE`, NotificationQueue, now, now-databaseQueueRetryAfter).Scan(
 		&j.ID, &j.Queue, &j.Payload, &j.Attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoJob

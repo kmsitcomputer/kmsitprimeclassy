@@ -230,6 +230,19 @@ func (s *Service) WhatsAppTestNumbers(ctx context.Context) ([]string, error) {
 
 // SendWhatsAppText sends a single explicitly requested test/ops message and returns a duplicate-safety outcome.
 func (s *Service) SendWhatsAppText(ctx context.Context, number, message string) (map[string]any, error) {
+	return s.sendWhatsAppText(ctx, number, message, "")
+}
+
+// SendWhatsAppTextFromDevice sends from the explicitly owned Agent device slot.
+// An empty device is rejected and never falls back to the platform default.
+func (s *Service) SendWhatsAppTextFromDevice(ctx context.Context, number, message, deviceID string) (map[string]any, error) {
+	if strings.TrimSpace(deviceID) == "" {
+		return map[string]any{"outcome": "failed", "error_class": "device_not_ready", "error_message": "Agent WhatsApp device is not ready."}, nil
+	}
+	return s.sendWhatsAppText(ctx, number, message, deviceID)
+}
+
+func (s *Service) sendWhatsAppText(ctx context.Context, number, message, requestedDevice string) (map[string]any, error) {
 	settings, err := s.settings(ctx, "integration.whatsapp")
 	if err != nil {
 		return nil, err
@@ -239,7 +252,10 @@ func (s *Service) SendWhatsAppText(ctx context.Context, number, message string) 
 	if base == "" || user == "" || cipher == "" || decErr != nil || password == "" || settings["wa.enabled"] != "1" {
 		return map[string]any{"outcome": "failed", "error_class": "not_configured", "error_message": "WhatsApp gateway is not configured."}, nil
 	}
-	device := settings["wa.device_id"]
+	device := requestedDevice
+	if device == "" {
+		device = settings["wa.device_id"]
+	}
 	timeout := intDefault(settings["wa.timeout"], 10)
 	if timeout < 2 {
 		timeout = 2
@@ -264,7 +280,10 @@ func (s *Service) SendWhatsAppText(ctx context.Context, number, message string) 
 		detail := sanitizeGatewayError(err.Error())
 		outcome := "unknown"
 		class := "timeout"
-		if strings.Contains(strings.ToLower(detail), "connection refused") || strings.Contains(strings.ToLower(detail), "could not resolve") || strings.Contains(strings.ToLower(detail), "failed to connect") {
+		lower := strings.ToLower(detail)
+		if strings.Contains(lower, "connection refused") || strings.Contains(lower, "could not resolve") ||
+			strings.Contains(lower, "failed to connect") || strings.Contains(lower, "tls: handshake failure") ||
+			strings.Contains(lower, "remote error: tls") {
 			outcome = "retry"
 			class = "unreachable"
 		}
@@ -273,31 +292,44 @@ func (s *Service) SendWhatsAppText(ctx context.Context, number, message string) 
 	defer resp.Body.Close()
 	var payload map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&payload)
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	return classifyWhatsAppResponse(resp.StatusCode, payload), nil
+}
+
+func classifyWhatsAppResponse(status int, payload map[string]any) map[string]any {
+	if status >= 200 && status < 300 {
 		code, _ := payload["code"].(string)
 		if code == "" || strings.EqualFold(code, "SUCCESS") {
 			results, _ := payload["results"].(map[string]any)
-			return map[string]any{"outcome": "sent", "provider_message_id": results["message_id"]}, nil
+			return map[string]any{"outcome": "sent", "provider_message_id": results["message_id"]}
 		}
-		return map[string]any{"outcome": "unknown", "error_class": "unexpected_response", "error_message": "Unexpected provider response: " + code}, nil
+		return map[string]any{"outcome": "unknown", "error_class": "unexpected_response", "error_message": "Unexpected provider response: " + code}
 	}
 	messageText, _ := payload["message"].(string)
 	if messageText == "" {
-		messageText = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		messageText = fmt.Sprintf("HTTP %d", status)
 	} else {
-		messageText = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, messageText)
+		messageText = fmt.Sprintf("HTTP %d: %s", status, messageText)
 	}
 	messageText = sanitizeGatewayError(messageText)
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return map[string]any{"outcome": "failed", "error_class": "auth", "error_message": "Gateway rejected the credentials."}, nil
+	if status == 401 || status == 403 {
+		return map[string]any{"outcome": "failed", "error_class": "auth", "error_message": "Gateway rejected the credentials."}
 	}
-	if resp.StatusCode == 404 {
-		return map[string]any{"outcome": "failed", "error_class": "device_not_found", "error_message": messageText}, nil
+	if status == 404 {
+		return map[string]any{"outcome": "failed", "error_class": "device_not_found", "error_message": messageText}
 	}
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		return map[string]any{"outcome": "failed", "error_class": "rejected", "error_message": messageText}, nil
+	if status >= 400 && status < 500 {
+		return map[string]any{"outcome": "failed", "error_class": "rejected", "error_message": messageText}
 	}
-	return map[string]any{"outcome": "unknown", "error_class": "provider_error", "error_message": messageText}, nil
+	if status >= 500 {
+		lower := strings.ToLower(messageText)
+		if strings.Contains(lower, "not connected") || strings.Contains(lower, "not logged in") ||
+			strings.Contains(lower, "disconnected") || (strings.Contains(lower, "device") &&
+			(strings.Contains(lower, "not found") || strings.Contains(lower, "not ready"))) ||
+			strings.Contains(lower, "login") {
+			return map[string]any{"outcome": "retry", "error_class": "device_disconnected", "error_message": messageText}
+		}
+	}
+	return map[string]any{"outcome": "unknown", "error_class": "provider_error", "error_message": messageText}
 }
 
 func sanitizeGatewayError(value string) string {
