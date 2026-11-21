@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,6 +18,8 @@ import (
 )
 
 func main() {
+	once := flag.Bool("once", false, "process at most one queued notification job and exit")
+	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg, err := config.Load(config.FileGetter(".env"))
@@ -55,6 +58,9 @@ func main() {
 			slog.Error("notification job failed", "error", err)
 		}
 		if ctx.Err() != nil {
+			break
+		}
+		if *once {
 			break
 		}
 		if !processed {
