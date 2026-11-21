@@ -15,8 +15,10 @@ import json
 import re
 import subprocess
 import sys
+import uuid
 
 import compare_fulfillment as f
+import compare_orders
 from compare_fulfillment import LARAVEL, GO, norm_body
 
 SUPER = "super@imp010.test"
@@ -24,25 +26,21 @@ TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+Z|\+00:00)?$")
 
 
 def seed():
-    sql = [
-        "DELETE FROM sheets_sync_logs;",
-        "DELETE FROM sheets_configs;",
-        "DELETE FROM sheets_destinations;",
-        "INSERT INTO sheets_destinations (id, agent_id, spreadsheet_id, created_at, updated_at) VALUES (1, NULL, 'sheet123456789', NOW(), NOW());",
-        "INSERT INTO sheets_destinations (id, agent_id, spreadsheet_id, created_at, updated_at) VALUES (2, 10, 'agent9999sheet', NOW(), NOW());",
+    token = uuid.uuid4().hex[:12]
+    spreadsheet = "imp010-sync-" + token
+    f.db("INSERT INTO sheets_destinations (agent_id,spreadsheet_id,created_at,updated_at) VALUES (NULL,'%s',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % spreadsheet)
+    destination = int(f.db("SELECT id FROM sheets_destinations WHERE spreadsheet_id='%s'" % spreadsheet)[0][0])
+    definitions = [
+        ("Products", "TabA-" + token, "products", [{"field": "id", "label": "ID"}, {"field": "sku", "label": "SKU"}]),
+        ("BadMap", "TabB-" + token, "products", [{"field": "no_such_field", "label": "X"}]),
+        ("Tx", "TabC-" + token, "transactions", [{"field": "order_no", "label": "Order"}, {"field": "sku", "label": "SKU"}]),
     ]
-    cols = json.dumps([{"field": "id", "label": "ID"}, {"field": "sku", "label": "SKU"}])
-    sql.append("INSERT INTO sheets_configs (id, destination_id, name, tab, dataset, columns, created_at, updated_at) VALUES (1, 1, 'Products', 'TabA', 'products', '%s', NOW(), NOW());" % cols)
-    bad = json.dumps([{"field": "no_such_field", "label": "X"}])
-    sql.append("INSERT INTO sheets_configs (id, destination_id, name, tab, dataset, columns, created_at, updated_at) VALUES (2, 1, 'BadMap', 'TabB', 'products', '%s', NOW(), NOW());" % bad)
-    # transactions dataset config (row count from the canonical item projection)
-    tcols = json.dumps([{"field": "order_no", "label": "Order"}, {"field": "sku", "label": "SKU"}])
-    sql.append("INSERT INTO sheets_configs (id, destination_id, name, tab, dataset, columns, created_at, updated_at) VALUES (3, 1, 'Tx', 'TabC', 'transactions', '%s', NOW(), NOW());" % tcols)
-    payload = "\n".join(sql)
-    p = subprocess.run(["docker", "exec", "-i", "primeclassy-mariadb", "sh", "-lc",
-                        'mariadb -uprimeclassy_app -p"$(cat $MARIADB_PASSWORD_FILE)" primeclassy_testing'],
-                       input=payload, capture_output=True, text=True)
-    assert p.returncode == 0, p.stderr[:300]
+    config_ids = []
+    for name, tab, dataset, columns in definitions:
+        raw = json.dumps(columns, separators=(",", ":")).encode().hex()
+        f.db("INSERT INTO sheets_configs (destination_id,name,tab,dataset,columns,created_at,updated_at) VALUES (%d,'%s','%s','%s',CONVERT(UNHEX('%s') USING utf8mb4),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % (destination, name, tab, dataset, raw))
+        config_ids.append(int(f.db("SELECT id FROM sheets_configs WHERE destination_id=%d AND tab='%s'" % (destination, tab))[0][0]))
+    return destination, config_ids
 
 
 def scrub(v):
@@ -57,38 +55,51 @@ def scrub(v):
     return v
 
 
-def scenario(base):
+def scenario(base, config_ids):
     out = {}
     c = f.client_for(base, SUPER)
-    out["sync_missing_config"] = c.call("POST", "/api/v1/google-sheets/configs/999/sync")
-    out["sync_products"] = c.call("POST", "/api/v1/google-sheets/configs/1/sync")
-    out["log_products"] = f.db("SELECT status, rows_processed, rows_success, rows_failed, error_summary FROM sheets_sync_logs WHERE config_id=1 ORDER BY id DESC LIMIT 1")
-    out["sync_invalid_mapping"] = c.call("POST", "/api/v1/google-sheets/configs/2/sync")
-    out["log_invalid_mapping"] = f.db("SELECT status, rows_processed, error_summary FROM sheets_sync_logs WHERE config_id=2 ORDER BY id DESC LIMIT 1")
-    out["sync_transactions"] = c.call("POST", "/api/v1/google-sheets/configs/3/sync")
-    out["log_transactions"] = f.db("SELECT status, rows_processed, error_summary FROM sheets_sync_logs WHERE config_id=3 ORDER BY id DESC LIMIT 1")
+    products, invalid, transactions = config_ids
+    out["sync_missing_config"] = c.call("POST", "/api/v1/google-sheets/configs/999999999/sync")
+    out["sync_products"] = c.call("POST", f"/api/v1/google-sheets/configs/{products}/sync")
+    out["log_products"] = f.db(f"SELECT status, rows_processed, rows_success, rows_failed, error_summary FROM sheets_sync_logs WHERE config_id={products} ORDER BY id DESC LIMIT 1")
+    out["sync_invalid_mapping"] = c.call("POST", f"/api/v1/google-sheets/configs/{invalid}/sync")
+    out["log_invalid_mapping"] = f.db(f"SELECT status, rows_processed, error_summary FROM sheets_sync_logs WHERE config_id={invalid} ORDER BY id DESC LIMIT 1")
+    out["sync_transactions"] = c.call("POST", f"/api/v1/google-sheets/configs/{transactions}/sync")
+    out["log_transactions"] = f.db(f"SELECT status, rows_processed, error_summary FROM sheets_sync_logs WHERE config_id={transactions} ORDER BY id DESC LIMIT 1")
     return out
 
 
 def main():
-    seed()
-    lar = scenario(LARAVEL)
-    seed()
-    go = scenario(GO)
-    failed = 0
-    total = 0
-    for key in sorted(lar):
-        total += 1
-        lv, gv = scrub(norm_body(lar[key])), scrub(norm_body(go[key]))
-        ok = lv == gv
-        if not ok:
-            failed += 1
-        print(("PASS " if ok else "FAIL ") + key)
-        if not ok:
-            print("  L=" + json.dumps(lv, default=str)[:500])
-            print("  G=" + json.dumps(gv, default=str)[:500])
-    print(f"sheets_sync: {total - failed} passed, {failed} failed")
-    return 1 if failed else 0
+    if f.db("SELECT DATABASE()")[0][0] != "primeclassy_testing":
+        raise RuntimeError("refusing non-testing database")
+    destination = None
+    config_ids = []
+    with compare_orders.TestDatabaseLock():
+        try:
+            destination, config_ids = seed()
+            lar = scenario(LARAVEL, config_ids)
+            go = scenario(GO, config_ids)
+            failed = 0
+            total = 0
+            for key in sorted(lar):
+                total += 1
+                lv, gv = scrub(norm_body(lar[key])), scrub(norm_body(go[key]))
+                ok = lv == gv
+                if not ok:
+                    failed += 1
+                print(("PASS " if ok else "FAIL ") + key)
+                if not ok:
+                    print("  L=" + json.dumps(lv, default=str)[:500])
+                    print("  G=" + json.dumps(gv, default=str)[:500])
+            print(f"sheets_sync: {total - failed} passed, {failed} failed")
+            return 1 if failed else 0
+        finally:
+            if config_ids:
+                ids = ",".join(str(int(i)) for i in config_ids)
+                f.db(f"DELETE FROM sheets_sync_logs WHERE config_id IN ({ids})")
+                f.db(f"DELETE FROM sheets_configs WHERE id IN ({ids})")
+            if destination:
+                f.db(f"DELETE FROM sheets_destinations WHERE id={int(destination)}")
 
 
 if __name__ == "__main__":
