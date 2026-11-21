@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 // Snapshot triggers, matching order_financial_snapshots.trigger.
@@ -581,6 +583,11 @@ func (s *Service) createForwardObligation(ctx context.Context, tx *sql.Tx, order
 	obligationID, err := res.LastInsertId()
 	if err != nil {
 		return err
+	}
+	// WhatsAppLifecycleObserver::obligationCreated — a root obligation CREATED as
+	// approved announces refund_approved (derived children announce nothing).
+	if nerr := whatsappnotify.NotifyObligationByID(ctx, tx, whatsappnotify.EventRefundApproved, obligationID); nerr != nil {
+		slog.WarnContext(ctx, "refund-approved notification dispatch failed", "obligation_id", obligationID, "error", nerr)
 	}
 	return s.refundAudit(ctx, tx, "obligation.created", orderID, obligationID, actorID, nil, map[string]any{
 		"amount_cents":   amount,

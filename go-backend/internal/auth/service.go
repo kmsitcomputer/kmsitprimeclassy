@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kmsitcomputer/primeclassy-go/internal/admininfra"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
@@ -22,10 +23,18 @@ import (
 type Service struct {
 	database *db.DB
 	locale   string
+	appKey   string
 }
 
 // NewService builds the identity service.
 func NewService(database *db.DB) *Service { return &Service{database: database} }
+
+// WithAppKey binds the application key (needed for the SMTP credential decryption
+// used by the registration welcome e-mail).
+func (s *Service) WithAppKey(appKey string) *Service {
+	s.appKey = appKey
+	return s
+}
 
 // WithLocale returns a copy bound to a request locale (used for message rendering).
 func (s *Service) WithLocale(locale string) *Service {
@@ -192,14 +201,18 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta ClientMet
 }
 
 // notifyRegistration ports Services/Auth/RegistrationNotifier: after the registration commit, a
-// restricted WhatsApp ledger enqueue (gated) and an informational e-mail. Welcome e-mail delivery
-// parity remains open; the WhatsApp ledger row and durable queue job are idempotent by the existing key.
+// restricted WhatsApp ledger enqueue (gated) and the welcome e-mail. Each channel is swallowed
+// on failure and never fails the signup; the WhatsApp ledger row and durable queue job are
+// idempotent by key, and the e-mail is deduped per account for the process lifetime (the
+// reference uses a 30-day file cache — same observable effect while no external SMTP is active).
 func (s *Service) notifyRegistration(ctx context.Context, u *User) (attempted bool, notifyErr error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			notifyErr = fmt.Errorf("registration notification panic: %v", recovered)
 		}
 	}() // never fails the signup (the reference swallows Throwable)
+
+	s.notifyRegistrationEmail(ctx, u)
 
 	msisdn := waMsisdn(deref(u.Phone))
 	if msisdn == "" {
@@ -227,6 +240,33 @@ func (s *Service) notifyRegistration(ctx context.Context, u *User) (attempted bo
 	}
 	const body = "Selamat datang di PrimeClassy.\n\nAkun Anda telah dibuat. Untuk melihat informasi lebih lengkap dan menggunakan fitur yang memerlukan bukti kepemilikan nomor, silakan verifikasi WhatsApp Anda melalui aplikasi resmi PrimeClassy."
 	return true, s.enqueueRegistrationWhatsApp(ctx, u.ID, agentID, msisdn, body, maxAttempts)
+}
+
+// registrationEmailDedupe mirrors RegistrationNotifier's 30-day Cache::add guard for the
+// lifetime of this process: a duplicate event for the same account never re-sends.
+var registrationEmailDedupe = map[int64]bool{}
+
+// notifyRegistrationEmail sends the welcome e-mail through the dashboard SMTP when it is
+// ON and complete (SmtpSettings::applyRuntime semantics); otherwise it is the log-mailer
+// no-op. Never fails the signup.
+func (s *Service) notifyRegistrationEmail(ctx context.Context, u *User) {
+	defer func() { _ = recover() }()
+	email := strings.ToLower(strings.TrimSpace(deref(u.Email)))
+	if email == "" || !strings.Contains(email, "@") || strings.HasPrefix(email, "@") || strings.HasSuffix(email, "@") {
+		return
+	}
+	if registrationEmailDedupe[u.ID] {
+		return
+	}
+	registrationEmailDedupe[u.ID] = true
+	const subject = "Selamat datang di PrimeClassy"
+	const body = "Akun PrimeClassy Anda telah dibuat. Email ini hanya pemberitahuan dan bukan verifikasi. " +
+		"Untuk menggunakan fitur yang memerlukan bukti kepemilikan kontak, verifikasi email atau nomor WhatsApp Anda " +
+		"melalui aplikasi resmi PrimeClassy. Kami tidak pernah meminta kata sandi Anda lewat email."
+	infra := admininfra.New(s.database, s.appKey)
+	if _, _, err := infra.SendAccountMail(ctx, email, subject, body); err != nil {
+		slog.Warn("registration.notify.email_failed", "user_id", u.ID, "error_type", fmt.Sprintf("%T", err))
+	}
 }
 
 func (s *Service) enqueueRegistrationWhatsApp(ctx context.Context, userID, agentID int64, msisdn, body string, maxAttempts int) error {

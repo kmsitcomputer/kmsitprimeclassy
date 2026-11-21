@@ -32,6 +32,63 @@ func (s *Service) CheckSMTP(ctx context.Context) (bool, string, error) {
 }
 
 // SendSMTPTest always uses the authenticated actor's stored email as the only recipient.
+// SendAccountMail sends one account mail (e.g. the registration welcome) through the
+// dashboard SMTP when it is ON and complete — the runtime equivalent of
+// SmtpSettings::applyRuntime pointing Laravel's default mailer at the dashboard
+// configuration. With SMTP off/incomplete it is a silent no-op, exactly like the
+// reference's `log` mailer: nothing is transmitted and nothing observable changes.
+func (s *Service) SendAccountMail(ctx context.Context, recipient, subject, body string) (bool, string, error) {
+	if _, err := mail.ParseAddress(recipient); err != nil || strings.ContainsAny(recipient, "\r\n") {
+		return false, "invalid_recipient", nil
+	}
+	settings, err := s.settings(ctx, "integration.smtp")
+	if err != nil {
+		return false, "", err
+	}
+	if !smtpTruthy(settings["smtp.enabled"]) || settings["smtp.host"] == "" ||
+		settings["smtp.port"] == "" || settings["smtp.from_address"] == "" {
+		return false, "smtp_disabled", nil // log-mailer equivalent: silent no-op
+	}
+	client, _, from, fromName, username, password, err := s.openSMTP(ctx, settings)
+	if err != nil {
+		return false, redactSMTPError(err.Error(), username, password), nil
+	}
+	defer client.Close()
+	if err = client.Mail(from); err == nil {
+		err = client.Rcpt(recipient)
+	}
+	var data io.WriteCloser
+	if err == nil {
+		data, err = client.Data()
+	}
+	if err == nil {
+		fromHeader := (&mail.Address{Name: fromName, Address: from}).String()
+		toHeader := (&mail.Address{Address: recipient}).String()
+		message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s\r\n",
+			fromHeader, toHeader, mime.QEncoding.Encode("UTF-8", cleanSMTPHeader(subject)), body)
+		_, err = io.WriteString(data, message)
+		closeErr := data.Close()
+		if err == nil {
+			err = closeErr
+		}
+	}
+	if err == nil {
+		err = client.Quit()
+	}
+	if err != nil {
+		return false, redactSMTPError(err.Error(), username, password), nil
+	}
+	return true, "", nil
+}
+
+func smtpTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
+}
+
 func (s *Service) SendSMTPTest(ctx context.Context, recipient, subject, body string) (bool, string, error) {
 	if _, err := mail.ParseAddress(recipient); err != nil || strings.ContainsAny(recipient, "\r\n") {
 		return false, "config_incomplete", nil

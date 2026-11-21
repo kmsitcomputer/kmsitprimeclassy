@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 type ReturnReviewInput struct {
@@ -117,6 +119,19 @@ func (s *Service) ReviewReturn(ctx context.Context, in ReturnReviewInput) error 
 		if _, err := tx.ExecContext(ctx, `UPDATE returns SET status=?,reviewed_by=?,reviewed_at=UTC_TIMESTAMP(6),updated_at=UTC_TIMESTAMP(6) WHERE id=?`,
 			map[bool]string{true: "approved", false: "rejected"}[in.Approved], in.ActorID, in.ReturnID); err != nil {
 			return err
+		}
+		// WhatsAppLifecycleObserver::returnUpdated — only `approved` fires an event on
+		// review (a rejected review is silent; RETURN_REJECTED is the completed-with-
+		// all-items-rejected path, which review never produces).
+		if in.Approved {
+			if nerr := whatsappnotify.NotifyReturnEvent(ctx, tx, whatsappnotify.EventReturnApproved, in.ReturnID, orderID); nerr != nil {
+				slog.WarnContext(ctx, "return-approved notification dispatch failed", "return_id", in.ReturnID, "error", nerr)
+			}
+			if nerr := whatsappnotify.NotifyEmailOrderEvent(ctx, tx, whatsappnotify.EventReturnApproved,
+				"return", in.ReturnID, orderID, whatsappnotify.Extra{
+					"nomor_retur": whatsappnotify.Str(fmt.Sprintf("RTN-%06d", in.ReturnID))}); nerr != nil {
+				slog.WarnContext(ctx, "return-approved email dispatch failed", "return_id", in.ReturnID, "error", nerr)
+			}
 		}
 		properties, err := json.Marshal(map[string]any{"approved": in.Approved, "actor_role": in.ActorRole})
 		if err != nil {

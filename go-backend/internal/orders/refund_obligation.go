@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 func (s *Service) ApproveRefundObligation(ctx context.Context, obligationID, actorID int64) error {
@@ -44,6 +46,10 @@ func (s *Service) ApproveRefundObligation(ctx context.Context, obligationID, act
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE refund_obligations SET status='approved',approved_by=?,approved_at=UTC_TIMESTAMP(6),approval_source='owner_manual_correction',updated_at=UTC_TIMESTAMP(6) WHERE id=?`, actorID, obligationID); err != nil {
 			return err
+		}
+		// obligationUpdated: pending → approved announces refund_approved.
+		if nerr := whatsappnotify.NotifyObligationByID(ctx, tx, whatsappnotify.EventRefundApproved, obligationID); nerr != nil {
+			slog.WarnContext(ctx, "refund-approved dispatch failed", "obligation_id", obligationID, "error", nerr)
 		}
 		payload, err := json.Marshal(map[string]any{"approval_source": "owner_manual_correction"})
 		if err != nil {
@@ -380,6 +386,10 @@ func (s *Service) completeRefundAttemptTx(ctx context.Context, tx *sql.Tx, order
 	if err != nil {
 		return err
 	}
+	// refundCreated proven → refund_completed (only money PROVEN to have left counts).
+	if nerr := whatsappnotify.NotifyPayoutByID(ctx, tx, *payoutID); nerr != nil {
+		slog.WarnContext(ctx, "refund-completed dispatch failed", "payout_id", *payoutID, "error", nerr)
+	}
 	var paidRawOrder, totalRaw string
 	if err := tx.QueryRowContext(ctx, `SELECT CAST(paid_amount AS CHAR),CAST(total_amount AS CHAR) FROM orders WHERE id=?`, orderID).Scan(&paidRawOrder, &totalRaw); err != nil {
 		return err
@@ -538,6 +548,10 @@ func (s *Service) ResolveRefundNeedsVerification(ctx context.Context, obligation
 			if err != nil {
 				return err
 			}
+			// obligationUpdated: needs_verification → approved announces refund_approved.
+			if nerr := whatsappnotify.NotifyObligationByID(ctx, tx, whatsappnotify.EventRefundApproved, obligationID); nerr != nil {
+				slog.WarnContext(ctx, "refund-approved dispatch failed", "obligation_id", obligationID, "error", nerr)
+			}
 		} else {
 			if role != "super_admin" && role != "agen" {
 				return &Problem{Status: 403, Message: "Aksi ini memerlukan persetujuan Owner/Agent.", Errors: map[string]any{"code": "refund_owner_approval_required"}}
@@ -548,6 +562,10 @@ func (s *Service) ResolveRefundNeedsVerification(ctx context.Context, obligation
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE refund_obligations SET status='cancelled',cancelled_at=UTC_TIMESTAMP(6),cancel_reason=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, r, obligationID); err != nil {
 				return err
+			}
+			// obligationUpdated: needs_verification → cancelled announces refund_rejected.
+			if nerr := whatsappnotify.NotifyObligationByID(ctx, tx, whatsappnotify.EventRefundRejected, obligationID); nerr != nil {
+				slog.WarnContext(ctx, "refund-rejected dispatch failed", "obligation_id", obligationID, "error", nerr)
 			}
 		}
 		why := reason

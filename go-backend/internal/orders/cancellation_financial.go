@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 // FinalizeCancellation mirrors CancellationFinancialService::finalize. The order row is the
@@ -143,6 +145,10 @@ func (s *Service) FinalizeCancellation(ctx context.Context, orderID, actorID int
 				obligationID, err := res.LastInsertId()
 				if err != nil {
 					return err
+				}
+				// obligationCreated approved → refund_approved (both channels).
+				if nerr := whatsappnotify.NotifyObligationByID(ctx, tx, whatsappnotify.EventRefundApproved, obligationID); nerr != nil {
+					slog.WarnContext(ctx, "cancellation refund-approved dispatch failed", "obligation_id", obligationID, "error", nerr)
 				}
 				if err := cancellationLedgerEvent(ctx, tx, orderID, obligationID, actorID, "obligation.created", fmt.Sprintf("obligation_created:%d", obligationID), nil, map[string]any{"amount_cents": amount, "source_type": "cancellation"}); err != nil {
 					return err

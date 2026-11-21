@@ -50,7 +50,7 @@ func New(cfg config.Config, database *db.DB, opts Options) *Server {
 		cfg:         cfg,
 		database:    database,
 		sessions:    auth.NewManager(database, cfg.Session),
-		identity:    auth.NewService(database),
+		identity:    auth.NewService(database).WithAppKey(cfg.AppKey),
 		limiter:     newLimiter(),
 		mux:         http.NewServeMux(),
 		startedAt:   time.Now().UTC(),

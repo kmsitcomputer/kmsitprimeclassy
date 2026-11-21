@@ -23,11 +23,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/inventory"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 // orderTransitions is Order::TRANSITIONS (and OrderItem::TRANSITIONS — identical maps).
@@ -134,6 +136,12 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*Orde
 	if _, err := tx.ExecContext(ctx, `UPDATE orders SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
 		in.NewStatus, in.OrderID); err != nil {
 		return nil, err
+	}
+
+	// WhatsAppLifecycleObserver::orderUpdated status event (order_processed/shipped/
+	// delivered/cancelled) — dispatched inside the same transaction.
+	if nerr := whatsappnotify.NotifyOrderStatusChanged(ctx, tx, in.OrderID, previousStatus, in.NewStatus); nerr != nil {
+		slog.WarnContext(ctx, "order-status notification dispatch failed", "order_id", in.OrderID, "error", nerr)
 	}
 
 	// A manual move to diproses creates the Stock Request (Agent-sourced items only).
@@ -362,6 +370,12 @@ func (s *Service) Cancel(ctx context.Context, in CancelInput) (*Order, error) {
 			updated_at = UTC_TIMESTAMP()
 		WHERE id = ?`, in.ActorID, in.Reason, in.OrderID); err != nil {
 		return nil, err
+	}
+
+	// WhatsAppLifecycleObserver::orderUpdated → order_cancelled (only when the status
+	// actually changed; a second cancel call is a no-op exactly like the reference).
+	if nerr := whatsappnotify.NotifyOrderStatusChanged(ctx, tx, in.OrderID, status, "dibatalkan"); nerr != nil {
+		slog.WarnContext(ctx, "order-cancel notification dispatch failed", "order_id", in.OrderID, "error", nerr)
 	}
 
 	// Step 2: the financial finalization — in the SAME transaction, under the same Order lock.
@@ -758,14 +772,21 @@ func (s *Service) finalizeCancellationFinancials(ctx context.Context, tx *sql.Tx
 			if merr != nil {
 				return merr
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO refund_obligations
+			cres, cerr := tx.ExecContext(ctx, `INSERT INTO refund_obligations
 				(obligation_no, order_id, source_type, source_id, obligation_key, amount, status, provenance,
 				 reason, approved_at, approval_source, deferred_amount, deferred_remaining, created_by,
 				 metadata, created_at, updated_at)
 				VALUES (?, ?, 'cancellation', ?, ?, ?, 'approved', 'forward', 'Cancellation refund',
 				 UTC_TIMESTAMP(), 'auto_cancellation_policy', '0.00', '0.00', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-				obligationNo, orderID, orderID, key, available, actorID, string(metadata)); err != nil {
-				return err
+				obligationNo, orderID, orderID, key, available, actorID, string(metadata))
+			if cerr != nil {
+				return cerr
+			}
+			if newObligationID, lerr := cres.LastInsertId(); lerr == nil {
+				// obligationCreated approved → refund_approved (both channels).
+				if nerr := whatsappnotify.NotifyObligationByID(ctx, tx, whatsappnotify.EventRefundApproved, newObligationID); nerr != nil {
+					slog.WarnContext(ctx, "cancellation refund-approved dispatch failed", "obligation_id", newObligationID, "error", nerr)
+				}
 			}
 		} else if err != nil {
 			return err

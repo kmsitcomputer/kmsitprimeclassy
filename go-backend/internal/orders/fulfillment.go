@@ -25,6 +25,8 @@ package orders
 //     Order lock — never inferred from whether a date happens to be set (allowlist).
 
 import (
+	"log/slog"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -35,6 +37,7 @@ import (
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/inventory"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 // AdjustInput is PATCH /orders/{order}/items/{item}/fulfillment.
@@ -945,7 +948,15 @@ func (s *Service) recomputeOrderStatus(ctx context.Context, tx *sql.Tx, orderID 
 	if rank[newStatus] > rank[status] {
 		_, err = tx.ExecContext(ctx, `UPDATE orders SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
 			newStatus, orderID)
-		return err
+		if err != nil {
+			return err
+		}
+		// WhatsAppLifecycleObserver::orderUpdated (item fulfillment can advance the Order
+		// lifecycle) — dispatched in the same transaction with the same event semantics.
+		if nerr := whatsappnotify.NotifyOrderStatusChanged(ctx, tx, orderID, status, newStatus); nerr != nil {
+			slog.WarnContext(ctx, "fulfillment-driven order notification dispatch failed", "order_id", orderID, "error", nerr)
+		}
+		return nil
 	}
 	return nil
 }

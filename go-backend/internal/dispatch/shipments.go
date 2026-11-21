@@ -5,6 +5,8 @@ package dispatch
 // courier commissions on delivery (idempotent), finalizer pending→approved, order recompute.
 
 import (
+	"log/slog"
+
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 var itemTransitions = map[string][]string{
@@ -378,6 +381,11 @@ func (s *Service) transition(ctx context.Context, tx *sql.Tx, a Actor, shipmentI
 		if _, err := tx.ExecContext(ctx, `UPDATE orders SET status = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?`,
 			newOrderStatus, orderID); err != nil {
 			return err
+		}
+		// WhatsAppLifecycleObserver::orderUpdated (order lifecycle can move dikirim/terkirim
+		// when a shipment transition completes) — same transaction, same event semantics.
+		if nerr := whatsappnotify.NotifyOrderStatusChanged(ctx, tx, orderID, orderStatus, newOrderStatus); nerr != nil {
+			slog.WarnContext(ctx, "shipment-driven order notification dispatch failed", "order_id", orderID, "error", nerr)
 		}
 	}
 	return nil

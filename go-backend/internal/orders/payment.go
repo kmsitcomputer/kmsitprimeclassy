@@ -32,6 +32,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
 	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 // querier is the shared subset of *sql.Tx and *db.DB.
@@ -353,11 +354,14 @@ func (s *Service) assertPaymentAllowed(ctx context.Context, q querier, order *pa
 
 // recalculatePaymentStatus is PaymentService::recalculatePaymentStatus. paid_amount is deliberately never
 // clamped to the total (an overpayment is real history); only remaining_amount is floored at zero.
+// The WhatsAppLifecycleObserver::orderUpdated payment-truth hook lives here: a transition into
+// `paid` dispatches payment_paid, into `partially_paid` payment_partial (one or the other, never both).
 func (s *Service) recalculatePaymentStatus(ctx context.Context, tx *sql.Tx, orderID int64, paidOverride *float64) error {
 	var total, current, gross string
+	var oldStatus string
 	if err := tx.QueryRowContext(ctx, `SELECT CAST(total_amount AS CHAR), CAST(paid_amount AS CHAR),
-			CAST(gross_received_amount AS CHAR) FROM orders WHERE id = ? FOR UPDATE`, orderID).
-		Scan(&total, &current, &gross); err != nil {
+			CAST(gross_received_amount AS CHAR), payment_status FROM orders WHERE id = ? FOR UPDATE`, orderID).
+		Scan(&total, &current, &gross, &oldStatus); err != nil {
 		return err
 	}
 	totalValue := money.Round2(parseString(total))
@@ -386,7 +390,29 @@ func (s *Service) recalculatePaymentStatus(ctx context.Context, tx *sql.Tx, orde
 	_, err := tx.ExecContext(ctx, `UPDATE orders SET paid_amount = ?, gross_received_amount = ?,
 		remaining_amount = ?, payment_status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
 		money.String(paid), money.String(grossValue), money.String(remaining), status, orderID)
-	return err
+	if err != nil {
+		return err
+	}
+	// HA-04 payment-truth observer hook (WhatsAppLifecycleObserver::orderUpdated):
+	// wasChanged('payment_status') && paid → payment_paid; partially_paid → payment_partial.
+	if status != oldStatus {
+		event := ""
+		switch status {
+		case "paid":
+			event = whatsappnotify.EventPaymentPaid
+		case "partially_paid":
+			event = whatsappnotify.EventPaymentPartial
+		}
+		if event != "" {
+			if nerr := whatsappnotify.NotifyOrderEvent(ctx, tx, event, orderID); nerr != nil {
+				slog.WarnContext(ctx, "payment-transition whatsapp dispatch failed", "order_id", orderID, "event", event, "error", nerr)
+			}
+			if nerr := whatsappnotify.NotifyEmailOrderEvent(ctx, tx, event, "order", orderID, orderID, nil); nerr != nil {
+				slog.WarnContext(ctx, "payment-transition email dispatch failed", "order_id", orderID, "event", event, "error", nerr)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) applyPaymentToOrder(ctx context.Context, tx *sql.Tx, order *paidOrder, amount float64) error {
@@ -509,6 +535,19 @@ func (s *Service) SubmitBankTransferProof(ctx context.Context, in SubmitBankTran
 			konsumenName.String, orderNo, proofHash); err != nil {
 			slog.WarnContext(ctx, "keuangan payment-proof notification could not be recorded",
 				"verification_id", verificationID, "error", err)
+		}
+		// Transactional WhatsApp + e-mail lanes to the branch's Keuangan
+		// (OrderNotifier::paymentProofUploaded / TransactionalEmailNotifier::dispatchFinance).
+		if err := whatsappnotify.NotifyPaymentProofUploadedWhatsApp(ctx, tx, verificationID, order.ID, proofHash); err != nil {
+			slog.WarnContext(ctx, "whatsapp payment-proof dispatch failed", "verification_id", verificationID, "error", err)
+		}
+		var submittedAmount sql.NullFloat64
+		var submittedAt sql.NullTime
+		_ = tx.QueryRowContext(ctx, `SELECT submitted_amount, submitted_at
+			FROM bank_transfer_verifications WHERE id = ?`, verificationID).Scan(&submittedAmount, &submittedAt)
+		if err := whatsappnotify.NotifyEmailPaymentProofUploaded(ctx, tx, verificationID, order.ID, proofHash,
+			submittedAmount, submittedAt); err != nil {
+			slog.WarnContext(ctx, "email payment-proof dispatch failed", "verification_id", verificationID, "error", err)
 		}
 
 		return logActivity(ctx, tx, in.ActorID, order.ID, "payment.proof_submitted", map[string]any{
@@ -826,6 +865,29 @@ func (s *Service) VerifyBankTransfer(ctx context.Context, in VerifyBankTransferI
 		}
 		if err := notifications.RecordPaymentFailed(ctx, tx, order.ID, order.AgentID, verificationID, orderNo, order.Total); err != nil {
 			slog.WarnContext(ctx, "admin payment-failed notification could not be recorded", "verification_id", verificationID, "error", err)
+		}
+		// WhatsAppLifecycleObserver::verificationUpdated → paymentRejected: transactional
+		// WhatsApp lane + transactional e-mail lane (both inside this transaction — a
+		// rollback notifies nobody, matching the reference after-commit boundary).
+		var submittedAmount sql.NullFloat64
+		var rejectionReason sql.NullString
+		_ = tx.QueryRowContext(ctx, `SELECT submitted_amount, rejection_reason
+			FROM bank_transfer_verifications WHERE id = ?`, verificationID).Scan(&submittedAmount, &rejectionReason)
+		if err := whatsappnotify.NotifyPaymentRejected(ctx, tx, verificationID, order.ID, submittedAmount, rejectionReason); err != nil {
+			slog.WarnContext(ctx, "whatsapp payment-failed dispatch failed", "verification_id", verificationID, "error", err)
+		}
+		extra := whatsappnotify.Extra{}
+		if submittedAmount.Valid {
+			sub := whatsappnotify.MoneyID(submittedAmount.Float64)
+			extra["jumlah_diajukan"] = &sub
+		}
+		if rejectionReason.Valid {
+			v := rejectionReason.String
+			extra["alasan_penolakan"] = &v
+		}
+		if err := whatsappnotify.NotifyEmailOrderEvent(ctx, tx, whatsappnotify.EventPaymentFailed,
+			"bank_transfer_verification", verificationID, order.ID, extra); err != nil {
+			slog.WarnContext(ctx, "email payment-failed dispatch failed", "verification_id", verificationID, "error", err)
 		}
 		return nil
 	})
