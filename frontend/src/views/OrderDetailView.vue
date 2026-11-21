@@ -9,6 +9,8 @@ import ConsentPanel from '@/components/dashboard/ConsentPanel.vue'
 import RefundRecipientPanel from '@/components/dashboard/RefundRecipientPanel.vue'
 import OrderPaymentTools from '@/components/orders/OrderPaymentTools.vue'
 import FulfillmentShortagePanel from '@/components/orders/FulfillmentShortagePanel.vue'
+import OrderRefundLedgerPanel from '@/components/orders/OrderRefundLedgerPanel.vue'
+import OrderItemReceiptsPanel from '@/components/orders/OrderItemReceiptsPanel.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { getOrder, cancelOrder, submitBankTransferProof, updateOrderStatus } from '@/api/orders'
 import { verifyBankTransfer, markCodPayment, submitCodPaymentProof, confirmCodPayment, requestDpSettlement } from '@/api/payments'
@@ -512,6 +514,13 @@ async function submitVerification(shipmentId: number) {
 const isOfficeRole = computed(() => auth.user?.role === 'koordinator-kurir')
 /** R-04: operational roles (gudang/kurir) receive no financial projection — hide money UI for them. */
 const seesFinancials = computed(() => ['super_admin', 'agen', 'admin', 'keuangan', 'konsumen', 'sales', 'sales-kurir-sub', 'korsal'].includes(auth.user?.role ?? ''))
+/**
+ * Refund ledger (RefundLedgerController) is a money-out control: super_admin/agen/admin/keuangan only.
+ * `seesFinancials` also covers konsumen/sales, so it cannot be reused here.
+ */
+const canSeeRefundLedger = computed(() => ['super_admin', 'agen', 'admin', 'keuangan'].includes(auth.user?.role ?? ''))
+/** REM-07 per-item receiving is admin-only (or super_admin) in the backend's itemReceiptAuthorized. */
+const canRecordItemReceipts = computed(() => ['super_admin', 'admin'].includes(auth.user?.role ?? ''))
 const assignTargets = reactive<Record<number, string | null>>({})
 const assigningCourierId = ref<number | null>(null)
 const assignCourierError = ref<string | null>(null)
@@ -1267,6 +1276,18 @@ async function submitReturn(item: OrderItem) {
               </div>
             </div>
 
+            <!-- REM-07 per-item receiving: a line can arrive in parts; the history and the
+                 "Catat Penerimaan" form live here (admin/super_admin — server-authoritative). -->
+            <details v-if="canRecordItemReceipts" class="mt-1.5">
+              <summary class="cursor-pointer text-xs font-medium text-brand-600 dark:text-brand-400">Tanda terima barang</summary>
+              <OrderItemReceiptsPanel
+                :order-item-id="item.id"
+                :remaining-quantity="Math.max(0, item.original_quantity - item.fulfilled_quantity)"
+                class="mt-2"
+                @recorded="load()"
+              />
+            </details>
+
             <!-- Delivery proof photo, once the kurir has submitted one -->
             <a
               v-if="item.delivery_proof_url"
@@ -1478,6 +1499,9 @@ async function submitReturn(item: OrderItem) {
           {{ invoiceBusy ? t('orders.invoiceLoading') : t('orders.invoiceDownload') }}
         </AppButton>
       </div>
+
+      <!-- Refund ledger: obligations → attempts → payouts. Same-agent (or super_admin) read; mutations need keuangan. -->
+      <OrderRefundLedgerPanel v-if="canSeeRefundLedger" :order-id="order.id" @changed="load()" />
 
       <div v-if="order.cancellation_reason" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">
         {{ t('orders.cancelledReason', { reason: order.cancellation_reason }) }}

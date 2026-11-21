@@ -260,7 +260,10 @@ onMounted(async () => {
       <ul class="grid gap-3">
         <li v-for="opname in opnames" :key="opname.id" class="rounded-xl border border-stone-100 p-3">
           <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span class="font-medium">{{ opname.opname_number }}</span>
+            <span class="flex items-center gap-2">
+              <span class="font-medium">{{ opname.opname_number }}</span>
+              <RouterLink :to="{ name: 'warehouse-opname-detail', params: { id: opname.id } }" class="text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
+            </span>
             <span class="text-xs text-stone-400">{{ STOCK_LABEL[opname.stock_type ?? ''] ?? opname.stock_type }} · {{ STATUS_LABEL[opname.status] ?? opname.status }}</span>
           </div>
           <ul class="mt-2 grid gap-2">

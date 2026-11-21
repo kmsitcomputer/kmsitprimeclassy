@@ -25,3 +25,14 @@ export async function createPlanTransfer(payload: { reference?: string; note?: s
 export async function approveTransfer(id: number) { return (await http.post<ApiEnvelope<StockTransfer>>(`/warehouse/transfers/${id}/approve`)).data.data }
 
 export async function rejectTransfer(id: number, reason: string) { return (await http.post<ApiEnvelope<StockTransfer>>(`/warehouse/transfers/${id}/reject`, { reason })).data.data }
+
+// ---- Detail & cancellation (transfer detail view) ----
+
+/** GET /warehouse/transfers/{transfer} — one transfer with items, creator and (when approved) its handover. */
+export async function getTransfer(id: number) { return (await http.get<ApiEnvelope<StockTransfer>>(`/warehouse/transfers/${id}`)).data.data }
+
+/** POST /warehouse/transfers — a transfer between two explicit stock buckets. */
+export async function createTransfer(payload: { source_stock_type: string; source_sub_location_id?: number | null; destination_stock_type: string; destination_sub_location_id?: number | null; reference?: string; note?: string; items: { product_id?: number | null; product_variation_id?: number | null; quantity: number }[] }) { return (await http.post<ApiEnvelope<StockTransfer>>('/warehouse/transfers', payload)).data.data }
+
+/** POST /warehouse/transfers/{transfer}/cancel — Gudang only, pending transfers with no Plan bucket (CancelTransfer). */
+export async function cancelTransfer(id: number) { return (await http.post<ApiEnvelope<StockTransfer>>(`/warehouse/transfers/${id}/cancel`)).data.data }

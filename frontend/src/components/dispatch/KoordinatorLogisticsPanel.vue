@@ -206,6 +206,7 @@ watch(() => props.section, () => load(1))
       <div v-for="p in proposals" :key="p.id" class="rounded-xl border border-stone-200 p-4 dark:border-stone-800">
         <p class="text-sm font-medium">{{ p.request?.order?.order_no ?? `Permintaan #${p.stock_request_id}` }}
           <span class="ml-2 text-xs text-stone-500">diserahkan Gudang {{ p.created_at ? formatDate(p.created_at) : '' }}<template v-if="p.requester"> · {{ p.requester.name }}</template></span>
+          <RouterLink :to="{ name: 'warehouse-proposal-detail', params: { id: p.id } }" class="ml-2 text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
         </p>
         <p v-if="p.handover_proof_url" class="mt-1 text-xs">
           Bukti serah terima Gudang:

@@ -87,3 +87,8 @@ export async function mySubStock() {
   const { data } = await http.get<ApiEnvelope<{ sub_location: { id: number; code: string; name: string; address?: string | null; contact_number?: string | null }; stocks: SubStockRow[] }>>('/sub-stock/my')
   return data.data
 }
+
+export async function getSubStockRequest(id: number): Promise<SubStockRequest> {
+  const { data } = await http.get<ApiEnvelope<SubStockRequest>>(`/sub-stock/requests/${id}`)
+  return data.data
+}

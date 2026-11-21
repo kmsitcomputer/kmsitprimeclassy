@@ -173,6 +173,33 @@ export const routeDefs: RouteDef[] = [
       meta: { requiresAuth: true, requiresAnyRole: ['admin', 'gudang'] },
     },
     {
+      path: '/dashboard/warehouse/transfers/:id',
+      name: 'warehouse-transfer-detail',
+      props: true,
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen', 'super_admin'] },
+    },
+    {
+      path: '/dashboard/warehouse/opnames/:id',
+      name: 'warehouse-opname-detail',
+      props: true,
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen', 'super_admin'] },
+    },
+    {
+      path: '/dashboard/warehouse/stock-addition-requests/:id',
+      name: 'warehouse-stock-addition-detail',
+      props: true,
+      meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen', 'super_admin'] },
+    },
+    {
+      path: '/dashboard/warehouse/fulfillment-proposals/:id',
+      name: 'warehouse-proposal-detail',
+      props: true,
+      meta: {
+        requiresAuth: true,
+        requiresAnyRole: ['gudang', 'admin', 'agen', 'koordinator-kurir', 'super_admin'],
+      },
+    },
+    {
       path: '/dashboard/warehouse/opnames',
       name: 'warehouse-opnames',
       meta: { requiresAuth: true, requiresAnyRole: ['gudang', 'admin', 'agen'] },
@@ -200,6 +227,15 @@ export const routeDefs: RouteDef[] = [
       path: '/dashboard/sub-stock',
       name: 'sub-stock',
       meta: { requiresAuth: true, requiresAnyRole: ['sales-kurir-sub'] },
+    },
+    {
+      path: '/dashboard/sub-stock/requests/:id',
+      name: 'sub-stock-request-detail',
+      props: true,
+      meta: {
+        requiresAuth: true,
+        requiresAnyRole: ['sales-kurir-sub', 'admin', 'gudang', 'agen', 'super_admin'],
+      },
     },
     {
       path: '/dashboard/sub-stock/approvals',

@@ -25,3 +25,5 @@ export async function submitOpname(id: number) { return (await http.post<ApiEnve
 export async function approveOpname(id: number) { return (await http.post<ApiEnvelope<StockOpname>>(`/warehouse/opnames/${id}/approve`)).data.data }
 export async function rejectOpname(id: number, reason: string) { return (await http.post<ApiEnvelope<StockOpname>>(`/warehouse/opnames/${id}/reject`, { reason })).data.data }
 export async function cancelOpname(id: number) { return (await http.post<ApiEnvelope<StockOpname>>(`/warehouse/opnames/${id}/cancel`)).data.data }
+/** GET /warehouse/opnames/{opname} — read-only detail with its counted items. */
+export async function getOpname(id: number) { return (await http.get<ApiEnvelope<StockOpname>>(`/warehouse/opnames/${id}`)).data.data }

@@ -156,3 +156,31 @@ export async function listEligibleSubLocationOwners(params: { page?: number; per
   const { data } = await http.get<ApiEnvelope<AuthUser[]>>('/warehouse/sub-locations/eligible-owners', { params })
   return { owners: data.data, meta: data.meta as unknown as PaginationMeta }
 }
+
+// ---- Detail & Sub Location raw stock (detail views) ----
+
+/** GET /warehouse/stock-addition-requests/{request} — one request; the show action attaches `current_stock`. */
+export async function getStockAdditionRequest(id: number) {
+  return (await http.get<ApiEnvelope<StockAdditionRequest>>(`/warehouse/stock-addition-requests/${id}`)).data.data
+}
+
+/** One raw warehouse_stocks row of a Sub Location — SubLocationStockController::stocks (NOT the stock-cards projection). */
+export interface SubLocationStockRow {
+  id: number
+  agent_id: number
+  product_id: number | null
+  product_variation_id: number | null
+  stock_type: string
+  sub_location_id: number | null
+  quantity: number
+  product_name?: string | null
+  variation_label?: string | null
+  sku?: string | null
+  product?: { id: number; name: string; sku?: string | null } | null
+  variation?: { id: number; label: string; sku: string } | null
+}
+
+/** GET /warehouse/sub-locations/{subLocation}/stocks — raw stock rows of one Sub Location. */
+export async function listSubLocationStocks(subLocationId: number) {
+  return (await http.get<ApiEnvelope<SubLocationStockRow[]>>(`/warehouse/sub-locations/${subLocationId}/stocks`)).data.data
+}

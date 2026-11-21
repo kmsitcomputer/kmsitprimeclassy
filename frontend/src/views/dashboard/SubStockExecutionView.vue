@@ -84,7 +84,10 @@ onMounted(() => load())
     <ul v-else class="grid gap-3">
       <li v-for="request in requests" :key="request.id" class="rounded-xl border border-stone-200 bg-white p-4">
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-          <span class="font-medium">{{ request.request_number }}</span>
+          <span class="flex items-center gap-2">
+            <span class="font-medium">{{ request.request_number }}</span>
+            <RouterLink :to="{ name: 'sub-stock-request-detail', params: { id: request.id } }" class="text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
+          </span>
           <span class="text-xs text-stone-400">{{ request.sub_location?.name ?? '' }} · {{ request.requester?.name ?? '' }} · {{ request.direction === 'replenish' ? 'Isi ulang (Transit → Sub)' : 'Retur (Sub → Transit)' }}</span>
           <span class="rounded-full bg-stone-100 px-2 py-0.5 text-xs">{{ request.status }}</span>
         </div>

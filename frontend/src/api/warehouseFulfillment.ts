@@ -2,6 +2,7 @@ import { http } from './client'
 import { uploadConfig } from './payments'
 import type { ApiEnvelope } from './client'
 import type { Order, PaginationMeta } from './types'
+import { secureUuid } from '@/utils/uuid'
 
 /**
  * The Gudang "Order Diproses" work queue and the Gudang → Koordinator Kurir handover.
@@ -181,4 +182,37 @@ export interface FulfillmentReceiptLine {
 export async function receiveFulfillmentProposal(id: number, items: FulfillmentReceiptLine[], note?: string) {
   const { data } = await http.post<ApiEnvelope<WarehouseFulfillmentProposal>>(`/warehouse/fulfillment-proposals/${id}/receive`, { items, note })
   return data.data
+}
+
+// ---- Detail, Admin decision and discrepancy resolution (proposal detail view) ----
+
+/** GET /warehouse/fulfillment-proposals/{proposal} — one handover submission with items, shortages and request. */
+export async function getFulfillmentProposal(id: number) {
+  return (await http.get<ApiEnvelope<WarehouseFulfillmentProposal>>(`/warehouse/fulfillment-proposals/${id}`)).data.data
+}
+
+/** POST /warehouse/fulfillment-proposals/{proposal}/approve — Admin exception path; reason is required (min 5 chars). */
+export async function approveFulfillmentProposal(id: number, reason: string) {
+  return (await http.post<ApiEnvelope<WarehouseFulfillmentProposal>>(`/warehouse/fulfillment-proposals/${id}/approve`, { reason })).data.data
+}
+
+/** POST /warehouse/fulfillment-proposals/{proposal}/reject — reason is required (max 255 chars). */
+export async function rejectFulfillmentProposal(id: number, reason: string) {
+  return (await http.post<ApiEnvelope<WarehouseFulfillmentProposal>>(`/warehouse/fulfillment-proposals/${id}/reject`, { reason })).data.data
+}
+
+/**
+ * POST /warehouse/stock-request-items/{item}/resolve-discrepancy — Admin settles the remainder of a
+ * reported shortage: `restock` returns it to Transit, `write_off` books it as damaged loss.
+ * `idempotency_key` is required by the backend; when the caller omits it a secure UUID is generated.
+ */
+export async function resolveStockRequestDiscrepancy(
+  itemId: number,
+  payload: { action: 'restock' | 'write_off'; quantity: number; reason: string; idempotency_key?: string },
+) {
+  const body = { ...payload, idempotency_key: payload.idempotency_key ?? secureUuid() }
+  return (await http.post<ApiEnvelope<{ id: number; damaged_hold_qty: number; remaining_qty: number }>>(
+    `/warehouse/stock-request-items/${itemId}/resolve-discrepancy`,
+    body,
+  )).data.data
 }

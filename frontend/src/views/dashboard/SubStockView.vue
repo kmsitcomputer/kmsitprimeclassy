@@ -225,7 +225,10 @@ onMounted(async () => {
       <ul v-else class="grid gap-3">
         <li v-for="request in requests" :key="request.id" class="rounded-xl border border-stone-100 p-3">
           <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span class="font-medium">{{ request.request_number }}</span>
+            <span class="flex items-center gap-2">
+              <span class="font-medium">{{ request.request_number }}</span>
+              <RouterLink :to="{ name: 'sub-stock-request-detail', params: { id: request.id } }" class="text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
+            </span>
             <span class="text-xs text-stone-400">{{ request.direction === 'replenish' ? 'Isi ulang' : 'Retur' }}</span>
             <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(request.status)">{{ statusLabel(request.status) }}</span>
           </div>

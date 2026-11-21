@@ -516,6 +516,7 @@ onMounted(load)
               <div class="text-xs text-stone-400">{{ req.created_at ?? '' }}</div>
             </div>
             <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(req.status)">{{ statusLabel(req.status) }}</span>
+            <RouterLink :to="{ name: 'warehouse-stock-addition-detail', params: { id: req.id } }" class="shrink-0 text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
           </li>
         </ul>
         <div v-if="requestMeta.last_page > 1" class="mt-3 flex items-center gap-2 text-sm">
@@ -553,6 +554,7 @@ onMounted(load)
             <input v-model="rejectReason[req.id]" placeholder="Alasan tolak" class="rounded-lg border border-stone-200 px-2 py-1 text-sm" />
             <button type="button" class="rounded-lg bg-red-600 px-3 py-1 text-sm text-white" @click="reject(req.id)">Reject</button>
           </div>
+          <RouterLink :to="{ name: 'warehouse-stock-addition-detail', params: { id: req.id } }" class="shrink-0 self-center text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
         </li>
       </ul>
       <div v-if="adminMeta.last_page > 1" class="mt-3 flex items-center gap-2 text-sm">

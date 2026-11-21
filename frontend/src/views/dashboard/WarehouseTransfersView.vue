@@ -459,7 +459,10 @@ onMounted(load)
         <li v-for="transfer in transfers" :key="transfer.id" class="rounded-xl border border-stone-100 p-3 text-sm">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <span class="font-medium">{{ transfer.transfer_number }}</span>
-            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="transferStatusClass(transfer.status)">{{ transferStatusLabel(transfer.status) }}</span>
+            <span class="flex items-center gap-2">
+              <RouterLink :to="{ name: 'warehouse-transfer-detail', params: { id: transfer.id } }" class="text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
+              <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="transferStatusClass(transfer.status)">{{ transferStatusLabel(transfer.status) }}</span>
+            </span>
           </div>
           <ul class="mt-2 grid gap-1">
             <li v-for="item in transfer.items" :key="item.id" class="text-stone-500">
@@ -494,7 +497,10 @@ onMounted(load)
           <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span class="font-medium">{{ transfer.transfer_number }}</span>
             <span class="text-xs text-stone-400">{{ transfer.creator?.name ?? '' }} · {{ transfer.created_at ?? '' }}</span>
-            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="transferStatusClass(transfer.status)">{{ transferStatusLabel(transfer.status) }}</span>
+            <span class="flex items-center gap-2">
+              <RouterLink :to="{ name: 'warehouse-transfer-detail', params: { id: transfer.id } }" class="text-xs font-medium text-brand-700 hover:underline dark:text-brand-300">Detail</RouterLink>
+              <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="transferStatusClass(transfer.status)">{{ transferStatusLabel(transfer.status) }}</span>
+            </span>
           </div>
           <ul class="grid gap-2">
             <li v-for="item in transfer.items" :key="item.id" class="flex flex-wrap items-center gap-3 rounded-lg bg-stone-50 p-2 text-sm">
