@@ -23,9 +23,9 @@ The generator confirms all 375 method/path records are mapped to Go handlers. Th
 
 1. **Google Sheets sync:** `handleGoogleSheetsConfigSync` writes a sync-log row and queries datasets, but does not call a Sheets write/replace operation. If credentials exist and metadata succeeds, the current handler still records a failed sync with the missing-credential message. `transaction_worksheet` is reduced to a partial transaction projection, and the Go row limit is 2,000 while Laravel config uses 10,000. The committed `compare_sheets_sync.py` proves only failure paths in the isolated no-credential environment (7 comparisons), not a successful sheet write.
 2. **Laravel Eloquent lifecycle observers:** `WhatsAppLifecycleObserver` emits after-commit order, payment, return, refund-obligation, refund-payout and rejected-verification notifications. Go SQL handlers do not invoke an equivalent lifecycle dispatcher/outbox across these affected mutations. `AdminNotificationObserver` also watches WhatsApp delivery and Agent device transitions; the Go notification package is a recipient-scoped inbox store, not an observer/delivery implementation.
-3. **Registration:** `auth.Service.notifyRegistration` writes a WhatsApp ledger row only. It does not enqueue that row for delivery, and the Laravel account-registration email is not sent.
+3. **Registration:** Go now creates its restricted WhatsApp ledger row and Laravel-compatible queue job atomically after the user transaction commits. A real-database regression verifies queue payload identity, duplicate idempotency, and rollback. The Go delivery worker and Laravel account-registration welcome email are still missing.
 
-The generated matrix now marks 24 affected routes PARTIAL, including Google Sheets sync, registration, order creation/status/payment/cancellation, return creation/review, and proven refund payout paths. See `docs/21a-IMP010-API-PARITY-MATRIX.md` for the exact route-level list and notes. This is a minimum evidence-backed correction; the remaining mutation routes still need a systematic observer-to-handler trace before the matrix can be considered fully audited.
+The generated matrix now marks 24 affected routes PARTIAL, including Google Sheets sync, registration, order creation/status/payment/cancellation, return creation/review, and proven refund payout paths. The registration route still remains PARTIAL because welcome-email delivery and Go queue consumption are not complete. See `docs/21a-IMP010-API-PARITY-MATRIX.md` for the exact route-level list and notes. This is a minimum evidence-backed correction; the remaining mutation routes still need a systematic observer-to-handler trace before the matrix can be considered fully audited.
 
 ## Zero-omission component inventory
 
@@ -62,6 +62,9 @@ All commands below ran locally; no full suite was run.
 - `go test ./internal/jobs ./internal/oauth ./internal/document ./internal/export ./internal/install ./internal/installer ./internal/media ./internal/notifications` — PASS (packages with no tests reported as such).
 - `go vet ./internal/jobs ./internal/oauth ./internal/document ./internal/export ./internal/install ./internal/installer ./internal/media ./internal/notifications` — PASS (command completed with exit 0).
 - `go test ./internal/api` — PASS (cached).
+- `docker run --rm --network primeclassy-net ... go test ./internal/auth -run '^TestRegistrationWhatsAppLedgerAndQueueAreDurableTogether$' -count=2 -v` — PASS twice against `primeclassy_testing`; test acquires the repository MySQL named lock, restores the WA setting, and cleans its user/ledger/queue fixtures.
+- The same scoped test from the host SKIPPED because `primeclassy-mariadb` is only resolvable inside Docker; it was then run in the existing test network without changing existing service containers.
+- `go test ./internal/auth ./internal/jobs -count=1` and `go vet ./internal/auth ./internal/jobs` — PASS after the registration fix.
 - The audit did not run a differential harness or any Full Test. The last committed Google Sheets sync evidence is `compare_sheets_sync.py` 7/7, limited to missing-config, invalid-mapping and missing-credential failure behavior.
 
 ## Business invariants and security

@@ -142,7 +142,7 @@ Status legend:
 | POST | `/api/v1/auth/login` | public | — | **GO** |  |
 | POST | `/api/v1/auth/logout` | session | — | **GO** |  |
 | GET | `/api/v1/auth/me` | session | — | **GO** |  |
-| POST | `/api/v1/auth/register` | public | — | **PARTIAL** | PARTIAL — account/referral/audit parity is verified, but Go does not send the Laravel registration email or enqueue the WhatsApp ledger row to a worker. |
+| POST | `/api/v1/auth/register` | public | — | **PARTIAL** | PARTIAL — Go now atomically creates the restricted WhatsApp ledger row and Laravel-compatible queue job after commit; welcome-email delivery and the Go notification worker remain incomplete. |
 | POST | `/api/v1/auth/reset-password` | public | — | **GO** | one code = one reset: subject-scoped verify (attempt counter persists on mismatch), password replace, all recovery challenges consumed, session revocation, audit; compared by compare_recovery.py (15/0) |
 
 ## Catalog — bestsellers — `bestsellers` (1/1 in Go)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
+	"github.com/kmsitcomputer/primeclassy-go/internal/jobs"
 )
 
 // Service bundles the identity use-cases. It depends only on the DB and the message catalogue, so it can
@@ -83,9 +85,8 @@ type RegisterInput struct {
 
 // Register creates a konsumen account with the referral chain and closure rows.
 //
-// Faithful to AuthController::register + HierarchyService::attachClosures. The only deliberate omission is
-// the RegistrationNotifier (welcome e-mail + restricted WhatsApp notice), which is a queued side effect
-// owned by the Laravel queue; it is documented as an open gap rather than half-implemented here.
+// Faithful to AuthController::register + HierarchyService::attachClosures. It also creates the
+// restricted WhatsApp ledger row and durable queue job after commit; welcome e-mail delivery remains open.
 func (s *Service) Register(ctx context.Context, in RegisterInput, meta ClientMeta) (*User, error) {
 	fields := map[string][]string{}
 	if strings.TrimSpace(in.Name) == "" {
@@ -183,32 +184,36 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta ClientMet
 	if err != nil {
 		return nil, err
 	}
-	// RegistrationNotifier::notify — everything is afterCommit and never fails the signup.
-	s.notifyRegistration(ctx, created)
+	// RegistrationNotifier::notify — afterCommit, and never fails the signup.
+	if _, notifyErr := s.notifyRegistration(ctx, created); notifyErr != nil {
+		slog.Warn("registration.notify.whatsapp_failed", "user_id", created.ID, "error_type", fmt.Sprintf("%T", notifyErr))
+	}
 	return created, nil
 }
 
 // notifyRegistration ports Services/Auth/RegistrationNotifier: after the registration commit, a
-// restricted WhatsApp ledger enqueue (gated) and an informational e-mail. The e-mail goes through
-// Laravel's own mailer — under the test/production log transport it produces NO DB-observable row
-// (email_messages is a different, SMTP-gated pipeline for order events only), so there is nothing
-// to reproduce for it here; the WhatsApp ledger row IS observable and idempotent by its key.
-func (s *Service) notifyRegistration(ctx context.Context, u *User) {
-	defer func() { _ = recover() }() // never fails the signup (the reference swallows Throwable)
+// restricted WhatsApp ledger enqueue (gated) and an informational e-mail. Welcome e-mail delivery
+// parity remains open; the WhatsApp ledger row and durable queue job are idempotent by the existing key.
+func (s *Service) notifyRegistration(ctx context.Context, u *User) (attempted bool, notifyErr error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			notifyErr = fmt.Errorf("registration notification panic: %v", recovered)
+		}
+	}() // never fails the signup (the reference swallows Throwable)
 
 	msisdn := waMsisdn(deref(u.Phone))
 	if msisdn == "" {
-		return
+		return false, nil
 	}
 	var enabled int
 	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM settings
-		WHERE `+"`group`"+`='integration.whatsapp' AND key='wa.enabled' AND value IN ('1','true')`).Scan(&enabled); err != nil || enabled == 0 {
-		return
+		WHERE `+"`group`"+`='integration.whatsapp' AND `+"`key`"+`='wa.enabled' AND value IN ('1','true')`).Scan(&enabled); err != nil || enabled == 0 {
+		return false, err
 	}
 	var maxAttempts int
 	if err := s.database.QueryRowContext(ctx, `SELECT COALESCE(MAX(CAST(value AS UNSIGNED)),0) FROM settings
-		WHERE `+"`group`"+`='integration.whatsapp' AND key='wa.max_attempts'`).Scan(&maxAttempts); err != nil {
-		return
+		WHERE `+"`group`"+`='integration.whatsapp' AND `+"`key`"+`='wa.max_attempts'`).Scan(&maxAttempts); err != nil {
+		return false, err
 	}
 	if maxAttempts < 1 {
 		maxAttempts = 3
@@ -217,20 +222,41 @@ func (s *Service) notifyRegistration(ctx context.Context, u *User) {
 		maxAttempts = 5
 	}
 	agentID := u.ID
-	if u.AgentID != nil {
+	if u.AgentID != nil && *u.AgentID > 0 {
 		agentID = *u.AgentID
 	}
 	const body = "Selamat datang di PrimeClassy.\n\nAkun Anda telah dibuat. Untuk melihat informasi lebih lengkap dan menggunakan fitur yang memerlukan bukti kepemilikan nomor, silakan verifikasi WhatsApp Anda melalui aplikasi resmi PrimeClassy."
-	if _, err := s.database.ExecContext(ctx, `INSERT INTO whatsapp_messages
+	return true, s.enqueueRegistrationWhatsApp(ctx, u.ID, agentID, msisdn, body, maxAttempts)
+}
+
+func (s *Service) enqueueRegistrationWhatsApp(ctx context.Context, userID, agentID int64, msisdn, body string, maxAttempts int) error {
+	return s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `INSERT INTO whatsapp_messages
 		(idempotency_key, purpose, event, template_class, recipient_role, agent_id, subject_type, subject_id,
 		 recipient_user_id, recipient_phone, body, status, max_attempts, queued_at, created_at, updated_at)
 		VALUES (?, 'transaction', 'account_registered', 'restricted', 'registrant', ?, 'user', ?, ?, ?, ?, 'queued', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-		ON DUPLICATE KEY UPDATE idempotency_key = idempotency_key`,
-		"txn:account_registered:user:"+strconv.FormatInt(u.ID, 10),
-		agentID, u.ID, u.ID, msisdn, body, maxAttempts); err != nil {
-		// Swallowed by the reference (Log::warning); never fails the signup.
-		return
-	}
+		ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)`,
+			"txn:account_registered:user:"+strconv.FormatInt(userID, 10),
+			agentID, userID, userID, msisdn, body, maxAttempts)
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return nil // Laravel's notifier does not dispatch again for an existing idempotency row.
+		}
+		messageID, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if err := jobs.EnqueueWhatsAppTx(ctx, tx, messageID, time.Now()); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func deref(v *string) string {

@@ -421,7 +421,7 @@ IMPLEMENTED = {
 # in its note.
 GAPS = {
     ("POST", "/api/v1/google-sheets/configs/{config}/sync"): "PARTIAL — query and sync-log failure paths match, but Go never calls the Sheets write API; with credentials present it still records failure. Transaction worksheet projection and the 10,000-row bound are also incomplete.",
-    ("POST", "/api/v1/auth/register"): "PARTIAL — account/referral/audit parity is verified, but Go does not send the Laravel registration email or enqueue the WhatsApp ledger row to a worker.",
+    ("POST", "/api/v1/auth/register"): "PARTIAL — Go now atomically creates the restricted WhatsApp ledger row and Laravel-compatible queue job after commit; welcome-email delivery and the Go notification worker remain incomplete.",
     ("POST", "/api/v1/orders"): "PARTIAL — core order and financial state matches; Laravel Order observers emit after-commit email/WhatsApp events that have no Go lifecycle dispatcher/worker.",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "PARTIAL — assisted-order state matches, but Laravel Order created observer notifications are not dispatched by Go.",
     ("POST", "/api/v1/orders/{order}/assisted-returns"): "PARTIAL — return state matches, but Laravel ReturnRequest created observer notification is not dispatched by Go.",
