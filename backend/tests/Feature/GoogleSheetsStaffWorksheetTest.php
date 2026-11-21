@@ -74,7 +74,8 @@ class GoogleSheetsStaffWorksheetTest extends TestCase
 
     private function makeProduct(User $agen): \App\Models\Product
     {
-        $category = \App\Models\ProductCategory::create(['name' => 'Kue Kering', 'slug' => 'kue-kering-'.Str::random(6)]);
+        $suffix = Str::random(6);
+        $category = \App\Models\ProductCategory::create(['name' => 'Kue Kering '.$suffix, 'slug' => 'kue-kering-'.$suffix]);
 
         return \App\Models\Product::create([
             'sku' => 'WS-'.Str::random(6), 'name' => 'Nastael', 'slug' => 'nastael-'.Str::random(6),

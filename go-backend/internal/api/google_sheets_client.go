@@ -19,8 +19,16 @@ import (
 )
 
 type googleSheetsAPIError struct{ Code, Message string }
+type googleSheetsSheet struct {
+	ID             int64  `json:"sheetId"`
+	Title          string `json:"title"`
+	GridProperties struct {
+		ColumnCount int `json:"columnCount"`
+	} `json:"gridProperties"`
+}
 type googleSheetsMetadata struct {
-	Title string `json:"title"`
+	Title  string              `json:"title"`
+	Sheets []googleSheetsSheet `json:"sheets"`
 }
 
 func (s *Server) googleSheetsMetadata(r *http.Request, spreadsheet string) (googleSheetsMetadata, *googleSheetsAPIError) {
@@ -35,6 +43,10 @@ func (s *Server) googleSheetsMetadataAt(r *http.Request, spreadsheet, base strin
 	if code != "" {
 		return googleSheetsMetadata{}, &googleSheetsAPIError{code, message}
 	}
+	return s.googleSheetsMetadataWithToken(r, spreadsheet, base, token)
+}
+
+func (s *Server) googleSheetsMetadataWithToken(r *http.Request, spreadsheet, base, token string) (googleSheetsMetadata, *googleSheetsAPIError) {
 	base = strings.TrimRight(base, "/")
 	endpoint := base + "/spreadsheets/" + url.PathEscape(spreadsheet) + "?fields=properties.title,sheets.properties"
 	timeout := s.cfg.GoogleSheets.Timeout
@@ -64,11 +76,18 @@ func (s *Server) googleSheetsMetadataAt(r *http.Request, spreadsheet, base strin
 		Properties struct {
 			Title string `json:"title"`
 		} `json:"properties"`
+		Sheets []struct {
+			Properties googleSheetsSheet `json:"properties"`
+		} `json:"sheets"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
 		return googleSheetsMetadata{}, &googleSheetsAPIError{"UNKNOWN_GOOGLE_API_ERROR", "Google Sheets API mengembalikan kegagalan yang tidak dikenal."}
 	}
-	return googleSheetsMetadata{Title: payload.Properties.Title}, nil
+	metadata := googleSheetsMetadata{Title: payload.Properties.Title}
+	for _, sheet := range payload.Sheets {
+		metadata.Sheets = append(metadata.Sheets, sheet.Properties)
+	}
+	return metadata, nil
 }
 
 func (s *Server) googleSheetsToken(ctx context.Context) (string, string, string) {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1005,32 +1006,132 @@ func (s *Server) handleGoogleSheetsConfigSync(w http.ResponseWriter, r *http.Req
 	if filtersJSON.Valid && filtersJSON.String != "" && filtersJSON.String != "null" {
 		_ = json.Unmarshal([]byte(filtersJSON.String), &filters)
 	}
-	records, qerr := s.sheetsDatasetQuery(ctx, dataset, destAgent, filters, fields)
+	maxRows := s.cfg.GoogleSheets.MaxRows
+	if maxRows < 1 {
+		maxRows = 10000
+	}
+	records, qerr := s.sheetsDatasetQuery(ctx, dataset, destAgent, filters, fields, maxRows)
 	if qerr != nil {
-		finish("failed", 0, 0, 0, "Invalid mapping")
+		finish("failed", 0, 0, 0, "Sync failed")
 		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
 		return
 	}
 	rowsProcessed := int64(len(records))
 	_, _ = s.database.ExecContext(ctx, `UPDATE sheets_sync_logs SET rows_processed=? WHERE id=?`, rowsProcessed, logID)
-	const maxRows = 2000
-	if rowsProcessed > maxRows {
+	if rowsProcessed > int64(maxRows) {
 		finish("failed", rowsProcessed, 0, rowsProcessed,
 			fmt.Sprintf("Dataset melebihi batas sinkronisasi (%d baris). Persempit periode filter lalu sinkronkan ulang.", maxRows))
 		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
 		return
 	}
-	// Sheets write: without readable credentials the whole sync fails (the
-	// reference SheetsClient throws CREDENTIAL_NOT_FOUND before any API call).
-	if _, apiErr := s.googleSheetsMetadata(r, spreadsheetID); apiErr != nil {
+	rows := make([][]any, 0, len(records)+1)
+	header := make([]any, 0, len(columns))
+	for _, column := range columns {
+		header = append(header, column.Label)
+	}
+	rows = append(rows, header)
+	rowKeys := make([]string, 0, len(records))
+	for _, record := range records {
+		row := make([]any, 0, len(columns))
+		for _, column := range columns {
+			value := record[column.Field]
+			row = append(row, sheetsCellValue(dataset, column.Field, value))
+		}
+		rows = append(rows, row)
+		if key, ok := record["no"]; ok {
+			rowKeys = append(rowKeys, strings.TrimSpace(fmt.Sprint(sheetsCellValue(dataset, "no", key))))
+		}
+	}
+	protected := sheetsProtectedIndexes(dataset, columns)
+	validation := map[int][]string{}
+	for index, column := range columns {
+		if dataset == "transaction_worksheet" && column.Field == "update_money_position" {
+			validation[index] = []string{"konsumen", "keuangan", "sales", "korsal"}
+		}
+	}
+	if len(protected) > 0 && len(rowKeys) != len(records) {
+		finish("failed", rowsProcessed, 0, rowsProcessed, "Identitas baris tidak cocok dengan payload — sinkronisasi aman dibatalkan.")
+		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+		return
+	}
+	if len(protected) > 0 && !sheetsHasField(fields, "no") {
+		finish("failed", rowsProcessed, 0, rowsProcessed, "Invalid mapping")
+		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+		return
+	}
+	var apiErr *googleSheetsAPIError
+	if s.googleSheetsBase != "" {
+		apiErr = s.googleSheetsReplaceAt(r, spreadsheetID, tab, rows, s.googleSheetsBase, sheetsProtectedConfig{Indexes: protected, RowKeys: rowKeys, Validation: validation})
+	} else {
+		apiErr = s.googleSheetsReplace(r, spreadsheetID, tab, rows, sheetsProtectedConfig{Indexes: protected, RowKeys: rowKeys, Validation: validation})
+	}
+	if apiErr != nil {
 		finish("failed", rowsProcessed, 0, rowsProcessed, apiErr.Message)
 		httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
 		return
 	}
-	// A configured deployment continues with the write; the isolated env stops
-	// at the credential gate above (no service account is provisioned).
-	finish("failed", rowsProcessed, 0, rowsProcessed, "File credential Google tidak ditemukan atau tidak dapat dibaca.")
+	finish("success", rowsProcessed, rowsProcessed, 0, nil)
 	httpx.OK(w, s.sheetsSyncLogResponse(ctx, logID), "OK", nil)
+}
+
+func sheetsHasField(fields []string, field string) bool {
+	for _, candidate := range fields {
+		if candidate == field {
+			return true
+		}
+	}
+	return false
+}
+
+func sheetsProtectedIndexes(dataset string, columns []struct {
+	Field string `json:"field"`
+	Label string `json:"label"`
+}) []int {
+	if dataset != "transaction_worksheet" {
+		return nil
+	}
+	manual := map[string]bool{"update_money_position": true, "settlement_note": true, "settlement_total": true}
+	indexes := []int{}
+	for i, column := range columns {
+		if manual[column.Field] {
+			indexes = append(indexes, i)
+		}
+	}
+	return indexes
+}
+
+func sheetsCellValue(dataset, field string, value any) any {
+	if value == nil {
+		return nil
+	}
+	if bytes, ok := value.([]byte); ok {
+		value = string(bytes)
+	}
+	if dataset != "transaction_worksheet" {
+		return value
+	}
+	numeric := map[string]bool{
+		"no": true, "unit_price": true, "quantity": true, "line_total": true, "shipping_fee": true, "order_discount": true,
+		"invoice_total": true, "invoice_paid": true, "invoice_outstanding": true, "dp": true, "installment_1": true, "settlement": true,
+	}
+	if !numeric[field] {
+		return value
+	}
+	text := fmt.Sprint(value)
+	if text == "" {
+		return nil
+	}
+	if field == "no" || field == "quantity" {
+		n, err := strconv.ParseInt(text, 10, 64)
+		if err == nil {
+			return n
+		}
+	}
+	n, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return value
+	}
+	return math.Round(n*100) / 100
 }
 
 func maskSpreadsheetID(id string) string {
@@ -1083,7 +1184,7 @@ func (s *Server) sheetsSyncLogResponse(ctx context.Context, id int64) map[string
 // credential gate stops the write before any payload leaves — so each dataset
 // uses the reference's exact FROM/WHERE shape.
 func (s *Server) sheetsDatasetQuery(ctx context.Context, dataset string, agentID sql.NullInt64,
-	filters map[string]any, fields []string) ([]map[string]any, error) {
+	filters map[string]any, fields []string, maxRows int) ([]map[string]any, error) {
 	q := ""
 	args := []any{}
 	withAgent := func(base string) string {
@@ -1200,7 +1301,9 @@ func (s *Server) sheetsDatasetQuery(ctx context.Context, dataset string, agentID
 			q += ` WHERE o.agent_id = ?`
 			args = append(args, agentID.Int64)
 		}
-	case "transactions", "transaction_items", "transaction_worksheet":
+	case "transaction_worksheet":
+		return s.sheetsWorksheetQuery(ctx, agentID, filters, maxRows)
+	case "transactions", "transaction_items":
 		// canonical order-item projection (OrderTransactionReportService)
 		q = `SELECT o.order_no, DATE_FORMAT(o.created_at, '%d/%m/%Y') AS order_date,
 			COALESCE(NULLIF(i.sku_snapshot, ''), '-') AS sku,
@@ -1231,7 +1334,7 @@ func (s *Server) sheetsDatasetQuery(ctx context.Context, dataset string, agentID
 	default:
 		return nil, errors.New("dataset not allowed")
 	}
-	q += " LIMIT 2001"
+	q += fmt.Sprintf(" LIMIT %d", maxRows+1)
 	rows, err := s.database.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err

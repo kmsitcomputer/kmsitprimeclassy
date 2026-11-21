@@ -20,16 +20,17 @@ import (
 // There is no service-to-service hop and no second datastore — the Go service reads the same MySQL schema the
 // Laravel app owns.
 type Server struct {
-	cfg         config.Config
-	database    *db.DB
-	sessions    *auth.Manager
-	identity    *auth.Service
-	limiter     *limiter
-	mux         *http.ServeMux
-	handler     http.Handler
-	startedAt   time.Time
-	logger      *slog.Logger
-	installLock string
+	cfg              config.Config
+	database         *db.DB
+	sessions         *auth.Manager
+	identity         *auth.Service
+	limiter          *limiter
+	mux              *http.ServeMux
+	handler          http.Handler
+	startedAt        time.Time
+	logger           *slog.Logger
+	installLock      string
+	googleSheetsBase string
 }
 
 // Options carries the pieces a caller can override (tests use it for the install-lock path).
