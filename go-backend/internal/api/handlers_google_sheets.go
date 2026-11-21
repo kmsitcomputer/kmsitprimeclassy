@@ -973,7 +973,7 @@ func (s *Server) handleGoogleSheetsConfigSync(w http.ResponseWriter, r *http.Req
 	}
 	logID, _ := res.LastInsertId()
 	finish := func(status string, rowsProcessed, rowsSuccess, rowsFailed int64, summary any) {
-	_, _ = s.database.ExecContext(ctx, `UPDATE sheets_sync_logs SET status=?, rows_processed=?, rows_success=?,
+		_, _ = s.database.ExecContext(ctx, `UPDATE sheets_sync_logs SET status=?, rows_processed=?, rows_success=?,
 			rows_failed=?, error_summary=?, completed_at=UTC_TIMESTAMP(6) WHERE id=?`,
 			status, rowsProcessed, rowsSuccess, rowsFailed, summary, logID)
 	}
