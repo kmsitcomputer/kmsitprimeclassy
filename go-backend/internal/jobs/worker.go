@@ -30,6 +30,7 @@ type Handler interface {
 }
 
 type Payload struct {
+	UUID        string `json:"uuid"`
 	DisplayName string `json:"displayName"`
 	Job         string `json:"job"`
 	Data        struct {
@@ -106,10 +107,24 @@ func Release(ctx context.Context, d *db.DB, id int64, availableAt time.Time) err
 	return err
 }
 
-func Fail(ctx context.Context, d *db.DB, id int64) error {
-	_, err := d.ExecContext(ctx,
-		"UPDATE jobs SET reserved_at = NULL WHERE id = ?", id)
-	return err
+func FailClaimed(ctx context.Context, d *db.DB, job *Job, cause error) error {
+	var payload Payload
+	if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil || payload.UUID == "" {
+		return errors.New("cannot record failed Laravel job without a valid payload UUID")
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE id=?`, job.ID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO failed_jobs (uuid,connection,queue,payload,exception,failed_at)
+		VALUES (?, 'database', ?, ?, ?, UTC_TIMESTAMP(6))`, payload.UUID, job.Queue, job.Payload, cause.Error()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func Process(ctx context.Context, d *db.DB, h Handler) (bool, error) {
@@ -123,8 +138,18 @@ func Process(ctx context.Context, d *db.DB, h Handler) (bool, error) {
 
 	id, name, ok := MessageID([]byte(j.Payload))
 	if !ok {
-		_ = Fail(ctx, d, j.ID)
-		return true, errors.New("unable to decode Laravel queued job payload")
+		cause := errors.New("unable to decode Laravel queued job payload")
+		if err := FailClaimed(ctx, d, j, cause); err != nil {
+			return true, err
+		}
+		return true, cause
+	}
+	if j.Attempts > 1 && (name == "App\\Jobs\\SendWhatsAppMessageJob" || name == "App\\Jobs\\SendTransactionalEmailJob") {
+		cause := errors.New("Laravel notification job exceeded its maximum attempt count of one")
+		if err := FailClaimed(ctx, d, j, cause); err != nil {
+			return true, err
+		}
+		return true, cause
 	}
 	switch name {
 	case "App\\Jobs\\SendWhatsAppMessageJob":
@@ -132,11 +157,16 @@ func Process(ctx context.Context, d *db.DB, h Handler) (bool, error) {
 	case "App\\Jobs\\SendTransactionalEmailJob":
 		err = h.HandleEmail(ctx, id)
 	default:
-		_ = Fail(ctx, d, j.ID)
-		return true, errors.New("unsupported Laravel queued job: " + name)
+		cause := errors.New("unsupported Laravel queued job: " + name)
+		if err := FailClaimed(ctx, d, j, cause); err != nil {
+			return true, err
+		}
+		return true, cause
 	}
 	if err != nil {
-		_ = Release(ctx, d, j.ID, time.Now().Add(time.Minute))
+		if failErr := FailClaimed(ctx, d, j, err); failErr != nil {
+			return true, failErr
+		}
 		return true, err
 	}
 	if err := DeleteClaimed(ctx, d, j.ID); err != nil {

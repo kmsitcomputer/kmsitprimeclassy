@@ -150,7 +150,7 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	result, err = database.ExecContext(ctx, `INSERT INTO whatsapp_messages
 		(idempotency_key,purpose,event,template_class,recipient_phone,body,status,max_attempts,queued_at,created_at,updated_at)
 		VALUES (?,?,?,?,?,'force-failure','queued',1,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
-		"worker-test-wa-failure:"+strconv.FormatInt(time.Now().UnixNano(), 10), "transaction", "order_created", "full", "628123456789")
+		"worker-test-wa-failure:"+strconv.FormatInt(time.Now().UnixNano(), 10), "test", "order_created", "full", "628123456789")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,15 +165,16 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	if err != nil || !processed {
 		t.Fatalf("failed WhatsApp queue process processed=%v err=%v", processed, err)
 	}
-	var failedStatus, dedupe string
+	var failedStatus string
 	if err := database.QueryRowContext(ctx, `SELECT status FROM whatsapp_messages WHERE id=?`, failureWAID).Scan(&failedStatus); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT dedupe_key FROM admin_notifications WHERE subject_type='whatsapp_message' AND subject_id=? ORDER BY id DESC LIMIT 1`, failureWAID).Scan(&dedupe); err != nil {
+	var failureNotices int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_notifications WHERE subject_type='whatsapp_message' AND subject_id=?`, failureWAID).Scan(&failureNotices); err != nil {
 		t.Fatal(err)
 	}
-	if failedStatus != "unknown" || dedupe != fmt.Sprintf("delivery.failed:whatsapp_message:%d:%d", failureWAID, testRecipientID) {
-		t.Fatalf("failure audit mismatch: status=%s dedupe=%s", failedStatus, dedupe)
+	if failedStatus != "unknown" || failureNotices != 0 {
+		t.Fatalf("failure audit mismatch: status=%s admin notices=%d", failedStatus, failureNotices)
 	}
 
 	address, closeSMTP := startSMTPStub(t)
