@@ -420,29 +420,6 @@ IMPLEMENTED = {
 # (the matrix said 31 PARTIAL while the execution state said 6). Anything here must name the missing behaviour
 # in its note.
 GAPS = {
-    ("POST", "/api/v1/auth/register"): "PARTIAL — Go now atomically creates the restricted WhatsApp ledger row and Laravel-compatible queue job after commit; welcome-email delivery and the Go notification worker remain incomplete.",
-    ("POST", "/api/v1/orders"): "PARTIAL — response and database differential now includes Laravel-compatible branch-scoped `order.created` admin notifications (43/0); after-commit transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker.",
-    ("POST", "/api/v1/crm/customers/{customer}/orders"): "PARTIAL — shared Go creation service now records the branch-scoped `order.created` admin notification; transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker.",
-    ("POST", "/api/v1/orders/{order}/assisted-returns"): "PARTIAL — return state matches, but Laravel ReturnRequest created observer notification is not dispatched by Go.",
-    ("POST", "/api/v1/orders/{order}/returns"): "PARTIAL — return state matches, but Laravel ReturnRequest created observer notification is not dispatched by Go.",
-    ("PATCH", "/api/v1/admin/returns/{return}/review"): "PARTIAL — return review state matches, but ReturnRequest approved/rejected lifecycle notifications are not dispatched by Go.",
-    ("PATCH", "/api/v1/orders/{order}/status"): "PARTIAL — order status transition matches, but Laravel Order lifecycle notifications are not dispatched by Go.",
-    ("PATCH", "/api/v1/shipments/{shipment}/status"): "PARTIAL — shipment transition can update the Order lifecycle, whose Laravel observer notification is not dispatched by Go.",
-    ("PATCH", "/api/v1/shipments/{shipment}/items/{orderItem}/status"): "PARTIAL — item transition can update the Order lifecycle, whose Laravel observer notification is not dispatched by Go.",
-    ("POST", "/api/v1/orders/{order}/cancel"): "PARTIAL — cancellation state and ledger parity are verified, but Order/refund-obligation lifecycle notifications are not dispatched by Go.",
-    ("PATCH", "/api/v1/orders/{order}/items/{item}/fulfillment"): "PARTIAL — fulfillment/financial state matches, but Laravel Order/refund-obligation lifecycle notifications are not dispatched by Go.",
-    ("POST", "/api/v1/orders/{order}/items/{item}/cancel-undelivered"): "PARTIAL — cancellation state matches, but Laravel Order/refund-obligation lifecycle notifications are not dispatched by Go.",
-    ("POST", "/api/v1/orders/{order}/payment/installment"): "PARTIAL — payment state matches, but Laravel Order payment-status notification is not dispatched by Go.",
-    ("POST", "/api/v1/orders/{order}/payment/verify"): "PARTIAL — payment verification state matches, but Laravel Order payment-status notification is not dispatched by Go.",
-    ("POST", "/api/v1/orders/{order}/payment/settle"): "PARTIAL — settlement state matches, but Laravel Order payment-status notification is not dispatched by Go.",
-    ("PATCH", "/api/v1/orders/{order}/payment/cod"): "PARTIAL — COD state matches, but Laravel Order payment-status notification is not dispatched by Go.",
-    ("PATCH", "/api/v1/admin/cod-payment-proofs/{codPaymentProof}/confirm"): "PARTIAL — COD confirmation state matches, but Laravel Order payment-status notification is not dispatched by Go.",
-    ("POST", "/api/v1/admin/orders/{order}/cancellation/finalize"): "PARTIAL — refund ledger finalization matches, but Laravel refund-obligation lifecycle notification is not dispatched by Go.",
-    ("POST", "/api/v1/admin/refund-obligations/{obligation}/approve"): "PARTIAL — approval state matches, but Laravel refund-obligation lifecycle notification is not dispatched by Go.",
-    ("POST", "/api/v1/admin/refund-obligations/{obligation}/needs-verification/resolve"): "PARTIAL — resolution state matches, but the cancelled-obligation notification is not dispatched by Go.",
-    ("POST", "/api/v1/admin/refund-attempts/{attempt}/complete"): "PARTIAL — payout/ledger state matches, but Laravel proven RefundPayout lifecycle notification is not dispatched by Go.",
-    ("POST", "/api/v1/admin/refund-attempts/{attempt}/reconcile"): "PARTIAL — payout/ledger state matches, but Laravel proven RefundPayout lifecycle notification is not dispatched by Go.",
-    ("PATCH", "/api/v1/admin/return-items/{item}/refund"): "PARTIAL — refund ledger state matches, but Laravel proven RefundPayout lifecycle notification is not dispatched by Go.",
 }
 
 AREA_TITLES = OrderedDict([

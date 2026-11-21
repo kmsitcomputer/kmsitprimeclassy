@@ -4,9 +4,9 @@
 Uses only a uniquely named synthetic CRM customer and a testing order. Every order side effect,
 stock reservation, invoice counter change, and synthetic customer is restored in finally.
 """
-import http.cookiejar, json, subprocess, urllib.error, urllib.parse, urllib.request, uuid
+import http.cookiejar, json, os, subprocess, urllib.error, urllib.parse, urllib.request, uuid
 
-LARAVEL="http://127.0.0.1:8899"; GO="http://127.0.0.1:8082"
+LARAVEL=os.environ.get("PARITY_LARAVEL_URL", "http://127.0.0.1:8899"); GO=os.environ.get("PARITY_GO_URL", "http://127.0.0.1:8082")
 
 class Client:
     def __init__(self,base):

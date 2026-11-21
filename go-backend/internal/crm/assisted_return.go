@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 type AssistedReturnLine struct {
@@ -169,6 +172,25 @@ func (s *Service) InitiateAssistedReturn(ctx context.Context, actor Actor, order
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Match Laravel's after-commit observer boundary: notification faults are best-effort
+	// and must not turn a persisted assisted return into an HTTP error.
+	if err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var orderNo, orderTotal string
+		if err := tx.QueryRowContext(ctx, `SELECT order_no,CAST(total_amount AS CHAR) FROM orders WHERE id=?`, orderID).Scan(&orderNo, &orderTotal); err != nil {
+			return err
+		}
+		if err := notifications.RecordReturnRequested(ctx, tx, orderID, orderAgent, returnID, orderNo, parseAmount(orderTotal)); err != nil {
+			slog.WarnContext(ctx, "admin assisted return-requested notification could not be recorded", "return_id", returnID, "error", err)
+		}
+		return nil
+	}); err != nil {
+		slog.WarnContext(ctx, "admin assisted return-requested notification transaction failed", "return_id", returnID, "error", err)
+	}
+	if err := s.database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return whatsappnotify.NotifyReturnEvent(ctx, tx, whatsappnotify.EventReturnRequested, returnID, orderID)
+	}); err != nil {
+		slog.WarnContext(ctx, "assisted return-requested WhatsApp dispatch failed", "return_id", returnID, "error", err)
 	}
 	return s.loadAssistedReturn(ctx, returnID)
 }

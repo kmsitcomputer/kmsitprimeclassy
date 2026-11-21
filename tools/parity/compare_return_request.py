@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Scoped Laravel ↔ Go differential for consumer return requests."""
-import base64, hashlib, http.cookiejar, json, pathlib, re, subprocess, urllib.error, urllib.parse, urllib.request, uuid
+import base64, hashlib, http.cookiejar, json, os, pathlib, re, subprocess, urllib.error, urllib.parse, urllib.request, uuid
 from compare_orders import TestDatabaseLock
 
-LARAVEL = "http://127.0.0.1:8899"
-GO = "http://127.0.0.1:8082"
+LARAVEL = os.environ.get("PARITY_LARAVEL_URL", "http://127.0.0.1:8899")
+GO = os.environ.get("PARITY_GO_URL", "http://127.0.0.1:8082")
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PUBLIC_ROOTS = [ROOT / "backend/storage/app/public", ROOT / "go-backend/storage/app/public"]
 

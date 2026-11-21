@@ -18,6 +18,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/media"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
 	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 type ReturnLine struct {
@@ -122,6 +123,20 @@ func (s *ReturnRequestService) Request(ctx context.Context, actorID int64, actor
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Laravel's observer fans out channel notifications after the business commit.
+	// Keep notification failures from changing the successful return response.
+	if err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return whatsappnotify.NotifyReturnEvent(ctx, tx, whatsappnotify.EventReturnRequested, returnID, orderID)
+	}); err != nil {
+		slog.WarnContext(ctx, "return-requested channel dispatch failed", "return_id", returnID, "error", err)
+	}
+	if err := s.Database.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return whatsappnotify.NotifyEmailOrderEvent(ctx, tx, whatsappnotify.EventReturnRequested,
+			"return", returnID, orderID, whatsappnotify.Extra{
+				"nomor_retur": whatsappnotify.Str(fmt.Sprintf("RTN-%06d", returnID))})
+	}); err != nil {
+		slog.WarnContext(ctx, "return-requested email dispatch failed", "return_id", returnID, "error", err)
 	}
 	return LoadReturnRequestResource(ctx, s.Database, returnID)
 }

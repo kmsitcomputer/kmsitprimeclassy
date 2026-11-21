@@ -55,6 +55,7 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	defer func() {
 		_, _ = lockConn.ExecContext(context.Background(), `SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing')`)
 	}()
+	defer deferPendingWorkerQueue(t, database)()
 
 	testRecipientID, err := ensureNotificationTestSuperAdmin(t, database)
 	if err != nil {
@@ -218,6 +219,48 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	}
 	if mailStatus != "sent" {
 		t.Fatalf("email status=%s, want sent", mailStatus)
+	}
+}
+
+func deferPendingWorkerQueue(t *testing.T, database *db.DB) func() {
+	t.Helper()
+	rows, err := database.QueryContext(context.Background(), `SELECT id,available_at,reserved_at FROM jobs WHERE queue=?`, jobs.NotificationQueue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type state struct {
+		id        int64
+		available int64
+		reserved  sql.NullInt64
+	}
+	var previous []state
+	for rows.Next() {
+		var item state
+		if err := rows.Scan(&item.id, &item.available, &item.reserved); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		previous = append(previous, item)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(previous) == 0 {
+		return func() {}
+	}
+	if _, err := database.ExecContext(context.Background(), `UPDATE jobs SET available_at=? WHERE queue=?`, time.Now().Add(24*time.Hour).Unix(), jobs.NotificationQueue); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		for _, item := range previous {
+			var reserved any
+			if item.reserved.Valid {
+				reserved = item.reserved.Int64
+			}
+			if _, err := database.ExecContext(context.Background(), `UPDATE jobs SET available_at=?,reserved_at=? WHERE id=?`, item.available, reserved, item.id); err != nil {
+				t.Errorf("restore notification queue row %d: %v", item.id, err)
+			}
+		}
 	}
 }
 

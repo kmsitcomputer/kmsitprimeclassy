@@ -42,6 +42,12 @@ func (s *Service) SendAccountMail(ctx context.Context, recipient, subject, body 
 	return s.sendDashboardMail(ctx, recipient, subject, body, "text/plain; charset=UTF-8")
 }
 
+// SendRegisteredAccountMail mirrors AccountRegisteredMail's rendered HTML. Its
+// queued-mail retries are owned by the Laravel-compatible jobs table worker.
+func (s *Service) SendRegisteredAccountMail(ctx context.Context, recipient, subject, body string) (bool, string, error) {
+	return s.sendDashboardMail(ctx, recipient, subject, body, "text/html; charset=UTF-8")
+}
+
 // SendTransactionalMail mirrors TransactionalNotificationMail's escaped HTML body and footer.
 func (s *Service) SendTransactionalMail(ctx context.Context, recipient, subject, body string) (bool, string, error) {
 	return s.sendDashboardMail(ctx, recipient, subject, renderTransactionalEmailHTML(body), "text/html; charset=UTF-8")

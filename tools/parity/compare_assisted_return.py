@@ -5,11 +5,11 @@ Creates one synthetic CRM customer and uses the normal assisted-order endpoint f
 Only the synthetic orders, consent rows, return rows, files, audit rows, reservation and invoice
 sequence are touched; the script refuses to use any database except primeclassy_testing.
 """
-import hashlib, http.cookiejar, json, pathlib, subprocess, urllib.error, urllib.parse, urllib.request, uuid
+import hashlib, http.cookiejar, json, os, pathlib, subprocess, urllib.error, urllib.parse, urllib.request, uuid
 from concurrent.futures import ThreadPoolExecutor
 
-LARAVEL = "http://127.0.0.1:8899"
-GO = "http://127.0.0.1:8082"
+LARAVEL = os.environ.get("PARITY_LARAVEL_URL", "http://127.0.0.1:8899")
+GO = os.environ.get("PARITY_GO_URL", "http://127.0.0.1:8082")
 PROJECT = pathlib.Path(__file__).resolve().parents[2]
 PUBLIC_ROOTS = [PROJECT / "backend/storage/app/public", PROJECT / "go-backend/storage/app/public"]
 

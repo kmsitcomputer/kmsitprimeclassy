@@ -48,6 +48,50 @@ type countingHandler struct{ calls int }
 func (h *countingHandler) HandleWhatsApp(context.Context, int64) error { h.calls++; return nil }
 func (h *countingHandler) HandleEmail(context.Context, int64) error    { h.calls++; return nil }
 
+// deferPendingNotificationJobs keeps committed synthetic fixture jobs from becoming the
+// next item claimed by these integration tests, then restores their exact queue timestamps.
+func deferPendingNotificationJobs(t *testing.T, database *db.DB) func() {
+	t.Helper()
+	rows, err := database.QueryContext(context.Background(), `SELECT id,available_at,reserved_at FROM jobs WHERE queue=?`, NotificationQueue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type state struct {
+		id        int64
+		available int64
+		reserved  sql.NullInt64
+	}
+	var previous []state
+	for rows.Next() {
+		var item state
+		if err := rows.Scan(&item.id, &item.available, &item.reserved); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		previous = append(previous, item)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(previous) == 0 {
+		return func() {}
+	}
+	if _, err := database.ExecContext(context.Background(), `UPDATE jobs SET available_at=? WHERE queue=?`, time.Now().Add(24*time.Hour).Unix(), NotificationQueue); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		for _, item := range previous {
+			var reserved any
+			if item.reserved.Valid {
+				reserved = item.reserved.Int64
+			}
+			if _, err := database.ExecContext(context.Background(), `UPDATE jobs SET available_at=?,reserved_at=? WHERE id=?`, item.available, reserved, item.id); err != nil {
+				t.Errorf("restore notification job %d: %v", item.id, err)
+			}
+		}
+	}
+}
+
 func TestProcessLogsLaravelFailedJobsAfterOneAttempt(t *testing.T) {
 	envPath := os.Getenv("GO_ENV_FILE")
 	if envPath == "" {
@@ -80,6 +124,7 @@ func TestProcessLogsLaravelFailedJobsAfterOneAttempt(t *testing.T) {
 	defer func() {
 		_, _ = lockConn.ExecContext(context.Background(), `SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing')`)
 	}()
+	defer deferPendingNotificationJobs(t, database)()
 
 	uuid := fmt.Sprintf("imp010-failed-job-%d", time.Now().UnixNano())
 	command := `O:31:"App\Jobs\SendWhatsAppMessageJob":2:{s:9:"messageId";i:987654;s:5:"queue";s:18:"primeclassy-notify";}`
@@ -170,6 +215,7 @@ func TestClaimNextReclaimsOnlyLaravelExpiredReservations(t *testing.T) {
 	defer func() {
 		_, _ = lockConn.ExecContext(context.Background(), `SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing')`)
 	}()
+	defer deferPendingNotificationJobs(t, database)()
 
 	now := time.Now().Unix()
 	fixtureIDs := []int64{}

@@ -36,6 +36,8 @@ KEYS = {
         "login_success",
         "logout_success",
         "registration_unavailable",
+        "registered_mail_subject",
+        "registered_mail_body",
     ],
     "stock": [
         "agent_id_required",
@@ -91,6 +93,8 @@ KEYS = {
         "item_not_delivered",
         "invalid_quantity",
         "requested",
+        "reviewed",
+        "already_reviewed",
         "sub_location_unavailable",
         "refund_marked",
     ],
@@ -142,6 +146,7 @@ KEYS = {
         "not_crm_order",
         "consent_required",
         "consent_scope_exceeded",
+        "recipient_evidence_required",
         "migration_pending",
     ],
     "consent": [
@@ -174,6 +179,7 @@ KEYS = {
         "discrepancy_unresolved",
     ],
     "payment": [
+        "not_fully_paid",
         "method_required",
         "invalid_method",
         "idempotency_key_required",
@@ -255,6 +261,9 @@ KEYS = {
         "invalid_number",
         "test_numbers_limit",
         "test_number_registered",
+        "test_send_limited",
+        "test_device_not_ready",
+        "test_gateway_off",
         "no_test_numbers",
         "number_not_allowed",
         "test_text",

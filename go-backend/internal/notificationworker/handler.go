@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/admininfra"
 	"github.com/kmsitcomputer/primeclassy-go/internal/cryptox"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
+	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
 	"github.com/kmsitcomputer/primeclassy-go/internal/jobs"
 	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
 	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
@@ -180,6 +182,32 @@ func (h *Handler) HandleEmail(ctx context.Context, id int64) error {
 	}
 	class, message := smtpFailure(detail)
 	return h.finishEmail(ctx, id, "failed", "", class, message, event, agentID, orderID)
+}
+
+// HandleRegistrationEmail delivers the queued AccountRegisteredMail mailable.
+// SMTP stays a runtime setting, and queue retries remain governed by the
+// serialized mailable's Laravel tries/backoff values.
+func (h *Handler) HandleRegistrationEmail(ctx context.Context, recipient, name string) error {
+	snapshot, err := h.infra.Snapshot(ctx, "smtp")
+	if err != nil {
+		return err
+	}
+	if snapshot["enabled"] != true || snapshot["complete"] != true {
+		return nil // Laravel's configured log-mailer has no external side effect.
+	}
+	escape := func(value string) string {
+		return strings.NewReplacer("&#34;", "&quot;", "&#39;", "&#039;").Replace(html.EscapeString(value))
+	}
+	subject := i18n.Translate("id", "auth.registered_mail_subject")
+	body := escape(subject) + "<br><br>" + escape(name) + ",<br><br>" + escape(i18n.Translate("id", "auth.registered_mail_body"))
+	sent, detail, err := h.infra.SendRegisteredAccountMail(ctx, recipient, subject, body)
+	if err != nil {
+		return err
+	}
+	if sent || detail == "smtp_disabled" {
+		return nil
+	}
+	return fmt.Errorf("registered account email delivery failed: %s", detail)
 }
 
 // smtpFailure matches the exception class and formatted response Symfony's

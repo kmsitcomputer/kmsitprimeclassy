@@ -676,18 +676,30 @@ func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int
 	// Laravel dispatches these observer side effects after the order commit. Keep
 	// them in their own transaction so a queue/notification fault cannot invalidate
 	// the already committed business transaction or turn a successful order into 500.
-	if notifyTx, nerr := s.Database.BeginTx(ctx, nil); nerr != nil {
-		slog.WarnContext(ctx, "order-created notification transaction could not start", "order_id", orderID, "error", nerr)
-	} else {
-		if nerr = whatsappnotify.NotifyOrderEvent(ctx, notifyTx, whatsappnotify.EventOrderCreated, orderID); nerr != nil {
-			slog.WarnContext(ctx, "order-created WhatsApp notification could not be recorded", "order_id", orderID, "error", nerr)
-		} else if nerr = whatsappnotify.NotifyEmailOrderEvent(ctx, notifyTx, whatsappnotify.EventOrderCreated, "order", orderID, orderID, nil); nerr != nil {
-			slog.WarnContext(ctx, "order-created e-mail notification could not be recorded", "order_id", orderID, "error", nerr)
+	for _, channel := range []struct {
+		name     string
+		dispatch func(context.Context, *sql.Tx) error
+	}{
+		{"WhatsApp", func(ctx context.Context, tx *sql.Tx) error {
+			return whatsappnotify.NotifyOrderEvent(ctx, tx, whatsappnotify.EventOrderCreated, orderID)
+		}},
+		{"e-mail", func(ctx context.Context, tx *sql.Tx) error {
+			return whatsappnotify.NotifyEmailOrderEvent(ctx, tx, whatsappnotify.EventOrderCreated, "order", orderID, orderID, nil)
+		}},
+	} {
+		notifyTx, nerr := s.Database.BeginTx(ctx, nil)
+		if nerr == nil {
+			nerr = channel.dispatch(ctx, notifyTx)
 		}
 		if nerr != nil {
-			_ = notifyTx.Rollback()
-		} else if nerr = notifyTx.Commit(); nerr != nil {
-			slog.WarnContext(ctx, "order-created notification transaction could not commit", "order_id", orderID, "error", nerr)
+			if notifyTx != nil {
+				_ = notifyTx.Rollback()
+			}
+			slog.WarnContext(ctx, "order-created channel could not be recorded", "order_id", orderID, "channel", channel.name, "error", nerr)
+			continue
+		}
+		if nerr = notifyTx.Commit(); nerr != nil {
+			slog.WarnContext(ctx, "order-created channel transaction could not commit", "order_id", orderID, "channel", channel.name, "error", nerr)
 		}
 	}
 

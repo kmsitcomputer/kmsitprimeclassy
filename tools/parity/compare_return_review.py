@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Scoped Laravel ↔ Go differential for admin return review and refund-ledger effects."""
-import base64, hashlib, http.cookiejar, json, pathlib, re, subprocess, urllib.error, urllib.parse, urllib.request, uuid
+import base64, hashlib, http.cookiejar, json, os, pathlib, re, subprocess, urllib.error, urllib.parse, urllib.request, uuid
 
-LARAVEL = "http://127.0.0.1:8899"
-GO = "http://127.0.0.1:8082"
+LARAVEL = os.environ.get("PARITY_LARAVEL_URL", "http://127.0.0.1:8899")
+GO = os.environ.get("PARITY_GO_URL", "http://127.0.0.1:8082")
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PUBLIC_ROOTS = [ROOT / "backend/storage/app/public", ROOT / "go-backend/storage/app/public"]
 TS = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|\+00:00)?$")

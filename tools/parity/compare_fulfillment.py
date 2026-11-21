@@ -20,6 +20,7 @@ right" is not evidence that the ledger, the reservation and the frozen unit basi
 Usage: python3 tools/parity/compare_fulfillment.py
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -29,8 +30,8 @@ import urllib.parse
 import urllib.request
 import uuid
 
-LARAVEL = "http://127.0.0.1:8899"
-GO = "http://127.0.0.1:8082"
+LARAVEL = os.environ.get("PARITY_LARAVEL_URL", "http://127.0.0.1:8899")
+GO = os.environ.get("PARITY_GO_URL", "http://127.0.0.1:8082")
 TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 
 results = []

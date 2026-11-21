@@ -9,9 +9,9 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/kmsitcomputer/primeclassy-go/internal/admininfra"
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
@@ -23,18 +23,10 @@ import (
 type Service struct {
 	database *db.DB
 	locale   string
-	appKey   string
 }
 
 // NewService builds the identity service.
 func NewService(database *db.DB) *Service { return &Service{database: database} }
-
-// WithAppKey binds the application key (needed for the SMTP credential decryption
-// used by the registration welcome e-mail).
-func (s *Service) WithAppKey(appKey string) *Service {
-	s.appKey = appKey
-	return s
-}
 
 // WithLocale returns a copy bound to a request locale (used for message rendering).
 func (s *Service) WithLocale(locale string) *Service {
@@ -245,6 +237,7 @@ func (s *Service) notifyRegistration(ctx context.Context, u *User) (attempted bo
 // registrationEmailDedupe mirrors RegistrationNotifier's 30-day Cache::add guard for the
 // lifetime of this process: a duplicate event for the same account never re-sends.
 var registrationEmailDedupe = map[int64]bool{}
+var registrationEmailDedupeMu sync.Mutex
 
 // notifyRegistrationEmail sends the welcome e-mail through the dashboard SMTP when it is
 // ON and complete (SmtpSettings::applyRuntime semantics); otherwise it is the log-mailer
@@ -255,16 +248,14 @@ func (s *Service) notifyRegistrationEmail(ctx context.Context, u *User) {
 	if email == "" || !strings.Contains(email, "@") || strings.HasPrefix(email, "@") || strings.HasSuffix(email, "@") {
 		return
 	}
+	registrationEmailDedupeMu.Lock()
 	if registrationEmailDedupe[u.ID] {
+		registrationEmailDedupeMu.Unlock()
 		return
 	}
 	registrationEmailDedupe[u.ID] = true
-	const subject = "Selamat datang di PrimeClassy"
-	const body = "Akun PrimeClassy Anda telah dibuat. Email ini hanya pemberitahuan dan bukan verifikasi. " +
-		"Untuk menggunakan fitur yang memerlukan bukti kepemilikan kontak, verifikasi email atau nomor WhatsApp Anda " +
-		"melalui aplikasi resmi PrimeClassy. Kami tidak pernah meminta kata sandi Anda lewat email."
-	infra := admininfra.New(s.database, s.appKey)
-	if _, _, err := infra.SendAccountMail(ctx, email, subject, body); err != nil {
+	registrationEmailDedupeMu.Unlock()
+	if err := jobs.EnqueueRegistrationEmail(ctx, s.database, email, u.Name); err != nil {
 		slog.Warn("registration.notify.email_failed", "user_id", u.ID, "error_type", fmt.Sprintf("%T", err))
 	}
 }
