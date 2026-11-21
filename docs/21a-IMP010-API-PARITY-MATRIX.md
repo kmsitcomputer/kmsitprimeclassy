@@ -81,7 +81,7 @@ Status legend:
 | GET | `/api/v1/admin/shipping-providers` | session | super_admin | **GO** | Super Admin global provider list limited to supported codes, id order, no per-Agent secrets; compare_admin_shipping_providers.py |
 | PATCH | `/api/v1/admin/shipping-providers/{provider}/toggle` | session | super_admin | **GO** | Super Admin global active toggle, same response and audited state; compare_admin_shipping_providers.py |
 
-## agent — `agent` (31/33 in Go)
+## agent — `agent` (33/33 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
@@ -94,8 +94,8 @@ Status legend:
 | PUT | `/api/v1/agent/shipping-providers/{provider}/config` | session | agen | **GO** | provider-specific validation, SSRF refusal, encrypted config side effect and localized response compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **GO** |  |
 | PUT | `/api/v1/agent/shipping-providers/{provider}/couriers` | session | agen | **GO** | supported-courier validation, response, and encrypted config side effect compared by compare_shipping_admin.py |
-| POST | `/api/v1/agent/shipping-providers/{provider}/destinations` | session | agen | LARAVEL |  |
-| POST | `/api/v1/agent/shipping-providers/{provider}/test` | session | agen | LARAVEL |  |
+| POST | `/api/v1/agent/shipping-providers/{provider}/destinations` | session | agen | **GO** | RajaOngkir destination search: by-ID provider binding, rajaongkir-only gate, search 3..100 validation, shared 422 when the external API is unreachable; compared by compare_external.py (18/0) |
+| POST | `/api/v1/agent/shipping-providers/{provider}/test` | session | agen | **GO** | provider connectivity test: by-ID binding, rajaongkir/openroute/kmsit dispatch, coordinate validation, shared 422 when the provider is unreachable (KMSIT reason codes only with a live endpoint); compared by compare_external.py (18/0) |
 | PATCH | `/api/v1/agent/shipping-providers/{provider}/toggle` | session | agen | **GO** | five-key response projection, localized message, audit and setting row compared by compare_shipping_admin.py |
 | GET | `/api/v1/agent/shipping-tariff` | session | agen | **GO** |  |
 | PUT | `/api/v1/agent/shipping-tariff` | session | agen | **GO** | pricing validation, Laravel response message, audit properties and resulting tariff row compared by compare_shipping_admin.py |
@@ -168,12 +168,12 @@ Status legend:
 | DELETE | `/api/v1/categories/{category}` | session | super_admin | **GO** | super_admin only; children are promoted by ON DELETE SET NULL |
 | PATCH | `/api/v1/categories/{category}` | session | super_admin | **GO** | super_admin only; parent-cycle and sibling-duplicate guards |
 
-## Checkout — `checkout` (2/4 in Go)
+## Checkout — `checkout` (4/4 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/checkout/courier-options` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
-| POST | `/api/v1/checkout/geocode` | session | agen, konsumen, korsal, sales, sales-kurir-sub | LARAVEL |  |
+| POST | `/api/v1/checkout/courier-options` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | RajaOngkir courier-picker sub-step: full line/destination validation (required_without address_id semantics), konsumen→agent branch resolution, provider gate, shared 422 method_not_available in the isolated env (external API unreachable — reference contract); compared by compare_external.py (18/0) |
+| POST | `/api/v1/checkout/geocode` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | GPS → canonical regional-master matcher (Nominatim port with provider config; GEOCODE_PROVIDER=noop in the isolated env mirrors the reference container having no external network), exact-chain single-match rule, matched:false fallback; compared by compare_external.py (18/0) |
 | POST | `/api/v1/checkout/quote` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **GO** | read-only Review preview through the same money/pricing arithmetic as order creation; never reserves stock or consumes a voucher |
 | GET | `/api/v1/checkout/steps` | public | — | **GO** | public; dynamic step list with role-derived flags, agent provider switches, KMSIT fallback and the konsumen payment filter |
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 368 (98.1%) |
-|   of which fully GO | 368 |
+| Served by Go now | 372 (99.2%) |
+|   of which fully GO | 372 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 7 |
-| Areas fully ported | 41 / 45 |
+| Still Laravel-only | 3 |
+| Areas fully ported | 43 / 45 |

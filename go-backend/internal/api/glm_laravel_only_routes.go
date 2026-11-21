@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/kmsitcomputer/primeclassy-go/internal/auth"
 	"io"
 	"net/http"
 	"os"
@@ -120,6 +121,10 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/profile/email/verification/{challenge}/confirm", chain(http.HandlerFunc(s.handleEmailVerificationConfirm), RequireAuth, s.RequireAgentLinked))
 	s.mux.Handle("POST /api/v1/profile/whatsapp/verification", chain(http.HandlerFunc(s.handleWhatsAppVerificationRequest), RequireAuth))
 	s.mux.Handle("POST /api/v1/profile/whatsapp/verification/{challenge}/confirm", chain(http.HandlerFunc(s.handleWhatsAppVerificationConfirm), RequireAuth))
+	s.mux.Handle("POST /api/v1/checkout/courier-options", chain(http.HandlerFunc(s.handleCheckoutCourierOptions), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/checkout/geocode", chain(http.HandlerFunc(s.handleCheckoutGeocode), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/agent/shipping-providers/{provider}/destinations", chain(http.HandlerFunc(s.handleAgentProviderDestinations), RequireAuth, s.RequireAgentLinked, RequireRole(auth.RoleAgen)))
+	s.mux.Handle("POST /api/v1/agent/shipping-providers/{provider}/test", chain(http.HandlerFunc(s.handleAgentProviderTest), RequireAuth, s.RequireAgentLinked, RequireRole(auth.RoleAgen)))
 
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
@@ -211,6 +216,10 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/profile/email/verification/{challenge}/confirm",
 		"POST /api/v1/profile/whatsapp/verification",
 		"POST /api/v1/profile/whatsapp/verification/{challenge}/confirm",
+		"POST /api/v1/checkout/courier-options",
+		"POST /api/v1/checkout/geocode",
+		"POST /api/v1/agent/shipping-providers/{provider}/destinations",
+		"POST /api/v1/agent/shipping-providers/{provider}/test",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",
