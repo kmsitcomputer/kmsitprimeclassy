@@ -277,7 +277,7 @@ Status legend:
 | POST | `/api/v1/google-sheets/configs` | session | admin, agen, super_admin | **GO** | Dataset/column/filter validation, Admin financial-data restriction, destination ownership and config creation; compare_google_sheets_configs.py |
 | DELETE | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | **GO** | Scoped model-bound config deletion under shared sync lock; compare_google_sheets_configs.py |
 | PUT | `/api/v1/google-sheets/configs/{config}` | session | admin, agen, super_admin | **GO** | Scoped config mutation under Laravel-compatible shared sync lock and validated replacement; compare_google_sheets_configs.py |
-| POST | `/api/v1/google-sheets/configs/{config}/sync` | session | admin, agen, super_admin | **PARTIAL** | PARTIAL — Go now performs replace writes, protected worksheet merge, validation, and the configured 10,000-row bound; fake-provider success/failure and test-DB sync-log tests pass. Laravel-Go differential evidence for response and provider payload remains outstanding. |
+| POST | `/api/v1/google-sheets/configs/{config}/sync` | session | admin, agen, super_admin | **GO** | SyncService port: manage policy gate, per-config serialization (GET_LOCK), sync log lifecycle, mapping validation, dataset queries, row limit, credential gate, masked spreadsheet ID; Laravel–Go responses and DB logs compare_sheets_sync.py (7/0), local fake-provider success/403 payload + controller response + log compare_sheets_provider_payload.py (PASS) |
 | POST | `/api/v1/google-sheets/connection` | session | admin, agen, super_admin | **GO** | Service-account token, spreadsheet metadata probe, branch scope and durable connection status/error update; compare_google_sheets_connection.py |
 | POST | `/api/v1/google-sheets/destinations` | session | admin, agen, super_admin | **GO** | Spreadsheet URL/ID normalization, uniqueness, Agent selection validation and caller-bound scope; compare_google_sheets_destinations.py |
 
@@ -614,7 +614,7 @@ Status legend:
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
 | Served by Go now | 375 (100.0%) |
-|   of which fully GO | 351 |
-|   of which PARTIAL (incomplete behaviour) | 24 |
+|   of which fully GO | 352 |
+|   of which PARTIAL (incomplete behaviour) | 23 |
 | Still Laravel-only | 0 |
 | Areas fully ported | 45 / 45 |

@@ -119,7 +119,7 @@ IMPLEMENTED = {
     ("POST", "/api/v1/agent/shipping-providers/{provider}/test"): "provider connectivity test: by-ID binding, rajaongkir/openroute/kmsit dispatch, coordinate validation, shared 422 when the provider is unreachable (KMSIT reason codes only with a live endpoint); compared by compare_external.py (18/0)",
     ("POST", "/api/v1/catalog/imports"): "full import apply: hardened CSV/XLSX reader, per-row planner (all reference error codes), unstaged create/update with catalog_skus registry, staged stock path (draft product + physical_opname draft row with import row-key idempotency + PayloadFingerprint, replay); compared by compare_imports.py (14/0)",
     ("POST", "/api/v1/catalog/imports/preview"): "pure validation pass over the same planner (writes nothing); compared by compare_imports.py (14/0)",
-    ("POST", "/api/v1/google-sheets/configs/{config}/sync"): "SyncService port: manage policy gate, per-config serialization (GET_LOCK), sync log lifecycle, mapping validation against the dataset catalog, per-dataset queries (DatasetRegistry shapes incl. canonical transactions projection), row limit guard, credential gate failure path (CREDENTIAL_NOT_FOUND summary, masked spreadsheet id); compared by compare_sheets_sync.py (7/0)",
+    ("POST", "/api/v1/google-sheets/configs/{config}/sync"): "SyncService port: manage policy gate, per-config serialization (GET_LOCK), sync log lifecycle, mapping validation, dataset queries, row limit, credential gate, masked spreadsheet ID; Laravel–Go responses and DB logs compare_sheets_sync.py (7/0), local fake-provider success/403 payload + controller response + log compare_sheets_provider_payload.py (PASS)",
     ("GET", "/api/v1/settings"): "",
     ("GET", "/api/v1/languages"): "",
     ("GET", "/api/v1/categories"): "",
@@ -420,7 +420,6 @@ IMPLEMENTED = {
 # (the matrix said 31 PARTIAL while the execution state said 6). Anything here must name the missing behaviour
 # in its note.
 GAPS = {
-    ("POST", "/api/v1/google-sheets/configs/{config}/sync"): "PARTIAL — Go now performs replace writes, protected worksheet merge, validation, and the configured 10,000-row bound; fake-provider success/failure and test-DB sync-log tests pass. Laravel-Go differential evidence for response and provider payload remains outstanding.",
     ("POST", "/api/v1/auth/register"): "PARTIAL — Go now atomically creates the restricted WhatsApp ledger row and Laravel-compatible queue job after commit; welcome-email delivery and the Go notification worker remain incomplete.",
     ("POST", "/api/v1/orders"): "PARTIAL — response and database differential now includes Laravel-compatible branch-scoped `order.created` admin notifications (43/0); after-commit transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker.",
     ("POST", "/api/v1/crm/customers/{customer}/orders"): "PARTIAL — shared Go creation service now records the branch-scoped `order.created` admin notification; transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker.",
