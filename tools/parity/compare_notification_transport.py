@@ -20,7 +20,7 @@ import compare_orders
 GO_CONTAINER = "pc_go_imp010"
 LARAVEL_CONTAINER = "pc_laravel_imp010"
 QUEUE = "primeclassy-notify"
-WA_KEYS = ["wa.enabled", "wa.base_url", "wa.username", "wa.password", "wa.device_id"]
+WA_KEYS = ["wa.enabled", "wa.base_url", "wa.username", "wa.password", "wa.device_id", "wa.timeout"]
 SMTP_KEYS = ["smtp.enabled", "smtp.host", "smtp.port", "smtp.from_address", "smtp.from_name", "smtp.username", "smtp.password", "smtp.encryption", "smtp.timeout", "smtp.transactional_enabled"]
 
 
@@ -44,6 +44,26 @@ class FakeGowa(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if payload.get("message") == "force-ambiguous-503":
+            body = json.dumps({"message": "temporary provider failure"}).encode()
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if payload.get("message") == "force-timeout-after-send":
+            time.sleep(3)
+            body = json.dumps({"code": "SUCCESS", "results": {"message_id": "late-message"}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
         body = json.dumps({"code": "SUCCESS", "results": {"message_id": "fake-message-1"}}).encode()
         self.send_response(200)
@@ -134,7 +154,7 @@ def encrypt_test_password():
 
 def set_active_settings(cipher, gowa_port, smtp_port):
     values = {
-        "integration.whatsapp": {"wa.enabled": "1", "wa.base_url": f"http://host.docker.internal:{gowa_port}", "wa.username": "worker", "wa.password": cipher, "wa.device_id": "global-test-slot"},
+        "integration.whatsapp": {"wa.enabled": "1", "wa.base_url": f"http://host.docker.internal:{gowa_port}", "wa.username": "worker", "wa.password": cipher, "wa.device_id": "global-test-slot", "wa.timeout": "2"},
         "integration.smtp": {"smtp.enabled": "1", "smtp.host": "host.docker.internal", "smtp.port": str(smtp_port), "smtp.from_address": "noreply@imp010.test", "smtp.from_name": "PrimeClassy Test", "smtp.username": "", "smtp.password": "", "smtp.encryption": "none", "smtp.timeout": "5", "smtp.transactional_enabled": "1"},
     }
     for group, rows in values.items():
@@ -142,9 +162,9 @@ def set_active_settings(cipher, gowa_port, smtp_port):
             f.db("INSERT INTO settings (`key`,value,`group`,is_public,created_at,updated_at) VALUES (" + ",".join((q(key), q(value), q(group), "0", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ") ON DUPLICATE KEY UPDATE value=VALUES(value),`group`=VALUES(`group`),updated_at=UTC_TIMESTAMP(6)")
 
 
-def add_whatsapp(tag, failure=False):
+def add_whatsapp(tag, outcome=None):
     key = "imp010-transport:" + uuid.uuid4().hex
-    body = "force-failure-auth" if failure else "transport parity body"
+    body = {"auth": "force-failure-auth", "ambiguous": "force-ambiguous-503", "timeout": "force-timeout-after-send"}.get(outcome, "transport parity body")
     f.db("INSERT INTO whatsapp_messages (idempotency_key,purpose,event,template_class,recipient_phone,body,status,max_attempts,queued_at,created_at,updated_at) VALUES (" + ",".join((q(key), q("test"), q("test"), q("full"), q("628123456789"), q(body), q("queued"), "1", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
     message_id = int(f.db("SELECT id FROM whatsapp_messages WHERE idempotency_key=" + q(key))[0][0])
     cls = "App\\Jobs\\SendWhatsAppMessageJob"
@@ -169,7 +189,7 @@ def main():
     if f.db("SELECT DATABASE()")[0][0] != "primeclassy_testing":
         raise RuntimeError("refusing non-testing database")
     settings = None
-    ids = {"wa": [], "wa_failure": [], "email": [], "email_failure": []}
+    ids = {"wa": [], "wa_failure": [], "wa_ambiguous": [], "wa_timeout": [], "email": [], "email_failure": []}
     initial_jobs = 0
     gowa = ThreadingHTTPServer(("0.0.0.0", 0), FakeGowa)
     smtp = SMTPServer(("0.0.0.0", 0), SMTPHandler)
@@ -202,26 +222,43 @@ def main():
                     email_failure_id = add_email(worker, failure=True)
                     ids["email_failure"].append(email_failure_id)
                     run_worker(worker)
-                    failure_id = add_whatsapp(worker, failure=True)
+                    failure_id = add_whatsapp(worker, outcome="auth")
                     ids["wa_failure"].append(failure_id)
                     run_worker(worker)
+                    ambiguous_id = add_whatsapp(worker, outcome="ambiguous")
+                    ids["wa_ambiguous"].append(ambiguous_id)
+                    run_worker(worker)
+                    timeout_id = add_whatsapp(worker, outcome="timeout")
+                    ids["wa_timeout"].append(timeout_id)
+                    run_worker(worker)
                 statuses = {}
-                for worker, wa_id, email_id, failure_id, email_failure_id in zip(("Laravel", "Go"), ids["wa"], ids["email"], ids["wa_failure"], ids["email_failure"]):
+                for worker, wa_id, email_id, failure_id, ambiguous_id, timeout_id, email_failure_id in zip(("Laravel", "Go"), ids["wa"], ids["email"], ids["wa_failure"], ids["wa_ambiguous"], ids["wa_timeout"], ids["email_failure"]):
                     statuses[worker] = {
                         "whatsapp": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),attempts,IFNULL(provider_message_id,'-') FROM whatsapp_messages WHERE id={wa_id}")[0],
                         "email": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),IFNULL(error_message,'-') FROM email_messages WHERE id={email_id}")[0],
                         "email_failure": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),IFNULL(error_message,'-') FROM email_messages WHERE id={email_failure_id}")[0],
                         "whatsapp_failure": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),attempts,IFNULL(error_message,'-') FROM whatsapp_messages WHERE id={failure_id}")[0],
+                        "whatsapp_ambiguous": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),attempts,IFNULL(error_message,'-') FROM whatsapp_messages WHERE id={ambiguous_id}")[0],
+                        "whatsapp_timeout": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),attempts,IFNULL(error_message,'-') FROM whatsapp_messages WHERE id={timeout_id}")[0],
                         "jobs": f.db(f"SELECT COUNT(*) FROM jobs WHERE payload LIKE '%imp010-transport-%'")[0][0],
-                        "admin_notices": f.db(f"SELECT type,severity,title,body,subject_type,recipient_user_id,IFNULL(agent_id,'-') FROM admin_notifications WHERE (subject_type='whatsapp_message' AND subject_id={failure_id}) OR (subject_type='email_message' AND subject_id={email_failure_id}) ORDER BY type,recipient_user_id"),
+                        "admin_notices": f.db(f"SELECT type,severity,title,body,subject_type,recipient_user_id,IFNULL(agent_id,'-') FROM admin_notifications WHERE subject_type='email_message' AND subject_id={email_failure_id} OR subject_type='whatsapp_message' AND subject_id IN ({failure_id},{ambiguous_id},{timeout_id}) ORDER BY type,recipient_user_id"),
                     }
-                if statuses["Laravel"] != statuses["Go"]:
+                comparable = json.loads(json.dumps(statuses))
+                for worker in ("Laravel", "Go"):
+                    # The two HTTP stacks report timeout wording differently; compare the
+                    # persisted uncertainty state/class, attempt count, queue and alerts.
+                    comparable[worker]["whatsapp_timeout"][4] = "<transport-specific timeout detail>"
+                if comparable["Laravel"] != comparable["Go"]:
                     raise AssertionError("Laravel/Go delivery status mismatch: " + json.dumps(statuses))
                 expected_gowa = [
                     ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "transport parity body"}),
                     ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "transport parity body"}),
                     ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-failure-auth"}),
                     ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-failure-auth"}),
+                    ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-ambiguous-503"}),
+                    ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-ambiguous-503"}),
+                    ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-timeout-after-send"}),
+                    ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-timeout-after-send"}),
                 ]
                 observed_gowa = FakeGowa.requests
                 if sorted(json.dumps(x, sort_keys=True) for x in observed_gowa) != sorted(json.dumps(x, sort_keys=True) for x in expected_gowa):
@@ -239,13 +276,17 @@ def main():
                     raise AssertionError("successful notification delivery not recorded: " + json.dumps(statuses))
                 if statuses["Laravel"]["whatsapp_failure"] != ["failed", "-", "auth", "1", "Gateway rejected the credentials."]:
                     raise AssertionError("terminal GOWA auth failure was not recorded as expected: " + json.dumps(statuses))
+                if statuses["Laravel"]["whatsapp_ambiguous"] != ["unknown", "-", "provider_error", "1", "HTTP 503: temporary provider failure"]:
+                    raise AssertionError("ambiguous GOWA 503 did not remain UNKNOWN without retry: " + json.dumps(statuses))
+                if statuses["Laravel"]["whatsapp_timeout"][0:4] != ["unknown", "-", "timeout", "1"]:
+                    raise AssertionError("post-send GOWA timeout did not remain UNKNOWN without retry: " + json.dumps(statuses))
                 if statuses["Laravel"]["email_failure"][0] != "failed":
                     raise AssertionError("SMTP recipient rejection was not recorded as failed: " + json.dumps(statuses))
                 if not statuses["Laravel"]["admin_notices"] or statuses["Laravel"]["admin_notices"][0][0:2] != ["delivery.failed", "critical"]:
                     raise AssertionError("SMTP failure did not create its admin alert: " + json.dumps(statuses))
                 if len(statuses["Laravel"]["admin_notices"]) != 1 or statuses["Laravel"]["admin_notices"][0][0:2] != ["delivery.failed", "critical"] or statuses["Laravel"]["admin_notices"][0][4] != "email_message":
                     raise AssertionError("unexpected admin alert for test-purpose GOWA or failed email: " + json.dumps(statuses))
-                print("notification transport differential: PASS (GOWA success/auth failure, SMTP success, matching ledger and purpose-scoped admin alerts)")
+                print("notification transport differential: PASS (GOWA success/auth/503/timeout, SMTP success/failure, matching retry safety, ledger and alerts)")
                 print(json.dumps(statuses, ensure_ascii=False, indent=2))
             finally:
                 f.db("DELETE FROM jobs WHERE payload LIKE '%imp010-transport-%'")
