@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,7 +62,6 @@ func run() error {
 	asset.SetBase(cfg.PublicURL)
 	orders.SetPublicBase(cfg.PublicURL)
 	media.SetRoot(cfg.MediaRoot)
-	media.SetRoot(cfg.MediaRoot)
 
 	server := api.New(cfg, database, api.Options{
 		InstallLockPath: installLockPath(),
@@ -70,7 +70,7 @@ func run() error {
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.Handler(),
+		Handler:           publicStorageHandler(server.Handler(), cfg.MediaRoot),
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
@@ -105,6 +105,20 @@ func run() error {
 	}
 	logger.Info("stopped")
 	return nil
+}
+
+// publicStorageHandler serves the Laravel `public` disk at /storage/... (the same URL
+// contract production nginx satisfies via the public/storage symlink), then falls back
+// to the API mux. Paths stay inside MEDIA_ROOT: the file server's rooted http.Dir plus
+// http.FileServer's own path cleaning block traversal.
+func publicStorageHandler(api http.Handler, mediaRoot string) http.Handler {
+	mux := http.NewServeMux()
+	if trimmed := strings.TrimRight(strings.TrimSpace(mediaRoot), "/"); trimmed != "" {
+		fs := http.FileServer(http.Dir(trimmed))
+		mux.Handle("/storage/", http.StripPrefix("/storage/", fs))
+	}
+	mux.Handle("/", api)
+	return mux
 }
 
 // newLogger builds the structured logger.
