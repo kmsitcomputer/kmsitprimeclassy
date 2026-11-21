@@ -232,7 +232,7 @@ Status legend:
 | POST | `/api/v1/crm/customers/{customer}/consent-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM consent: channel gates (unlinked 409, unverified email 422, whatsapp 409), challenge row; 17/0 compared by compare_crm_consent.py |
 | POST | `/api/v1/crm/customers/{customer}/link` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: link consumption, double-link 409/422, link event + audit; 26/0 compared by compare_crm_link.py |
 | POST | `/api/v1/crm/customers/{customer}/link-otp` | session | korsal, sales, sales-kurir-sub | **GO** | CRM linking: OTP gates (unknown konsumen, unverified email, channel, rate limit), identity_otp_challenges row; 26/0 compared by compare_crm_link.py |
-| POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** | PARTIAL — assisted-order state matches, but Laravel Order created observer notifications are not dispatched by Go. |
+| POST | `/api/v1/crm/customers/{customer}/orders` | session | agen, korsal, sales, sales-kurir-sub | **PARTIAL** | PARTIAL — shared Go creation service now records the branch-scoped `order.created` admin notification; transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker. |
 | POST | `/api/v1/crm/customers/{customer}/unlink` | session | admin, agen, korsal, sales, sales-kurir-sub | **GO** | CRM linking: unlink scope + event + audit; 26/0 compared by compare_crm_link.py |
 | GET | `/api/v1/crm/customers/{customer}/visits` | session | admin, agen, korsal, sales, sales-kurir-sub, super_admin | **GO** |  |
 | POST | `/api/v1/crm/customers/{customer}/visits` | session | korsal, sales, sales-kurir-sub | **GO** | CRM write slice: visit validation (status set, date, plan_next_before rule) + audit; 36/0 compared by compare_crm_writes.py |
@@ -360,7 +360,7 @@ Status legend:
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | GET | `/api/v1/orders` | session | — | **GO** | role-scoped list; a kurir is refused; operational roles see the minimized projection; status/payment_status/search/region/delivery_date/paid filters |
-| POST | `/api/v1/orders` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **PARTIAL** | PARTIAL — core order and financial state matches; Laravel Order observers emit after-commit email/WhatsApp events that have no Go lifecycle dispatcher/worker. |
+| POST | `/api/v1/orders` | session | agen, konsumen, korsal, sales, sales-kurir-sub | **PARTIAL** | PARTIAL — response and database differential now includes Laravel-compatible branch-scoped `order.created` admin notifications (43/0); after-commit transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker. |
 | GET | `/api/v1/orders/regions` | session | — | **GO** | region facets derived only from the caller's own scoped orders; each level empty until its parent is supplied |
 | GET | `/api/v1/orders/{order}` | session | — | **GO** | policy-gated detail (own buyer, branch roles, korsal/sales team + the reassigned-owner leg, gudang queue-only); loads payment_transaction + returns, which the list omits |
 | POST | `/api/v1/orders/{order}/assisted-returns` | session | korsal, sales, sales-kurir-sub | **PARTIAL** | PARTIAL — return state matches, but Laravel ReturnRequest created observer notification is not dispatched by Go. |

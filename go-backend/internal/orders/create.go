@@ -30,6 +30,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/db"
 	"github.com/kmsitcomputer/primeclassy-go/internal/inventory"
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
+	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
 	"github.com/kmsitcomputer/primeclassy-go/internal/shipping"
 )
 
@@ -661,6 +663,11 @@ func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int
 		"shipping_provider": quote.ProviderCode,
 	}, s.IP, s.UserAgent); err != nil {
 		return nil, err
+	}
+	if err := notifications.RecordOrderCreated(ctx, tx, orderID, agentID, invoiceNo, total); err != nil {
+		// Laravel's model observer is explicitly best-effort: a notification failure
+		// must not roll back a committed order or alter its response.
+		slog.WarnContext(ctx, "admin order-created notification could not be recorded", "order_id", orderID, "error", err)
 	}
 
 	if err := tx.Commit(); err != nil {

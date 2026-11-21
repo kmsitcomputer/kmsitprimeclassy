@@ -422,8 +422,8 @@ IMPLEMENTED = {
 GAPS = {
     ("POST", "/api/v1/google-sheets/configs/{config}/sync"): "PARTIAL — Go now performs replace writes, protected worksheet merge, validation, and the configured 10,000-row bound; fake-provider success/failure and test-DB sync-log tests pass. Laravel-Go differential evidence for response and provider payload remains outstanding.",
     ("POST", "/api/v1/auth/register"): "PARTIAL — Go now atomically creates the restricted WhatsApp ledger row and Laravel-compatible queue job after commit; welcome-email delivery and the Go notification worker remain incomplete.",
-    ("POST", "/api/v1/orders"): "PARTIAL — core order and financial state matches; Laravel Order observers emit after-commit email/WhatsApp events that have no Go lifecycle dispatcher/worker.",
-    ("POST", "/api/v1/crm/customers/{customer}/orders"): "PARTIAL — assisted-order state matches, but Laravel Order created observer notifications are not dispatched by Go.",
+    ("POST", "/api/v1/orders"): "PARTIAL — response and database differential now includes Laravel-compatible branch-scoped `order.created` admin notifications (43/0); after-commit transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker.",
+    ("POST", "/api/v1/crm/customers/{customer}/orders"): "PARTIAL — shared Go creation service now records the branch-scoped `order.created` admin notification; transactional email and WhatsApp lifecycle delivery still lack a Go dispatcher/worker.",
     ("POST", "/api/v1/orders/{order}/assisted-returns"): "PARTIAL — return state matches, but Laravel ReturnRequest created observer notification is not dispatched by Go.",
     ("POST", "/api/v1/orders/{order}/returns"): "PARTIAL — return state matches, but Laravel ReturnRequest created observer notification is not dispatched by Go.",
     ("PATCH", "/api/v1/admin/returns/{return}/review"): "PARTIAL — return review state matches, but ReturnRequest approved/rejected lifecycle notifications are not dispatched by Go.",

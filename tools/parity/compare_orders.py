@@ -246,10 +246,13 @@ def order_state():
     sub_res = db("""SELECT r.product_id, r.product_variation_id, r.quantity, r.status
         FROM sub_stock_reservations r ORDER BY r.id""")
     invoice_sequence = db("SELECT `value` FROM settings WHERE `key` = 'orders.invoice_sequence'")
+    notifications = db("""SELECT recipient_user_id,type,severity,title,body,subject_type
+        FROM admin_notifications WHERE order_id IN (SELECT id FROM orders) ORDER BY recipient_user_id""")
     return {
         "orders": rows, "items": items, "commissions": commissions, "shipments": shipments,
         "stock_requests": stock_requests, "payment_transactions": payments, "snapshots": snapshots,
         "agent_reserved": reservations, "sub_reservations": sub_res, "invoice_sequence": invoice_sequence,
+        "admin_notifications": notifications,
     }
 
 
@@ -298,7 +301,7 @@ def compare_create(name, body, email="konsumen@imp010.test"):
     return st_l, body_l
 
 
-def main():
+def main_unlocked():
     seed_full()
 
     # --- happy paths -------------------------------------------------------------------------------
@@ -412,6 +415,48 @@ def summary():
     failed = [r for r in results if not r[1]]
     print(f"{len(results) - len(failed)} passed, {len(failed)} failed")
     return 1 if failed else 0
+
+
+class TestDatabaseLock:
+    """Hold the repository named test-run lock for this mutating differential harness."""
+
+    def __enter__(self):
+        command = 'mariadb --unbuffered -N -B -uprimeclassy_app -p"$(cat $MARIADB_PASSWORD_FILE)" primeclassy_testing'
+        self.process = subprocess.Popen(
+            ["docker", "exec", "-i", "primeclassy-mariadb", "sh", "-lc", command],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+        )
+        assert self.process.stdin is not None and self.process.stdout is not None
+        self.process.stdin.write("SELECT GET_LOCK('primeclassy:testrun:primeclassy_testing',0);\n")
+        self.process.stdin.flush()
+        result = self.process.stdout.readline().strip()
+        if result != "1":
+            self.process.kill()
+            self.process.wait(timeout=20)
+            raise RuntimeError(f"primeclassy_testing named lock unavailable: {result!r}")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.process.stdin is not None:
+            try:
+                if self.process.poll() is None:
+                    self.process.stdin.write("SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing');\n")
+                    self.process.stdin.flush()
+            except BrokenPipeError:
+                # If the client is already gone, MariaDB has released the connection lock.
+                pass
+            finally:
+                self.process.stdin.close()
+        try:
+            self.process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=20)
+
+
+def main():
+    with TestDatabaseLock():
+        return main_unlocked()
 
 
 if __name__ == "__main__":
