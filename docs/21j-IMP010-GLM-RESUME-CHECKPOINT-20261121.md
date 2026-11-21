@@ -1,6 +1,6 @@
 # IMP-010 GLM Continuation Checkpoint — 2026-11-21
 
-Status: **IN PROGRESS — notification success transport and Sheets sync failure-path differentials pass; provider-failure parity and Sheets success-provider cross-runtime comparison remain open.**
+Status: **IN PROGRESS — notification success/failure/ambiguous transport, queue failure/reclaim/crash replay, and Sheets provider success/403 response + payload differentials have scoped parity evidence. Sheets route is ready for canonical matrix reclassification.**
 
 ## Objective and phase
 
@@ -9,9 +9,9 @@ Continue from `docs/21i-IMP010-GLM-PAUSE-CHECKPOINT-20261121.md`. Active work is
 ## Repository state
 
 - Branch: `imp010/go-backend`
-- HEAD: `06024ea5f92fdfa3a5b115575acc85f7118f3d2b` (`fix(sheets): match Laravel sync missing-config response`).
-- Commits in this continuation: `7585321` (durable Go notification delivery worker), `58b372b` (worker checkpoint), `ea29f34` (one-shot worker mode), `3f9650d` (notification worker and Sheets parity harnesses), `1f7f794` (Laravel-compatible transactional email HTML), `06024ea` (Sheets missing-config response parity).
-- No source changes are pending after `06024ea`; this checkpoint update is pending commit.
+- HEAD: `imp010/go-backend` at `2d042b9` (`fix(worker): record failed Laravel queue jobs`), with reservation and harness response-capture changes currently uncommitted.
+- Commits in this continuation: `7585321` (durable Go notification delivery worker), `58b372b` (worker checkpoint), `ea29f34` (one-shot worker mode), `3f9650d` (notification worker and Sheets parity harnesses), `1f7f794` (Laravel-compatible transactional email HTML), `06024ea` (Sheets missing-config response parity), `b3a72a2` (Sheets and notification parity checkpoint), `bc368a1` (notification failure parity), `50389df` (Sheets provider payload differential), `0daf174` (ambiguous GOWA differential), `2d042b9` (failed queue jobs).
+- Current uncommitted files: `go-backend/internal/jobs/worker_test.go`, `go-backend/internal/api/google_sheets_sync_integration_test.go`, `tools/parity/compare_notification_worker.py`, and `tools/parity/compare_sheets_provider_payload.py`, plus this checkpoint. The diffs cover Laravel's 90-second reservation recovery, non-queued WhatsApp crash/replay, and wrapped Sheets endpoint response comparisons. No production API logic changes are in this WIP.
 - Prior checkpoint's order-notification changes and differential harness are in commit `18135aa`.
 - A generated worker binary was moved outside the repository to `/tmp/imp010-notification-worker-check`; it is not part of source changes.
 
@@ -23,11 +23,20 @@ Continue from `docs/21i-IMP010-GLM-PAUSE-CHECKPOINT-20261121.md`. Active work is
 - `python3 tools/parity/compare_return_request.py` — 9 passed, 0 failed.
 - `python3 tools/parity/compare_notification_worker.py` — PASS for Laravel and Go one-shot workers on WhatsApp test-mode and transactional email with channels disabled. Both produced the same skip status/reason, deleted the queue row, and created zero admin notices.
 - `python3 tools/parity/compare_notification_transport.py` — PASS on Laravel and Go current-source workers: both WhatsApp rows became `sent` with provider ID `fake-message-1`; GOWA method/path/auth/device/payload matched; both email rows became `sent`; SMTP recipient, subject, `text/html` MIME type and complete rendered HTML body matched; queue rows were deleted and no admin notices were produced.
+- `python3 tools/parity/compare_notification_transport.py` — PASS after `bc368a1`: successful GOWA/SMTP delivery, terminal GOWA 401 ledger, SMTP recipient 550 error class and exact message, and admin-notice state all match. A purpose=`test` WhatsApp failure correctly creates no Laravel or Go admin alert; Go mirrors Laravel's transactional-purpose observer gate.
+- `python3 tools/parity/compare_notification_transport.py` — PASS after `0daf174`: GOWA 503 and timeout after the fake provider receives the request both remain `unknown`, attempt count 1, no retry/job row; 503 error fields match exactly and alert state matches. Timeout detail wording differs between cURL and Go HTTP client, so parity compares status/class/attempts/queue/alerts for that transport-dependent field.
 - `cd go-backend && go test ./internal/admininfra ./internal/jobs ./internal/notifications ./internal/notificationworker -count=1` — PASS, 0 failures. The integration fixture now creates and cleans up a temporary super-admin when the testing schema has no matching fixture account.
 - `cd go-backend && go vet ./internal/admininfra ./internal/jobs ./internal/notifications ./internal/notificationworker` — PASS.
 - `python3 tools/parity/compare_sheets_sync.py` against Laravel 8899 and current-source Go test API 8084 — **7/7 PASS**. This includes missing config, mapping rejection, and product/transaction log/result contracts. The live API test surfaced a 404 locale mismatch (`Endpoint tidak ditemukan.` vs Laravel `Endpoint not found.`); Go now returns the reference English 404 and a scoped regression assertion covers it.
 - `cd go-backend && go test ./internal/api -run '^TestGoogleSheetsSyncWritesAndCompletesLog$' -count=1` — PASS after the 404 fix; also exercises stub-provider success and provider-forbidden failure sync logs.
 - `cd go-backend && go vet ./internal/api` — PASS.
+- `python3 tools/parity/compare_sheets_provider_payload.py` — PASS for provider success and 403 denial. Both runtimes made matching metadata GET and batchUpdate POST requests, including a tagged one-row product export; success and failed sync logs (including error summary) matched exactly. The local fakes made no Google API calls.
+- `python3 tools/parity/compare_sheets_provider_payload.py` — PASS extended: controller success and provider-failure HTTP response envelopes also match after dynamic IDs/timestamps are normalized, along with provider payloads and sync logs.
+- `docker exec pc_go_imp010 sh -lc 'cd /src && PATH=/usr/local/go/bin:$PATH go vet ./internal/api'` — PASS after adding request capture to the scoped Sheets integration test.
+- `docker exec pc_go_imp010 sh -lc 'cd /src && PATH=/usr/local/go/bin:$PATH go test ./internal/jobs -run ^TestProcessLogsLaravelFailedJobsAfterOneAttempt$ -count=1 -v'` — PASS; the throwing handler writes one UUID-keyed `failed_jobs` row and deletes the queue row; a payload already at attempts=1 is failed before handler invocation.
+- Sequential scoped tests in the Go container: `go test ./internal/jobs -count=1`, `go test ./internal/notificationworker -count=1`, `go test ./internal/notifications -count=1` — PASS; `go vet` the three packages — PASS. A first multi-package invocation ran DB integration packages concurrently and the notification-worker lock guard correctly rejected the overlap; rerunning each package sequentially passed.
+- `docker exec pc_go_imp010 sh -lc 'cd /src && PATH=/usr/local/go/bin:$PATH go test ./internal/jobs -run ^TestClaimNextReclaimsOnlyLaravelExpiredReservations$ -count=1 -v'` — PASS; Go reclaims an expired 90-second reservation and leaves a 10-second-old reservation untouched. Fixtures are removed by exact IDs before releasing the named DB lock.
+- `python3 tools/parity/compare_notification_worker.py` — PASS for disabled-channel processing and sending-ledger replay. When WhatsApp ledger is already `sending`, both workers leave state/attempts unchanged (`sending`, 1), delete the replayed queue job and do not send again.
 - `docker exec pc_laravel_imp010 sh -lc 'cd /app && APP_ENV=testing php artisan test --filter=GoogleSheetsTest'` — **15 passed, 87 assertions**, 0 failures (25.70s).
 - `GOOS=linux GOARCH=amd64 go -C go-backend build -o /tmp/imp010-notify-worker ./cmd/worker` — PASS; copied into the Go test container for transport parity.
 - `GOOS=linux GOARCH=amd64 go -C go-backend build -o /tmp/imp010-migrate ./cmd/migrate` — PASS; applied its additive test-only `pc_go_sessions` migration after Laravel's scoped test reset.
@@ -42,8 +51,8 @@ Continue from `docs/21i-IMP010-GLM-PAUSE-CHECKPOINT-20261121.md`. Active work is
 - Matched Laravel database queue `retry_after` default (90 seconds) by reclaiming stale reserved jobs.
 - Added GOWA device-scoped send support that rejects missing device IDs without fallback, plus conservative retry classification for clearly disconnected devices and safe duplicate behavior for ambiguous provider failures.
 - Added `notifications.RecordDeliveryFailed` to record failure notices within the delivery result transaction.
-- Notification success transport parity is now verified cross-runtime. Cross-runtime GOWA failure outcomes/admin notice payloads and SMTP failure classification/message parity remain open; Go's terminal failure audit is Go integration-tested only.
-- The Sheets sync differential exercises the missing-credential environment and invalid mapping. Success/failure provider HTTP payload parity remains verified separately by the Go provider-stub integration test and Laravel scoped feature tests, not one shared cross-runtime fake-provider comparison.
+- Notification success and covered failure-path transport parity are verified cross-runtime. Covered failures are definitive GOWA 401 and SMTP 550 recipient rejection; Go's transactional WhatsApp terminal-alert path is also database-integration-tested.
+- Sheets success and provider-denial API request payloads and resulting sync logs are compared cross-runtime with a one-row product fixture and local fake provider. Route auth/contract remains separately checked by `compare_sheets_sync.py`.
 
 ## Environment and test database
 
@@ -54,15 +63,15 @@ Continue from `docs/21i-IMP010-GLM-PAUSE-CHECKPOINT-20261121.md`. Active work is
 
 ## Known risks / open work
 
-- Cross-runtime transport failure differential remains open, especially SMTP exception class/message and provider retry classification.
-- Worker currently does not implement Laravel `failed_jobs`/max-attempts semantics for malformed or repeatedly failing queue records; inspect exact project queue configuration and Laravel worker policy before production use.
-- A process crash after a WhatsApp ledger transitions to `sending` can leave that ledger row non-queued; Laravel delivery also treats replay of a non-queued row as a no-op, but this crash path needs explicit parity evidence and operational treatment.
-- Cross-runtime Sheets provider batch payload comparison remains open; current 7/7 evidence covers missing credentials, invalid mapping, missing config and sync logs, while Go provider success/failure is separately stub-tested.
+- GOWA ambiguous outcomes now have cross-runtime evidence for HTTP 503 and timeout after request receipt; both preserve UNKNOWN, do not retry, and leave no queued job. Timeout detail text is client-library specific.
+- Worker now handles queue failures according to notification jobs' `$tries=1` and Laravel `database-uuids` provider. Strict byte-for-byte exception trace parity is not claimed; the stored fields, UUID, original payload, queue and failure lifecycle are verified.
+- A process crash after a WhatsApp ledger transitions to `sending` leaves that ledger row non-queued. Both runtimes delete the replayed job without resending; operator recovery remains a manual concern consistent with Laravel's behavior.
+- Additional Sheets cases (protected columns / row-anchored merge and Google API error variants) remain subject to broader scoped feature/integration evidence; this cross-runtime harness covers unprotected product replacement plus success and 403 failure.
 - Canonical matrix unchanged at 351 GO / 24 PARTIAL / 0 Laravel-only.
 - No production access, deployment, push, Laravel removal, or GLM worktree modification occurred.
 
 ## EXACT NEXT ACTION
 
-1. Extend the local-only transport differential with GOWA terminal/ambiguous failure cases and an SMTP failure response; compare message ledger fields, retry/no-retry behavior, queue rows and admin notices across Laravel and Go.
-2. Build a cross-runtime Sheets fake-provider harness that compares batch API request payloads plus success/failure log states; never call real Google. Keep test rows under `primeclassy_testing` and use `TestDatabaseLock`.
-3. Fix any concrete mismatches and rerun scoped tests. Keep the canonical matrix at 351/24/0 until all required route evidence and the wider 375-route audit are complete; do not declare this lane GO prematurely.
+1. Commit reviewed reservation/replay and wrapped Sheets endpoint-response differential evidence after scoped checks and `git diff --check`.
+2. Update the parity generator note for `POST /api/v1/google-sheets/configs/{config}/sync`, regenerate the canonical matrix, and verify count delta plus all other statuses unchanged.
+3. Continue from the next active phase/checkpoint for remaining PARTIAL routes. Do not declare migration completion until the whole 375-route matrix and non-HTTP parity evidence meet the mandate.

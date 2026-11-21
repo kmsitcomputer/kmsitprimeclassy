@@ -15,12 +15,16 @@ $app = require '/app/bootstrap/app.php';
 $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 use App\Models\SheetsConfig;
 use App\Models\SheetsDestination;
+use App\Models\SheetsSyncLog;
 use App\Models\User;
+use App\Http\Controllers\Api\V1\Integration\SheetsController;
 use App\Services\GoogleSheets\SheetsClient;
 use App\Services\GoogleSheets\SyncService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\Request;
 
 $lock = DB::selectOne("SELECT GET_LOCK('primeclassy:testrun:primeclassy_testing',0) AS acquired");
 if ((int) $lock->acquired !== 1 || DB::getDatabaseName() !== 'primeclassy_testing') {
@@ -64,7 +68,13 @@ try {
     });
     $client = new class extends SheetsClient { public function token(): string { return 'stub-token'; } };
     app()->instance(SheetsClient::class, $client);
-    $log = app(SyncService::class)->sync(User::findOrFail($userId), $config);
+    $actor = User::findOrFail($userId);
+    Auth::setUser($actor);
+    $controller = app(SheetsController::class);
+    $request = Request::create('/api/v1/google-sheets/configs/'.$config->id.'/sync', 'POST');
+    $request->setUserResolver(fn () => $actor);
+    $successResponse = $controller->sync($request, $config, app(SyncService::class))->getData(true);
+    $log = SheetsSyncLog::query()->where('config_id', $configId)->latest('id')->firstOrFail();
     $captureRequests = function ($records) {
         $requests = [];
         foreach ($records as [$request, $response]) {
@@ -78,13 +88,14 @@ try {
     $firstRecords = Http::recorded()->all();
     $successRequests = $captureRequests($firstRecords);
     if ($log->status !== 'success') throw new RuntimeException('Laravel sync failed: '.$log->error_summary);
-    $failedLog = app(SyncService::class)->sync(User::findOrFail($userId), $config);
+    $failureResponse = $controller->sync($request, $config, app(SyncService::class))->getData(true);
+    $failedLog = SheetsSyncLog::query()->where('config_id', $configId)->latest('id')->firstOrFail();
     $allRequests = Http::recorded()->all();
     $failureRequests = $captureRequests(array_slice($allRequests, count($firstRecords)));
     if ($failedLog->status !== 'failed') throw new RuntimeException('Laravel provider failure was not recorded');
     $out = [
-        'success' => ['requests' => $successRequests, 'log' => [$log->status, (int) $log->rows_processed, (int) $log->rows_success, (int) $log->rows_failed, '']],
-        'failure' => ['requests' => $failureRequests, 'log' => [$failedLog->status, (int) $failedLog->rows_processed, (int) $failedLog->rows_success, (int) $failedLog->rows_failed, $failedLog->error_summary]],
+        'success' => ['requests' => $successRequests, 'log' => [$log->status, (int) $log->rows_processed, (int) $log->rows_success, (int) $log->rows_failed, ''], 'response' => $successResponse],
+        'failure' => ['requests' => $failureRequests, 'log' => [$failedLog->status, (int) $failedLog->rows_processed, (int) $failedLog->rows_success, (int) $failedLog->rows_failed, $failedLog->error_summary], 'response' => $failureResponse],
     ];
 } finally {
     if ($configId) DB::table('sheets_sync_logs')->where('config_id', $configId)->delete();
@@ -107,7 +118,17 @@ def normalize_scenario(capture):
         if "body" in request:
             item["body"] = request["body"]
         normalized.append(item)
-    return {"requests": normalized, "log": capture["log"]}
+    return {"requests": normalized, "log": capture["log"], "response": scrub(capture["response"])}
+
+
+def scrub(value):
+    if isinstance(value, str) and value[:10].count("-") == 2 and ("T" in value or " " in value):
+        return "<timestamp>"
+    if isinstance(value, list):
+        return [scrub(item) for item in value]
+    if isinstance(value, dict):
+        return {key: ("<id>" if key in {"id", "config_id", "actor_id"} else scrub(item)) for key, item in value.items()}
+    return value
 
 
 def normalize(capture):

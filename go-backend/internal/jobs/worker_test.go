@@ -137,3 +137,75 @@ func TestProcessLogsLaravelFailedJobsAfterOneAttempt(t *testing.T) {
 		t.Fatalf("failed_jobs rows for max-attempt fixture=%d, want 1", failedRows)
 	}
 }
+
+func TestClaimNextReclaimsOnlyLaravelExpiredReservations(t *testing.T) {
+	envPath := os.Getenv("GO_ENV_FILE")
+	if envPath == "" {
+		envPath = filepath.Join("..", "..", ".env")
+	}
+	cfg, err := config.Load(config.FileGetter(envPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Env != config.EnvTesting || !config.IsTestingDatabase(cfg.DB.Database) {
+		t.Fatalf("refusing non-testing database %q", cfg.DB.Database)
+	}
+	database, err := db.Open(context.Background(), cfg.DB)
+	if err != nil {
+		t.Skipf("isolated test database unavailable: %v", err)
+	}
+	defer database.Close()
+	lockConn, err := database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockConn.Close()
+	var acquired sql.NullInt64
+	if err := lockConn.QueryRowContext(context.Background(), `SELECT GET_LOCK('primeclassy:testrun:primeclassy_testing',0)`).Scan(&acquired); err != nil {
+		t.Fatal(err)
+	}
+	if !acquired.Valid || acquired.Int64 != 1 {
+		t.Fatal("test database is already owned by another runner")
+	}
+	defer func() {
+		_, _ = lockConn.ExecContext(context.Background(), `SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing')`)
+	}()
+
+	now := time.Now().Unix()
+	fixtureIDs := []int64{}
+	insert := func(label string, reservedAt int64) int64 {
+		t.Helper()
+		payload := fmt.Sprintf(`{"uuid":"imp010-reservation-%d-%s","displayName":"unsupported"}`, now, label)
+		result, err := database.ExecContext(context.Background(), `INSERT INTO jobs (queue,payload,attempts,reserved_at,available_at,created_at) VALUES (?,?,0,?,?,?)`, NotificationQueue, payload, reservedAt, now, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixtureIDs = append(fixtureIDs, id)
+		return id
+	}
+	staleID := insert("stale", now-databaseQueueRetryAfter-1)
+	freshID := insert("fresh", now-10)
+	defer func() {
+		for _, id := range fixtureIDs {
+			_, _ = database.ExecContext(context.Background(), `DELETE FROM jobs WHERE id=?`, id)
+		}
+	}()
+	claimed, err := ClaimNext(context.Background(), database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.ID != staleID || claimed.Attempts != 1 {
+		t.Fatalf("claimed id=%d attempts=%d, want stale id=%d attempts=1", claimed.ID, claimed.Attempts, staleID)
+	}
+	var freshAttempts int
+	if err := database.QueryRowContext(context.Background(), `SELECT attempts FROM jobs WHERE id=?`, freshID).Scan(&freshAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if freshAttempts != 0 {
+		t.Fatalf("fresh Laravel reservation attempts=%d; must remain unclaimed", freshAttempts)
+	}
+}

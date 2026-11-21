@@ -181,6 +181,10 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("sync HTTP status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
+	var successResponse map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &successResponse); err != nil {
+		t.Fatal(err)
+	}
 	if !wrote {
 		t.Fatal("sync returned without writing to Sheets API")
 	}
@@ -205,6 +209,10 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	if failedRecorder.Code != http.StatusOK || !wrote {
 		t.Fatalf("failed sync response=%d wrote=%v body=%s", failedRecorder.Code, wrote, failedRecorder.Body.String())
 	}
+	var failureResponse map[string]any
+	if err := json.Unmarshal(failedRecorder.Body.Bytes(), &failureResponse); err != nil {
+		t.Fatal(err)
+	}
 	var errorSummary string
 	if err := database.QueryRowContext(context.Background(), `SELECT status,rows_processed,rows_success,rows_failed,error_summary FROM sheets_sync_logs WHERE config_id=? ORDER BY id DESC LIMIT 1`, configID).Scan(&status, &rowsProcessed, &rowsSuccess, &rowsFailed, &errorSummary); err != nil {
 		t.Fatal(err)
@@ -214,8 +222,8 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	}
 	if capturePath := os.Getenv("GOOGLE_SHEETS_CAPTURE_FILE"); capturePath != "" {
 		payload, err := json.Marshal(map[string]any{
-			"success": map[string]any{"requests": successCaptured, "log": successLog},
-			"failure": map[string]any{"requests": captured, "log": []any{status, rowsProcessed, rowsSuccess, rowsFailed, errorSummary}},
+			"success": map[string]any{"requests": successCaptured, "log": successLog, "response": successResponse},
+			"failure": map[string]any{"requests": captured, "log": []any{status, rowsProcessed, rowsSuccess, rowsFailed, errorSummary}, "response": failureResponse},
 		})
 		if err != nil {
 			t.Fatal(err)

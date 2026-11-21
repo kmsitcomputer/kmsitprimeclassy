@@ -59,11 +59,11 @@ def docker(container, command):
     return result.stdout.strip()
 
 
-def enqueue_message(channel, worker, tag):
+def enqueue_message(channel, worker, tag, initial_status="queued"):
     token = uuid.uuid4().hex
     now = int(time.time())
     if channel == "whatsapp":
-        f.db("INSERT INTO whatsapp_messages (idempotency_key,purpose,event,template_class,recipient_phone,body,status,max_attempts,queued_at,created_at,updated_at) VALUES (" + ",".join((q("imp010-worker-diff:" + token), q("test"), q("test"), q("full"), q("628123456789"), q("worker parity " + tag), q("queued"), "1", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
+        f.db("INSERT INTO whatsapp_messages (idempotency_key,purpose,event,template_class,recipient_phone,body,status,attempts,max_attempts,queued_at,created_at,updated_at) VALUES (" + ",".join((q("imp010-worker-diff:" + token), q("test"), q("test"), q("full"), q("628123456789"), q("worker parity " + tag), q(initial_status), "1" if initial_status == "sending" else "0", "1", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
         message_id = int(f.db("SELECT id FROM whatsapp_messages WHERE idempotency_key=" + q("imp010-worker-diff:" + token))[0][0])
         class_name = "App\\Jobs\\SendWhatsAppMessageJob"
         serialized = f'O:{len(class_name)}:"{class_name}":2:{{s:9:"messageId";i:{message_id};s:5:"queue";s:18:"primeclassy-notify";}}'
@@ -91,6 +91,27 @@ def enqueue_message(channel, worker, tag):
     return {"result": row, "job_remaining": int(remaining_jobs), "admin_notices": int(notices)}
 
 
+def enqueue_sending_replay(worker):
+    token = uuid.uuid4().hex
+    key = "imp010-worker-diff:" + token
+    f.db("INSERT INTO whatsapp_messages (idempotency_key,purpose,event,template_class,recipient_phone,body,status,attempts,max_attempts,queued_at,created_at,updated_at) VALUES (" + ",".join((q(key), q("test"), q("test"), q("full"), q("628123456789"), q("already claimed " + token), q("sending"), "1", "1", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
+    message_id = int(f.db("SELECT id FROM whatsapp_messages WHERE idempotency_key=" + q(key))[0][0])
+    class_name = "App\\Jobs\\SendWhatsAppMessageJob"
+    serialized = f'O:{len(class_name)}:"{class_name}":2:{{s:9:"messageId";i:{message_id};s:5:"queue";s:18:"primeclassy-notify";}}'
+    payload = json.dumps({"uuid": "imp010-worker-diff-" + token, "displayName": class_name, "job": "Illuminate\\Queue\\CallQueuedHandler@call", "maxTries": 1, "data": {"commandName": class_name, "command": serialized}}, separators=(",", ":"))
+    payload_hex = payload.encode().hex()
+    f.db("INSERT INTO jobs (queue,payload,attempts,reserved_at,available_at,created_at) VALUES (" + ",".join((q(QUEUE), "CONVERT(UNHEX(" + q(payload_hex) + ") USING utf8mb4)", "0", "NULL", str(int(time.time())), str(int(time.time())))) + ")")
+    job_id = int(f.db("SELECT MAX(id) FROM jobs WHERE queue=" + q(QUEUE))[0][0])
+    if worker == "Go":
+        docker(GO_CONTAINER, "/tmp/imp010-notify-worker --once")
+    else:
+        docker(LARAVEL_CONTAINER, "cd /app && php artisan queue:work database --queue=primeclassy-notify --once --tries=1 --timeout=60 --no-interaction --env=queue-testing")
+    state = f.db(f"SELECT status,attempts FROM whatsapp_messages WHERE id={message_id}")[0]
+    remaining = int(f.db(f"SELECT COUNT(*) FROM jobs WHERE id={job_id}")[0][0])
+    f.db(f"DELETE FROM whatsapp_messages WHERE id={message_id}")
+    return {"status": state[0], "attempts": int(state[1]), "job_remaining": remaining}
+
+
 def main():
     global EMAIL_USER_ID
     if f.db("SELECT DATABASE()")[0][0] != "primeclassy_testing":
@@ -115,11 +136,15 @@ def main():
                     rows = f.db("SELECT id FROM " + ("whatsapp_messages" if channel == "whatsapp" else "email_messages") + " WHERE idempotency_key LIKE 'imp010-worker-diff:%' ORDER BY id DESC LIMIT 1")
                     if rows:
                         state["wa_ids" if channel == "whatsapp" else "email_ids"].append(int(rows[0][0]))
+            replay = {worker: enqueue_sending_replay(worker) for worker in ("Laravel", "Go")}
             expected = {"whatsapp": {"result": ["skipped", "gateway_disabled", "-", "1"], "job_remaining": 0, "admin_notices": 0}, "email": {"result": ["skipped", "mail_disabled", "-"], "job_remaining": 0, "admin_notices": 0}}
             if outputs["Laravel"] != expected or outputs["Go"] != expected:
                 raise AssertionError("worker differential mismatch: " + json.dumps(outputs, ensure_ascii=False))
+            if replay["Laravel"] != replay["Go"] or replay["Laravel"] != {"status": "sending", "attempts": 1, "job_remaining": 0}:
+                raise AssertionError("sending-ledger replay mismatch: " + json.dumps(replay, ensure_ascii=False))
             print("notification worker differential: PASS (Laravel and Go; disabled WhatsApp/email gates)")
             print(json.dumps(outputs, ensure_ascii=False, indent=2))
+            print("sending-ledger crash/replay differential: PASS " + json.dumps(replay, ensure_ascii=False))
         finally:
             f.db("DELETE FROM jobs WHERE payload LIKE '%imp010-worker-diff-%'")
             f.db("DELETE FROM failed_jobs WHERE uuid LIKE 'imp010-worker-diff-%'")
