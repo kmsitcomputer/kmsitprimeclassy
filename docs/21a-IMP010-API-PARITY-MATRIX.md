@@ -132,18 +132,18 @@ Status legend:
 | GET | `/api/v1/articles` | public | — | **GO** |  |
 | GET | `/api/v1/articles/{slug}` | public | — | **GO** |  |
 
-## Identity & session — `auth` (4/8 in Go)
+## Identity & session — `auth` (6/8 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/auth/forgot-password` | public | — | LARAVEL |  |
+| POST | `/api/v1/auth/forgot-password` | public | — | **GO** | enumeration-resistant recovery request: byte-identical answer (unknown/unverified/rate-limited contained), challenge issuance per-subject lock + 3/10min limit + invalidate-previous + HMAC hash; compared by compare_recovery.py (15/0) |
 | GET | `/api/v1/auth/google/callback` | public | — | LARAVEL |  |
 | GET | `/api/v1/auth/google/redirect` | public | — | LARAVEL |  |
 | POST | `/api/v1/auth/login` | public | — | **GO** |  |
 | POST | `/api/v1/auth/logout` | session | — | **GO** |  |
 | GET | `/api/v1/auth/me` | session | — | **GO** |  |
 | POST | `/api/v1/auth/register` | public | — | **GO** | user + referral chain + closures; welcome e-mail/WA notification not emitted (queue bridge outstanding) |
-| POST | `/api/v1/auth/reset-password` | public | — | LARAVEL |  |
+| POST | `/api/v1/auth/reset-password` | public | — | **GO** | one code = one reset: subject-scoped verify (attempt counter persists on mismatch), password replace, all recovery challenges consumed, session revocation, audit; compared by compare_recovery.py (15/0) |
 
 ## Catalog — bestsellers — `bestsellers` (1/1 in Go)
 
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 360 (96.0%) |
-|   of which fully GO | 360 |
+| Served by Go now | 362 (96.5%) |
+|   of which fully GO | 362 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 15 |
+| Still Laravel-only | 13 |
 | Areas fully ported | 39 / 45 |
