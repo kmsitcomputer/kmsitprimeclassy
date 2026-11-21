@@ -918,7 +918,7 @@ func (s *Server) handleGoogleSheetsConfigSync(w http.ResponseWriter, r *http.Req
 	}
 	configID, cerr := strconv.ParseInt(r.PathValue("config"), 10, 64)
 	if cerr != nil {
-		writeError(w, r, httpx.NewError(http.StatusNotFound, "Endpoint tidak ditemukan."))
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
 		return
 	}
 	var cfgID, destID int64
@@ -932,7 +932,7 @@ func (s *Server) handleGoogleSheetsConfigSync(w http.ResponseWriter, r *http.Req
 		FROM sheets_configs c JOIN sheets_destinations d ON d.id = c.destination_id WHERE c.id = ?`,
 		configID).Scan(&cfgID, &destID, &dataset, &tab, &columnsJSON, &filtersJSON, &destAgent, &spreadsheetID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, r, httpx.NewError(http.StatusNotFound, "Endpoint tidak ditemukan."))
+		writeError(w, r, httpx.NewError(http.StatusNotFound, i18n.Translate("en", "system.endpoint_not_found")))
 		return
 	}
 	if err != nil {

@@ -12,6 +12,7 @@ credential error summary, masked spreadsheet id).
 Usage: python3 tools/parity/compare_sheets_sync.py
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -19,9 +20,11 @@ import uuid
 
 import compare_fulfillment as f
 import compare_orders
-from compare_fulfillment import LARAVEL, GO, norm_body
+from compare_fulfillment import LARAVEL as DEFAULT_LARAVEL, GO as DEFAULT_GO, norm_body
 
 SUPER = "super@imp010.test"
+LARAVEL = os.environ.get("PARITY_LARAVEL_URL", DEFAULT_LARAVEL).rstrip("/")
+GO = os.environ.get("PARITY_GO_URL", DEFAULT_GO).rstrip("/")
 TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+Z|\+00:00)?$")
 
 
@@ -43,6 +46,27 @@ def seed():
     return destination, config_ids
 
 
+def ensure_super_admin():
+    existing = f.db("SELECT id FROM users WHERE email='super@imp010.test'")
+    if existing:
+        return int(existing[0][0]), None, False
+    role = f.db("SELECT id FROM roles WHERE slug='super_admin'")
+    role_created = None
+    if role:
+        role_id = int(role[0][0])
+    else:
+        f.db("INSERT INTO roles (slug,name,created_at,updated_at) VALUES ('super_admin','Super Admin',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))")
+        role_id = int(f.db("SELECT id FROM roles WHERE slug='super_admin'")[0][0])
+        role_created = role_id
+    result = subprocess.run(["docker", "exec", "pc_laravel_imp010", "php", "-r", "echo password_hash($argv[1], PASSWORD_BCRYPT);", "Secret123!"], capture_output=True, text=True, timeout=30)
+    if result.returncode or not result.stdout.startswith("$2y$"):
+        raise RuntimeError("could not create an isolated test login hash: " + result.stderr[:300])
+    password = result.stdout.strip()
+    password_hex = password.encode().hex()
+    f.db("INSERT INTO users (role_id,name,email,status,password,created_at,updated_at) VALUES (%d,'Super Admin','super@imp010.test','active',CONVERT(UNHEX('%s') USING utf8mb4),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % (role_id, password_hex))
+    return int(f.db("SELECT id FROM users WHERE email='super@imp010.test'")[0][0]), role_created, True
+
+
 def scrub(v):
     if isinstance(v, str) and TS.match(v):
         return "<ts>"
@@ -57,14 +81,19 @@ def scrub(v):
 
 def scenario(base, config_ids):
     out = {}
-    c = f.client_for(base, SUPER)
+    c = f.Client(base)
+    c.call("GET", "/sanctum/csrf-cookie")
+    status, response = c.call("POST", "/api/v1/auth/login", {"identifier": SUPER, "password": "Secret123!"}, {"X-Locale": "id"})
+    if status != 200:
+        raise RuntimeError(f"login failed for {SUPER} on {base}: status={status}, response={response}")
+    call = lambda method, path: c.call(method, path, extra={"X-Locale": "id"})
     products, invalid, transactions = config_ids
-    out["sync_missing_config"] = c.call("POST", "/api/v1/google-sheets/configs/999999999/sync")
-    out["sync_products"] = c.call("POST", f"/api/v1/google-sheets/configs/{products}/sync")
+    out["sync_missing_config"] = call("POST", "/api/v1/google-sheets/configs/999999999/sync")
+    out["sync_products"] = call("POST", f"/api/v1/google-sheets/configs/{products}/sync")
     out["log_products"] = f.db(f"SELECT status, rows_processed, rows_success, rows_failed, error_summary FROM sheets_sync_logs WHERE config_id={products} ORDER BY id DESC LIMIT 1")
-    out["sync_invalid_mapping"] = c.call("POST", f"/api/v1/google-sheets/configs/{invalid}/sync")
+    out["sync_invalid_mapping"] = call("POST", f"/api/v1/google-sheets/configs/{invalid}/sync")
     out["log_invalid_mapping"] = f.db(f"SELECT status, rows_processed, error_summary FROM sheets_sync_logs WHERE config_id={invalid} ORDER BY id DESC LIMIT 1")
-    out["sync_transactions"] = c.call("POST", f"/api/v1/google-sheets/configs/{transactions}/sync")
+    out["sync_transactions"] = call("POST", f"/api/v1/google-sheets/configs/{transactions}/sync")
     out["log_transactions"] = f.db(f"SELECT status, rows_processed, error_summary FROM sheets_sync_logs WHERE config_id={transactions} ORDER BY id DESC LIMIT 1")
     return out
 
@@ -74,8 +103,12 @@ def main():
         raise RuntimeError("refusing non-testing database")
     destination = None
     config_ids = []
+    actor_id = None
+    created_role = None
+    actor_created = False
     with compare_orders.TestDatabaseLock():
         try:
+            actor_id, created_role, actor_created = ensure_super_admin()
             destination, config_ids = seed()
             lar = scenario(LARAVEL, config_ids)
             go = scenario(GO, config_ids)
@@ -100,6 +133,10 @@ def main():
                 f.db(f"DELETE FROM sheets_configs WHERE id IN ({ids})")
             if destination:
                 f.db(f"DELETE FROM sheets_destinations WHERE id={int(destination)}")
+            if actor_created and actor_id:
+                f.db(f"DELETE FROM users WHERE id={actor_id}")
+            if created_role:
+                f.db(f"DELETE FROM roles WHERE id={created_role}")
 
 
 if __name__ == "__main__":

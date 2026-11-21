@@ -137,6 +137,14 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 
 	app := &Server{database: database, cfg: config.Config{GoogleSheets: config.GoogleSheetsConfig{Enabled: true, CredentialsPath: credentialPath, Timeout: 5 * time.Second, MaxRows: 10000}}, googleSheetsBase: provider.URL + "/v4"}
 	actor := &auth.User{ID: 1, Role: auth.RoleSuperAdmin}
+	missingRequest := httptest.NewRequest(http.MethodPost, "/api/v1/google-sheets/configs/999999999/sync", nil)
+	missingRequest.SetPathValue("config", "999999999")
+	missingRequest = missingRequest.WithContext(withState(missingRequest.Context(), &requestState{User: actor}))
+	missingRecorder := httptest.NewRecorder()
+	app.handleGoogleSheetsConfigSync(missingRecorder, missingRequest)
+	if missingRecorder.Code != http.StatusNotFound || !strings.Contains(missingRecorder.Body.String(), "Endpoint not found.") {
+		t.Fatalf("missing config response=%d body=%s", missingRecorder.Code, missingRecorder.Body.String())
+	}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/google-sheets/configs/"+strconv.FormatInt(configID, 10)+"/sync", nil)
 	request.SetPathValue("config", strconv.FormatInt(configID, 10))
 	request = request.WithContext(withState(request.Context(), &requestState{User: actor}))
