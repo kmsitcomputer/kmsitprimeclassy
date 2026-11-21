@@ -10,7 +10,7 @@ Continue from `docs/21i-IMP010-GLM-PAUSE-CHECKPOINT-20261121.md`. Active work is
 
 - Branch: `imp010/go-backend`
 - HEAD at start of this continuation: `18135aac6d07757638f4d2eecde384813319aa29`.
-- This checkpoint and worker implementation are included in the next local commit; update this line with that commit after it is created.
+- Commit created during this continuation: `7585321` (`feat(notifications): add durable Go delivery worker`).
 - Worktree changes to commit: `go-backend/internal/admininfra/admininfra.go`, `go-backend/internal/admininfra/admininfra_test.go`, `go-backend/internal/jobs/worker.go`, new `go-backend/internal/notifications/delivery.go`, `go-backend/internal/notificationworker/`, and `go-backend/cmd/worker/`.
 - Prior checkpoint's order-notification changes and differential harness are in commit `18135aa`.
 - A generated worker binary was moved outside the repository to `/tmp/imp010-notification-worker-check`; it is not part of source changes.
