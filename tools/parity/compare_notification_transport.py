@@ -37,6 +37,14 @@ class FakeGowa(BaseHTTPRequestHandler):
         device = self.headers.get("X-Device-Id", "")
         payload = json.loads(raw or b"{}")
         self.requests.append((self.path, auth, device, payload))
+        if payload.get("message") == "force-failure-auth":
+            body = json.dumps({"message": "provider rejected credentials"}).encode()
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         body = json.dumps({"code": "SUCCESS", "results": {"message_id": "fake-message-1"}}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -71,6 +79,8 @@ class SMTPHandler(socketserver.StreamRequestHandler):
                     message.append(text[1:] if text.startswith("..") else text)
             elif upper.startswith("EHLO") or upper.startswith("HELO"):
                 self.wfile.write(b"250-localhost\r\n250 SIZE 10485760\r\n")
+            elif upper.startswith("RCPT TO") and "SMTP-FAILURE@" in upper:
+                self.wfile.write(b"550 5.1.1 test recipient rejected\r\n")
             elif upper.startswith("MAIL FROM") or upper.startswith("RCPT TO"):
                 self.wfile.write(b"250 ok\r\n")
             elif upper == "DATA":
@@ -89,6 +99,8 @@ class SMTPServer(socketserver.ThreadingTCPServer):
 
 
 EMAIL_USER_ID = 0
+TEMP_ROLE_ID = 0
+TEMP_ROLE_CREATED = False
 
 
 def insert_job(class_name, serialized):
@@ -130,9 +142,10 @@ def set_active_settings(cipher, gowa_port, smtp_port):
             f.db("INSERT INTO settings (`key`,value,`group`,is_public,created_at,updated_at) VALUES (" + ",".join((q(key), q(value), q(group), "0", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ") ON DUPLICATE KEY UPDATE value=VALUES(value),`group`=VALUES(`group`),updated_at=UTC_TIMESTAMP(6)")
 
 
-def add_whatsapp(tag):
+def add_whatsapp(tag, failure=False):
     key = "imp010-transport:" + uuid.uuid4().hex
-    f.db("INSERT INTO whatsapp_messages (idempotency_key,purpose,event,template_class,recipient_phone,body,status,max_attempts,queued_at,created_at,updated_at) VALUES (" + ",".join((q(key), q("test"), q("test"), q("full"), q("628123456789"), q("transport parity body"), q("queued"), "1", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
+    body = "force-failure-auth" if failure else "transport parity body"
+    f.db("INSERT INTO whatsapp_messages (idempotency_key,purpose,event,template_class,recipient_phone,body,status,max_attempts,queued_at,created_at,updated_at) VALUES (" + ",".join((q(key), q("test"), q("test"), q("full"), q("628123456789"), q(body), q("queued"), "1", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
     message_id = int(f.db("SELECT id FROM whatsapp_messages WHERE idempotency_key=" + q(key))[0][0])
     cls = "App\\Jobs\\SendWhatsAppMessageJob"
     serialized = f'O:{len(cls)}:"{cls}":2:{{s:9:"messageId";i:{message_id};s:5:"queue";s:18:"primeclassy-notify";}}'
@@ -140,9 +153,10 @@ def add_whatsapp(tag):
     return message_id
 
 
-def add_email(tag):
+def add_email(tag, failure=False):
     key = "imp010-transport:" + uuid.uuid4().hex
-    f.db("INSERT INTO email_messages (idempotency_key,event,recipient_role,recipient_user_id,recipient_email,subject,body,status,created_at,updated_at) VALUES (" + ",".join((q(key), q("test"), q("creator"), str(EMAIL_USER_ID), q("konsumen@imp010.test"), q("Worker transport parity"), q("transport parity body"), q("queued"), "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
+    recipient = "smtp-failure@imp010.test" if failure else "konsumen@imp010.test"
+    f.db("INSERT INTO email_messages (idempotency_key,event,recipient_role,recipient_user_id,recipient_email,subject,body,status,created_at,updated_at) VALUES (" + ",".join((q(key), q("test"), q("creator"), str(EMAIL_USER_ID), q(recipient), q("Worker transport parity"), q("transport parity body"), q("queued"), "UTC_TIMESTAMP(6)", "UTC_TIMESTAMP(6)")) + ")")
     message_id = int(f.db("SELECT id FROM email_messages WHERE idempotency_key=" + q(key))[0][0])
     cls = "App\\Jobs\\SendTransactionalEmailJob"
     serialized = f'O:{len(cls)}:"{cls}":2:{{s:9:"messageId";i:{message_id};s:5:"queue";s:18:"primeclassy-notify";}}'
@@ -151,11 +165,11 @@ def add_email(tag):
 
 
 def main():
-    global EMAIL_USER_ID
+    global EMAIL_USER_ID, TEMP_ROLE_ID, TEMP_ROLE_CREATED
     if f.db("SELECT DATABASE()")[0][0] != "primeclassy_testing":
         raise RuntimeError("refusing non-testing database")
     settings = None
-    ids = {"wa": [], "email": []}
+    ids = {"wa": [], "wa_failure": [], "email": [], "email_failure": []}
     initial_jobs = 0
     gowa = ThreadingHTTPServer(("0.0.0.0", 0), FakeGowa)
     smtp = SMTPServer(("0.0.0.0", 0), SMTPHandler)
@@ -167,10 +181,14 @@ def main():
                 keys = WA_KEYS + SMTP_KEYS
                 settings = f.db("SELECT id,`key`,value,`group`,is_public,created_at,updated_at FROM settings WHERE `key` IN (" + ",".join(q(k) for k in keys) + ")")
                 initial_jobs = int(f.db("SELECT COALESCE(MAX(id),0) FROM jobs")[0][0])
-                roles = f.db("SELECT id FROM roles ORDER BY id LIMIT 1")
-                if not roles:
-                    raise RuntimeError("test DB must have at least one role before worker differential")
-                f.db("INSERT INTO users (role_id,name,email,password,status,created_at,updated_at) VALUES (%s,'Worker parity recipient','worker-%s@imp010.test','unused-test-password','active',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % (roles[0][0], uuid.uuid4().hex))
+                roles = f.db("SELECT id FROM roles WHERE slug='super_admin' LIMIT 1")
+                if roles:
+                    TEMP_ROLE_ID = int(roles[0][0])
+                else:
+                    f.db("INSERT INTO roles (slug,name,created_at,updated_at) VALUES ('super_admin','Super Admin',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))")
+                    TEMP_ROLE_ID = int(f.db("SELECT id FROM roles WHERE slug='super_admin'")[0][0])
+                    TEMP_ROLE_CREATED = True
+                f.db("INSERT INTO users (role_id,name,email,password,status,created_at,updated_at) VALUES (%s,'Worker parity recipient','worker-%s@imp010.test','unused-test-password','active',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % (TEMP_ROLE_ID, uuid.uuid4().hex))
                 EMAIL_USER_ID = int(f.db("SELECT id FROM users WHERE email LIKE 'worker-%%@imp010.test' ORDER BY id DESC LIMIT 1")[0][0])
                 cipher = encrypt_test_password()
                 set_active_settings(cipher, gowa.server_port, smtp.server_address[1])
@@ -181,25 +199,35 @@ def main():
                     email_id = add_email(worker)
                     ids["email"].append(email_id)
                     run_worker(worker)
+                    email_failure_id = add_email(worker, failure=True)
+                    ids["email_failure"].append(email_failure_id)
+                    run_worker(worker)
+                    failure_id = add_whatsapp(worker, failure=True)
+                    ids["wa_failure"].append(failure_id)
+                    run_worker(worker)
                 statuses = {}
-                for worker, wa_id, email_id in zip(("Laravel", "Go"), ids["wa"], ids["email"]):
+                for worker, wa_id, email_id, failure_id, email_failure_id in zip(("Laravel", "Go"), ids["wa"], ids["email"], ids["wa_failure"], ids["email_failure"]):
                     statuses[worker] = {
                         "whatsapp": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),attempts,IFNULL(provider_message_id,'-') FROM whatsapp_messages WHERE id={wa_id}")[0],
                         "email": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),IFNULL(error_message,'-') FROM email_messages WHERE id={email_id}")[0],
+                        "email_failure": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),IFNULL(error_message,'-') FROM email_messages WHERE id={email_failure_id}")[0],
+                        "whatsapp_failure": f.db(f"SELECT status,IFNULL(skip_reason,'-'),IFNULL(error_class,'-'),attempts,IFNULL(error_message,'-') FROM whatsapp_messages WHERE id={failure_id}")[0],
                         "jobs": f.db(f"SELECT COUNT(*) FROM jobs WHERE payload LIKE '%imp010-transport-%'")[0][0],
-                        "admin_notices": f.db(f"SELECT COUNT(*) FROM admin_notifications WHERE (subject_type='whatsapp_message' AND subject_id={wa_id}) OR (subject_type='email_message' AND subject_id={email_id})")[0][0],
+                        "admin_notices": f.db(f"SELECT type,severity,title,body,subject_type,recipient_user_id,IFNULL(agent_id,'-') FROM admin_notifications WHERE (subject_type='whatsapp_message' AND subject_id={failure_id}) OR (subject_type='email_message' AND subject_id={email_failure_id}) ORDER BY type,recipient_user_id"),
                     }
                 if statuses["Laravel"] != statuses["Go"]:
                     raise AssertionError("Laravel/Go delivery status mismatch: " + json.dumps(statuses))
                 expected_gowa = [
                     ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "transport parity body"}),
                     ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "transport parity body"}),
+                    ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-failure-auth"}),
+                    ("/send/message", "Basic " + base64.b64encode(b"worker:worker-secret").decode(), "global-test-slot", {"phone": "628123456789@s.whatsapp.net", "message": "force-failure-auth"}),
                 ]
                 observed_gowa = FakeGowa.requests
                 if sorted(json.dumps(x, sort_keys=True) for x in observed_gowa) != sorted(json.dumps(x, sort_keys=True) for x in expected_gowa):
                     raise AssertionError("GOWA request mismatch: " + json.dumps(observed_gowa))
                 if len(SMTPHandler.messages) != 2:
-                    raise AssertionError(f"SMTP sends={len(SMTPHandler.messages)}, expected 2")
+                    raise AssertionError(f"SMTP sends={len(SMTPHandler.messages)}, expected 2 successful deliveries")
                 smtp_messages = [BytesParser(policy=policy.default).parsebytes(value.encode()) for value in SMTPHandler.messages]
                 smtp_contracts = [(m.get("To"), m.get("Subject"), m.get_content_type(), m.get_content().rstrip("\r\n")) for m in smtp_messages]
                 if smtp_contracts[0] != smtp_contracts[1] or smtp_contracts[0][0] != "konsumen@imp010.test" or smtp_contracts[0][2] != "text/html":
@@ -207,9 +235,17 @@ def main():
                 expected_html = "transport parity body<br><br>Salam,<br><strong>Tim PrimeClassy</strong><br><br><small>Pesan ini dikirim otomatis berdasarkan aktivitas transaksi atau akun Anda. Untuk bantuan, gunakan kanal layanan pelanggan resmi PrimeClassy.</small>"
                 if smtp_contracts[0][3] != expected_html:
                     raise AssertionError("SMTP HTML body mismatch: " + repr(smtp_contracts[0][3]))
-                if statuses["Laravel"]["whatsapp"][0] != "sent" or statuses["Laravel"]["email"][0] != "sent" or statuses["Laravel"]["jobs"] != "0" or statuses["Laravel"]["admin_notices"] != "0":
+                if statuses["Laravel"]["whatsapp"][0] != "sent" or statuses["Laravel"]["email"][0] != "sent" or statuses["Laravel"]["jobs"] != "0":
                     raise AssertionError("successful notification delivery not recorded: " + json.dumps(statuses))
-                print("notification transport differential: PASS (Laravel and Go GOWA request/SMTP send plus ledgers)")
+                if statuses["Laravel"]["whatsapp_failure"] != ["failed", "-", "auth", "1", "Gateway rejected the credentials."]:
+                    raise AssertionError("terminal GOWA auth failure was not recorded as expected: " + json.dumps(statuses))
+                if statuses["Laravel"]["email_failure"][0] != "failed":
+                    raise AssertionError("SMTP recipient rejection was not recorded as failed: " + json.dumps(statuses))
+                if not statuses["Laravel"]["admin_notices"] or statuses["Laravel"]["admin_notices"][0][0:2] != ["delivery.failed", "critical"]:
+                    raise AssertionError("SMTP failure did not create its admin alert: " + json.dumps(statuses))
+                if len(statuses["Laravel"]["admin_notices"]) != 1 or statuses["Laravel"]["admin_notices"][0][0:2] != ["delivery.failed", "critical"] or statuses["Laravel"]["admin_notices"][0][4] != "email_message":
+                    raise AssertionError("unexpected admin alert for test-purpose GOWA or failed email: " + json.dumps(statuses))
+                print("notification transport differential: PASS (GOWA success/auth failure, SMTP success, matching ledger and purpose-scoped admin alerts)")
                 print(json.dumps(statuses, ensure_ascii=False, indent=2))
             finally:
                 f.db("DELETE FROM jobs WHERE payload LIKE '%imp010-transport-%'")
@@ -219,6 +255,8 @@ def main():
                 f.db("DELETE FROM email_messages WHERE idempotency_key LIKE 'imp010-transport:%'")
                 if EMAIL_USER_ID:
                     f.db(f"DELETE FROM users WHERE id={EMAIL_USER_ID}")
+                if TEMP_ROLE_CREATED and TEMP_ROLE_ID:
+                    f.db(f"DELETE FROM roles WHERE id={TEMP_ROLE_ID}")
                 if settings is not None:
                     keys = WA_KEYS + SMTP_KEYS
                     f.db("DELETE FROM settings WHERE `key` IN (" + ",".join(q(k) for k in keys) + ")")

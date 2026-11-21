@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +178,32 @@ func (h *Handler) HandleEmail(ctx context.Context, id int64) error {
 	if detail == "smtp_disabled" {
 		return h.finishEmail(ctx, id, "skipped", "mail_disabled", "", "", event, agentID, orderID)
 	}
-	return h.finishEmail(ctx, id, "failed", "", "TransportException", detail, event, agentID, orderID)
+	class, message := smtpFailure(detail)
+	return h.finishEmail(ctx, id, "failed", "", class, message, event, agentID, orderID)
+}
+
+// smtpFailure matches the exception class and formatted response Symfony's
+// Laravel mail transport persists when an SMTP server rejects a command.
+func smtpFailure(detail string) (string, string) {
+	fields := strings.Fields(detail)
+	if len(fields) > 0 {
+		code, err := strconv.Atoi(fields[0])
+		if err == nil && code >= 400 && code <= 599 {
+			response := strings.TrimSpace(strings.TrimPrefix(detail, fields[0]))
+			if len(response) >= 2 && response[0] == '"' && response[len(response)-1] == '"' {
+				response = response[1 : len(response)-1]
+			}
+			message := fmt.Sprintf(`Expected response code "250/251/252" but got code "%d", with message "%d %s".`, code, code, response)
+			if len(message) > 200 {
+				message = message[:200]
+			}
+			return "UnexpectedResponseException", message
+		}
+	}
+	if len(detail) > 200 {
+		detail = detail[:200]
+	}
+	return "TransportException", detail
 }
 
 func (h *Handler) claimWhatsApp(ctx context.Context, id int64) (waMessage, bool, error) {
@@ -346,7 +372,10 @@ func (h *Handler) finishWhatsApp(ctx context.Context, m waMessage, status, skipR
 	if err != nil {
 		return err
 	}
-	if status == "failed" || status == "unknown" {
+	// Laravel's AdminNotificationObserver only raises delivery.failed for
+	// transactional WhatsApp messages. Test, promotional, and OTP traffic do
+	// not create operator alerts.
+	if m.purpose == "transaction" && (status == "failed" || status == "unknown") {
 		label, _ := whatsappnotify.Def(m.event)
 		var agentID, orderID *int64
 		if m.agentValid {

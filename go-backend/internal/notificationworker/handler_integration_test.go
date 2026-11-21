@@ -150,7 +150,7 @@ func TestNotificationHandlerSendsWhatsAppAndEmail(t *testing.T) {
 	result, err = database.ExecContext(ctx, `INSERT INTO whatsapp_messages
 		(idempotency_key,purpose,event,template_class,recipient_phone,body,status,max_attempts,queued_at,created_at,updated_at)
 		VALUES (?,?,?,?,?,'force-failure','queued',1,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
-		"worker-test-wa-failure:"+strconv.FormatInt(time.Now().UnixNano(), 10), "test", "order_created", "full", "628123456789")
+		"worker-test-wa-failure:"+strconv.FormatInt(time.Now().UnixNano(), 10), "transaction", "order_created", "full", "628123456789")
 	if err != nil {
 		t.Fatal(err)
 	}
