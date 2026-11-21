@@ -8,7 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,6 +58,23 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	defer func() {
 		_, _ = lockConn.ExecContext(context.Background(), `SELECT RELEASE_LOCK('primeclassy:testrun:primeclassy_testing')`)
 	}()
+	fixtureSKU := os.Getenv("GOOGLE_SHEETS_FIXTURE_SKU")
+	if fixtureSKU == "" {
+		fixtureSKU = "imp010-sheets-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	fixtureSlug := fixtureSKU
+	result, err := database.ExecContext(context.Background(), `INSERT INTO products (name,slug,sku,base_price,status,created_at,updated_at)
+		VALUES ('IMP010 Sheets payload fixture',?,?,1234.50,'active',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, fixtureSlug, fixtureSKU)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureProductID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = database.ExecContext(context.Background(), `DELETE FROM products WHERE id=?`, fixtureProductID)
+	}()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -70,24 +87,35 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	pemKey := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER}))
 	var wrote bool
 	failWrite := false
+	captureEnabled := true
+	var captured []map[string]any
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/token":
 			_, _ = w.Write([]byte(`{"access_token":"stub-token"}`))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/spreadsheets/sheets-sync-test-"):
+			if captureEnabled {
+				captured = append(captured, map[string]any{"method": r.Method, "path": r.URL.Path, "query": r.URL.RawQuery})
+			}
 			_, _ = w.Write([]byte(`{"properties":{"title":"Test"},"sheets":[{"properties":{"sheetId":8,"title":"Products","gridProperties":{"columnCount":2}}}]}`))
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, ":batchUpdate"):
 			if r.Header.Get("Authorization") != "Bearer stub-token" {
 				t.Errorf("missing bearer token")
 			}
-			var body struct {
-				Requests []json.RawMessage `json:"requests"`
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read batch update: %v", err)
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			var body map[string]any
+			if err := json.Unmarshal(raw, &body); err != nil {
 				t.Errorf("decode batch update: %v", err)
 			}
-			if len(body.Requests) < 2 {
-				t.Errorf("batch requests=%d want >=2", len(body.Requests))
+			requests, _ := body["requests"].([]any)
+			if len(requests) < 2 {
+				t.Errorf("batch requests=%d want >=2", len(requests))
+			}
+			if captureEnabled {
+				captured = append(captured, map[string]any{"method": r.Method, "path": r.URL.Path, "body": body})
 			}
 			wrote = true
 			if failWrite {
@@ -108,8 +136,8 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	spreadsheetID := fmt.Sprintf("sheets-sync-test-%d", time.Now().UnixNano())
-	result, err := database.ExecContext(context.Background(), `INSERT INTO sheets_destinations (spreadsheet_id,created_at,updated_at) VALUES (?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, spreadsheetID)
+	spreadsheetID := "sheets-sync-test-cross-runtime"
+	result, err = database.ExecContext(context.Background(), `INSERT INTO sheets_destinations (spreadsheet_id,created_at,updated_at) VALUES (?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, spreadsheetID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +192,9 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	if status != "success" || rowsSuccess != rowsProcessed || rowsFailed != 0 {
 		t.Fatalf("sync log status=%s processed=%d success=%d failed=%d", status, rowsProcessed, rowsSuccess, rowsFailed)
 	}
+	successCaptured := captured
+	successLog := []any{status, rowsProcessed, rowsSuccess, rowsFailed, ""}
+	captured = nil
 	failWrite = true
 	wrote = false
 	failedRequest := httptest.NewRequest(http.MethodPost, "/api/v1/google-sheets/configs/"+strconv.FormatInt(configID, 10)+"/sync", nil)
@@ -174,10 +205,23 @@ func TestGoogleSheetsSyncWritesAndCompletesLog(t *testing.T) {
 	if failedRecorder.Code != http.StatusOK || !wrote {
 		t.Fatalf("failed sync response=%d wrote=%v body=%s", failedRecorder.Code, wrote, failedRecorder.Body.String())
 	}
-	if err := database.QueryRowContext(context.Background(), `SELECT status,rows_processed,rows_success,rows_failed FROM sheets_sync_logs WHERE config_id=? ORDER BY id DESC LIMIT 1`, configID).Scan(&status, &rowsProcessed, &rowsSuccess, &rowsFailed); err != nil {
+	var errorSummary string
+	if err := database.QueryRowContext(context.Background(), `SELECT status,rows_processed,rows_success,rows_failed,error_summary FROM sheets_sync_logs WHERE config_id=? ORDER BY id DESC LIMIT 1`, configID).Scan(&status, &rowsProcessed, &rowsSuccess, &rowsFailed, &errorSummary); err != nil {
 		t.Fatal(err)
 	}
 	if status != "failed" || rowsSuccess != 0 || rowsFailed != rowsProcessed {
 		t.Fatalf("failed sync log status=%s processed=%d success=%d failed=%d", status, rowsProcessed, rowsSuccess, rowsFailed)
+	}
+	if capturePath := os.Getenv("GOOGLE_SHEETS_CAPTURE_FILE"); capturePath != "" {
+		payload, err := json.Marshal(map[string]any{
+			"success": map[string]any{"requests": successCaptured, "log": successLog},
+			"failure": map[string]any{"requests": captured, "log": []any{status, rowsProcessed, rowsSuccess, rowsFailed, errorSummary}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(capturePath, payload, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
