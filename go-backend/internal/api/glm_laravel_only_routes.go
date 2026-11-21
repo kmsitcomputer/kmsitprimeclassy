@@ -114,6 +114,8 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/install/lock", http.HandlerFunc(s.handleInstallLock))
 	s.mux.Handle("POST /api/v1/auth/forgot-password", http.HandlerFunc(s.handleForgotPassword))
 	s.mux.Handle("POST /api/v1/auth/reset-password", http.HandlerFunc(s.handleResetPassword))
+	s.mux.Handle("GET /api/v1/auth/google/redirect", http.HandlerFunc(s.handleGoogleRedirect))
+	s.mux.Handle("GET /api/v1/auth/google/callback", http.HandlerFunc(s.handleGoogleCallback))
 
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
@@ -199,6 +201,8 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/install/lock",
 		"POST /api/v1/auth/forgot-password",
 		"POST /api/v1/auth/reset-password",
+		"GET /api/v1/auth/google/redirect",
+		"GET /api/v1/auth/google/callback",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",

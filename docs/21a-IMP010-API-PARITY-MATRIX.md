@@ -132,13 +132,13 @@ Status legend:
 | GET | `/api/v1/articles` | public | — | **GO** |  |
 | GET | `/api/v1/articles/{slug}` | public | — | **GO** |  |
 
-## Identity & session — `auth` (6/8 in Go)
+## Identity & session — `auth` (8/8 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
 | POST | `/api/v1/auth/forgot-password` | public | — | **GO** | enumeration-resistant recovery request: byte-identical answer (unknown/unverified/rate-limited contained), challenge issuance per-subject lock + 3/10min limit + invalidate-previous + HMAC hash; compared by compare_recovery.py (15/0) |
-| GET | `/api/v1/auth/google/callback` | public | — | LARAVEL |  |
-| GET | `/api/v1/auth/google/redirect` | public | — | LARAVEL |  |
+| GET | `/api/v1/auth/google/callback` | public | — | **GO** | callback completion: missing/invalid flow → SPA redirect invalid_state (register-mode errors land on /register); compared by compare_google.py (8/0) |
+| GET | `/api/v1/auth/google/redirect` | public | — | **GO** | Google OAuth browser redirect: mode gates in reference order (link session eligibility, register referral-chain fail-fast) BEFORE config resolution (agent→global→env), PKCE S256 authorization URL when configured; compared by compare_google.py (8/0) |
 | POST | `/api/v1/auth/login` | public | — | **GO** |  |
 | POST | `/api/v1/auth/logout` | session | — | **GO** |  |
 | GET | `/api/v1/auth/me` | session | — | **GO** |  |
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 362 (96.5%) |
-|   of which fully GO | 362 |
+| Served by Go now | 364 (97.1%) |
+|   of which fully GO | 364 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 13 |
-| Areas fully ported | 39 / 45 |
+| Still Laravel-only | 11 |
+| Areas fully ported | 40 / 45 |

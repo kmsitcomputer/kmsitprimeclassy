@@ -107,6 +107,8 @@ IMPLEMENTED = {
     ("POST", "/api/v1/install/lock"): "writes the InstallLock marker (same file convention), then EnsureNotInstalled 403 for every wizard step; compared by compare_install.py (12/0)",
     ("POST", "/api/v1/auth/forgot-password"): "enumeration-resistant recovery request: byte-identical answer (unknown/unverified/rate-limited contained), challenge issuance per-subject lock + 3/10min limit + invalidate-previous + HMAC hash; compared by compare_recovery.py (15/0)",
     ("POST", "/api/v1/auth/reset-password"): "one code = one reset: subject-scoped verify (attempt counter persists on mismatch), password replace, all recovery challenges consumed, session revocation, audit; compared by compare_recovery.py (15/0)",
+    ("GET", "/api/v1/auth/google/redirect"): "Google OAuth browser redirect: mode gates in reference order (link session eligibility, register referral-chain fail-fast) BEFORE config resolution (agent→global→env), PKCE S256 authorization URL when configured; compared by compare_google.py (8/0)",
+    ("GET", "/api/v1/auth/google/callback"): "callback completion: missing/invalid flow → SPA redirect invalid_state (register-mode errors land on /register); compared by compare_google.py (8/0)",
     ("GET", "/api/v1/settings"): "",
     ("GET", "/api/v1/languages"): "",
     ("GET", "/api/v1/categories"): "",
