@@ -164,6 +164,10 @@ func (h *harness) csrf() string {
 }
 
 func (h *harness) post(path string, body any, csrf string) response {
+	return h.postFromOrigin(path, body, csrf, "")
+}
+
+func (h *harness) postFromOrigin(path string, body any, csrf, origin string) response {
 	h.t.Helper()
 	var reader *bytes.Reader
 	if body != nil {
@@ -181,6 +185,9 @@ func (h *harness) post(path string, body any, csrf string) response {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
 	if csrf != "" {
 		req.Header.Set("X-XSRF-TOKEN", csrf)
 	}
@@ -211,25 +218,13 @@ func TestUnknownPathReturns404Envelope(t *testing.T) {
 	}
 }
 
-func TestKnownUnimplementedRouteReturns501(t *testing.T) {
+func TestInvoiceRouteIsRegisteredAndProtected(t *testing.T) {
 	h := newHarness(t)
-	// `GET /orders/{order}/invoice` is a REAL Laravel route that this build does not serve yet. It must be a 501
-	// with the machine-readable code, never a 404 (which would look like "no such endpoint") and never a 200.
-	//
-	// (POST /orders itself USED to be the example here; it is implemented now, so the guard moved to a route that
-	// is still outstanding — the assertion is about the fallback behaviour, not about that one endpoint.)
+	// The invoice route is implemented and protected. An anonymous request must reach its auth middleware (401),
+	// not the unknown-route 404 or the removed 501 fallback.
 	res := h.do(http.MethodGet, "/api/v1/orders/1/invoice", map[string]any{})
-	if res.status != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501", res.status)
-	}
-	_, _, _, errs := h.decode(res)
-	payload, ok := errs.(map[string]any)
-	if !ok {
-		t.Fatalf("errors = %#v", errs)
-	}
-	codes, ok := payload["code"].([]any)
-	if !ok || len(codes) != 1 || codes[0] != "not_implemented" {
-		t.Errorf("errors.code = %#v", payload["code"])
+	if res.status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (implemented protected route)", res.status)
 	}
 }
 
@@ -258,8 +253,9 @@ func TestHealthAndReadiness(t *testing.T) {
 
 func TestMutationWithoutCSRFIsRejectedWith419(t *testing.T) {
 	h := newHarness(t)
-	// No csrf-cookie call at all: an unauthenticated mutation has no token to match.
-	res := h.post("/api/v1/auth/login", map[string]any{"identifier": "konsumen@imp010.test", "password": "Secret123!"}, "")
+	// A first-party frontend mutation without a session token must be rejected.
+	const frontendOrigin = "http://127.0.0.1:8899"
+	res := h.postFromOrigin("/api/v1/auth/login", map[string]any{"identifier": "konsumen@imp010.test", "password": "Secret123!"}, "", frontendOrigin)
 	if res.status != 419 {
 		t.Fatalf("status = %d, want 419", res.status)
 	}
@@ -269,7 +265,7 @@ func TestMutationWithoutCSRFIsRejectedWith419(t *testing.T) {
 
 	// With a session but a bogus token, still 419.
 	h.csrf()
-	bad := h.post("/api/v1/auth/login", map[string]any{"identifier": "konsumen@imp010.test", "password": "Secret123!"}, "deadbeef")
+	bad := h.postFromOrigin("/api/v1/auth/login", map[string]any{"identifier": "konsumen@imp010.test", "password": "Secret123!"}, "deadbeef", frontendOrigin)
 	if bad.status != 419 {
 		t.Errorf("bogus token status = %d, want 419", bad.status)
 	}

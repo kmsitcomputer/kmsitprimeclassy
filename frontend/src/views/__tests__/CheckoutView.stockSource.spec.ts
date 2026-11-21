@@ -15,6 +15,10 @@ vi.mock('@/layouts/ShopLayout.vue', () => ({ default: { template: '<div><slot />
 vi.mock('@/components/checkout/AddressMapPicker.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/maps/GoogleMapView.vue', () => ({ default: { template: '<div />' } }))
 import CheckoutView from '../CheckoutView.vue'
+type CheckoutSetupState = {
+  selectedPaymentCode: string
+  placeOrder: () => Promise<void>
+}
 
 async function setup(role = 'sales-kurir-sub') {
   const pinia = createPinia()
@@ -27,7 +31,7 @@ async function setup(role = 'sales-kurir-sub') {
   const w = mount(CheckoutView, { global: { plugins: [pinia, router, i18n], stubs: { AppIcon: true } } })
   await flushPromises()
   // Setup-state access follows the existing CMS component tests; source selection itself uses the rendered radios.
-  const state = (w.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState
+  const state = (w.vm as unknown as { $: { setupState: CheckoutSetupState } }).$.setupState
   state.selectedPaymentCode = 'cod'
   return { w, cart, state }
 }

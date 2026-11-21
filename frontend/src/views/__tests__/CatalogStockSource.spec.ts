@@ -11,6 +11,12 @@ vi.mock('@/api/catalog', () => ({ getProduct: detail, listRelatedProducts: vi.fn
 vi.mock('@/layouts/ShopLayout.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 import ProductDetailView from '../ProductDetailView.vue'
 import ProductListingView from '../ProductListingView.vue'
+type CatalogSetupState = {
+  canAddToCart: boolean
+  quantity: number
+  stockQuantity: number
+  addToCart: () => void
+}
 const product = (available: number) => ({ id: 1, slug: 'cake', name: 'Cake', status: 'active', has_variations: false, base_price: '1000', weight_grams: 10, images: [], variations: [], stock: { available, in_stock: available > 0 } })
 async function setup(list = false) {
   const pinia = createPinia()
@@ -22,7 +28,7 @@ async function setup(list = false) {
   const global = { plugins: [pinia, router, i18n], stubs: { AppIcon: true, ProductCard: true } }
   const w = list ? mount(ProductListingView, { global }) : mount(ProductDetailView, { props: { slug: 'cake' }, global })
   await flushPromises()
-  return { w, cart, state: (w.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState }
+  return { w, cart, state: (w.vm as unknown as { $: { setupState: CatalogSetupState } }).$.setupState }
 }
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); vi.clearAllMocks()

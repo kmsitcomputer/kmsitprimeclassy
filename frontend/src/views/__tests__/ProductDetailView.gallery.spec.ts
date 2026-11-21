@@ -11,6 +11,7 @@ vi.mock('@/layouts/ShopLayout.vue', () => ({ default: { template: '<div><slot />
 vi.mock('@/components/shop/StockSourceSelector.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/shop/ProductCard.vue', () => ({ default: { template: '<div />' } }))
 import ProductDetailView from '../ProductDetailView.vue'
+type ProductDetailSetupState = { addToCart: () => void }
 
 const VARIATION = (id: number, label: string) => ({ id, sku: `SKU-${id}`, label, price: '15000', weight_grams: 100, is_active: true, stock: { available: 5, in_stock: true, login_to_view: false } })
 
@@ -127,7 +128,7 @@ describe('REM-02 storefront variation gallery switching', () => {
     const { w, cart } = await setup(product)
     const biru = w.findAll('button').filter((b) => b.text() === 'Biru')
     await biru[0]!.trigger('click')
-    const state = (w.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState
+    const state = (w.vm as unknown as { $: { setupState: ProductDetailSetupState } }).$.setupState
     state.addToCart()
     expect(cart.lines).toHaveLength(1)
     expect(cart.lines[0]!.image).toBe('/img/2.jpg')
@@ -167,7 +168,7 @@ describe('REM-02 gallery thumbnail selects its variation', () => {
   it('add-to-cart uses the variation chosen through the gallery (id, label, price, own image)', async () => {
     const { w, cart } = await setup(three([{ product_variation_id: 11, isPrimary: true }, { product_variation_id: 12, isPrimary: true }]))
     await w.get('[data-testid="variant-thumb-12"]').trigger('click')
-    ;(w.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState.addToCart()
+    ;(w.vm as unknown as { $: { setupState: ProductDetailSetupState } }).$.setupState.addToCart()
     expect(cart.lines).toHaveLength(1)
     expect(cart.lines[0]).toMatchObject({ variationId: 12, variationLabel: 'Biru', unitPrice: 20000, image: '/img/2.jpg' })
   })
@@ -176,7 +177,7 @@ describe('REM-02 gallery thumbnail selects its variation', () => {
     const { w, cart } = await setup(three([{ product_variation_id: 11, isPrimary: true }, { product_variation_id: 13, isPrimary: true }]))
     await w.get('[data-testid="variant-thumb-13"]').trigger('click')
     expect(sel(w)).toEqual(['Hijau'])
-    ;(w.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState.addToCart()
+    ;(w.vm as unknown as { $: { setupState: ProductDetailSetupState } }).$.setupState.addToCart()
     expect(cart.lines).toHaveLength(0)
   })
 

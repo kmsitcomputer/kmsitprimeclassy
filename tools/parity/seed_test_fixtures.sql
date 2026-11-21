@@ -13,6 +13,12 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DELETE FROM activity_logs;
 DELETE FROM user_closures;
+DELETE FROM admin_notifications;
+DELETE FROM email_messages;
+DELETE FROM whatsapp_messages;
+DELETE FROM jobs;
+DELETE FROM failed_jobs;
+DELETE FROM pc_go_sessions;
 DELETE FROM users;
 DELETE FROM roles;
 

@@ -16,7 +16,9 @@ check('no hydration warnings against real backend', !msgs.some((m) => /hydrat|mi
 
 const api = (method, path, body, withToken = true) => page.evaluate(async ([m, p, b, t]) => {
   const xsrf = decodeURIComponent((document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || '')
-  const r = await fetch(p, { method: m, credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(t && xsrf ? { 'X-XSRF-TOKEN': xsrf } : {}) }, body: b ? JSON.stringify(b) : undefined })
+  const init = { method: m, credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(t && xsrf ? { 'X-XSRF-TOKEN': xsrf } : {}) } }
+  if (b && m !== 'GET' && m !== 'HEAD') Object.assign(init, { body: JSON.stringify(b) })
+  const r = await fetch(p, init)
   let j = null; try { j = await r.json() } catch {}
   return { status: r.status, json: j }
 }, [method, path, body, withToken])

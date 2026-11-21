@@ -595,8 +595,8 @@ describe('OrderDetailView PEMENUHAN KURANG', () => {
     expect(rescheduleButtons(w)).toHaveLength(1)
     await w.get('[data-testid="shortage-reschedule-102"]').trigger('click')
     await flushPromises()
-    expect(w.find('#order-item-102 input[type="date"]').exists()).toBe(true)
-    expect(w.find('#order-item-101 input[type="date"]').exists()).toBe(false)
+    expect(w.find('[data-testid="reschedule-date-102"]').exists()).toBe(true)
+    expect(w.find('[data-testid="reschedule-date-101"]').exists()).toBe(false)
   })
 
   it('keeps the original window for an order that shipped without a reported shortage', async () => {

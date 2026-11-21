@@ -6,7 +6,6 @@ import PasswordInput from '@/components/ui/PasswordInput.vue'
 import {
   getGlobalGoogleAuthConfig,
   saveGlobalGoogleAuthConfig,
-  type GoogleAuthConfigView,
 } from '@/api/googleAuthSettings'
 import { ApiError } from '@/api/client'
 import { formatApiError } from '@/utils/apiError'

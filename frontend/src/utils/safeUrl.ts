@@ -9,7 +9,10 @@ const SAFE_LINK = /^(?:https?:\/\/[^\s<>"'\\]+|mailto:[^\s<>"'\\]+|tel:\+?[0-9][
 export function safeHref(url: string | null | undefined): string | undefined {
   if (typeof url !== 'string') return undefined
   const value = url.trim()
-  if (!value || /[\u0000-\u001F\u007F]/.test(value)) return undefined
+  if (!value || [...value].some((character) => {
+    const code = character.charCodeAt(0)
+    return code <= 0x1f || code === 0x7f
+  })) return undefined
   return SAFE_LINK.test(value) ? value : undefined
 }
 

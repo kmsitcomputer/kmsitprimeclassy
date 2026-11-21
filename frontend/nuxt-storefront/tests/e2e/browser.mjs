@@ -45,7 +45,6 @@ const cartLs = await page.evaluate(() => localStorage.getItem('pc-cart'))
 check('cart in localStorage preserved (not overwritten by SSR empty state)', cartLs && cartLs.includes('Red Velvet'))
 // client-side navigation between Nuxt-owned routes stays in-app
 await page.evaluate(() => { window.__marker = 'alive' })
-const before = docRequests.length
 await page.goto(B + '/', { waitUntil: 'networkidle' })
 // SPA hand-off: clicking a link to an SPA-owned route does a FULL document navigation
 await page.goto(B + '/products', { waitUntil: 'networkidle' })

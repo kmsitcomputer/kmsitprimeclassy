@@ -4,7 +4,6 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppButton from '@/components/ui/AppButton.vue'
-import AppIcon from '@/components/ui/AppIcon.vue'
 import { getBlock, createBlock, updateBlock } from '@/api/cmsAdmin'
 import { ApiError } from '@/api/client'
 import HomepageBlockRenderer from '@/components/cms/HomepageBlockRenderer.vue'
@@ -40,7 +39,7 @@ const submitting = ref(false)
 const generalError = ref<string | null>(null)
 const errors = ref<Record<string, string[]>>({})
 
-const form = reactive<Record<string, any>>({
+const initialForm = {
   type: 'text' as string,
   heading: '',
   subheading: '',
@@ -80,7 +79,9 @@ const form = reactive<Record<string, any>>({
   interval_seconds: 5,
   show_arrows: true,
   show_dots: true,
-})
+}
+type FormValue = string | boolean | number
+const form = reactive<typeof initialForm & Record<string, FormValue>>(initialForm)
 
 const MAX_SLIDES = 10
 const previewDevice = ref<'desktop' | 'mobile'>('desktop')
@@ -157,8 +158,6 @@ const imageFile = ref<File | null>(null)
 const removeImage = ref(false)
 const existingImageUrl = ref<string | null>(null)
 const localPreview = ref<string | null>(null)
-const isDragging = ref(false)
-
 const previewUrl = computed(() => localPreview.value ?? (removeImage.value ? null : existingImageUrl.value))
 
 async function load() {
@@ -340,7 +339,7 @@ const PREVIEW_TYPES = new Set(['hero', 'cta', 'banner_slider'])
 /** The block exactly as the public page will receive it, with local (not yet uploaded) images. */
 const previewBlock = computed(() => {
   if (!PREVIEW_TYPES.has(form.type)) return null
-  const content: Record<string, any> = { ...buildContent() }
+  const content: Record<string, unknown> = { ...buildContent() }
   if (form.type === 'hero') content.image_url = previewUrl.value ?? undefined
   if (form.type === 'banner_slider') {
     content.slides = slides.value.map((sl) => ({

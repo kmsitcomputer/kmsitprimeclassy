@@ -149,7 +149,7 @@ async function openEditVariation(variation: ProductVariation) {
   variationEditForm.weight_grams = variation.weight_grams
   variationEditForm.is_active = variation.is_active
   variationEditForm.stock = variation.stock?.available ?? 0
-  originalAttributes = { ...(variation.attributes ?? {}) }
+  originalAttributes = { ...variation.attributes }
   variationEditForm.attributes = Object.entries(originalAttributes).map(([key, value]) => ({ key, value }))
   if (variationEditForm.attributes.length === 0) variationEditForm.attributes.push({ key: '', value: '' })
   variationEditForm.agent_fee = 0

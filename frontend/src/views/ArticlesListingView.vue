@@ -53,8 +53,9 @@ onMounted(() => {
 })
 
 function pageLocation(page: number) {
-  const { page: _drop, ...rest } = route.query
-  return { query: { ...rest, ...(page > 1 ? { page: String(page) } : {}) } }
+  const query = { ...route.query }
+  delete query.page
+  return { query: { ...query, ...(page > 1 ? { page: String(page) } : {}) } }
 }
 /** Real, crawlable URL of a result page; clicking still navigates in-app (the route change below drives the load). */
 function pageHref(page: number): string {

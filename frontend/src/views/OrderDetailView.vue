@@ -1216,7 +1216,7 @@ async function submitReturn(item: OrderItem) {
                 <p v-if="rescheduleError" class="text-xs text-red-600">{{ rescheduleError }}</p>
                 <div class="flex items-center gap-2">
                   <label class="text-xs text-stone-500 dark:text-stone-400">{{ t('orders.newDeliveryDate') }}</label>
-                  <input v-model="rescheduleForm.requested_delivery_date" type="date" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
+                  <input v-model="rescheduleForm.requested_delivery_date" :data-testid="`reschedule-date-${item.id}`" type="date" class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-950" />
                 </div>
                 <div v-if="item.fulfilled_quantity > 1" class="flex items-center gap-2">
                   <label class="text-xs text-stone-500 dark:text-stone-400">{{ t('orders.rescheduleQuantity') }}</label>

@@ -63,7 +63,7 @@ describe.each([
 
   it('has no nested interactive control that could interfere with the card link, except the existing wishlist heart on the catalog card', () => {
     const buttons = card().findAll('button')
-    expect(buttons.length === 0 || buttons.every((b) => /wishlist/i.test(b.attributes('aria-label') ?? ''))).toBe(true)
+    expect(buttons.filter((b) => !/wishlist/i.test(b.attributes('aria-label') ?? ''))).toHaveLength(0)
   })
 })
 

@@ -27,7 +27,6 @@ page.on('console', (m) => {
   if (m.type() === 'error' && !isFixtureNoise(m.text())) errors.push(m.text())
 })
 
-const shellNames = () => page.evaluate(() => caches.keys())
 const cachedShell = () =>
   page.evaluate(async () => {
     for (const name of await caches.keys()) {
@@ -113,7 +112,6 @@ await fetch(`${C}/__up`)
 
 // ── 4. update behaviour (no automatic skipWaiting) ────────────────────────────────────────────────
 await page.goto(`${P}/`, { waitUntil: 'networkidle' })
-const before = await shellNames()
 await fetch(`${C}/__sw-next`)
 const waitingInstalled = await page.evaluate(
   () =>

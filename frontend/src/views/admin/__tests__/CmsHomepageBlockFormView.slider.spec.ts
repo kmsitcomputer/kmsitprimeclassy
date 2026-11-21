@@ -15,6 +15,25 @@ vi.mock('@/layouts/DashboardLayout.vue', () => ({ default: { template: '<div><sl
 
 import CmsHomepageBlockFormView from '../CmsHomepageBlockFormView.vue'
 
+type SliderDraft = {
+  key: string
+  title: string
+  button_label: string
+  button_url: string
+  existingDesktop: string | null
+  existingMobile: string | null
+}
+type CmsFormSetupState = {
+  slides: SliderDraft[]
+  form: { type: string; slider_layout: string; autoplay: boolean; interval_seconds: number; show_dots: boolean }
+  setSlideImage: (slide: SliderDraft, kind: 'desktop' | 'mobile', files: File[]) => void
+  moveSlide: (index: number, offset: number) => void
+}
+
+function setupState(w: { vm: unknown }): CmsFormSetupState {
+  return (w.vm as { $: { setupState: CmsFormSetupState } }).$.setupState
+}
+
 URL.createObjectURL = vi.fn(() => 'blob:preview')
 URL.revokeObjectURL = vi.fn()
 
@@ -85,9 +104,8 @@ describe('CmsHomepageBlockFormView — banner slider', () => {
     await w.find('select').setValue('banner_slider')
     await w.find('[data-testid="add-slide"]').trigger('click')
 
-    const vm = w.vm as unknown as { $: { setupState: Record<string, any> } }
-    const state = vm.$.setupState
-    const [s1, s2] = state.slides as any[]
+    const state = setupState(w)
+    const [s1, s2] = state.slides
     s1.title = 'Satu'
     s1.button_label = 'Lihat'
     s1.button_url = '/produk'
@@ -138,7 +156,7 @@ describe('CmsHomepageBlockFormView — banner slider', () => {
       },
     })
     const { w } = await mountForm('/edit/9')
-    const state = (w.vm as any).$.setupState
+    const state = setupState(w)
     expect(state.form.type).toBe('banner_slider')
     expect(state.form.slider_layout).toBe('wide')
     expect(state.form.autoplay).toBe(false)
@@ -167,7 +185,7 @@ describe('CmsHomepageBlockFormView — banner slider', () => {
   it('the preview has a real mobile mode: a 390px frame that uses the mobile image', async () => {
     const { w } = await mountForm('/new')
     await w.find('select').setValue('banner_slider')
-    const state = (w.vm as any).$.setupState
+    const state = setupState(w)
     state.setSlideImage(state.slides[0], 'desktop', [file('d.jpg')])
     state.slides[0].existingMobile = '/storage/m.jpg'
     await w.vm.$nextTick()
@@ -188,7 +206,7 @@ describe('CmsHomepageBlockFormView — banner slider', () => {
   it('shows a live preview rendered by the public slider component', async () => {
     const { w } = await mountForm('/new')
     await w.find('select').setValue('banner_slider')
-    const state = (w.vm as any).$.setupState
+    const state = setupState(w)
     state.setSlideImage(state.slides[0], 'desktop', [file('d.jpg')])
     await w.vm.$nextTick()
     const preview = w.find('[data-testid="block-preview"]')

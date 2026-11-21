@@ -284,10 +284,6 @@ function closeForm(): void {
   resetDraft()
 }
 
-function isForm(kind: FormKind, id: number): boolean {
-  return activeForm.value?.kind === kind && activeForm.value.id === id
-}
-
 function obligationForForm(form: ActiveForm): RefundObligation | null {
   const obligations = ledger.value?.obligations ?? []
   return (

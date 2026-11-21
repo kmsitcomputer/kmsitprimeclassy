@@ -34,8 +34,6 @@ check('next visit without ?lang: server renders EN from the cookie (no flash bac
 await s.page.evaluate(() => { window.__alive = 1 })
 await s.page.goto(B + '/articles/tips', { waitUntil: 'networkidle' }); await s.page.evaluate(() => { window.__alive = 1 })
 const head = () => s.page.evaluate(() => ({ lang: document.documentElement.lang, title: document.title, canonical: document.querySelector('link[rel=canonical]')?.href, url: location.pathname + location.search, alt: document.querySelectorAll('link[rel=alternate][hreflang]').length }))
-const before = await head()
-const sw = s.page.locator('button[aria-label], button').filter({ hasText: /Bahasa|English|Language|语言/ }).first()
 let switched = false
 for (const label of ['Language', 'Bahasa', '语言', 'اللغة']) {
   const b = s.page.getByRole('button', { name: new RegExp(label, 'i') }).first()

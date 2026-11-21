@@ -1,4 +1,4 @@
-const B = 'http://127.0.0.1:3000'
+const B = process.env.NUXT_URL || 'http://127.0.0.1:3000'
 const out = []
 const check = (name, ok, detail = '') => { out.push(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`) }
 // The mock log is cumulative: clear it so the SSR-only assertions below see ONLY this run's traffic
