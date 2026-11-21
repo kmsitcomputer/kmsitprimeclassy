@@ -24,7 +24,7 @@ func EnqueueEmailTx(ctx context.Context, tx *sql.Tx, messageID int64) error {
 	uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80
 	jobUUID := fmt.Sprintf("%s-%s-%s-%s-%s", hex.EncodeToString(uuidBytes[0:4]), hex.EncodeToString(uuidBytes[4:6]),
 		hex.EncodeToString(uuidBytes[6:8]), hex.EncodeToString(uuidBytes[8:10]), hex.EncodeToString(uuidBytes[10:16]))
-	serialized := fmt.Sprintf(`O:36:"App\Jobs\SendTransactionalEmailJob":2:{s:9:"messageId";i:%d;s:5:"queue";s:18:"primeclassy-notify";}`, messageID)
+	serialized := fmt.Sprintf(`O:34:"App\Jobs\SendTransactionalEmailJob":2:{s:9:"messageId";i:%d;s:5:"queue";s:18:"primeclassy-notify";}`, messageID)
 	payload, err := json.Marshal(map[string]any{
 		"uuid": jobUUID, "displayName": EmailJobName, "job": "Illuminate\\Queue\\CallQueuedHandler@call",
 		"maxTries": 1, "maxExceptions": nil, "failOnTimeout": false, "backoff": nil, "timeout": 60, "retryUntil": nil,

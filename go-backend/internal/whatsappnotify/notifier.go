@@ -138,7 +138,7 @@ func notify(ctx context.Context, tx executor, event, subjectType string, subject
 		if err == sql.ErrNoRows {
 			return nil
 		}
-		return err
+		return fmt.Errorf("load order notification context: %w", err)
 	}
 	if !EventEnabledFor(ctx, tx, event, nilInt64(o.AgentID)) {
 		return nil // disabled = no ledger row at all
@@ -149,7 +149,10 @@ func notify(ctx context.Context, tx executor, event, subjectType string, subject
 		SubjectType: subjectType, SubjectID: subjectID,
 	}
 	if o.CRMOrigin || !o.KonsumenID.Valid {
-		return SkipTx(ctx, tx, base, "recipient_not_verified")
+		if err := SkipTx(ctx, tx, base, "recipient_not_verified"); err != nil {
+			return fmt.Errorf("record recipient skip: %w", err)
+		}
+		return nil
 	}
 	targets := ResolveOrderRecipients(ctx, tx, o)
 	if len(targets) == 0 {
@@ -162,7 +165,10 @@ func notify(ctx context.Context, tx executor, event, subjectType string, subject
 		if !phone.Valid || NormalizeMSISDN(phone.String) == "" {
 			reason = "no_phone"
 		}
-		return SkipTx(ctx, tx, skip, reason)
+		if err := SkipTx(ctx, tx, skip, reason); err != nil {
+			return fmt.Errorf("record recipient skip: %w", err)
+		}
+		return nil
 	}
 	vars := OrderVars(ctx, tx, o)
 	for k, v := range extra {
@@ -170,7 +176,7 @@ func notify(ctx context.Context, tx executor, event, subjectType string, subject
 	}
 	for _, t := range targets {
 		if err := sendTo(ctx, tx, base, o, event, t, vars); err != nil {
-			return err
+			return fmt.Errorf("record %s recipient %s: %w", event, t.Role, err)
 		}
 	}
 	return nil

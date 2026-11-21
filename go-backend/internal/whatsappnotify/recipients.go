@@ -69,16 +69,23 @@ func ResolveOrderRecipients(ctx context.Context, q queryer, o *orderRow) []Recip
 		rows, err := q.QueryContext(ctx, `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
 			WHERE r.slug = 'admin' AND u.agent_id = ? AND u.deleted_at IS NULL ORDER BY u.id`, o.AgentID.Int64)
 		if err == nil {
+			var adminIDs []int64
 			for rows.Next() {
 				var id int64
 				if rows.Scan(&id) == nil {
-					if msisdn := MsisdnForUser(ctx, q, id); msisdn != "" {
-						candidates = append(candidates, Recipient{Role: "admin", Msisdn: msisdn,
-							UserID: &id, TemplateClass: "full"})
-					}
+					adminIDs = append(adminIDs, id)
 				}
 			}
 			rows.Close()
+			// Resolve proof/phone only after closing the cursor. q may be a sql.Tx,
+			// which cannot run a nested query while its result set is still active.
+			for _, id := range adminIDs {
+				if msisdn := MsisdnForUser(ctx, q, id); msisdn != "" {
+					adminID := id
+					candidates = append(candidates, Recipient{Role: "admin", Msisdn: msisdn,
+						UserID: &adminID, TemplateClass: "full"})
+				}
+			}
 		}
 	}
 	// The account buyer is the PRIMARY recipient.

@@ -41,6 +41,7 @@ import (
 	"github.com/kmsitcomputer/primeclassy-go/internal/money"
 	"github.com/kmsitcomputer/primeclassy-go/internal/notifications"
 	"github.com/kmsitcomputer/primeclassy-go/internal/shipping"
+	"github.com/kmsitcomputer/primeclassy-go/internal/whatsappnotify"
 )
 
 // Line is one requested cart line.
@@ -669,9 +670,25 @@ func (s *Service) createInTransaction(ctx context.Context, in Input, agentID int
 		// must not roll back a committed order or alter its response.
 		slog.WarnContext(ctx, "admin order-created notification could not be recorded", "order_id", orderID, "error", err)
 	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	// Laravel dispatches these observer side effects after the order commit. Keep
+	// them in their own transaction so a queue/notification fault cannot invalidate
+	// the already committed business transaction or turn a successful order into 500.
+	if notifyTx, nerr := s.Database.BeginTx(ctx, nil); nerr != nil {
+		slog.WarnContext(ctx, "order-created notification transaction could not start", "order_id", orderID, "error", nerr)
+	} else {
+		if nerr = whatsappnotify.NotifyOrderEvent(ctx, notifyTx, whatsappnotify.EventOrderCreated, orderID); nerr != nil {
+			slog.WarnContext(ctx, "order-created WhatsApp notification could not be recorded", "order_id", orderID, "error", nerr)
+		} else if nerr = whatsappnotify.NotifyEmailOrderEvent(ctx, notifyTx, whatsappnotify.EventOrderCreated, "order", orderID, orderID, nil); nerr != nil {
+			slog.WarnContext(ctx, "order-created e-mail notification could not be recorded", "order_id", orderID, "error", nerr)
+		}
+		if nerr != nil {
+			_ = notifyTx.Rollback()
+		} else if nerr = notifyTx.Commit(); nerr != nil {
+			slog.WarnContext(ctx, "order-created notification transaction could not commit", "order_id", orderID, "error", nerr)
+		}
 	}
 
 	return s.loadOrder(ctx, orderID, paymentTxnID)
