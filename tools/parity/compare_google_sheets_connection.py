@@ -22,6 +22,8 @@ def main():
     agent_id = int(parity.db("SELECT id FROM users WHERE email='agen@imp010.test'")[0][0])
     parity.db("INSERT INTO sheets_destinations(spreadsheet_id,agent_id,created_at,updated_at) VALUES('pc-sheets-connection-differential',%d,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))" % agent_id)
     destination_id = int(parity.db("SELECT id FROM sheets_destinations WHERE spreadsheet_id='pc-sheets-connection-differential'")[0][0])
+    parity.db("INSERT INTO sheets_destinations(spreadsheet_id,agent_id,created_at,updated_at) VALUES('pc-sheets-connection-foreign',NULL,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))")
+    foreign_id = int(parity.db("SELECT id FROM sheets_destinations WHERE spreadsheet_id='pc-sheets-connection-foreign'")[0][0])
     try:
         snapshots = []
         for base in (parity.LARAVEL, parity.GO):
@@ -37,9 +39,17 @@ def main():
         response, state = snapshots[0]
         if response[0] != 422 or response[1]["errors"]["code"] != ["CREDENTIAL_NOT_FOUND"] or state != [["failed", "CREDENTIAL_NOT_FOUND", "1"]]:
             raise AssertionError(f"unexpected missing-credential contract: {response!r}, {state!r}")
-        print("Google Sheets connection differential: missing-credential response, Agent scope, and persisted error state passed, 0 failed")
+        foreign=[]
+        for base in (parity.LARAVEL, parity.GO):
+            client=parity.Client(base)
+            if client.login("agen@imp010.test")!=200: raise AssertionError(f"Agent login failed for {base}")
+            foreign.append(client.call("POST","/api/v1/google-sheets/connection",json.dumps({"destination_id":foreign_id}).encode(),{"Content-Type":"application/json"}))
+        if foreign[0]!=foreign[1] or foreign[0][0]!=403 or foreign[0][1]["message"]!="Terjadi kesalahan.":
+            raise AssertionError(f"foreign destination scope mismatch: {foreign!r}")
+        print("Google Sheets connection differential: missing-credential response, foreign Agent denial, and persisted error state passed, 0 failed")
     finally:
         parity.db(f"DELETE FROM sheets_destinations WHERE id={destination_id}")
+        parity.db(f"DELETE FROM sheets_destinations WHERE id={foreign_id}")
 
 
 if __name__ == "__main__":

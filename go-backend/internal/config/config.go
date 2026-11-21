@@ -52,6 +52,8 @@ type Config struct {
 	Log          LogConfig
 	Shipping     ShippingConfig
 	GoogleSheets GoogleSheetsConfig
+	CacheStore   string
+	CachePrefix  string
 }
 
 // GoogleSheetsConfig mirrors backend/config/google_sheets.php.
@@ -233,6 +235,18 @@ func Load(getenv func(string) string) (Config, error) {
 		Timeout:         defaultDuration(getenv("GOOGLE_SHEETS_TIMEOUT"), 30*time.Second),
 		MaxRows:         defaultInt(getenv("GOOGLE_SHEETS_MAX_ROWS"), 10000),
 	}
+	cacheStore := strings.TrimSpace(getenv("CACHE_STORE"))
+	if cacheStore == "" {
+		cacheStore = "database"
+		if env == EnvTesting {
+			cacheStore = "array"
+		}
+	}
+	cachePrefix := strings.TrimSpace(getenv("CACHE_PREFIX"))
+	if cachePrefix == "" {
+		appName := defaultStr(getenv("APP_NAME"), "Laravel")
+		cachePrefix = laravelCachePrefix(appName)
+	}
 
 	logCfg := LogConfig{
 		Level:  strings.ToLower(defaultStr(getenv("LOG_LEVEL"), "info")),
@@ -262,12 +276,29 @@ func Load(getenv func(string) string) (Config, error) {
 		Log:          logCfg,
 		Shipping:     shippingCfg,
 		GoogleSheets: googleSheetsCfg,
+		CacheStore:   cacheStore,
+		CachePrefix:  cachePrefix,
 	}
 
 	if len(errs) > 0 {
 		return Config{}, errors.New("invalid configuration:\n  - " + strings.Join(errs, "\n  - "))
 	}
 	return cfg, nil
+}
+
+func laravelCachePrefix(appName string) string {
+	var b strings.Builder
+	underscore := false
+	for _, r := range strings.ToLower(appName) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			underscore = false
+		} else if b.Len() > 0 && !underscore {
+			b.WriteByte('_')
+			underscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_") + "_cache_"
 }
 
 // IsTestingDatabase implements the repository rule: only names containing _test or _testing.

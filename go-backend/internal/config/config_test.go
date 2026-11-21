@@ -37,6 +37,9 @@ func TestLoadDefaults(t *testing.T) {
 	if !cfg.GoogleSheets.Enabled || cfg.GoogleSheets.CredentialsPath != "/app/storage/app/private/google/service-account.json" || cfg.GoogleSheets.Timeout != 30*time.Second || cfg.GoogleSheets.MaxRows != 10000 {
 		t.Errorf("unexpected Google Sheets defaults: %+v", cfg.GoogleSheets)
 	}
+	if cfg.CacheStore != "database" || cfg.CachePrefix != "laravel_cache_" {
+		t.Errorf("unexpected Laravel cache defaults: store=%q prefix=%q", cfg.CacheStore, cfg.CachePrefix)
+	}
 	if !cfg.Session.Secure {
 		// local defaults to insecure cookies so http://localhost works; this asserts the documented rule.
 		t.Log("local env allows non-secure cookies (expected false)")
@@ -80,6 +83,10 @@ func TestTestingDatabasePolicy(t *testing.T) {
 	}
 	if _, err := Load(getter(withDB("testing", "primeclassy_test"))); err != nil {
 		t.Errorf("testing + _test database must be allowed: %v", err)
+	}
+	testingConfig, err := Load(getter(withDB("testing", "primeclassy_testing")))
+	if err != nil || testingConfig.CacheStore != "array" {
+		t.Errorf("testing environment must mirror Laravel's .env.testing array cache: %+v, %v", testingConfig, err)
 	}
 	if _, err := Load(getter(withDB("testing", "primeclassy_db"))); err == nil {
 		t.Error("testing against a non-test database must be refused")

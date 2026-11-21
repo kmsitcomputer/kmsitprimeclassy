@@ -27,7 +27,7 @@ def main():
     agent_id = int(parity.db("SELECT id FROM users WHERE email='agen@imp010.test'")[0][0])
     for actor_email, payload in (
         ("super@imp010.test", {"spreadsheet_id": "https://docs.google.com/spreadsheets/d/pc-destination-{}/edit?usp=sharing", "agent_id": agent_id}),
-        ("agen@imp010.test", {"spreadsheet_id": "pc-agent-destination-{}", "agent_id": agent_id}),
+        ("agen@imp010.test", {"spreadsheet_id": "pc-agent-destination-{}", "agent_id": None}),
     ):
         token = uuid.uuid4().hex[:12]
         raw = {key: (value.format(token) if isinstance(value, str) else value) for key, value in payload.items()}

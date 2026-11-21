@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
+	"crypto/rand"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -73,9 +77,15 @@ func (s *Server) handleGoogleSheetsIndex(w http.ResponseWriter, r *http.Request)
 		}
 		for _, config := range configs {
 			for _, key := range []string{"columns", "filters"} {
-				if raw, ok := config[key].([]byte); ok {
+				switch raw := config[key].(type) {
+				case []byte:
 					var decoded any
 					if json.Unmarshal(raw, &decoded) == nil {
+						config[key] = decoded
+					}
+				case string:
+					var decoded any
+					if json.Unmarshal([]byte(raw), &decoded) == nil {
 						config[key] = decoded
 					}
 				}
@@ -259,7 +269,7 @@ func (s *Server) handleGoogleSheetsConnection(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !actor.IsRole(auth.RoleSuperAdmin) && (actor.AgentID == nil || !agentID.Valid || agentID.Int64 != *actor.AgentID) {
-		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "system.forbidden"), nil)
+		httpx.Failure(w, http.StatusForbidden, msg(r.Context(), "system.generic_error"), nil)
 		return
 	}
 	credential := googleSheetsCredentialInfo(s.cfg.GoogleSheets.CredentialsPath, s.cfg.StorageRoot)
@@ -396,3 +406,500 @@ func laravelStringInput(raw json.RawMessage) string {
 	}
 	return value
 }
+
+func (s *Server) handleGoogleSheetsConfigStore(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	if actor == nil {
+		writeError(w, r, unauthorizedError(r.Context()))
+		return
+	}
+	input, err := s.validateGoogleSheetsConfig(r, actor, 0)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	result, err := s.database.ExecContext(r.Context(), `INSERT INTO sheets_configs(destination_id,name,tab,dataset,columns,filters,created_at,updated_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, input.destinationID, input.name, input.tab, input.dataset, string(input.columns), input.filtersJSON)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	data, err := s.googleSheetsConfigResponse(r, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.Created(w, data, "Created")
+}
+
+func (s *Server) handleGoogleSheetsConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	if actor == nil {
+		writeError(w, r, unauthorizedError(r.Context()))
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("config"), 10, 64)
+	if err != nil || id < 1 {
+		httpx.Failure(w, http.StatusNotFound, msg(r.Context(), "system.not_found"), nil)
+		return
+	}
+	current, err := s.googleSheetsConfigRow(r, id)
+	if err == sql.ErrNoRows {
+		httpx.Failure(w, http.StatusNotFound, msg(r.Context(), "system.not_found"), nil)
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.googleSheetsCanManage(actor, current.agentID, current.dataset) {
+		httpx.Failure(w, http.StatusForbidden, "This action is unauthorized.", nil)
+		return
+	}
+	input, err := s.validateGoogleSheetsConfig(r, actor, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	release, locked, err := s.acquireGoogleSheetsLock(r, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !locked {
+		httpx.Failure(w, http.StatusConflict, "Sinkronisasi sedang berjalan.", nil)
+		return
+	}
+	defer release()
+	_, err = s.database.ExecContext(r.Context(), `UPDATE sheets_configs SET destination_id=?,name=?,tab=?,dataset=?,columns=?,filters=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`, input.destinationID, input.name, input.tab, input.dataset, string(input.columns), input.filtersJSON, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	data, err := s.googleSheetsConfigResponse(r, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, data, "OK", nil)
+}
+
+func (s *Server) handleGoogleSheetsConfigDestroy(w http.ResponseWriter, r *http.Request) {
+	actor := UserFrom(r.Context())
+	if actor == nil {
+		writeError(w, r, unauthorizedError(r.Context()))
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("config"), 10, 64)
+	if err != nil || id < 1 {
+		httpx.Failure(w, http.StatusNotFound, msg(r.Context(), "system.not_found"), nil)
+		return
+	}
+	current, err := s.googleSheetsConfigRow(r, id)
+	if err == sql.ErrNoRows {
+		httpx.Failure(w, http.StatusNotFound, msg(r.Context(), "system.not_found"), nil)
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.googleSheetsCanManage(actor, current.agentID, current.dataset) {
+		httpx.Failure(w, http.StatusForbidden, "This action is unauthorized.", nil)
+		return
+	}
+	release, locked, err := s.acquireGoogleSheetsLock(r, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !locked {
+		httpx.Failure(w, http.StatusConflict, "Sinkronisasi sedang berjalan.", nil)
+		return
+	}
+	defer release()
+	if _, err = s.database.ExecContext(r.Context(), `DELETE FROM sheets_configs WHERE id=?`, id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.OK(w, nil, "OK", nil)
+}
+
+type googleSheetsConfigOwner struct {
+	agentID sql.NullInt64
+	dataset string
+}
+
+func (s *Server) googleSheetsConfigRow(r *http.Request, id int64) (googleSheetsConfigOwner, error) {
+	var row googleSheetsConfigOwner
+	err := s.database.QueryRowContext(r.Context(), `SELECT d.agent_id,c.dataset FROM sheets_configs c JOIN sheets_destinations d ON d.id=c.destination_id WHERE c.id=?`, id).Scan(&row.agentID, &row.dataset)
+	return row, err
+}
+func (s *Server) googleSheetsCanManage(actor *auth.User, agentID sql.NullInt64, dataset string) bool {
+	if actor.IsRole(auth.RoleAdmin) && dataset == "financial_summary" {
+		return false
+	}
+	return actor.IsRole(auth.RoleSuperAdmin) || (actor.IsRole(auth.RoleAgen, auth.RoleAdmin) && actor.AgentID != nil && agentID.Valid && *actor.AgentID == agentID.Int64)
+}
+
+func (s *Server) googleSheetsConfigResponse(r *http.Request, id int64) (map[string]any, error) {
+	rows, err := s.queryMaps(r, `SELECT c.id,c.destination_id,c.name,c.tab,c.dataset,c.columns,c.filters,c.created_at,c.updated_at,d.id AS destination__id,d.spreadsheet_id AS destination__spreadsheet_id,d.agent_id AS destination__agent_id,d.spreadsheet_title AS destination__spreadsheet_title,d.connection_status AS destination__connection_status,d.last_tested_at AS destination__last_tested_at,d.last_error_code AS destination__last_error_code,d.created_at AS destination__created_at,d.updated_at AS destination__updated_at FROM sheets_configs c JOIN sheets_destinations d ON d.id=c.destination_id WHERE c.id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	item := rows[0]
+	for _, key := range []string{"columns", "filters"} {
+		if raw, ok := item[key].(string); ok {
+			var decoded any
+			if json.Unmarshal([]byte(raw), &decoded) == nil {
+				item[key] = decoded
+			}
+		}
+	}
+	destination := map[string]any{}
+	for key := range item {
+		if strings.HasPrefix(key, "destination__") {
+			name := strings.TrimPrefix(key, "destination__")
+			value := item[key]
+			if name == "id" || name == "agent_id" {
+				value = numericValue(value)
+			}
+			destination[name] = value
+			delete(item, key)
+		}
+	}
+	item["id"] = numericValue(item["id"])
+	item["destination_id"] = numericValue(item["destination_id"])
+	item["destination"] = destination
+	return item, nil
+}
+
+func (s *Server) acquireGoogleSheetsLock(r *http.Request, id int64) (func(), bool, error) {
+	if s.cfg.CacheStore == "array" {
+		// Laravel's .env.testing uses its request-local array store. There is no
+		// cross-request lock row in that environment, so mirror that behavior.
+		return func() {}, true, nil
+	}
+	if s.cfg.CacheStore != "database" {
+		return nil, false, fmt.Errorf("Google Sheets lock store %q is not supported by the Go runtime", s.cfg.CacheStore)
+	}
+	ownerBytes := make([]byte, 20)
+	if _, err := rand.Read(ownerBytes); err != nil {
+		return nil, false, err
+	}
+	owner := hex.EncodeToString(ownerBytes)
+	key := s.cfg.CachePrefix + fmt.Sprintf("sheets-sync-%d", id)
+	now := time.Now().Unix()
+	expires := now + 180
+	result, err := s.database.ExecContext(r.Context(), `INSERT IGNORE INTO cache_locks(`+"`key`"+`,owner,expiration) VALUES(?,?,?)`, key, owner, expires)
+	if err != nil {
+		return nil, false, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		result, err = s.database.ExecContext(r.Context(), `UPDATE cache_locks SET owner=?,expiration=? WHERE `+"`key`"+`=? AND expiration<=?`, owner, expires, key, now)
+		if err != nil {
+			return nil, false, err
+		}
+		affected, _ = result.RowsAffected()
+	}
+	if affected == 0 {
+		return func() {}, false, nil
+	}
+	release := func() {
+		_, _ = s.database.ExecContext(context.Background(), `DELETE FROM cache_locks WHERE `+"`key`"+`=? AND owner=?`, key, owner)
+	}
+	return release, true, nil
+}
+
+type googleSheetsConfigInput struct {
+	destinationID      int64
+	name, tab, dataset string
+	columns            []byte
+	filters            any
+	filtersJSON        []byte
+}
+
+func (s *Server) validateGoogleSheetsConfig(r *http.Request, actor *auth.User, configID int64) (googleSheetsConfigInput, error) {
+	var body map[string]json.RawMessage
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		return googleSheetsConfigInput{}, err
+	}
+	locale := LocaleFrom(r.Context())
+	fields := map[string][]string{}
+	add := func(key, rule string, args ...string) {
+		fields[key] = append(fields[key], i18n.ValidationMessage(locale, rule, key, args...))
+	}
+	if _, exists := body["agent_id"]; exists {
+		add("agent_id", "prohibited")
+	}
+	var out googleSheetsConfigInput
+	forbiddenScope := false
+	rawDestination := strings.TrimSpace(string(body["destination_id"]))
+	if rawDestination == "" || rawDestination == "null" {
+		add("destination_id", "required")
+	} else if n, err := strconv.ParseInt(strings.Trim(rawDestination, `"`), 10, 64); err != nil {
+		add("destination_id", "integer")
+	} else {
+		out.destinationID = n
+		var destAgent sql.NullInt64
+		err = s.database.QueryRowContext(r.Context(), `SELECT agent_id FROM sheets_destinations WHERE id=?`, n).Scan(&destAgent)
+		if err == sql.ErrNoRows {
+			add("destination_id", "exists")
+		} else if err != nil {
+			return out, err
+		} else if !actor.IsRole(auth.RoleSuperAdmin) && (actor.AgentID == nil || !destAgent.Valid || destAgent.Int64 != *actor.AgentID) {
+			forbiddenScope = true
+		}
+	}
+	out.name = validateSheetsString(body, "name", 150, locale, fields, true)
+	out.tab = validateSheetsString(body, "tab", 100, locale, fields, true)
+	if out.tab != "" {
+		if !sheetsTabPattern.MatchString(out.tab) {
+			add("tab", "regex")
+		}
+		if out.destinationID > 0 {
+			var exists int
+			query := `SELECT EXISTS(SELECT 1 FROM sheets_configs WHERE destination_id=? AND tab=?`
+			args := []any{out.destinationID, out.tab}
+			if configID > 0 {
+				query += ` AND id<>?`
+				args = append(args, configID)
+			}
+			query += `)`
+			if err := s.database.QueryRowContext(r.Context(), query, args...).Scan(&exists); err != nil {
+				return out, err
+			}
+			if exists > 0 {
+				add("tab", "unique")
+			}
+		}
+	}
+	var catalog map[string]any
+	if err := json.Unmarshal(googleSheetsCatalogJSON, &catalog); err != nil {
+		return out, err
+	}
+	datasetDefs, _ := catalog["datasets"].(map[string]any)
+	out.dataset = jsonRawString(body["dataset"])
+	if raw := body["dataset"]; len(raw) == 0 || string(raw) == "null" {
+		add("dataset", "required")
+	} else if _, ok := datasetDefs[out.dataset]; !ok {
+		add("dataset", "in", "values", strings.Join(googleSheetsDatasetNames(datasetDefs), ", "))
+	}
+	if _, ok := body["columns"]; !ok || string(body["columns"]) == "null" {
+		add("columns", "required")
+	} else {
+		var cols []map[string]json.RawMessage
+		if json.Unmarshal(body["columns"], &cols) != nil {
+			add("columns", "array")
+		} else {
+			if len(cols) < 1 {
+				add("columns", "min.array", "min", "1")
+			}
+			if len(cols) > 60 {
+				add("columns", "max.array", "max", "60")
+			}
+			fieldsSeen := map[string]bool{}
+			datasetFields := []any{}
+			if defs, ok := datasetDefs[out.dataset].([]any); ok {
+				datasetFields = defs
+			}
+			var normalized []map[string]any
+			for i, col := range cols {
+				prefix := fmt.Sprintf("columns.%d", i)
+				validKeys := map[string]bool{"field": true, "label": true}
+				for key := range col {
+					if !validKeys[key] {
+						fields[prefix] = append(fields[prefix], i18n.ValidationMessage(locale, "array", prefix))
+					}
+				}
+				fieldName := jsonRawString(col["field"])
+				if len(col["field"]) == 0 || string(col["field"]) == "null" || fieldName == "" {
+					fields[prefix+".field"] = append(fields[prefix+".field"], i18n.ValidationMessage(locale, "required", prefix+".field"))
+				} else if col["field"][0] != '"' {
+					fields[prefix+".field"] = append(fields[prefix+".field"], i18n.ValidationMessage(locale, "string", prefix+".field"))
+				} else {
+					if fieldsSeen[fieldName] {
+						fields[prefix+".field"] = append(fields[prefix+".field"], i18n.ValidationMessage(locale, "distinct", prefix+".field"))
+					}
+					fieldsSeen[fieldName] = true
+					found := false
+					for _, item := range datasetFields {
+						if item == fieldName {
+							found = true
+							break
+						}
+					}
+					if !found {
+						fields[prefix+".field"] = append(fields[prefix+".field"], i18n.ValidationMessage(locale, "in", prefix+".field", "values", strings.Join(anyStrings(datasetFields), ", ")))
+					}
+				}
+				label := jsonRawString(col["label"])
+				if len(col["label"]) == 0 || string(col["label"]) == "null" || label == "" {
+					fields[prefix+".label"] = append(fields[prefix+".label"], i18n.ValidationMessage(locale, "required", prefix+".label"))
+				} else if col["label"][0] != '"' {
+					fields[prefix+".label"] = append(fields[prefix+".label"], i18n.ValidationMessage(locale, "string", prefix+".label"))
+				} else if len([]rune(label)) > 100 {
+					fields[prefix+".label"] = append(fields[prefix+".label"], i18n.ValidationMessage(locale, "max.string", prefix+".label", "max", "100"))
+				}
+				normalized = append(normalized, map[string]any{"field": fieldName, "label": label})
+			}
+			out.columns, _ = json.Marshal(normalized)
+		}
+	}
+	if raw, exists := body["filters"]; exists && string(raw) != "null" {
+		var filters map[string]json.RawMessage
+		if json.Unmarshal(raw, &filters) != nil {
+			add("filters", "array")
+		} else {
+			allowedKeys := map[string]bool{"period": true, "from": true, "to": true, "status": true, "category_group": true}
+			for key := range filters {
+				if !allowedKeys[key] {
+					add("filters", "array")
+					break
+				}
+			}
+			normalized := map[string]any{}
+			for key, rawValue := range filters {
+				value := jsonRawString(rawValue)
+				if string(rawValue) == "null" {
+					normalized[key] = nil
+					continue
+				}
+				switch key {
+				case "period":
+					if !sheetsSet(value, "daily", "weekly", "monthly", "custom") {
+						add("filters.period", "in", "values", "daily, weekly, monthly, custom")
+					}
+					normalized[key] = value
+				case "from", "to":
+					if !sheetsDate(value) {
+						add("filters."+key, "date_format", "format", "Y-m-d")
+					}
+					normalized[key] = value
+				case "status":
+					if rawValue[0] != '"' {
+						add("filters.status", "string")
+					} else if len([]rune(value)) > 40 {
+						add("filters.status", "max.string", "max", "40")
+					}
+					normalized[key] = value
+				case "category_group":
+					if !sheetsSet(value, "cookies", "cake") {
+						add("filters.category_group", "in", "values", "cookies, cake")
+					}
+					normalized[key] = value
+				}
+			}
+			out.filters = normalized
+		}
+	}
+	if len(fields) > 0 {
+		return out, httpx.Validation(fields)
+	}
+	if forbiddenScope {
+		return out, &httpx.Error{Status: http.StatusForbidden, Message: msg(r.Context(), "system.generic_error")}
+	}
+	if actor.IsRole(auth.RoleAdmin) && out.dataset == "financial_summary" {
+		return out, &httpx.Error{Status: http.StatusForbidden, Message: "Dataset ini memuat komisi Agen dan tidak tersedia untuk Admin."}
+	}
+	if filters, ok := out.filters.(map[string]any); ok {
+		if group, ok := filters["category_group"].(string); ok && group != "" && out.dataset != "transaction_worksheet" {
+			fields["filters.category_group"] = []string{"Filter kategori hanya tersedia pada Laporan C."}
+		}
+		periodUsed := false
+		for _, key := range []string{"period", "from", "to"} {
+			if value, ok := filters[key].(string); ok && value != "" && value != "0" {
+				periodUsed = true
+			}
+		}
+		if periodUsed && out.dataset != "transaction_worksheet" {
+			fields["filters"] = []string{"Filter periode hanya tersedia pada laporan Transaksi Awal dan Posisi Pembayaran Terkini."}
+		} else if filters["period"] == "custom" {
+			from, _ := filters["from"].(string)
+			to, _ := filters["to"].(string)
+			if from == "" || to == "" {
+				fields["filters.from"] = []string{"Periode kustom wajib diisi tanggal mulai dan tanggal sampai."}
+			}
+			if from != "" && to != "" && from > to {
+				fields["filters.to"] = []string{"Tanggal sampai tidak boleh lebih awal dari tanggal mulai."}
+			}
+		}
+	}
+	if len(fields) > 0 {
+		return out, httpx.Validation(fields)
+	}
+	out.filtersJSON = nil
+	if out.filters != nil {
+		out.filtersJSON, _ = json.Marshal(out.filters)
+	}
+	return out, nil
+}
+
+func validateSheetsString(body map[string]json.RawMessage, field string, max int, locale string, errors map[string][]string, required bool) string {
+	raw, exists := body[field]
+	value := jsonRawString(raw)
+	if !exists || string(raw) == "null" || value == "" {
+		if required {
+			errors[field] = append(errors[field], i18n.ValidationMessage(locale, "required", field))
+		}
+		return ""
+	}
+	if len(raw) == 0 || raw[0] != '"' {
+		errors[field] = append(errors[field], i18n.ValidationMessage(locale, "string", field))
+		return value
+	}
+	if len([]rune(value)) > max {
+		errors[field] = append(errors[field], i18n.ValidationMessage(locale, "max.string", field, "max", strconv.Itoa(max)))
+	}
+	return value
+}
+func jsonRawString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		return value
+	}
+	return strings.TrimSpace(string(raw))
+}
+func googleSheetsDatasetNames(defs map[string]any) []string {
+	out := make([]string, 0, len(defs))
+	for key := range defs {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, fmt.Sprint(value))
+	}
+	return out
+}
+func sheetsSet(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+func sheetsDate(value string) bool {
+	if len(value) != 10 {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", value)
+	return err == nil
+}
+
+var sheetsTabPattern = regexp.MustCompile(`^[^\[\]:*?\\/]+$`)
