@@ -116,6 +116,10 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/auth/reset-password", http.HandlerFunc(s.handleResetPassword))
 	s.mux.Handle("GET /api/v1/auth/google/redirect", http.HandlerFunc(s.handleGoogleRedirect))
 	s.mux.Handle("GET /api/v1/auth/google/callback", http.HandlerFunc(s.handleGoogleCallback))
+	s.mux.Handle("POST /api/v1/profile/email/verification", chain(http.HandlerFunc(s.handleEmailVerificationRequest), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/profile/email/verification/{challenge}/confirm", chain(http.HandlerFunc(s.handleEmailVerificationConfirm), RequireAuth, s.RequireAgentLinked))
+	s.mux.Handle("POST /api/v1/profile/whatsapp/verification", chain(http.HandlerFunc(s.handleWhatsAppVerificationRequest), RequireAuth))
+	s.mux.Handle("POST /api/v1/profile/whatsapp/verification/{challenge}/confirm", chain(http.HandlerFunc(s.handleWhatsAppVerificationConfirm), RequireAuth))
 
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
@@ -203,6 +207,10 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"POST /api/v1/auth/reset-password",
 		"GET /api/v1/auth/google/redirect",
 		"GET /api/v1/auth/google/callback",
+		"POST /api/v1/profile/email/verification",
+		"POST /api/v1/profile/email/verification/{challenge}/confirm",
+		"POST /api/v1/profile/whatsapp/verification",
+		"POST /api/v1/profile/whatsapp/verification/{challenge}/confirm",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",
