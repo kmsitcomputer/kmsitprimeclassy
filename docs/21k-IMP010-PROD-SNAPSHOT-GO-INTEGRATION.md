@@ -98,3 +98,25 @@ user primeclassy_test on primeclassy_testing) — its MariaDB grant covered only
 the w1..w5 scratch DBs. Remediation: GRANT primeclassy_test ALL on
 primeclassy_testing (local MariaDB, no production impact). The Laravel serve
 command also needs `--env=testing` (the recreated container CMD lost it).
+
+## Root cause & final fix for the 8899 outage (2026-11-22)
+
+Root cause: `php artisan serve` spawns the PHP built-in server with ONLY the
+passthrough env vars (APP_ENV, PATH, ...) — the container's DB_HOST/DB_USERNAME
+env vars are NOT inherited by the serve workers, so the app booted from the
+env-file values alone. With APP_ENV=testing passthrough the boot resolved a
+host that is not reachable from the container (connection refused on the DB
+cache store) → every API route 500'd after the host reboot.
+
+Fix: pc_laravel_imp010 recreated with the same image/env/binds and the
+direct-server CMD pattern already used by pc_laravel_imp010_parity:
+
+  sh -lc 'export DB_PASSWORD="$(cat /run/secrets/maria_app_password)";
+          exec php -S 0.0.0.0:8899 -t /app/public
+            /app/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php'
+
+With the direct server the full container env (DB_HOST=primeclassy-mariadb,
+DB_USERNAME=primeclassy_app, DB_DATABASE=primeclassy_testing) reaches the
+workers. Verified after recreate: /api/v1/install/status 200 (installed=true,
+has_tables=true, has_super_admin=true), products/categories return data.
+Both Go stacks (:8082 test, :8086 snapshot) and both Caddy aliases unaffected.
