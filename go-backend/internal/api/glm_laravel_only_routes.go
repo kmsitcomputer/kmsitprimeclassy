@@ -103,6 +103,16 @@ func (s *Server) registerGLMLaravelOnlyRoutes() {
 	s.mux.Handle("POST /api/v1/order-items/{item}/receipts", chain(http.HandlerFunc(s.handleItemReceiptsStore), RequireAuth, s.RequireAgentLinked, dvGate))
 	s.mux.Handle("POST /api/v1/return-items/{returnItem}/receipt-allocations", chain(http.HandlerFunc(s.handleReturnReceiptAllocationsStore), RequireAuth, s.RequireAgentLinked, dvGate))
 
+	// First-run installer wizard (throttle:20,1 by IP in the reference; every write
+	// step sealed by the not-installed lock).
+	s.mux.Handle("GET /api/v1/install/requirements", http.HandlerFunc(s.handleInstallRequirements))
+	s.mux.Handle("POST /api/v1/install/database/test", http.HandlerFunc(s.handleInstallDatabaseTest))
+	s.mux.Handle("POST /api/v1/install/database/save", http.HandlerFunc(s.handleInstallDatabaseSave))
+	s.mux.Handle("POST /api/v1/install/configure-app", http.HandlerFunc(s.handleInstallConfigureApp))
+	s.mux.Handle("POST /api/v1/install/run", http.HandlerFunc(s.handleInstallRun))
+	s.mux.Handle("POST /api/v1/install/finalize", http.HandlerFunc(s.handleInstallFinalize))
+	s.mux.Handle("POST /api/v1/install/lock", http.HandlerFunc(s.handleInstallLock))
+
 	// REM-005 / WS-9 consent evidence. Capturing roles act only inside their own Agent/referral
 	// chain (ConsentAccess); the OTP code is emailed, never returned.
 	consentCaptureGate := RequireRole("sales,sales-kurir-sub,korsal,agen")
@@ -178,6 +188,13 @@ func matchesGLMLaravelOnlyRoute(method, path string) bool {
 		"GET /api/v1/order-items/{item}/receipts",
 		"POST /api/v1/order-items/{item}/receipts",
 		"POST /api/v1/orders/{order}/refund-recipient",
+		"GET /api/v1/install/requirements",
+		"POST /api/v1/install/database/test",
+		"POST /api/v1/install/database/save",
+		"POST /api/v1/install/configure-app",
+		"POST /api/v1/install/run",
+		"POST /api/v1/install/finalize",
+		"POST /api/v1/install/lock",
 		"POST /api/v1/consent/otp",
 		"POST /api/v1/consent/otp/{challenge}/verify",
 		"POST /api/v1/consent-events",

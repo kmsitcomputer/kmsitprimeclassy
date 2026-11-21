@@ -287,17 +287,17 @@ Status legend:
 |---|---|---|---|---|---|
 | GET | `/api/v1/homepage` | public | — | **GO** | "bestseller" block returns [] for anonymous visitors (identical to the reference); authenticated ranking not ported |
 
-## Installer — `install` (1/8 in Go)
+## Installer — `install` (8/8 in Go)
 
 | Method | Path | Auth | Roles | Go status | Notes |
 |---|---|---|---|---|---|
-| POST | `/api/v1/install/configure-app` | public | — | LARAVEL |  |
-| POST | `/api/v1/install/database/save` | public | — | LARAVEL |  |
-| POST | `/api/v1/install/database/test` | public | — | LARAVEL |  |
-| POST | `/api/v1/install/finalize` | public | — | LARAVEL |  |
-| POST | `/api/v1/install/lock` | public | — | LARAVEL |  |
-| GET | `/api/v1/install/requirements` | public | — | LARAVEL |  |
-| POST | `/api/v1/install/run` | public | — | LARAVEL |  |
+| POST | `/api/v1/install/configure-app` | public | — | **GO** | APP_NAME/APP_URL/FRONTEND_URLS/SANCTUM_STATEFUL_DOMAINS env persist; super_admin 403; compared by compare_install.py (12/0) |
+| POST | `/api/v1/install/database/save` | public | — | **GO** | connection verify + .env DB_* persist; super_admin defence-in-depth 403; compared by compare_install.py (12/0) |
+| POST | `/api/v1/install/database/test` | public | — | **GO** | real PDO-style connection attempt, generic failure reasons (unknown-database vs generic), validation; compared by compare_install.py (12/0) |
+| POST | `/api/v1/install/finalize` | public | — | **GO** | pure summary step (has_tables, has_super_admin; storage_linked scrubbed as env-specific); compared by compare_install.py (12/0) |
+| POST | `/api/v1/install/lock` | public | — | **GO** | writes the InstallLock marker (same file convention), then EnsureNotInstalled 403 for every wizard step; compared by compare_install.py (12/0) |
+| GET | `/api/v1/install/requirements` | public | — | **GO** | wizard requirements check (structure + labels + ok flags; php.version is runtime-specific); compared by compare_install.py (12/0) |
+| POST | `/api/v1/install/run` | public | — | **GO** | one-shot Super Admin creation (bcrypt $2y$), confirmed validation, hasSuperAdmin 422; compared by compare_install.py (12/0) |
 | GET | `/api/v1/install/status` | public | — | **GO** |  |
 
 ## Invoices — `invoice` (2/2 in Go)
@@ -613,8 +613,8 @@ Status legend:
 | Metric | Value |
 |---|---|
 | Laravel `/api/v1` routes on this baseline | 375 |
-| Served by Go now | 353 (94.1%) |
-|   of which fully GO | 353 |
+| Served by Go now | 360 (96.0%) |
+|   of which fully GO | 360 |
 |   of which PARTIAL (incomplete behaviour) | 0 |
-| Still Laravel-only | 22 |
-| Areas fully ported | 38 / 45 |
+| Still Laravel-only | 15 |
+| Areas fully ported | 39 / 45 |
