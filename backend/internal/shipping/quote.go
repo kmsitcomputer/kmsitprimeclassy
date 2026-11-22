@@ -517,12 +517,12 @@ func (s *Service) rajaOngkirSearch(ctx context.Context, apiKey, search string) (
 	}
 	var payload struct {
 		Data []struct {
-			ID              string `json:"id"`
-			Label           string `json:"label"`
-			ProvinceName    string `json:"province_name"`
-			CityName        string `json:"city_name"`
-			DistrictName    string `json:"district_name"`
-			SubdistrictName string `json:"subdistrict_name"`
+			ID              json.RawMessage `json:"id"`
+			Label           string          `json:"label"`
+			ProvinceName    string          `json:"province_name"`
+			CityName        string          `json:"city_name"`
+			DistrictName    string          `json:"district_name"`
+			SubdistrictName string          `json:"subdistrict_name"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -530,15 +530,114 @@ func (s *Service) rajaOngkirSearch(ctx context.Context, apiKey, search string) (
 	}
 	out := make([]rajaOngkirDestinationRow, 0, len(payload.Data))
 	for _, row := range payload.Data {
-		if row.ID == "" || row.Label == "" {
+		id := strings.Trim(strings.TrimSpace(string(row.ID)), `"`)
+		if id == "" || row.Label == "" {
 			continue
 		}
 		out = append(out, rajaOngkirDestinationRow{
-			ID: row.ID, Label: row.Label, ProvinceName: row.ProvinceName,
+			ID: id, Label: row.Label, ProvinceName: row.ProvinceName,
 			CityName: row.CityName, DistrictName: row.DistrictName, SubdistrictName: row.SubdistrictName,
 		})
 	}
 	return out, nil
+}
+
+// SearchDestinations performs a read-only Komerce V2 destination lookup. An unsaved key supplied by the agent
+// is used only for this request; otherwise the saved encrypted config is used.
+func (s *Service) SearchDestinations(ctx context.Context, agentID, providerID int64, search, apiKey string) ([]map[string]any, error) {
+	var code string
+	if err := s.DB.QueryRowContext(ctx, `SELECT code FROM shipping_providers WHERE id=?`, providerID).Scan(&code); err != nil {
+		return nil, err
+	}
+	if code != "rajaongkir" {
+		return nil, &QuoteError{Message: "destination search is only supported by RajaOngkir"}
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		cfg, err := s.providerConfig(ctx, agentID, providerID)
+		if err != nil {
+			return nil, err
+		}
+		apiKey = configString(cfg, "api_key")
+	}
+	rows, err := s.rajaOngkirSearch(ctx, apiKey, search)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{"id": row.ID, "label": row.Label, "province_name": row.ProvinceName,
+			"city_name": row.CityName, "district_name": row.DistrictName, "subdistrict_name": row.SubdistrictName})
+	}
+	return out, nil
+}
+
+// TestProviderConnection performs a read-only provider request using saved credentials and current agent
+// coordinates. It never persists a supplied credential or changes provider activation.
+func (s *Service) TestProviderConnection(ctx context.Context, agentID, providerID int64, destinationLat, destinationLng *float64) (map[string]any, error) {
+	var row Provider
+	var active int
+	if err := s.DB.QueryRowContext(ctx, `SELECT id,code,name,is_active FROM shipping_providers WHERE id=?`, providerID).
+		Scan(&row.ID, &row.Code, &row.Name, &active); err != nil {
+		return nil, err
+	}
+	row.IsActive = active == 1
+	switch row.Code {
+	case "rajaongkir":
+		cfg, err := s.providerConfig(ctx, agentID, providerID)
+		if err != nil {
+			return nil, err
+		}
+		apiKey := configString(cfg, "api_key")
+		originID := configString(cfg, "origin_destination_id")
+		search := configString(cfg, "origin_search")
+		if apiKey == "" || originID == "" || search == "" {
+			return nil, &QuoteError{Message: "RajaOngkir config is incomplete"}
+		}
+		results, err := s.rajaOngkirSearch(ctx, apiKey, search)
+		if err != nil {
+			return nil, err
+		}
+		for _, result := range results {
+			if result.ID == originID {
+				return map[string]any{"connected": true, "api_version": "komerce_v2", "origin_id": originID, "origin_label": result.Label}, nil
+			}
+		}
+		return nil, &QuoteError{Message: "configured RajaOngkir origin did not match provider results"}
+	case "openroute", "kmsit":
+		if destinationLat == nil || destinationLng == nil {
+			return nil, &QuoteError{Message: "destination coordinates are required"}
+		}
+		var originLat, originLng sql.NullFloat64
+		if err := s.DB.QueryRowContext(ctx, `SELECT latitude,longitude FROM agent_profiles WHERE user_id=?`, agentID).
+			Scan(&originLat, &originLng); err != nil || !originLat.Valid || !originLng.Valid {
+			return nil, &QuoteError{Message: "agent origin coordinates are unavailable", Err: err}
+		}
+		ctxRoute := Context{AgentID: agentID, OriginLat: originLat.Float64, OriginLng: originLng.Float64,
+			DestLat: *destinationLat, DestLng: *destinationLng}
+		var result distanceResult
+		var err error
+		if row.Code == "kmsit" {
+			result, err = s.kmsitRoute(ctx, ctxRoute)
+		} else {
+			result, err = s.openRouteDistance(ctx, ctxRoute, row)
+		}
+		if err != nil {
+			return nil, err
+		}
+		profile := s.Config.OpenRouteProfile
+		if row.Code == "kmsit" {
+			profile = "car"
+		}
+		if cfg, cfgErr := s.providerConfig(ctx, agentID, providerID); cfgErr == nil && configString(cfg, "profile") != "" {
+			profile = configString(cfg, "profile")
+		}
+		if profile == "" {
+			profile = "driving-car"
+		}
+		return map[string]any{"connected": true, "profile": profile, "distance_km": result.Km, "duration_seconds": result.Seconds}, nil
+	default:
+		return nil, &QuoteError{Message: "unsupported shipping provider"}
+	}
 }
 
 // snippet keeps a bounded, non-secret prefix of a provider response for diagnostics.
@@ -557,8 +656,9 @@ func normalizeName(v string) string {
 func sameName(a, b string) bool { return normalizeName(a) == normalizeName(b) }
 
 func sameRegency(external, internal string) bool {
-	trimmed := regexpKotaKabupaten.ReplaceAllString(internal, "")
-	return normalizeName(external) == normalizeName(trimmed)
+	externalName := regexpKotaKabupaten.ReplaceAllString(external, "")
+	internalName := regexpKotaKabupaten.ReplaceAllString(internal, "")
+	return normalizeName(externalName) == normalizeName(internalName)
 }
 
 var regexpKotaKabupaten = mustRegexp(`(?i)^(kota|kabupaten)\s+`)

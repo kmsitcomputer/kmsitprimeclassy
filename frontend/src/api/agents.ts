@@ -72,16 +72,32 @@ export interface OwnAgentStoreProfile {
   store_name: string
   address: string
   phone: string | null
-  latitude: number
-  longitude: number
+  latitude: number | null
+  longitude: number | null
+}
+
+type OwnAgentStoreProfileResponse = Omit<OwnAgentStoreProfile, 'latitude' | 'longitude'> & {
+  latitude: string | number | null
+  longitude: string | number | null
+}
+
+function normalizeOwnStoreProfile(profile: OwnAgentStoreProfileResponse): OwnAgentStoreProfile {
+  const asNumberOrNull = (value: string | number | null) => {
+    if (value === null || value === '') return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return { ...profile, latitude: asNumberOrNull(profile.latitude), longitude: asNumberOrNull(profile.longitude) }
 }
 
 export async function getOwnStoreProfile() {
-  const { data } = await http.get<ApiEnvelope<OwnAgentStoreProfile | null>>('/agent/store-profile')
-  return data.data
+  const { data } = await http.get<ApiEnvelope<OwnAgentStoreProfileResponse | null>>('/agent/store-profile')
+  const profile = data.data
+  if (!profile) return null
+  return normalizeOwnStoreProfile(profile)
 }
 
 export async function updateOwnStoreProfile(payload: OwnAgentStoreProfile) {
-  const { data } = await http.put<ApiEnvelope<OwnAgentStoreProfile>>('/agent/store-profile', payload)
-  return data.data
+  const { data } = await http.put<ApiEnvelope<OwnAgentStoreProfileResponse>>('/agent/store-profile', payload)
+  return normalizeOwnStoreProfile(data.data)
 }

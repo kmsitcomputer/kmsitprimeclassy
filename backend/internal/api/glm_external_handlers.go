@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kmsitcomputer/primeclassy-go/internal/agentadmin"
 	"github.com/kmsitcomputer/primeclassy-go/internal/httpx"
 	"github.com/kmsitcomputer/primeclassy-go/internal/i18n"
+	"github.com/kmsitcomputer/primeclassy-go/internal/shipping"
 )
 
 // handleCheckoutGeocode ports GeocodeController::locate (IMP-002 "Gunakan Lokasi
@@ -142,16 +144,27 @@ func (s *Server) nominatimReverse(lat, lng float64) map[string]string {
 	if json.NewDecoder(resp.Body).Decode(&payload) != nil {
 		return nil
 	}
-	a := payload.Address
-	get := func(k string) string {
-		if v, ok := a[k].(string); ok {
-			return v
+	return nominatimAddressLabels(payload.Address)
+}
+
+// nominatimAddressLabels keeps the administrative levels distinct. Nominatim uses different address keys
+// across Indonesian regions; treating suburb as both district and village made exact master-region matching
+// impossible whenever those levels had different names.
+func nominatimAddressLabels(address map[string]any) map[string]string {
+	get := func(keys ...string) string {
+		for _, key := range keys {
+			if value, ok := address[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
 		}
 		return ""
 	}
 	return map[string]string{
-		"province": get("state"), "regency": firstNonEmpty(get("city"), get("county")),
-		"district": get("suburb"), "village": get("suburb"), "postal_code": get("postcode"),
+		"province":    get("state", "province"),
+		"regency":     get("city", "municipality", "county", "town"),
+		"district":    get("city_district", "district", "suburb"),
+		"village":     get("village", "suburb", "neighbourhood", "hamlet"),
+		"postal_code": get("postcode"),
 	}
 }
 
@@ -313,7 +326,11 @@ func (s *Server) handleAgentProviderDestinations(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	_ = user
+	agentID, err := agentadmin.ResolveAgent(user, false)
+	if err != nil {
+		writeAgentAdminError(w, r, err)
+		return
+	}
 	providerID, perr := strconv.ParseInt(r.PathValue("provider"), 10, 64)
 	var code string
 	if perr == nil {
@@ -343,10 +360,12 @@ func (s *Server) handleAgentProviderDestinations(w http.ResponseWriter, r *http.
 		writeError(w, r, httpx.Validation(map[string][]string(fields)))
 		return
 	}
-	// The RajaOngkir destination search is an external API call; in the isolated
-	// env it cannot succeed and the reference answer is the shared 422.
-	writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity,
-		"Koneksi atau pencarian RajaOngkir gagal."))
+	result, err := (&shipping.Service{DB: s.database, AppKey: s.cfg.AppKey, Config: s.cfg.Shipping}).SearchDestinations(ctx, agentID, providerID, *body.Search, valueOrEmpty(body.APIKey))
+	if err != nil {
+		writeError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Message: "Koneksi atau pencarian RajaOngkir gagal."})
+		return
+	}
+	httpx.OK(w, result, "OK", nil)
 }
 
 // handleAgentProviderTest ports AgentShippingProviderController::testConnection.
@@ -356,7 +375,11 @@ func (s *Server) handleAgentProviderTest(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	_ = user
+	agentID, err := agentadmin.ResolveAgent(user, false)
+	if err != nil {
+		writeAgentAdminError(w, r, err)
+		return
+	}
 	providerID, perr := strconv.ParseInt(r.PathValue("provider"), 10, 64)
 	var code string
 	if perr == nil {
@@ -366,14 +389,14 @@ func (s *Server) handleAgentProviderTest(w http.ResponseWriter, r *http.Request)
 		writeError(w, r, httpx.NewError(http.StatusNotFound, "Endpoint tidak ditemukan."))
 		return
 	}
+	var body struct {
+		DestinationLatitude  *float64 `json:"destination_latitude"`
+		DestinationLongitude *float64 `json:"destination_longitude"`
+	}
 	if code != "rajaongkir" {
 		if code != "openroute" && code != "kmsit" {
 			writeError(w, r, httpx.NewError(http.StatusNotFound, "Endpoint tidak ditemukan."))
 			return
-		}
-		var body struct {
-			DestinationLatitude  *float64 `json:"destination_latitude"`
-			DestinationLongitude *float64 `json:"destination_longitude"`
 		}
 		_ = httpx.DecodeJSON(r, &body)
 		fields := fieldErrors{}
@@ -392,9 +415,18 @@ func (s *Server) handleAgentProviderTest(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	// The provider connectivity test is an external call; in the isolated env it
-	// cannot succeed and the reference answer is the shared 422 (KMSIT's safe
-	// reason codes only appear with a reachable endpoint).
-	writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity,
-		"Koneksi provider pengiriman gagal. Periksa API key, profile, dan koordinat."))
+	result, err := (&shipping.Service{DB: s.database, AppKey: s.cfg.AppKey, Config: s.cfg.Shipping}).TestProviderConnection(ctx, agentID, providerID, body.DestinationLatitude, body.DestinationLongitude)
+	if err != nil {
+		writeError(w, r, httpx.NewError(http.StatusUnprocessableEntity,
+			"Koneksi provider pengiriman gagal. Periksa konfigurasi dan koordinat."))
+		return
+	}
+	httpx.OK(w, result, "Koneksi provider berhasil.", nil)
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

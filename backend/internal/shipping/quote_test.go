@@ -395,4 +395,32 @@ func TestRajaOngkirRejectsUnmappedDestination(t *testing.T) {
 	}
 }
 
+func TestRajaOngkirDestinationSearchAndConnectionCheck(t *testing.T) {
+	d := openTestDB(t)
+	reset(t, d)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("key") != "test-key" {
+			t.Errorf("unexpected credential header")
+		}
+		if r.URL.Path != "/destination/domestic-destination" || r.URL.Query().Get("search") != "Bandung" {
+			t.Errorf("unexpected destination request: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":32,"label":"Bandung","province_name":"Jawa Barat","city_name":"Kota Bandung","district_name":"Coblong","subdistrict_name":"Dago"}]}`))
+	}))
+	defer server.Close()
+
+	id := providerID(t, d, "rajaongkir")
+	seedConfig(t, d, id, `{"api_key":"test-key","api_version":"komerce_v2","origin_destination_id":"32","origin_label":"Bandung","origin_search":"Bandung","couriers":["jne"]}`)
+	svc := newService(d, server.URL, nil)
+
+	destinations, err := svc.SearchDestinations(context.Background(), testAgentID, id, "Bandung", "")
+	if err != nil || len(destinations) != 1 || destinations[0]["id"] != "32" {
+		t.Fatalf("destination search = %#v, %v", destinations, err)
+	}
+	connection, err := svc.TestProviderConnection(context.Background(), testAgentID, id, nil, nil)
+	if err != nil || connection["connected"] != true || connection["origin_id"] != "32" {
+		t.Fatalf("provider test = %#v, %v", connection, err)
+	}
+}
+
 var _ = sql.ErrNoRows
