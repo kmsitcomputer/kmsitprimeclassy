@@ -17,10 +17,11 @@ Historical specs, checkpoints, audits and reports were removed from the working 
 
 ## 0. ACTIVE MANDATE — IMP-010 (supersedes review gates, not safety rules)
 
-**Owner decision, final and standing:** migrate the ENTIRE Laravel backend to Go 100%, with every feature,
-business rule, security control and integration preserved. This mandate is the governing instruction for the
-IMP-010 work and it **pre-authorises every technical decision** that can be derived from the Laravel source, the
-database schema, the verified API contract, or observed runtime behaviour.
+**Owner decision, final and standing:** IMP-010 finalizes PrimeClassy as a Go-only backend with the Vue/Nuxt
+frontend, preserving the existing features, business rules, security controls and integrations. The active Go
+source and verified API contract govern the final repository. Historical Laravel source in Git history or the
+external backup is archival reference only and is not a runtime dependency. REM-11’s 19 Historical POS/report-registry
+routes are explicitly excluded.
 
 What this mandate changes:
 
@@ -37,16 +38,17 @@ What this mandate changes:
 
 What this mandate does NOT change — these remain absolute:
 
-- No production access, no deployment, no push to a remote, no destructive operation outside the isolated test
-  environment (§9, §10).
+- No production access or deployment. GitHub publication is allowed only when an explicit Owner mandate authorizes
+  it; this final consolidation mandate does so. No destructive operation outside the isolated test environment
+  (§9, §10).
 - Production data stays authoritative; never migrate, wipe or backfill production (§9).
 - The locked business rules in [docs/05-BUSINESS-RULES.md](docs/05-BUSINESS-RULES.md) are implemented, never
-  redefined. Laravel's behaviour is the specification.
+  redefined. Verified Laravel compatibility behavior was the migration specification; the Go contract now governs.
 - Security is never weakened to make a response easier to match (§6).
 
-**Sequencing rule for the migration:** parity first, removal second. Laravel is archived and its PHP code and
-dependencies are removed from the active repository only after the full route matrix is GO and the non-HTTP
-services are ported and verified. Never delete a runtime the system still depends on.
+**Sequencing rule:** parity and required Go worker/service verification precede source/runtime cleanup. The final
+route matrix target is 375 GO routes; REM-11 remains excluded. Keep the active repository Go-only and do not
+reintroduce Laravel source, Composer dependencies, PHP runtime services or old deployment tooling.
 
 ## 2. Authority order
 
@@ -54,8 +56,8 @@ When sources disagree, use this order:
 
 1. The IMP-010 mandate above, and explicit Human decisions.
 2. The authoritative docs above (once consistent with source).
-3. The Laravel source, migrations, schema, tests and verified runtime behaviour — **this is the specification**
-   for migration work.
+3. The active Go source, database schema, verified API contract and observed local runtime behaviour. Historical
+   Laravel source in Git history/backups may be consulted only to confirm compatibility contracts.
 4. Anything in Git history.
 
 **Source reality wins over stale documentation.** If you find the docs wrong, fix the docs in the same change (or flag it) — never "fix" source to match an outdated sentence. If you find source that contradicts a locked business rule in `docs/05-BUSINESS-RULES.md`, stop and report it instead of silently choosing.
@@ -82,9 +84,8 @@ When sources disagree, use this order:
 - A real but out-of-scope finding is recorded as technical debt with concrete evidence (file, behaviour), not silently fixed.
 - Never special-case a single production order/user/ID when the real issue is a domain rule.
 - **Bounded defect handling:** a concrete runtime defect found during UAT is fixed in source (never only in a built artifact), with the smallest change, a regression/verification, and its own commit. It does not authorize roadmap recon or new features.
-- The IMP-010 mandate (§0) IS the authorisation for the whole migration: no per-package Human change request is
-  needed to continue porting existing Laravel behaviour. A genuinely NEW feature (behaviour Laravel does not
-  have) still requires an explicit Human change request.
+- The IMP-010 mandate (§0) authorized migration and final local consolidation. New features beyond the verified
+  PrimeClassy contract still require an explicit Human change request.
 
 ## 6. Diff-first review
 
@@ -93,16 +94,16 @@ Review the diff against the stated baseline, not just the last commit. At least 
 ## 7. Testing requirements
 
 - Every behaviour change gets the smallest meaningful regression test. Use real-database tests for persistence, locking, policy, migration and concurrency behaviour — do not replace a DB/lock defect with mocks.
-- Differential comparison against the running reference (`tools/parity/compare_*.py`) is the required evidence for
-  a ported endpoint: response body AND resulting database state. A Go-only test proves the code works, not that it
-  matches.
+- The 375-route IMP-010 matrix and differential evidence were verified before removal of the Laravel runtime. For
+  post-consolidation changes, use Go contract/regression tests and compare response plus database effects against
+  the checked-in verified contract fixtures; PHP/Laravel is not a runtime test dependency.
 - Run focused tests while iterating, then the **scoped backend tests for every changed area** (0 failures) plus the
   relevant differential harness before committing. Frontend changes: `npm run type-check` and
   `npm run build-only`. Then `git diff --check`. During IMP-010 this is a per-unit gate, not a per-package review
   gate (§0); the full sweep happens at final acceptance.
 - **The full backend suite (Full Test) is not a review or release requirement** (Owner decision, 2026-11-02). The Owner may run it at their discretion; scoped tests covering every changed area are the required evidence.
 - Distinguish pre-existing noise (e.g. the CLI "OPcache already loaded" / `mbstring` warnings) from new failures. Record exact commands and results in the checkpoint.
-- Test harness, lock, Owner Full-Test procedure and the agent testing policy (scoped tests only; Full Test is Owner-exclusive; never two runners on one database) are in [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md).
+- Current Go/frontend test commands, test database lock policy and latest evidence are in [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md). Never run two runners on one database.
 - Tests run only against a database whose name contains `_test`/`_testing` (`primeclassy_testing`); the bootstrap refuses anything else. Never point tests at DEV or production data.
 
 ## 8. Context compaction / checkpoint protocol
@@ -126,7 +127,7 @@ Production data is authoritative.
 - **Never copy the DEV `.env`, DEV credentials or DEV uploads to production.** Preserve production `.env`, uploads, private credentials, sessions, logs, runtime caches and installed-lock state.
 - **No production mutation (deploy, migrate, cache, data) without explicit Human authorization for that step.** Approval for one step does not carry over to the next.
 - Use dry-runs / whitelists when production holds local/runtime differences. Keep maintenance mode on during incompatible code/schema transition windows. Verify migrations Pending before and Ran after. Reconcile data before bringing the app fully live.
-- **Frontend production invariant — never delete `public_html/laravel.php`.** The single-domain layout routes `/api`, `/sanctum` and `/up` to Laravel through that bridge; a destructive sync silently removes it and the API returns 404 while the frontend still loads (a real production incident). Never run `rsync --delete` against the document root without `--exclude='laravel.php'`. The canonical command is in [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md).
+- **Production remains outside this local Go-only worktree.** Do not change the live VPS, its current routing bridge, DNS, database or storage during repository cleanup. This repository no longer contains the Laravel bridge or a production sync script; any production cutover requires a separate explicit mandate and current preflight.
 
 ## 11. Concurrency and inventory invariants
 

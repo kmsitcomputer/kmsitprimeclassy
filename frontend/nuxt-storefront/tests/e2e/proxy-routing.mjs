@@ -1,6 +1,6 @@
 // Local deployment-readiness checks (IMP-009 C/D) through dev-proxy.mjs.
 //
-// Proves the documented routing boundary on ONE origin: Nuxt storefront paths, SPA paths, Laravel API
+// Proves the documented routing boundary on ONE origin: Nuxt storefront paths, SPA paths, Go API
 // paths, static shell files, the health check, header forwarding (x-pc-renderer) and the rollback drill
 // (NUXT_ENABLED=0 → every URL is served by the unchanged SPA build).
 const P = process.env.PROXY_URL || 'http://127.0.0.1:8080'
@@ -52,12 +52,12 @@ for (const p of ['/dashboard', '/dashboard/piutang', '/login', '/cart', '/checko
   }
 }
 
-// ── Laravel paths ───────────────────────────────────────────────────────────────────────────────────
+// ── Go API paths ────────────────────────────────────────────────────────────────────────────────────
 {
   const s = await get(P, '/api/v1/install/status')
-  check('/api/* proxied to the Laravel origin (JSON envelope)', s.r.status === 200 && /"data"/.test(s.t), `status ${s.r.status}`)
+  check('/api/* proxied to the Go API origin (JSON envelope)', s.r.status === 200 && /"data"/.test(s.t), `status ${s.r.status}`)
   const up = await get(P, '/up')
-  check('/up proxied to Laravel (upstream 404 forwarded verbatim, mock has no /up)', up.r.status === 404, `status ${up.r.status}`)
+  check('/up proxied to Go (upstream 404 forwarded verbatim, mock has no /up)', up.r.status === 404, `status ${up.r.status}`)
 }
 
 // ── routing table recorded by the proxy (no path is served by the wrong runtime) ───────────────────
@@ -87,7 +87,7 @@ if (process.env.ROLLBACK_URL !== 'skip') {
       check(`rollback ${p}: SPA shell, no SSR marker`, r.status === 200 && /<div id="app">/.test(t) && !r.headers.get('x-pc-renderer'), `status ${r.status} marker ${r.headers.get('x-pc-renderer')}`)
     }
     const api = await get(R, '/api/v1/install/status')
-    check('rollback: Laravel API still reachable', api.r.status === 200 && /"data"/.test(api.t), `status ${api.r.status}`)
+    check('rollback: Go API still reachable', api.r.status === 200 && /"data"/.test(api.t), `status ${api.r.status}`)
   }
 }
 

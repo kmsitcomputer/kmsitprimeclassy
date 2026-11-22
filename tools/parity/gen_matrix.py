@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the IMP-010 API parity matrix from the embedded route inventory.
 
-Source of truth: go-backend/internal/api/parity_routes.json (produced from `php artisan route:list --json` on
+Source of truth: backend/internal/api/parity_routes.json (produced from `php artisan route:list --json` on
 the IMP-008/IMP-009 baseline). The IMPLEMENTED column is read from the same list the router consults, kept here
 as an explicit table so the document and the code cannot disagree silently — the Go test
 `TestImplementedRoutesAreRealRoutes` enforces the reverse direction.
@@ -14,7 +14,7 @@ import sys
 from collections import Counter, OrderedDict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ROUTES = os.path.join(ROOT, "go-backend", "internal", "api", "parity_routes.json")
+ROUTES = os.path.join(ROOT, "backend", "internal", "api", "parity_routes.json")
 
 # Endpoints the Go service serves. Anything absent is NOT PORTED.
 IMPLEMENTED = {
@@ -484,7 +484,7 @@ def main():
     implemented = 0
 
     print("# IMP-010 — Complete API parity matrix\n")
-    print("Generated from `go-backend/internal/api/parity_routes.json` "
+    print("Generated from `backend/internal/api/parity_routes.json` "
           "(375 `/api/v1` routes on the IMP-008/IMP-009 baseline, REM-11 excluded) by "
           "`tools/parity/gen_matrix.py`. **Do not edit by hand.**\n")
     print("Status legend:\n")

@@ -24,7 +24,7 @@ export { ApiError } from './errors'
 // configureServerApi — constant after startup, so it cannot leak between requests).
 let serverApiBase = ''
 
-/** Nuxt server only: absolute internal backend origin, e.g. http://localhost:8000 (never sent to browsers). */
+/** Nuxt server only: absolute internal Go API origin, e.g. http://localhost:8082 (never sent to browsers). */
 export function configureServerApi(base: string): void {
   serverApiBase = base.replace(/\/+$/, '')
 }
@@ -55,7 +55,7 @@ export const http = axios.create({
   headers: { Accept: 'application/json' },
 })
 
-// Laravel/Sanctum already re-issues a fresh XSRF-TOKEN cookie on EVERY
+// The Go API's Sanctum-compatible session middleware re-issues a fresh XSRF-TOKEN cookie on EVERY
 // stateful response (not just this endpoint) — so by the time a user
 // reaches any write action, at least one prior request (page load, the
 // app's own auth/me bootstrap check, an earlier navigation) has already

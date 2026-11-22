@@ -11,6 +11,7 @@ import tailwindcss from '@tailwindcss/vite'
  */
 const spaSrc = fileURLToPath(new URL('../src', import.meta.url))
 const spaRoot = fileURLToPath(new URL('..', import.meta.url))
+const apiDevTarget = (process.env.NUXT_API_INTERNAL_BASE || 'http://localhost:8082').replace(/\/+$/, '')
 
 // SPA-owned authenticated paths. The front proxy must never send them here; if it does, the boundary
 // middleware answers 404 (fail closed — never a client-only shell, which would reload-loop) and this
@@ -47,8 +48,8 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
-    // PRIVATE (server only, never exposed to the browser): where SSR reaches the Laravel API. NUXT_API_INTERNAL_BASE.
-    apiInternalBase: 'http://localhost:8000',
+    // PRIVATE (server only, never exposed to the browser): where SSR reaches the Go API. NUXT_API_INTERNAL_BASE.
+    apiInternalBase: 'http://localhost:8082',
     public: {
       // Absolute public origin used for canonical/OG/sitemap URLs. NUXT_PUBLIC_SITE_URL (falls back to the request origin).
       siteUrl: '',
@@ -116,9 +117,9 @@ export default defineNuxtConfig({
     publicAssets: [{ dir: fileURLToPath(new URL('../public', import.meta.url)), baseURL: '/' }],
     // Dev only: same-origin API like the SPA's Vite proxy (Host header preserved for SANCTUM_STATEFUL_DOMAINS).
     devProxy: {
-      '/api': { target: 'http://localhost:8000/api', changeOrigin: false },
-      '/sanctum': { target: 'http://localhost:8000/sanctum', changeOrigin: false },
-      '/storage': { target: 'http://localhost:8000/storage', changeOrigin: false },
+      '/api': { target: `${apiDevTarget}/api`, changeOrigin: false },
+      '/sanctum': { target: `${apiDevTarget}/sanctum`, changeOrigin: false },
+      '/storage': { target: `${apiDevTarget}/storage`, changeOrigin: false },
     },
   },
 

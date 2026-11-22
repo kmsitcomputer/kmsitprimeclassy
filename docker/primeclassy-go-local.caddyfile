@@ -1,0 +1,15 @@
+http://primeclassy-go-local.kmsit.localhost {
+    @api path /api /api/* /sanctum /sanctum/* /storage/* /up
+    handle @api {
+        reverse_proxy primeclassy-go-api:8082
+    }
+
+    @nuxt path / /products /products/* /categories /articles /articles/* /page/* /_nuxt/* /sitemap.xml /robots.txt /healthz
+    handle @nuxt {
+        reverse_proxy primeclassy-go-nuxt:3000
+    }
+
+    handle {
+        reverse_proxy primeclassy-go-spa:80
+    }
+}

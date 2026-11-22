@@ -1,5 +1,10 @@
 # 20 — IMP-009: Nuxt Storefront (additive SSR layer)
 
+> **Historical implementation record.** This document records the original Laravel-backed rollout design and
+> test evidence. The active local architecture is now Go-only; use `docs/01-PROJECT-OVERVIEW.md`,
+> `docs/02-SYSTEM-ARCHITECTURE.md`, `docs/13-DEPLOYMENT-OPERATIONS.md` and `docs/14-TESTING-STATUS.md` for
+> current commands and routing. Laravel references below describe the historical baseline, not a live dependency.
+
 Status: **implemented on branch `imp009/nuxt-frontend`, local only, pending Owner/ChatGPT review. Not closed.**
 Base: `baseline/laravel-imp008` @ `331dcf868633ea3ff25b1ab1d1b509d7af25b796`.
 Remediation: **IMP-009 remediation (A–D) complete on this branch** — see §10a (scope), §10b (evidence) and §11 (remaining gaps).

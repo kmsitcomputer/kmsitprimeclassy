@@ -5,7 +5,7 @@ import { captureReferralFromQuery } from '@/utils/referral'
  * - Captures ?ref= on every navigation, like the SPA guard (referral must survive browsing).
  * - A navigation to a route the SPA owns is handed over as a FULL PAGE navigation (the SPA is a different
  *   build/bundle). This middleware is NOT an authorization layer: all auth/RBAC stays in the SPA guard and,
- *   authoritatively, in the Laravel backend.
+ *   authoritatively, in the Go backend.
  */
 export default defineNuxtRouteMiddleware((to) => {
   const nuxtApp = useNuxtApp()

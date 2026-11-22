@@ -9,13 +9,13 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
-  // Single-domain dev baseline: in production the SPA and the Laravel API are
-  // served from ONE origin (see deploy/). To mirror that in dev, Vite proxies
+  // Single-domain Go baseline: in production the SPA and Go API are served
+  // from ONE origin. To mirror that in dev, Vite proxies
   // the API paths to the backend so the browser only ever talks to
   // http://localhost:5173 — no CORS, same-origin session/CSRF cookies, exactly
   // like production. `changeOrigin: false` keeps the Host header as
   // localhost:5173 so it matches SANCTUM_STATEFUL_DOMAINS in backend/.env.
-  const apiTarget = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8000'
+  const apiTarget = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8082'
 
   return {
     plugins: [vue(), vueDevTools(), tailwindcss()],

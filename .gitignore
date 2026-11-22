@@ -4,6 +4,7 @@
 .env
 .env.*
 !.env.example
+/storage/
 
 .DS_Store
 .idea
@@ -13,8 +14,8 @@
 # Private integration credential files
 **/google-service-account*.json
 **/service-account*.json
-backend/storage/app/private/google-sheets/
-backend/storage/app/private/google/
+backend/.env
+backend/storage/
 
 # Local AI-assistant tool state — not app code, and the permission
 # allowlists below have carried real local DB credentials in past commands.
@@ -62,4 +63,4 @@ deploy/output/
 
 # Python bytecode from the parity tooling.
 __pycache__/
-go-backend/storage/
+backend/api

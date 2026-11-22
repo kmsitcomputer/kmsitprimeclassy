@@ -116,6 +116,55 @@ describe('shared card: image, stock and price are data driven', () => {
   })
 })
 
+describe.each([
+  ['ProductBlock (homepage)', homeCard],
+  ['ProductCard (catalog / wishlist / related)', catalogCard],
+])('%s: shared wishlist, action and fallback', (_name, card) => {
+  it('shows the wishlist heart and a footer action that is only a link affordance (never an add-to-cart control)', () => {
+    const a = card()
+    expect(a.find('.pc-card__wish').exists()).toBe(true)
+    expect(a.find('.pc-card__wish').attributes('aria-pressed')).toBe('false')
+    const cta = a.find('[data-testid=product-card-cta]')
+    expect(cta.exists()).toBe(true)
+    expect(cta.element.tagName).toBe('SPAN')
+    expect(cta.attributes('aria-hidden')).toBe('true')
+    // the only buttons on the card are the wishlist toggle; nothing can reach the cart without opening the product page
+    expect(a.findAll('button')).toHaveLength(1)
+    expect(a.attributes('href')).toBe('/products/kastangel')
+  })
+
+  it('toggling the wishlist does not navigate and flips the pressed state', async () => {
+    const a = card()
+    await a.find('.pc-card__wish').trigger('click')
+    expect(a.find('.pc-card__wish').attributes('aria-pressed')).toBe('true')
+    expect(a.find('.pc-card__wish').classes()).toContain('pc-card__wish--on')
+  })
+})
+
+describe('shared card: image, stock and price are data driven', () => {
+  const mountCard = (product: object) => mount(ProductCard, { props: { product: product as never }, global: global() })
+  const base = { id: 7, name: 'Nastar', slug: 'nastar', has_variations: false, base_price: '45000.00', images: [{ id: 1, url: '/x.jpg', is_primary: true }], variations: [] }
+
+  it('falls back to the placeholder when the image fails to load', async () => {
+    const w = mountCard(base)
+    expect(w.find('img').exists()).toBe(true)
+    await w.find('img').trigger('error')
+    expect(w.find('img').exists()).toBe(false)
+    expect(w.find('.pc-card__placeholder').exists()).toBe(true)
+  })
+
+  it('uses the placeholder when there is no image, and shows the real price (no "mulai" for a simple product)', () => {
+    const w = mountCard({ ...base, images: [] })
+    expect(w.find('.pc-card__placeholder').exists()).toBe(true)
+    expect(w.find('[data-testid=product-price]').text()).toMatch(/^Rp\s?45\.000/)
+  })
+
+  it('catalog card keeps its stock slot; the homepage card, which has no stock data, shows none', () => {
+    expect(mountCard(base).find('.pc-card__stock').exists()).toBe(true)
+    expect(homeCard().find('.pc-card__stock').exists()).toBe(false)
+  })
+})
+
 describe('product-card.css — the approved tokens', () => {
   it('holds the out-of-stock label to one compact line so rows keep one height', () => {
     const b = css.slice(css.indexOf(".pc-card__stock[data-testid='stock-out-label'] {"))

@@ -1,4 +1,4 @@
-// Minimal stand-in for the Laravel public API (fixtures only) — records every request so the smoke test can
+// Minimal stand-in for the Go public API (fixtures only) — records every request so the smoke test can
 // prove SSR never forwards cookies/credentials and only issues GETs.
 import http from 'node:http'
 export const log = []

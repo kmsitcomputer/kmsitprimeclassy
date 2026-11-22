@@ -1,6 +1,6 @@
 # IMP-010 — Complete API parity matrix
 
-Generated from `go-backend/internal/api/parity_routes.json` (375 `/api/v1` routes on the IMP-008/IMP-009 baseline, REM-11 excluded) by `tools/parity/gen_matrix.py`. **Do not edit by hand.**
+Generated from `backend/internal/api/parity_routes.json` (375 `/api/v1` routes on the IMP-008/IMP-009 baseline, REM-11 excluded) by `tools/parity/gen_matrix.py`. **Do not edit by hand.**
 
 Status legend:
 

@@ -1,0 +1,91 @@
+name: primeclassy-go-local
+
+services:
+  api:
+    container_name: primeclassy-go-api
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.go
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_URL: http://primeclassy-go-local.kmsit.localhost
+      HTTP_ADDR: :8082
+      DB_HOST: primeclassy-mariadb
+      DB_DATABASE: primeclassy_go_local
+      INSTALL_LOCK_PATH: /srv/storage/installed.lock
+      MEDIA_ROOT: /srv/storage/public
+      STORAGE_ROOT: /srv/storage
+    user: "${PC_UID:-501}:${PC_GID:-20}"
+    volumes:
+      - ./storage:/srv/storage
+    networks:
+      - primeclassy-net
+      - caddy-ingress
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/up"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  worker:
+    container_name: primeclassy-go-worker
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.go
+    command: ["/app/worker"]
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_URL: http://primeclassy-go-local.kmsit.localhost
+      DB_HOST: primeclassy-mariadb
+      DB_DATABASE: primeclassy_go_local
+      STORAGE_ROOT: /srv/storage
+    user: "${PC_UID:-501}:${PC_GID:-20}"
+    volumes:
+      - ./storage:/srv/storage
+    networks:
+      - primeclassy-net
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: ["async"]
+    restart: unless-stopped
+
+  spa:
+    container_name: primeclassy-go-spa
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+      target: spa
+    networks:
+      - caddy-ingress
+    restart: unless-stopped
+
+  nuxt:
+    container_name: primeclassy-go-nuxt
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+      target: nuxt
+    environment:
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: 3000
+      NUXT_API_INTERNAL_BASE: http://primeclassy-go-api:8082
+      NUXT_PUBLIC_SITE_URL: http://primeclassy-go-local.kmsit.localhost
+    networks:
+      - primeclassy-net
+      - caddy-ingress
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  primeclassy-net:
+    external: true
+    name: primeclassy-net
+  caddy-ingress:
+    external: true
+    name: caddy-ingress

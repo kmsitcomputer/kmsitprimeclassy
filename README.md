@@ -1,80 +1,47 @@
-# Prime Classy Cake & Cookies
+# PrimeClassy Go — local consolidated runtime
 
-Platform pemesanan kue & cookies **multi-cabang (multi-Agent)**: Laravel 11 JSON API + SPA Vue 3/Vite terpisah. Setiap Agen (cabang) menjalankan storefront, hierarki staf, stok, gudang, dan pengiriman sendiri; satu Super Admin mengawasi platform; konsumen membeli dari katalog bersama dan teratribusi ke cabang melalui rantai referral.
+This worktree is the local Go-only application root. It contains the existing Vue/Vite SPA, the Nuxt public storefront, the Go API/worker, and the imported `storage/` tree. The local snapshot database and Caddy/MariaDB infrastructure remain shared services; this project does not own or remove those containers or volumes.
 
-README ini hanya pintu masuk. Sistem dijelaskan dalam **dokumentasi kanonis**:
+Production is unchanged. Production Laravel remains outside this local worktree and no production deployment or cutover is configured here.
 
-| Dokumen | Isi |
-|---|---|
-| [docs/01-PROJECT-OVERVIEW.md](docs/01-PROJECT-OVERVIEW.md) | Identitas, stack, struktur repo, status implementasi |
-| [docs/02-SYSTEM-ARCHITECTURE.md](docs/02-SYSTEM-ARCHITECTURE.md) | Topologi, layanan, locking, idempotency |
-| [docs/03-FEATURE-CATALOG.md](docs/03-FEATURE-CATALOG.md) | Katalog fitur + status (IMPLEMENTED/PARTIAL/…) |
-| [docs/04-ROLES-PERMISSIONS.md](docs/04-ROLES-PERMISSIONS.md) | 11 role, matriks otorisasi, isolasi data Agen |
-| [docs/05-BUSINESS-RULES.md](docs/05-BUSINESS-RULES.md) | Aturan bisnis **terkunci (LOCKED)** — jangan diubah tanpa persetujuan Owner |
-| [docs/06-BUSINESS-WORKFLOWS.md](docs/06-BUSINESS-WORKFLOWS.md) | 20 alur bisnis end-to-end |
-| [docs/07-FRONTEND-GUIDE.md](docs/07-FRONTEND-GUIDE.md) | SPA Vue: routing, halaman, navigasi per role |
-| [docs/08-BACKEND-API.md](docs/08-BACKEND-API.md) | Referensi endpoint `/api/v1` + command + jobs |
-| [docs/09-DATABASE-MODEL.md](docs/09-DATABASE-MODEL.md) | Tabel, kolom kunci, relasi (±100 tabel) |
-| [docs/10-NOTIFICATIONS.md](docs/10-NOTIFICATIONS.md) | Sistem notifikasi WA/Email/In-App (REL005 & REL006) |
-| [docs/11-INTEGRATIONS.md](docs/11-INTEGRATIONS.md) | GOWA, SMTP, ORS/KMSIT, RajaOngkir, Sheets, Google |
-| [docs/12-SECURITY.md](docs/12-SECURITY.md) | Autentikasi, otorisasi, proteksi data, audit |
-| [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) | Runbook DEV/TEST/PRODUCTION + invarian `laravel.php` |
-| [docs/19-IMP008-BASELINE-ISOLATION.md](docs/19-IMP008-BASELINE-ISOLATION.md) | Baseline IMP-008: REM-11 dikecualikan, inventaris, digest manifest, risiko |
-| [docs/20-IMP009-NUXT-STOREFRONT.md](docs/20-IMP009-NUXT-STOREFRONT.md) | IMP-009: layer Nuxt SSR untuk storefront publik (SPA tetap), boundary, deploy, rollback |
-| [docs/21-IMP010-GO-BACKEND.md](docs/21-IMP010-GO-BACKEND.md) | IMP-010: layanan Go (increment terverifikasi), parity API, session/CSRF, rollback |
-| [docs/21a-IMP010-API-PARITY-MATRIX.md](docs/21a-IMP010-API-PARITY-MATRIX.md) | IMP-010: matriks parity 375 route `/api/v1` (generated) |
-| [docs/21b-IMP010-COMPATIBILITY-DEVIATIONS.md](docs/21b-IMP010-COMPATIBILITY-DEVIATIONS.md) | IMP-010: register deviasi kompatibilitas (wajib dibaca sebelum klaim parity) |
-| [docs/21c-IMP010-EXECUTION-STATE.md](docs/21c-IMP010-EXECUTION-STATE.md) | IMP-010: status eksekusi + catatan lanjutan (baca dulu saat melanjutkan) |
-| [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md) | Harness uji + kebijakan (Full Test = Owner) |
-| [docs/15-KNOWN-LIMITATIONS.md](docs/15-KNOWN-LIMITATIONS.md) | Gap ledger + keterbatasan |
-| [docs/16-TRACEABILITY.md](docs/16-TRACEABILITY.md) | Register keputusan Owner |
-| [AGENTS.md](AGENTS.md) | Kontrak tata kelola AI/developer |
+## Local setup
 
-Spesifikasi, audit, checkpoint dan laporan historis hanya ada di **Git history** (`git log -- docs/`); laporan reset dokumentasi ini: [docs/17-DOCUMENTATION-RESET-REPORT.md](docs/17-DOCUMENTATION-RESET-REPORT.md).
+1. Keep the imported database `primeclassy_go_local` and storage snapshot intact. Configure `backend/.env` from `backend/.env.example`; use only local snapshot credentials. The runtime reads the database and writes uploaded media/session-independent files under `storage/`.
+2. Copy `.env.example` to `.env` and set `PC_UID` / `PC_GID` to the local account that owns `storage/`.
+3. Install and build the existing frontend from `frontend/`:
 
-## Stack
+   ```sh
+   npm ci
+   npm run type-check
+   npm run test
+   npm run build-only
+   npm run nuxt:typecheck
+   npm run nuxt:build
+   ```
 
-- **Backend:** PHP 8.2+ (DEV 8.3), Laravel 11.56, Sanctum (SPA cookie session), MariaDB 10.11, HTMLPurifier, PhpSpreadsheet, Google API (Sheets export).
-- **Frontend:** Vue 3 (Composition API), Vite 8, TypeScript, Pinia, Vue Router, vue-i18n (id/en/ar/zh), Tailwind CSS 4, CKEditor 5, Axios. Node ^22.18 / ≥24.12; package manager **npm**.
-- **Layanan eksternal:** GOWA (WhatsApp), OpenRouteService, KMSIT Routing Server, RajaOngkir/Komerce, Google Sheets, Google OAuth, Nominatim.
+4. Build and start the local Go API and both frontend servers on the existing `primeclassy-net` and `caddy-ingress` networks:
 
-## Setup lokal
+   ```sh
+   docker compose up --build -d api spa nuxt
+   ```
 
-```bash
-# backend
-cd backend
-composer install
-cp .env.example .env && php artisan key:generate
-# buat database kosong + user, set DB_* di .env, lalu:
-php artisan migrate --seed   # roles (11), languages, settings, payment methods, shipping providers — tanpa user demo
-php artisan serve            # http://localhost:8000
+5. The Caddy site fragment is `docker/primeclassy-go-local.caddyfile`. It routes API, Sanctum and public media to Go; public storefront routes to Nuxt; and SPA routes to the static Vue build. The site must be validated before reloading the shared Caddy service.
 
-# frontend
-cd frontend
-npm install
-cp .env.example .env         # VITE_API_URL (kosong = same origin)
-npm run dev                  # http://localhost:5173
-```
+The Compose file intentionally uses the existing `primeclassy-mariadb` service and the restored `primeclassy_go_local` database. It does not define a new database, mutate production, or remove shared infrastructure. The Go schema migrator is additive and only owns `pc_go_sessions` / `go_migrations`.
 
-Sanctum butuh `FRONTEND_URLS` (dengan scheme) **dan** `SANCTUM_STATEFUL_DOMAINS` (host:port, tanpa scheme) di `backend/.env`. Super Admin pertama dibuat lewat installer browser (`/setup`; `/install` = landing PWA publik) atau `php artisan tinker` — lihat [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) §5.
+## Verification
 
-## Perintah utama
+- Full isolated Go suite: `bash tools/parity/run_go_tests.sh` (uses `primeclassy_testing`, never the imported local snapshot database).
+- Frontend unit/component tests: `npm run test`.
+- Frontend and Nuxt type checks: `npm run type-check && npm run nuxt:typecheck`.
+- Production builds: `npm run build-only && npm run nuxt:build`.
+- SSR smoke/integration scripts are documented in `frontend/nuxt-storefront/tests/e2e/README.md`.
 
-```bash
-cd backend
-php artisan test --filter=NamaTest      # scoped (database primeclassy_testing)
-php scripts/run-tests-serialized.php tests/Feature/NamaTest.php
-cd ../frontend
-npm run type-check                      # vue-tsc
-npm run build-only                      # vite build
-```
+The optional `async` Compose profile starts the Go notification worker. Enable it only after reviewing the local queue and configuring sandbox/fake delivery transports; do not let test or restored data trigger real external messages.
 
-Kebijakan pengujian (scoped test untuk agen; Full Test eksklusif Owner; satu runner per database): [docs/14-TESTING-STATUS.md](docs/14-TESTING-STATUS.md).
+## Data and safety
 
-## Build & deployment
-
-`npm run build-only` → `frontend/dist/`; `deploy/build.sh` merakit paket produksi single-domain (SPA + `laravel.php` + `.htaccess` + `config.js` + backend). Aturan deployment produksi (termasuk invarian **`public_html/laravel.php` tidak boleh dihapus**): [docs/13-DEPLOYMENT-OPERATIONS.md](docs/13-DEPLOYMENT-OPERATIONS.md) §7.
-
-## Status
-
-Baseline produksi/main: REL006 (`f8445e1`). Package A & B tutup di produksi; Package C diimplementasi (DEV stage gate CLOSED, deployment produksi tertunda). Rincian status per fitur: [docs/03-FEATURE-CATALOG.md](docs/03-FEATURE-CATALOG.md).
+- `storage/public` is the only directory served by the Go `/storage/*` handler. `storage/private` remains private and is served only through authorized Go endpoints.
+- `storage/` and all `.env` files are ignored by Git. Backups are stored outside the repository.
+- Historical Laravel source, route inventories and differential scripts in Git history are migration evidence, not application runtime dependencies.
+- Production VPS/data/DNS changes are outside this local finalization. GitHub `main` publication is part of the Owner-authorized consolidation; do not deploy or connect to production.

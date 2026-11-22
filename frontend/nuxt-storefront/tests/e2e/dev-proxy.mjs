@@ -1,18 +1,18 @@
 // Local, production-shaped reverse proxy for IMP-009 verification (test fixture — never deployed).
 //
 // It implements ONLY the routing contract documented in docs/20-IMP009-NUXT-STOREFRONT.md §8, so the
-// same-origin behaviour of the real deployment (Nuxt storefront + Vue SPA + Laravel API on one origin)
+// same-origin behaviour of the local Go-only deployment (Nuxt storefront + Vue SPA + Go API on one origin)
 // can be exercised locally in one browser origin:
 //
 //   Nuxt-owned     /  /products  /products/*  /categories  /articles  /articles/*  /page/*  /toko-kami
 //                  /_nuxt/*  /sitemap.xml  /robots.txt  /healthz
-//   Laravel        /api/*  /sanctum*  /storage/*  /up
+//   Go API         /api/*  /sanctum*  /storage/*  /up
 //   SPA (static)   everything else, with index.html history fallback (/assets/*, /sw.js, /config.js, …)
 //
 // Response headers are passed through untouched, so `x-pc-renderer: nuxt` reaches the browser and the
 // service worker exactly as in production.
 //
-// Env: PORT (8080) · NUXT_ORIGIN (http://127.0.0.1:3100) · LARAVEL_ORIGIN (http://127.0.0.1:8000)
+// Env: PORT (8080) · NUXT_ORIGIN (http://127.0.0.1:3100) · API_ORIGIN (http://127.0.0.1:8082)
 //      SPA_DIR (/app/dist) · NUXT_ENABLED=0 → rollback drill: every route is served by the SPA build.
 // Control (test only), on PORT+10 so it stays reachable while traffic is "down":
 //   GET /__routes · GET /__reset · GET /__sw-next (byte-changed /sw.js) · GET /__down · GET /__up
@@ -23,13 +23,13 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 const PORT = Number(process.env.PORT || 8080)
 const CONTROL_PORT = PORT + 10
 const NUXT = process.env.NUXT_ORIGIN || 'http://127.0.0.1:3100'
-const LARAVEL = process.env.LARAVEL_ORIGIN || 'http://127.0.0.1:8000'
+const API = process.env.API_ORIGIN || 'http://127.0.0.1:8082'
 const SPA_DIR = resolve(process.env.SPA_DIR || '/app/dist')
 const NUXT_ENABLED = process.env.NUXT_ENABLED !== '0'
 
 const NUXT_EXACT = new Set(['/', '/products', '/categories', '/articles', '/toko-kami', '/sitemap.xml', '/robots.txt', '/healthz'])
 const NUXT_PREFIXES = ['/products/', '/articles/', '/page/', '/_nuxt/']
-const LARAVEL_PREFIXES = ['/api/', '/sanctum', '/storage/', '/up']
+const API_PREFIXES = ['/api/', '/sanctum', '/storage/', '/up']
 
 const routes = []
 let swVariant = false
@@ -39,7 +39,7 @@ let swVariant = false
 let down = false
 
 function target(pathname) {
-  if (LARAVEL_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))) return 'laravel'
+  if (API_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))) return 'api'
   if (NUXT_ENABLED && (NUXT_EXACT.has(pathname) || NUXT_PREFIXES.some((p) => pathname.startsWith(p)))) return 'nuxt'
   return 'spa'
 }
@@ -114,7 +114,7 @@ const server = http.createServer((req, res) => {
 
   const to = target(pathname)
   if (to === 'nuxt') return proxy(req, res, NUXT)
-  if (to === 'laravel') return proxy(req, res, LARAVEL)
+  if (to === 'api') return proxy(req, res, API)
   serveSpa(req, res, pathname)
 })
 
@@ -145,5 +145,5 @@ const control = http.createServer((req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   control.listen(CONTROL_PORT, '0.0.0.0')
-  console.log(`[dev-proxy] :${PORT} (control :${CONTROL_PORT}) nuxt=${NUXT_ENABLED ? NUXT : 'disabled (rollback drill)'} laravel=${LARAVEL} spa=${SPA_DIR}`)
+  console.log(`[dev-proxy] :${PORT} (control :${CONTROL_PORT}) nuxt=${NUXT_ENABLED ? NUXT : 'disabled (rollback drill)'} api=${API} spa=${SPA_DIR}`)
 })

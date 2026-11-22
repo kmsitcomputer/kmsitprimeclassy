@@ -10,7 +10,7 @@ const pages = [
   ['/articles', 200], ['/articles/tips', 200], ['/toko-kami', 200],
 ]
 for (const [p, st] of pages) {
-  const { r, t } = await get(p, { cookie: 'laravel_session=SECRET-SESSION; XSRF-TOKEN=SECRET-XSRF' })
+  const { r, t } = await get(p, { cookie: 'pc_go_session=SECRET-SESSION; XSRF-TOKEN=SECRET-XSRF' })
   check(`${p} status ${st}`, r.status === st, `got ${r.status}`)
   check(`${p} has <title>`, /<title>[^<]+<\/title>/.test(t), (t.match(/<title>([^<]*)/) || [])[1])
   check(`${p} canonical + og:title`, /rel="canonical"/.test(t) && /property="og:title"/.test(t))

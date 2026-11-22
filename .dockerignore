@@ -1,0 +1,11 @@
+.git
+.DS_Store
+**/node_modules
+**/.nuxt
+**/.cache
+**/coverage
+**/.env
+storage/
+backend/storage/
+!frontend/nuxt-storefront/.output/server/node_modules/
+!frontend/nuxt-storefront/.output/server/node_modules/**

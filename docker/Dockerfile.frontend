@@ -1,0 +1,10 @@
+FROM nginx:stable-alpine AS spa
+COPY frontend/dist/ /usr/share/nginx/html/
+COPY docker/nginx-spa.conf /etc/nginx/conf.d/default.conf
+
+FROM node:24-alpine AS nuxt
+WORKDIR /app
+COPY frontend/nuxt-storefront/.output/ ./
+ENV NITRO_HOST=0.0.0.0 NITRO_PORT=3000
+EXPOSE 3000
+CMD ["node", "server/index.mjs"]

@@ -1,69 +1,48 @@
 # 14 — Testing Status
 
-Harness uji, kebijakan pengujian agen, dan status terakhir yang tercatat. Perilaku aplikasi dijelaskan di dokumen lain; dokumen ini hanya tentang pengujian.
+Test commands and verified evidence for the Go-only backend and Vue/Nuxt frontend. Run tests only against isolated `*_test` / `*_testing` databases. Production and the imported `primeclassy_go_local` snapshot are not test targets.
 
----
+## Backend Go
 
-## 1. Satu runner per database uji
+From the repository root:
 
-- Tes serial memakai `primeclassy_testing`; infrastruktur parallel Owner-only mengizinkan tepat `primeclassy_testing_w1..w5` sesuai ID worker (§7). `APP_ENV=testing`, guard eksak `Tests\Support\TestDatabaseGuard` — bukan pola.
-- `Tests\Support\TestRunLock` mengambil **MySQL named lock** (`GET_LOCK('primeclassy:testrun:primeclassy_testing', 0)`) sebelum operasi schema pertama. Runner kedua ditolak langsung ("TEST DATABASE ALREADY IN USE …"). Crash: server melepas lock saat koneksi pemiliknya mati — tidak ada lock file untuk dihapus; ulangi saja.
-- Runner serial `backend/scripts/run-tests-serialized.php` menambah lock `flock` + menolak DB non-testing.
-- **Fail-closed lock loss:** kepemilikan lock dibuktikan ulang (`IS_USED_LOCK = CONNECTION_ID`) di setiap batas kritis (boot tes, pre-rebuild, pre/post actor batch). Kehilangan lock ⇒ "TEST RUN LOCK LOST: refusing …" dan tetap hilang sampai proses berakhir — hentikan run, preflight ulang, mulai run baru.
-
-## 2. Tiga jenis tes, tiga strategi isolasi
-
-1. **Tes biasa** (`RefreshDatabase`): transaction per-tes yang di-rollback.
-2. **Tes konkurensi committed** (`RestoresIsolatedTestDatabase`): fixture di-commit agar actor PHP terpisah melihatnya; schema direstore ke "persis hasil `migrate:fresh`" di batas (rebuild ~43 s; fingerprint `information_schema` + `CHECKSUM TABLE` menentukan skip).
-3. **Tes kontrak migrasi/DDL**: `$isolatedSchemaAlwaysRebuild = true`.
-
-## 3. Kebijakan pengujian (AGENTS.md §7 — berlaku)
-
-- Agen menjalankan **scoped test saja** (kelas / `--filter`); **Full Test eksklusif Owner**; tidak pernah "full regression/E2E menyeluruh" dengan nama lain.
-- **Full Test bukan gerbang review/rilis** (keputusan Owner 2026-11-02). Bukti wajib = scoped test per area perubahan (0 failure) + frontend `type-check`/`build-only` + `git diff --check`.
-- Tidak ada dua runner pada satu database. Preflight sebelum test: pastikan tidak ada runner aktif.
-- Jangan pernah reset/migrate/wipe `primeclassy_dev` atau produksi; operasi destruktif schema hanya di `primeclassy_testing` oleh harness.
-- Klaim PASS selalu dengan bukti: command, jumlah, durasi, database.
-- Jangan menambah privilege DB / menghapus / melemahkan tes.
-
-## 4. Prosedur Full Test Owner (PowerShell — ringkas)
-
-```powershell
-cd C:\ServBay\www\primeclassy
-git status --short; git rev-parse HEAD
-Get-CimInstance Win32_Process -Filter "Name='php.exe'" |
-  Where-Object CommandLine -match 'artisan\s+test|phpunit|pest|run-tests' |
-  Select ProcessId,CreationDate,CommandLine   # harus kosong
-
-cd C:\ServBay\www\primeclassy\backend
-php scripts/run-tests-serialized.php 2>&1 |
-  Tee-Object ..\primeclassy-fulltest-backend-$(Get-Date -Format yyyyMMdd-HHmm).log
+```sh
+bash tools/parity/run_go_tests.sh
 ```
 
-Baca baris akhir `RUN <uuid> exit=… failures: environment/migration/concurrency/test`; artefak di `backend/storage/framework/testing/runs/` (summary JSON, junit, stats). `environment > 0` = run terganggu (kontensi/schema), bukan aplikasi salah. Filter mengandung `|` → panggil `php.exe` langsung. Comparison antar-run: bandingkan `git_head`/`git.dirty` dulu, lalu `duration/rebuilds/per-class seconds`.
+The runner verifies the database name is `primeclassy_testing`, applies only additive Go-owned migrations, loads synthetic fixtures, then runs `go vet ./...` and `go test -p 1 ./... -count=1` in the Go container. The full Go suite is serialized because the integration tests share the isolated test database. Never run two runners on that database at once.
 
-## 5. Skala suite (saat reset ini)
+A plain build is also performed by the API Dockerfile:
 
-- `backend/tests/Feature`: 219 file; `tests/Unit`: 6; `tests/Support`: 8 (harness) — baseline IMP-008 (setelah REM-11 dikeluarkan). Manifest paralel: 225 file PHP (190 paralel / 35 serial) + 49 Vitest, digest `86afb591a75425f2b82aa4369ec2c2c91b84df1eb8f23ea1e5929b550d93af53` — **belum disetujui Owner dan belum pernah dijalankan** (lihat [19-IMP008-BASELINE-ISOLATION](19-IMP008-BASELINE-ISOLATION.md)).
-- Frontend: tidak ada test runner sebagai gerbang; `npm run type-check` (vue-tsc) + `npm run build-only`. (Ada `__tests__` Vitest bersebar di komponen/views — dijalankan ad-hoc saat mengubah area terkait, contoh REL005: `views/dashboard` 79/79.)
-- Run penuh terakhir yang tercatat (runner serial `run-tests-serialized.php`, 2026-11-01, PHP 8.3.33, HEAD `1f510e6` dirty): **1721 tests / 12.702 assertions / 0 failures / 0 errors** (klasifikasi environment/migration/concurrency/test = 0; exit 0; durasi 7.507,8 s ≈ 2j05m). Bukti mesin: `backend/storage/framework/testing/runs/5ca38852-…` (git-ignored). Angka "855 passed / 6075 assertions" dari dokumentasi lama berasal dari era suite yang lebih kecil; salinan log Tee di root dihapus saat cleanup 2026-11-02 ([18-LOCAL-REPOSITORY-CLEANUP](18-LOCAL-REPOSITORY-CLEANUP.md)) — bukti kanonik tetap di `runs/`. **Selalu jalankan ulang untuk angka terkini.**
-- Bukti rilis REL005: scoped backend 283 passed / 2485 assertions (33 kelas, `primeclassy_testing`) + frontend type-check/build + Vitest dashboard 79/79.
+```sh
+docker compose build api
+```
 
-## 6. Keanehan lingkungan yang diketahui
+## Frontend Vue and Nuxt
 
-- Runner CLI butuh `OPENSSL_CONF` untuk `GoogleAuthTest` (`$env:OPENSSL_CONF='C:\ServBay\packages\php\8.3\extras\ssl\openssl.cnf'`).
-- Noise CLI DEV: "Cannot load Zend OPcache", "Module mbstring already loaded" — jinak.
-- Tes konkurensi men-spawn proses PHP kedua nyata (`.phpunit-concurrency-actor.php`), ~10–20 s per suite.
+From `frontend/` with the lockfile dependencies installed:
 
-## 7. Parallel Full Test (5 worker) — terintegrasi, BELUM diaktifkan
+```sh
+npm run test -- --maxWorkers=2
+npm run type-check
+npm run build-only
+npm run nuxt:typecheck
+npm run nuxt:build
+npx oxlint .
+npx eslint . --no-cache
+```
 
-Infrastruktur Owner-only di `tools/parallel-test/` (README di sana). Status: *INTEGRATED — PENDING CODEX SAFETY AUDIT*; **tidak pernah dijalankan**, database worker belum dibuat, validasi runtime masih pending.
+The bounded worker count avoids process-start timeouts in constrained local environments. SSR smoke and multilingual/i18n integration scripts use the mock API in `frontend/nuxt-storefront/tests/e2e/`; browser E2E requires Playwright/Chromium and must not be reported as passing unless actually run.
 
-- `Tests\Support\TestDatabaseGuard` kini menerima, selain `primeclassy_testing`, hanya `primeclassy_testing_w1..w5` (peta eksplisit) untuk worker `PRIMECLASSY_PARALLEL_WORKER=1..5`; host DB harus `127.0.0.1|localhost|::1|primeclassy-mariadb`; `primeclassy_db`/DEV/production tetap ditolak. Tanpa variabel itu perilaku lama (database kanonis) tidak berubah.
-- Tes konkurensi/aktor, tes yang membaca nama DB kanonis, dan tes yang memakai path storage bersama berjalan di *serial lane* (`primeclassy_testing`) setelah fase paralel; harness konkurensi tidak diubah.
-- Runner: PHP via `docker exec primeclassy-fpm`, Node via `docker run --rm` sementara; aktivasi hanya manual oleh Owner (runbook: `tools/parallel-test/docs/OWNER-RUNBOOK.md`). Kebijakan agen tetap: scoped test saja; Full Test (serial maupun paralel) eksklusif Owner.
+## Finalization verification — 2026-11-22
 
-
-### Audit statis lanjutan Codex
-
-Lihat `tools/parallel-test/docs/CODEX-FINAL-SAFETY-AUDIT-AUTO-REMEDIATION.md`. Remediasi testing-only menambah guard sebelum provider boot dan saat pemilihan koneksi/query, pidfd ownership controller, heartbeat lease, recovery markers, discovery dinamis wajib serta agregasi setelah shutdown terbukti. **Seluruh regresi baru hanya source; tidak dijalankan sesuai instruksi Owner STATIC ONLY.** Runtime termasuk prasyarat Python/pidfd container, PHP lint, grants, provisioning, dependency preparation dan Full Test tetap belum diverifikasi/dijalankan. Tidak ada perubahan business logic atau produksi.
+- `bash tools/parity/run_go_tests.sh` — PASS on rerun: Go vet and all packages passed against `primeclassy_testing`. One earlier run showed a transient duplicate WhatsApp queue row in an integration test; the focused test and complete rerun both passed. No production or imported-local database was used.
+- `docker compose up --build -d api spa nuxt` — Go API, SPA and Nuxt images built and services started.
+- Frontend Vitest — 56 files, 435 tests passed (`--maxWorkers=2`).
+- Vue type-check, Vite/PWA build, Nuxt type-check, Nuxt production build and Oxlint — PASS.
+- ESLint — 0 errors, 1 pre-existing unused `eslint-disable` warning at `src-pwa/sw.js:19`.
+- Nuxt SSR smoke — 56/56 PASS against the mock API.
+- Nuxt SSR/i18n integration — 37/37 PASS against the mock API when the test origin matched the server origin.
+- HTTP smoke on the local Go domain — `/`, `/products`, `/api/v1/install/status`, `/up`: 200; unauthenticated `/api/v1/auth/me`: 401.
+- Canonical parity generator — 375 routes, 375 GO, 0 PARTIAL, 0 Laravel-only; REM-11's 19 Historical POS routes remain excluded.
+- Browser E2E — not run; Playwright/Chromium was unavailable in the earlier checkpoint.

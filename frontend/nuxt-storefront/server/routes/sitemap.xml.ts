@@ -1,6 +1,6 @@
 /**
  * /sitemap.xml — public storefront URLs only (home, listing, categories, products, articles). Built from
- * the same PUBLIC Laravel endpoints the pages use, with no cookies. Static CMS pages (/page/:slug) are not
+ * the same public Go API endpoints the pages use, with no cookies. Static CMS pages (/page/:slug) are not
  * listed: the backend exposes no public page index (see docs/20-IMP009-NUXT-STOREFRONT.md).
  */
 import { activeSupportedLocales, buildAlternates } from '@/utils/localeSeo'

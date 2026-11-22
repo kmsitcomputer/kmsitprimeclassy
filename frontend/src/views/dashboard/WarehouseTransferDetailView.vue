@@ -50,7 +50,7 @@ function bucketLabel(stockType: string, subLocationId?: number | null): string {
   return subLocationId != null ? `${stockTypeLabel(stockType)} · Sub Lokasi #${subLocationId}` : stockTypeLabel(stockType)
 }
 
-// CancelTransfer (go-backend internal/inventory/transfers.go): gudang actor, status must still be
+// CancelTransfer (backend/internal/inventory/transfers.go): gudang actor, status must still be
 // pending, and neither side may touch the factory_plan bucket (Plan moves only through Admin approval).
 const canCancel = computed(() =>
   transfer.value !== null &&

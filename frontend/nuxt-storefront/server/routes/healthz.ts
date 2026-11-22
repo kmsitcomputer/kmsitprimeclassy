@@ -1,6 +1,6 @@
 /**
  * /healthz — liveness for process supervisors and the front proxy. Cheap and dependency-free by default (the process
- * answers ⇒ the renderer is up). `?deep=1` additionally probes the Laravel API through the same internal base the
+ * answers ⇒ the renderer is up). `?deep=1` additionally probes the Go API through the same internal base the
  * renderer uses (GET /up), for readiness checks. Never exposes configuration, versions or user data.
  */
 export default defineEventHandler(async (event) => {
